@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>RomM Gamepad Test</title></head>
+<body style="font-family:monospace;background:#1a1a1a;color:#0f0;padding:20px;">
+<h1>RomM Gamepad Injection Test</h1>
+<div id="results"></div>
+<pre id="gamepads"></pre>
+<script>
+var r=[];
+function log(m,t){r.push(m+' ['+(t||'info')+']');document.getElementById('results').innerHTML=r.join('<br>');}
+
+// Test 1: Injection marker
+if(window.__rommGamepadOverride) log('Injection marker present','pass');
+else log('No injection marker','fail');
+
+// Test 2: Update function available
+if(typeof window.__rommUpdateGamepads==='function') log('Update function available','pass');
+else log('No update function','fail');
+
+// Test 3: getGamepads returns array
+var gps=navigator.getGamepads();
+if(gps && typeof gps.length==='number') log('getGamepads returns array of length '+gps.length,'pass');
+else log('getGamepads not callable or returns non-array','fail');
+
+// Test 4: Display gamepad state
+document.getElementById('gamepads').textContent=JSON.stringify(gps||[],null,2);
+
+// Test 5: Diagnostics status
+if(window.__rommGamepadStatus){
+  var st=window.__rommGamepadStatus;
+  log('Diagnostics: injected='+st.injected+', origin='+st.origin,'info');
+  log('Diagnostics: numButtons='+st.numButtons+', numAxes='+st.numAxes,'info');
+}
+
+// Test 6: Simulate a connection and verify structure
+var testJson='[{\"index\":0,\"connected\":true,\"id\":\"Test\",\"buttons\":[1,0,0,0,0,0,0.5,0.8,0,0,0,0,0,0,0,0],\"axes\":[0,0,0,0]},null,null,null]';
+window.__rommUpdateGamepads(testJson);
+var updated=navigator.getGamepads();
+if(updated[0]){
+  var gp=updated[0];
+  if(gp.connected===true) log('Simulated gamepad connected=true','pass');
+  else log('Simulated gamepad connected!=true','fail');
+  if(gp.mapping==='standard') log('Mapping is standard','pass');
+  else log('Mapping is not standard: '+gp.mapping,'fail');
+  if(gp.buttons.length===16) log('Buttons count=16','pass');
+  else log('Buttons count='+gp.buttons.length+' (expected 16)','fail');
+  if(gp.axes.length===4) log('Axes count=4 (W3C standard)','pass');
+  else log('Axes count='+gp.axes.length+' (expected 4)','fail');
+  // Verify triggers as buttons
+  if(Math.abs(gp.buttons[6].value-0.5)<0.01) log('LT button (idx 6) value=0.5','pass');
+  else log('LT button value='+gp.buttons[6].value+' (expected ~0.5)','fail');
+  if(Math.abs(gp.buttons[7].value-0.8)<0.01) log('RT button (idx 7) value=0.8','pass');
+  else log('RT button value='+gp.buttons[7].value+' (expected ~0.8)','fail');
+}
+
+// Test 7: Simulate disconnection and verify event semantics
+var discFired=false;
+var discGamepadConnected=true;
+window.addEventListener('gamepaddisconnected',function(e){
+  discFired=true;
+  if(e.gamepad) discGamepadConnected=e.gamepad.connected;
+});
+window.__rommUpdateGamepads('[null,null,null,null]');
+if(discFired) log('gamepaddisconnected event fired','pass');
+else log('gamepaddisconnected event not fired','fail');
+if(!discGamepadConnected) log('Disconnected event gamepad.connected=false','pass');
+else log('Disconnected event gamepad.connected!=false','fail');
+</script>
+</body>
+</html>

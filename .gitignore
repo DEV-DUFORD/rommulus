@@ -1,0 +1,39 @@
+# Node
+node_modules/
+
+# Gradle
+.gradle/
+build/
+.caches/
+captures/
+gradletasktime.txt
+polyglot.json
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+.idea_modules/
+
+# Android Studio
+local.properties
+.externalNativeBuild
+.cxx
+
+# Keystore
+*.jks
+*.p12
+*.pfx
+*.cer
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Screenshots / UI dumps (validation artifacts, may contain sensitive data)
+screenshots/
+
+# APK/AAB (build outputs; never commit)
+*.apk
+**/*.aab
