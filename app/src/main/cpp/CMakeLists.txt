@@ -30,6 +30,20 @@ target_link_libraries(romm_libretro_host
 
 # ---------------------------------------------------------------------------
 # test_core: an app-owned, copyright-safe synthetic Libretro core
-# (LIBRETRO_REFACTOR.md section 7.3), added in the next Phase 2 commit once
-# the JNI toolchain above is proven on the physical device.
+# (LIBRETRO_REFACTOR.md section 7.3). Built as its own shared library and
+# loaded the same way a real core would be (dlopen + retro_* symbol
+# resolution), so the loading path is exercised honestly before any
+# third-party core is integrated.
 # ---------------------------------------------------------------------------
+add_library(test_core SHARED
+    test_core/test_core.c
+)
+
+target_include_directories(test_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/libretro
+)
+
+target_link_libraries(test_core
+    log
+    m
+)
