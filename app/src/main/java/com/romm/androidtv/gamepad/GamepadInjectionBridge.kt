@@ -119,7 +119,11 @@ class GamepadInjectionBridge(
         originString = buildOriginString(rommOrigin)
         compiledScript = listOf(
             GamepadInjectionScript.build(originString!!),
-            EmulatorPerformanceScript.build(originString!!)
+            // enableUnvalidatedGenesisFallback stays false here: the Genesis Plus GX ->
+            // PicoDrive remap is an unvalidated, unlicensed experiment (see
+            // LIBRETRO_REFACTOR.md section 4.3) and must never run in the production
+            // WebView path, debug or release.
+            EmulatorPerformanceScript.build(originString!!, enableUnvalidatedGenesisFallback = false)
         ).joinToString("\n")
 
         // Attempt document-start registration.

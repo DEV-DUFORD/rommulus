@@ -5,17 +5,29 @@ package com.romm.androidtv.emulator
  *
  * RomM can enable rewind and a post-processing shader globally. Both are expensive
  * on low-power Android TV WebViews, so the native host forces them off without
- * changing the server-wide configuration used by desktop browsers. The host also
- * substitutes Picodrive for Genesis Plus GX because the latter cannot reserve its
- * Wasm heap in 32-bit Android WebView renderers.
+ * changing the server-wide configuration used by desktop browsers.
+ *
+ * PHASE 0 NOTE (LIBRETRO_REFACTOR.md section 4.3): this object previously also
+ * silently substituted Picodrive for Genesis Plus GX because the latter cannot
+ * reserve its Wasm heap in 32-bit Android WebView renderers. Neither core is
+ * approved for production distribution (see [com.romm.androidtv.emulation.model.CoreManifest]),
+ * and the substitution was never physically validated end-to-end. It is now an
+ * opt-in, debug-only experiment: [build] only wires it up when
+ * [enableUnvalidatedGenesisFallback] is explicitly true, which callers must gate
+ * behind `BuildConfig.DEBUG`. It must never run in a release build.
  */
 object EmulatorPerformanceScript {
 
-    fun build(allowedOrigin: String): String {
+    fun build(allowedOrigin: String, enableUnvalidatedGenesisFallback: Boolean = false): String {
         val escapedOrigin = allowedOrigin.replace("\\", "\\\\")
             .replace("'", "\\'")
             .replace("\n", "\\n")
             .replace("\r", "\\r")
+        val coreFallbacksLiteral = if (enableUnvalidatedGenesisFallback) {
+            "{ genesis_plus_gx: 'picodrive' }"
+        } else {
+            "{}"
+        }
 
         return """
 (function() {
@@ -32,9 +44,9 @@ object EmulatorPerformanceScript {
     shader: 'disabled',
     rewindEnabled: 'disabled'
   };
-  var coreFallbacks = {
-    genesis_plus_gx: 'picodrive'
-  };
+  // DEBUG-ONLY, UNVALIDATED EXPERIMENT: empty unless explicitly enabled by a debug build.
+  // See LIBRETRO_REFACTOR.md section 4.3. Never populated in production.
+  var coreFallbacks = $coreFallbacksLiteral;
 
   Object.defineProperty(window, 'EJS_core', {
     configurable: true,

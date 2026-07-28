@@ -31,8 +31,32 @@ class EmulatorPerformanceScriptTest {
     }
 
     @Test
-    fun `build substitutes Picodrive for Genesis Plus GX`() {
+    fun `build does not substitute Picodrive for Genesis Plus GX by default`() {
         val script = EmulatorPerformanceScript.build("https://romm.example.com")
+
+        assertThat(script).doesNotContain("genesis_plus_gx")
+        assertThat(script).doesNotContain("picodrive")
+        assertThat(script).contains("defineProperty(window, 'EJS_core'")
+        assertThat(script).contains(": value;")
+    }
+
+    @Test
+    fun `build omits the Genesis fallback when explicitly disabled`() {
+        val script = EmulatorPerformanceScript.build(
+            "https://romm.example.com",
+            enableUnvalidatedGenesisFallback = false
+        )
+
+        assertThat(script).doesNotContain("genesis_plus_gx")
+        assertThat(script).doesNotContain("picodrive")
+    }
+
+    @Test
+    fun `build only substitutes Picodrive for Genesis Plus GX when explicitly enabled`() {
+        val script = EmulatorPerformanceScript.build(
+            "https://romm.example.com",
+            enableUnvalidatedGenesisFallback = true
+        )
 
         assertThat(script).contains("genesis_plus_gx: 'picodrive'")
         assertThat(script).contains("defineProperty(window, 'EJS_core'")
