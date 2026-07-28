@@ -19,6 +19,10 @@ fun localProp(name: String, fallback: String = ""): String {
 android {
     namespace = "com.romm.androidtv"
     compileSdk = 34
+    // Pinned per LIBRETRO_REFACTOR.md section 7.1: build approved cores as pinned
+    // shared libraries for armeabi-v7a and arm64-v8a. Keep this version pinned and
+    // bump it deliberately, not implicitly via SDK manager updates.
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "com.romm.androidtv"
@@ -36,6 +40,26 @@ android {
         // Debug build gets the configured value; release builds get empty string.
         val rommOrigin = localProp("romm.origin", "")
         buildConfigField("String", "ROMM_ORIGIN", "\"$rommOrigin\"")
+
+        ndk {
+            // The physical Google TV Streamer is 32-bit userspace (armeabi-v7a); it is a
+            // release gate, not a legacy afterthought (LIBRETRO_REFACTOR.md section 3).
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += ""
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {
