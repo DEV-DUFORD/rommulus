@@ -14,6 +14,8 @@
 #pragma once
 
 #include <string>
+#include <vector>
+#include <cstdint>
 
 namespace romm {
 
@@ -27,5 +29,14 @@ bool atomicWriteFile(const std::string& path, const void* data, size_t size);
 // size mismatch is treated as an incompatible/foreign file, not silently
 // truncated or zero-padded.
 bool readFileExact(const std::string& path, void* data, size_t size);
+
+// Reads the entirety of `path` into `out`, replacing its previous contents.
+// Returns false (leaving `out` unspecified) if the file doesn't exist or
+// can't be fully read. Used to load real ROM content into memory once
+// before handing it to a core's retro_load_game() (LIBRETRO_REFACTOR.md
+// section 6, step 9) — this never touches the network, only an already
+// validated, app-private path a caller resolved beforehand (section 10's
+// download/cache pipeline runs entirely in the main process, never here).
+bool readWholeFile(const std::string& path, std::vector<uint8_t>& out);
 
 }  // namespace romm

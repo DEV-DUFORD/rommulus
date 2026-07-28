@@ -67,10 +67,19 @@ public:
     bool acquireProcessSlot();
     void releaseProcessSlot();
 
-    // Loads corePath, runs retro_init()/retro_load_game(nullptr) (no-content
-    // core only in Phase 2), and starts the emulation thread. Returns false
-    // on any failure; check lastError().
-    bool start(const std::string& corePath, const std::string& systemDir, const std::string& saveDir);
+    // Loads corePath, runs retro_init(), then retro_load_game(). When
+    // contentPath is empty, calls retro_load_game(nullptr) (a no-content
+    // core, e.g. the Phase 2/3 synthetic test_core). When contentPath is
+    // non-empty (Phase 4: a real core with real, already-staged-and-verified
+    // ROM content — see LIBRETRO_REFACTOR.md sections 6 and 10), the entire
+    // file is read into memory once here and handed to the core as a
+    // populated retro_game_info{path, data, size}; the buffer is released
+    // once retro_load_game() returns, since every conventional libretro core
+    // (including SameBoy's GB_load_rom_from_buffer) copies whatever it needs
+    // out of that buffer during the call rather than retaining the pointer.
+    // Returns false on any failure; check lastError().
+    bool start(const std::string& corePath, const std::string& systemDir, const std::string& saveDir,
+               const std::string& contentPath = "");
 
     // Stops the emulation thread (bounded wait for in-flight callbacks),
     // calls retro_unload_game()/retro_deinit(), and unloads the core.

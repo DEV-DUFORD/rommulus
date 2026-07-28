@@ -50,7 +50,7 @@ class RomRepositoryImplTest {
 
     private fun newCache() = ContentCache(cacheRoot, CacheDatabase(File(cacheRoot, "index.json")))
 
-    /** A resolver that always approves "gb" for a fake "test-core", regardless of [CoreManifest]'s real (empty) approvals. */
+    /** A resolver that always approves "gb" for a fake "test-core", overriding the real (now partly-approved) CoreManifest for tests that need a stable, test-local core id. */
     private val alwaysApproveGb: (String) -> String? = { slug -> if (slug == "gb") "test-core" else null }
 
     private fun repo(cache: ContentCache = newCache(), resolver: (String) -> String? = alwaysApproveGb) =
@@ -70,16 +70,45 @@ class RomRepositoryImplTest {
     """.trimIndent()
 
     @Nested
-    @DisplayName("no approved core — the real, currently-always-true production state")
-    inner class NoApprovedCoreDefault {
+    @DisplayName("core resolution")
+    inner class CoreResolution {
         @Test
-        fun `the default resolver (backed by the real, empty CoreManifest) never approves anything`() {
+        fun `an unapproved platform is rejected as NoApprovedCore regardless of the resolver injected`() {
             server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson()))
 
             val outcome = runBlocking { repo(resolver = { _ -> null }).stageForLaunch(42) }
 
             assertThat(outcome).isInstanceOf(StagingOutcome.NoApprovedCore::class.java)
             assertThat((outcome as StagingOutcome.NoApprovedCore).platformSlug).isEqualTo("gb")
+        }
+
+        @Test
+        fun `the real, default resolver (backed by the actual CoreManifest) approves gb for SameBoy since its Phase 4 review`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson()))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("hello world!"))
+
+            // No resolver override here: exercises the real CoreManifest.approvedEntries() lookup.
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(42)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("sameboy")
+        }
+
+        @Test
+        fun `the real, default resolver still rejects a platform with no approved core`() {
+            val genesisRomJson = """
+                {"id": 50, "fs_name": "game.md", "fs_size_bytes": 4, "platform_slug": "genesis", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.md", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(genesisRomJson))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(50)
+            }
+
+            assertThat(outcome).isEqualTo(StagingOutcome.NoApprovedCore("genesis"))
         }
     }
 

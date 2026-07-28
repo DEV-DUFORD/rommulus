@@ -98,14 +98,41 @@ object CoreManifest {
             coreName = "SameBoy",
             coreId = "sameboy",
             upstreamRepository = "https://github.com/LIJI32/SameBoy",
-            commitSha = "",
-            licenseSummary = "MIT at the upstream revision reviewed in LIBRETRO_REFACTOR.md; " +
-                "full source-tree review still required before shipping. Fully compatible " +
-                "with a GPLv3 application (see docs/PHASE0_DECISIONS.md).",
-            commercialUseFinding = CommercialUseFinding.UNREVIEWED,
+            commitSha = "8230189896a8bb6598574d302ba0ad3658f98ab4",
+            releaseTag = "v1.0.3-libretro",
+            licenseSummary = "Expat/MIT license covers \"all files and directories in this " +
+                "repository, except the iOS and HexFiend directories\" (upstream LICENSE, " +
+                "verbatim). This project only ever vendors Core/ (the GB/GBC emulation engine " +
+                "— flat, first-party .c/.h files, no vendored third-party libraries found) and " +
+                "libretro/ (the libretro API wrapper, including upstream's own jni/Android.mk + " +
+                "Application.mk NDK build config); neither references iOS/ or HexFiend/. The " +
+                "iOS directory's extra restriction (\"written permission required for App Store " +
+                "distribution\") is textually scoped only to files under iOS/ and does not apply " +
+                "here. BootROMs/ (SameBoy's own from-scratch reimplemented boot ROM replacements, " +
+                "shipped as .asm source, not Nintendo's copyrighted binaries) is NOT excluded from " +
+                "the Expat license and requires no external firmware. Fully compatible with a " +
+                "GPLv3 application (see docs/PHASE0_DECISIONS.md); MIT imposes no source-offer " +
+                "obligation, only preservation of the copyright notice and license text in the " +
+                "app's bundled NOTICE/licenses.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
             supportedSystems = listOf("gb", "gbc"),
             supportedExtensions = listOf(".gb", ".gbc"),
-            approved = false,
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `sameboy_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/sameboy/{Core,libretro}/* " +
+                "with the exact preprocessor flags upstream's own libretro/Makefile.common + " +
+                "libretro/jni/Android.mk use, -std=c99, and upstream's own libretro/link.T version " +
+                "script; see third_party/cores/sameboy/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "251cfde8cbe2e4be5d6dad300efb6feb2e90b5bc74c536b5709c4b0b42fb5738",
+                "arm64-v8a" to "f4fda64892a3febdafabc326e616791395c087f7f40ef468f636f76eb37cf944",
+            ),
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-07-28",
+            approved = true,
         ),
         CoreLicenseFinding(
             coreName = "Genesis Plus GX",

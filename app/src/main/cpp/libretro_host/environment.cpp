@@ -127,6 +127,64 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
             return true;
         }
 
+        // -------------------------------------------------------------------
+        // Phase 4: SameBoy (and real cores generally) probe these. None of
+        // them are needed for correct gameplay/save behavior in this build,
+        // so each is handled explicitly (real, honest "not supported" rather
+        // than falling into the generic unsupported-command warning) instead
+        // of silently claiming support it doesn't have (LIBRETRO_REFACTOR.md
+        // section 7.2's "environment callback support" principle).
+        // -------------------------------------------------------------------
+
+        case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE: {
+            // No rumble output pipeline exists in this build.
+            return false;
+        }
+
+        case RETRO_ENVIRONMENT_GET_INPUT_BITMASKS: {
+            // Per-button input_state queries (the existing path) are already
+            // fully supported; the bitmask fast-path is a pure optimization
+            // this host doesn't implement.
+            return false;
+        }
+
+        case RETRO_ENVIRONMENT_SET_MEMORY_MAPS: {
+            // No RetroAchievements-style raw memory map consumer exists.
+            return false;
+        }
+
+        case RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO: {
+            // No multi-content subsystem launch path (e.g. GBC link cable)
+            // exists; every launch is a single piece of content.
+            return false;
+        }
+
+        case RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS: {
+            // No achievements feature exists in this product.
+            return false;
+        }
+
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS:
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL:
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2:
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL: {
+            // No configurable core options UI exists yet; returning false
+            // here is safe and expected — SameBoy's own
+            // libretro_set_core_options() helper falls back to the already-
+            // handled RETRO_ENVIRONMENT_SET_VARIABLES path when every one of
+            // these newer commands is unsupported, and simply runs with its
+            // compiled-in option defaults.
+            return false;
+        }
+
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY: {
+            // Dynamically show/hide a previously-registered option; since no
+            // options were ever registered (above), there is nothing to
+            // display or hide. SameBoy's own call site ignores this
+            // command's return value, so returning false is safe.
+            return false;
+        }
+
         default: {
             if (loggedUnsupported_.insert(cmd).second) {
                 LOGW("unsupported environment command: %u", cmd);

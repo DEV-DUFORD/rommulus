@@ -86,6 +86,43 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeLoadTestCo
     return JNI_TRUE;
 }
 
+// Phase 4: loads any core (a real one, e.g. SameBoy) with real, already
+// staged-and-verified ROM content (LIBRETRO_REFACTOR.md sections 6 and 10).
+// contentPath must be an absolute, app-private path the caller resolved
+// through the Phase 3 download/cache pipeline in the main process — this
+// function itself never touches the network or does any content
+// negotiation, only loading a file that already exists on disk.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeLoadCoreWithContent(
+        JNIEnv* env, jobject /*thiz*/, jstring corePath, jstring systemDir, jstring saveDir,
+        jstring contentPath) {
+    if (g_session != nullptr) {
+        LOGE("nativeLoadCoreWithContent: a session already exists in this process");
+        return JNI_FALSE;
+    }
+
+    auto session = std::make_unique<romm::EmulationSession>();
+    if (!session->acquireProcessSlot()) {
+        LOGE("nativeLoadCoreWithContent: another session is already the active process slot");
+        return JNI_FALSE;
+    }
+
+    std::string path = jstringToStd(env, corePath);
+    std::string sysDir = jstringToStd(env, systemDir);
+    std::string savDir = jstringToStd(env, saveDir);
+    std::string content = jstringToStd(env, contentPath);
+
+    if (!session->start(path, sysDir, savDir, content)) {
+        LOGE("nativeLoadCoreWithContent: start() failed: %s", session->lastError().c_str());
+        session->releaseProcessSlot();
+        return JNI_FALSE;
+    }
+
+    g_session = std::move(session);
+    return JNI_TRUE;
+}
+
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeStopSession(

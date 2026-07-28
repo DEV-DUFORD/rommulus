@@ -37,10 +37,22 @@ void EmulationSession::releaseProcessSlot() {
 }
 
 bool EmulationSession::start(const std::string& corePath, const std::string& systemDir,
-                              const std::string& saveDir) {
+                              const std::string& saveDir, const std::string& contentPath) {
     if (state_.load() != SessionState::kUninitialized) {
         lastError_ = "session already started";
         return false;
+    }
+
+    // Content is read into memory *before* touching the core at all, so a
+    // missing/unreadable file fails cleanly without ever calling retro_init()
+    // on a core we'd then have to tear down again.
+    std::vector<uint8_t> contentBuffer;
+    if (!contentPath.empty()) {
+        if (!readWholeFile(contentPath, contentBuffer)) {
+            lastError_ = "failed to read content file: " + contentPath;
+            LOGE("%s", lastError_.c_str());
+            return false;
+        }
     }
 
     if (!core_.load(corePath)) {
@@ -51,7 +63,12 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
 
     environment_.setSystemDirectory(systemDir);
     environment_.setSaveDirectory(saveDir);
-    environment_.setContentDirectory(saveDir);  // no separate content dir for a no-content core
+    // A real core's content lives wherever the caller staged it (an
+    // app-private cache directory from LIBRETRO_REFACTOR.md section 10), not
+    // saveDir; contentPath's own parent directory is the honest answer for
+    // both the no-content and real-content cases.
+    environment_.setContentDirectory(
+        contentPath.empty() ? saveDir : contentPath.substr(0, contentPath.find_last_of('/')));
 
     const CoreFunctions& fns = core_.functions();
     fns.retro_set_environment(&EmulationSession::environmentTrampoline);
@@ -65,10 +82,25 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
 
     fns.retro_init();
 
-    // Phase 2: no-content launch only. Real ROM content is a later phase
-    // (LIBRETRO_REFACTOR.md sections 6 and 10).
-    if (!fns.retro_load_game(nullptr)) {
-        lastError_ = "retro_load_game(nullptr) failed";
+    bool loadedOk;
+    if (contentPath.empty()) {
+        // No-content core (the Phase 2/3 synthetic test_core).
+        loadedOk = fns.retro_load_game(nullptr);
+    } else {
+        // Real core, real content (LIBRETRO_REFACTOR.md section 6, step 9):
+        // the core copies whatever it needs out of `data` during this call
+        // (verified for SameBoy's GB_load_rom_from_buffer), so contentBuffer
+        // only needs to outlive this one call, not the whole session.
+        struct retro_game_info info {};
+        info.path = contentPath.c_str();
+        info.data = contentBuffer.data();
+        info.size = contentBuffer.size();
+        info.meta = nullptr;
+        loadedOk = fns.retro_load_game(&info);
+    }
+
+    if (!loadedOk) {
+        lastError_ = "retro_load_game failed";
         LOGE("%s", lastError_.c_str());
         fns.retro_deinit();
         core_.unload();
@@ -91,7 +123,8 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     }
 
     thread_ = std::thread(&EmulationSession::runLoop, this);
-    LOGI("session started, core=%s", corePath.c_str());
+    LOGI("session started, core=%s, content=%s", corePath.c_str(),
+         contentPath.empty() ? "(none)" : contentPath.c_str());
     return true;
 }
 

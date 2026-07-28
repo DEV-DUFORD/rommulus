@@ -86,4 +86,31 @@ bool readFileExact(const std::string& path, void* data, size_t size) {
     return true;
 }
 
+bool readWholeFile(const std::string& path, std::vector<uint8_t>& out) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (f == nullptr) {
+        LOGE("readWholeFile: fopen(%s) failed: %s", path.c_str(), strerror(errno));
+        return false;
+    }
+
+    struct stat st {};
+    if (fstat(fileno(f), &st) != 0 || st.st_size < 0) {
+        LOGE("readWholeFile: fstat(%s) failed: %s", path.c_str(), strerror(errno));
+        fclose(f);
+        return false;
+    }
+
+    out.assign(static_cast<size_t>(st.st_size), 0);
+    size_t readBytes = out.empty() ? 0 : fread(out.data(), 1, out.size(), f);
+    fclose(f);
+
+    if (readBytes != out.size()) {
+        LOGE("readWholeFile: short read (%zu of %zu) from %s", readBytes, out.size(), path.c_str());
+        out.clear();
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace romm

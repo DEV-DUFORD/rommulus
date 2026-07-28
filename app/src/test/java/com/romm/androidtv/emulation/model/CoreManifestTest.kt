@@ -6,10 +6,23 @@ import org.junit.jupiter.api.Test
 class CoreManifestTest {
 
     @Test
-    fun `no core is approved before Phase 0 product review`() {
-        // Phase 0 only records starting facts and gates; it must not pre-approve
-        // any core for production distribution.
-        assertThat(CoreManifest.approvedEntries()).isEmpty()
+    fun `only SameBoy is approved, following its Phase 4 individual license review`() {
+        // Every other core in the manifest is still an unreviewed/restricted starting fact
+        // from Phase 0 (LIBRETRO_REFACTOR.md section 4.1) — approving one core in Phase 4
+        // must not silently approve any other entry.
+        assertThat(CoreManifest.approvedEntries().map { it.coreId }).containsExactly("sameboy")
+    }
+
+    @Test
+    fun `SameBoy's approval records a named reviewer, date, commit, and permissive finding`() {
+        val sameboy = CoreManifest.findById("sameboy")
+
+        assertThat(sameboy).isNotNull
+        assertThat(sameboy!!.approved).isTrue()
+        assertThat(sameboy.reviewedBy).isEqualTo("DEV-DUFORD")
+        assertThat(sameboy.reviewedOn).isNotBlank()
+        assertThat(sameboy.commitSha).isNotBlank()
+        assertThat(sameboy.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
     }
 
     @Test

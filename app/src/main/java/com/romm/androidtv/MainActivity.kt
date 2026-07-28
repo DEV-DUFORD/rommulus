@@ -46,14 +46,19 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import com.romm.androidtv.auth.AuthRepository
 import com.romm.androidtv.auth.SessionStore
+import com.romm.androidtv.cache.CacheDatabase
+import com.romm.androidtv.cache.ContentCache
 import com.romm.androidtv.config.SettingsRepository
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.router.ControllerEventRouter
 import com.romm.androidtv.diagnostic.DiagnosticPageHtml
+import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.gamepad.GamepadInjectionBridge
 import com.romm.androidtv.gamepad.GamepadInjectionDiagnostics
 import com.romm.androidtv.model.*
 import com.romm.androidtv.network.*
+import com.romm.androidtv.romm.RomRepositoryImpl
+import com.romm.androidtv.romm.StagingOutcome
 import com.romm.androidtv.web.AuthenticatedWebViewScreen
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -140,6 +145,18 @@ class MainActivity : ComponentActivity() {
     // MainActivity coordinates navigation rather than owning network internals.
     private val authRepository: AuthRepository by lazy {
         AuthRepository(okHttpClient, RommOkHttpClient.cookieSyncJar, sessionStore)
+    }
+
+    // Phase 3/4 native content pipeline — quota-limited, identity-keyed cache of
+    // downloaded ROM/firmware content, and the repository that stages one ROM
+    // for native launch through it (LIBRETRO_REFACTOR.md sections 6 and 10).
+    // This all runs in the main process, never in :emulation (architectural
+    // rule: "the emulation process does not make network requests").
+    private val contentCache: ContentCache by lazy {
+        ContentCache(filesDir.resolve("content_cache"), CacheDatabase(filesDir.resolve("content_cache/index.json")))
+    }
+    private val romRepository: RomRepositoryImpl by lazy {
+        RomRepositoryImpl(okHttpClient, sessionStore, contentCache)
     }
 
     /** The currently configured RomM origin: persisted override, or the BuildConfig default. */
@@ -327,6 +344,9 @@ class MainActivity : ComponentActivity() {
                             },
                             onOpenControllerDiagnostics = {
                                 currentScreen = Screen.CONTROLLER_DIAGNOSTICS
+                            },
+                            onStageAndLaunchRealRom = { romId, onResult ->
+                                stageAndLaunchRealRom(romId, onResult)
                             }
                         )
                         Screen.ORIGIN_STATUS -> OriginStatusScreen(
@@ -383,6 +403,50 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    // ---- Phase 4 debug entry point: stage one real, user-owned RomM ROM
+    // through the Phase 3 content pipeline and launch it with the approved
+    // SameBoy core (LIBRETRO_REFACTOR.md section 13, Phase 4: "Load one
+    // user-owned RomM title through the native content pipeline"). This all
+    // runs in the main process — EmulationActivity (in :emulation) only ever
+    // receives the already-resolved, app-private contentPath/savePath this
+    // method computes, never ROM bytes or a raw server URL (section 6, step 7).
+
+    private fun stageAndLaunchRealRom(romId: Long, onResult: (StagingOutcome) -> Unit) {
+        lifecycleScope.launch {
+            val outcome = romRepository.stageForLaunch(romId)
+            onResult(outcome)
+            if (outcome is StagingOutcome.Success) {
+                launchStagedRom(outcome)
+            }
+        }
+    }
+
+    private fun launchStagedRom(outcome: StagingOutcome.Success) {
+        val spec = outcome.launchSpec
+        val session = sessionStore.current()
+        val serverKey = session?.origin?.let { RommOrigin.parse(it)?.host ?: it } ?: "unknown-server"
+        val userKey = session?.username ?: "unknown-user"
+        val savePath = SavePathPolicy.autosaveSramPath(
+            filesDir = filesDir,
+            serverKey = serverKey,
+            userKey = userKey,
+            romId = spec.romId,
+            romHash = spec.romHash,
+        )
+
+        startActivity(
+            Intent(this, com.romm.androidtv.emulation.process.EmulationActivity::class.java).apply {
+                putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_CORE_ID, spec.coreId)
+                putExtra(
+                    com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_CONTENT_PATH,
+                    spec.contentPath
+                )
+                putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_SAVE_PATH, savePath)
+                putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_ROM_ID, spec.romId)
+            }
+        )
     }
 
     // ---- Auth flow (lifecycle-aware coroutine, single-flight guarded) ----
@@ -524,7 +588,8 @@ fun HomeScreen(
     onLogin: () -> Unit,
     onRunDiagnostics: () -> Unit,
     onOpenRomMOrigin: () -> Unit,
-    onOpenControllerDiagnostics: () -> Unit = {}
+    onOpenControllerDiagnostics: () -> Unit = {},
+    onStageAndLaunchRealRom: (Long, (StagingOutcome) -> Unit) -> Unit = { _, _ -> }
 ) {
     val scrollState = rememberScrollState()
     Column(
@@ -656,6 +721,56 @@ fun HomeScreen(
                     text = "Native Emulation (Debug)",
                     style = MaterialTheme.typography.titleMedium,
                     color = Color(0xFFff9800)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Phase 4 debug entry point: stage one real, user-owned RomM ROM
+            // through the Phase 3 content pipeline and launch it with the
+            // approved SameBoy core. Still gated behind BuildConfig.DEBUG —
+            // PlaybackBackendPolicy.resolve() is untouched by this and still
+            // always resolves to WEBVIEW for the real product flow.
+            var romIdText by remember { mutableStateOf("") }
+            var stagingStatus by remember { mutableStateOf<String?>(null) }
+
+            OutlinedTextField(
+                value = romIdText,
+                onValueChange = { romIdText = it.filter { c -> c.isDigit() } },
+                label = { Text("RomM ROM ID (GB/GBC)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    val romId = romIdText.toLongOrNull()
+                    if (romId == null || romId <= 0) {
+                        stagingStatus = "Enter a valid positive ROM ID"
+                    } else {
+                        stagingStatus = "Staging ROM $romId…"
+                        onStageAndLaunchRealRom(romId) { outcome ->
+                            stagingStatus = "Result: $outcome"
+                        }
+                    }
+                },
+                modifier = Modifier.padding(horizontal = 16.dp)
+            ) {
+                Text(
+                    text = "Native Emulation (Debug) — Real ROM (SameBoy)",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color(0xFFff9800)
+                )
+            }
+
+            stagingStatus?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = it,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = Color.White
                 )
             }
         }

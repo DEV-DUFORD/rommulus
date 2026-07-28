@@ -39,6 +39,7 @@ import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
 import com.romm.androidtv.emulation.video.EmulationSurface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -95,6 +96,22 @@ class EmulationActivity : ComponentActivity() {
     companion object {
         private const val TAG = "EmulationActivity"
         private val isSessionActive = AtomicBoolean(false)
+
+        /**
+         * Intent extras for a real-content launch (LIBRETRO_REFACTOR.md
+         * section 6, step 7: "starts EmulationActivity with a small parcel
+         * containing manifest and session IDs, not ROM bytes"). The caller
+         * (`MainActivity`, in the main process) resolves every one of these
+         * through the Phase 3 staging pipeline and [SavePathPolicy] *before*
+         * starting this activity — this activity only ever receives already-
+         * validated, app-private paths and IDs, never ROM bytes or a raw
+         * server URL. Omitting these extras entirely falls back to the
+         * existing Phase 2/3 synthetic-test-core debug flow.
+         */
+        const val EXTRA_CORE_ID = "com.romm.androidtv.emulation.EXTRA_CORE_ID"
+        const val EXTRA_CONTENT_PATH = "com.romm.androidtv.emulation.EXTRA_CONTENT_PATH"
+        const val EXTRA_SAVE_PATH = "com.romm.androidtv.emulation.EXTRA_SAVE_PATH"
+        const val EXTRA_ROM_ID = "com.romm.androidtv.emulation.EXTRA_ROM_ID"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -113,14 +130,42 @@ class EmulationActivity : ComponentActivity() {
             return
         }
 
-        val corePath = NativeLibretroHost.resolveBundledTestCorePath(applicationContext)
+        val corePath: String
+        val contentPath: String?
         val systemDir = filesDir.resolve("system").apply { mkdirs() }.absolutePath
         val saveDir = filesDir.resolve("save").apply { mkdirs() }.absolutePath
-        val savePath = filesDir.resolve("save/test_core_autosave.srm").absolutePath
+        val savePath: String
+        val romId = intent.getLongExtra(EXTRA_ROM_ID, -1L)
+        val coreId = intent.getStringExtra(EXTRA_CORE_ID)
+        val requestedContentPath = intent.getStringExtra(EXTRA_CONTENT_PATH)
+        val requestedSavePath = intent.getStringExtra(EXTRA_SAVE_PATH)
 
-        sessionStarted = host.nativeLoadTestCore(corePath, systemDir, saveDir)
+        if (coreId != null && requestedContentPath != null && requestedSavePath != null) {
+            val resolvedCorePath = NativeLibretroHost.resolveBundledCorePathForCoreId(applicationContext, coreId)
+            if (resolvedCorePath == null) {
+                Log.e(TAG, "onCreate: no bundled core for coreId=$coreId")
+                isSessionActive.set(false)
+                finish()
+                return
+            }
+            corePath = resolvedCorePath
+            contentPath = requestedContentPath
+            savePath = requestedSavePath
+            File(savePath).parentFile?.mkdirs()
+            Log.i(TAG, "onCreate: real-content launch coreId=$coreId romId=$romId content=$contentPath")
+        } else {
+            corePath = NativeLibretroHost.resolveBundledTestCorePath(applicationContext)
+            contentPath = null
+            savePath = filesDir.resolve("save/test_core_autosave.srm").absolutePath
+        }
+
+        sessionStarted = if (contentPath != null) {
+            host.nativeLoadCoreWithContent(corePath, systemDir, saveDir, contentPath)
+        } else {
+            host.nativeLoadTestCore(corePath, systemDir, saveDir)
+        }
         if (!sessionStarted) {
-            Log.e(TAG, "nativeLoadTestCore failed: ${host.nativeGetLastError()}")
+            Log.e(TAG, "core load failed: ${host.nativeGetLastError()}")
         } else {
             // Restore-on-launch (LIBRETRO_REFACTOR.md section 11.1). A missing file
             // (first launch) or a size mismatch both return false; either way SRAM

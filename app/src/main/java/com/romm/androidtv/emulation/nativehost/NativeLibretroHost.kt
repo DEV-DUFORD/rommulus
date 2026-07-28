@@ -33,6 +33,22 @@ class NativeLibretroHost {
      */
     external fun nativeLoadTestCore(corePath: String, systemDir: String, saveDir: String): Boolean
 
+    /**
+     * Loads a real core from [corePath] (e.g. an absolute path to
+     * `libsameboy_core.so`) with real, already staged-and-verified ROM
+     * content at [contentPath] (an absolute, app-private path a caller
+     * resolved through the Phase 3 download/cache pipeline — this call
+     * never touches the network itself). [systemDir]/[saveDir] are
+     * app-private directories exposed to the core via the environment
+     * callbacks. Returns false on any failure; see [nativeGetLastError].
+     */
+    external fun nativeLoadCoreWithContent(
+        corePath: String,
+        systemDir: String,
+        saveDir: String,
+        contentPath: String,
+    ): Boolean
+
     /** Stops the emulation thread and unloads the core. Safe to call even if nothing is loaded. */
     external fun nativeStopSession()
 
@@ -134,13 +150,45 @@ class NativeLibretroHost {
          * can load it (LIBRETRO_REFACTOR.md section 7.1) — it is loading
          * mechanics, not a runtime download of executable code.
          */
-        fun resolveBundledTestCorePath(context: Context): String {
-            val destination = File(context.filesDir, "native_test/libtest_core.so")
+        fun resolveBundledTestCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libtest_core.so")
+
+        /**
+         * Resolves an absolute, dlopen-able path to the bundled, approved
+         * SameBoy core (LIBRETRO_REFACTOR.md section 13, Phase 4) — the only
+         * entry in [com.romm.androidtv.emulation.model.CoreManifest] with
+         * `approved == true` at the time of writing. Same run-from-apk
+         * extraction rationale as [resolveBundledTestCorePath].
+         */
+        fun resolveBundledSameBoyCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libsameboy_core.so")
+
+        /**
+         * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
+         * to its bundled shared-library path, or null if [coreId] has no
+         * bundled core in this build. Deliberately does not fall back to any
+         * default — an unrecognized coreId must fail the launch explicitly,
+         * never silently substitute a different core.
+         */
+        fun resolveBundledCorePathForCoreId(context: Context, coreId: String): String? = when (coreId) {
+            "sameboy" -> resolveBundledSameBoyCorePath(context)
+            else -> null
+        }
+
+        /**
+         * Shared extraction logic for [resolveBundledTestCorePath] and
+         * [resolveBundledSameBoyCorePath]: every bundled core is a normal JNI
+         * library shipped in the APK, extracted once to app-private storage
+         * under a name derived from [soFileName] so multiple cores never
+         * collide on disk.
+         */
+        private fun resolveBundledCoreSharedLibrary(context: Context, soFileName: String): String {
+            val destination = File(context.filesDir, "native_cores/$soFileName")
             if (destination.exists()) return destination.absolutePath
             destination.parentFile?.mkdirs()
 
             val abi = Build.SUPPORTED_ABIS.first()
-            val entryName = "lib/$abi/libtest_core.so"
+            val entryName = "lib/$abi/$soFileName"
             ZipFile(context.applicationInfo.sourceDir).use { zip ->
                 val entry = zip.getEntry(entryName)
                     ?: error("$entryName not found in APK (${context.applicationInfo.sourceDir})")
