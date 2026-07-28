@@ -134,6 +134,13 @@ dependencies {
     implementation("com.squareup.moshi:moshi:1.15.1")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
 
+    // 7z archive extraction (LIBRETRO_REFACTOR.md section 10: RomM single-file ROM entries are
+    // commonly .7z, needing extraction before raw bytes can reach a libretro core). Both are
+    // ordinary, permissively-licensed app dependencies (Apache-2.0 / public domain) — not
+    // libretro cores — so the CoreManifest review gate (section 4) doesn't apply to them.
+    implementation("org.apache.commons:commons-compress:1.28.0")
+    implementation("org.tukaani:xz:1.12") // LZMA2 codec support used by commons-compress's 7z reader
+
     // Coroutines + lifecycle
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4")

@@ -3,9 +3,12 @@
 package com.romm.androidtv.romm
 
 import com.romm.androidtv.auth.SessionStore
+import com.romm.androidtv.cache.ArchiveExtractionOutcome
 import com.romm.androidtv.cache.AtomicFileStore
 import com.romm.androidtv.cache.CacheEntryKind
 import com.romm.androidtv.cache.ContentCache
+import com.romm.androidtv.cache.SevenZArchiveExtractor
+import com.romm.androidtv.cache.ZipArchiveExtractor
 import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.emulation.model.LaunchSpec
 import com.romm.androidtv.network.RommOrigin
@@ -55,6 +58,21 @@ sealed interface StagingOutcome {
 
     /** Section 10: initial support explicitly rejects multi-file content with a clear message. */
     data class UnsupportedMultiFile(val fileCount: Int) : StagingOutcome
+
+    /**
+     * The ROM's single file is an archive whose format isn't supported for
+     * extraction (e.g. rar). [extension] is the lowercased file extension
+     * that was detected.
+     */
+    data class UnsupportedArchiveFormat(val extension: String) : StagingOutcome
+
+    /**
+     * The ROM's single file was a supported archive format, but extracting
+     * its raw ROM bytes failed a section-10 safety check (path traversal,
+     * excessive entry count, decompression-ratio/zip-bomb limit, multiple
+     * ambiguous entries, or a malformed archive). [reason] is human-readable.
+     */
+    data class ArchiveExtractionFailed(val reason: String) : StagingOutcome
 
     object RomNotFound : StagingOutcome
 
@@ -121,6 +139,14 @@ class RomRepositoryImpl(
         val coreId = resolveApprovedCoreId(rom.platformSlug)
             ?: return@withContext StagingOutcome.NoApprovedCore(rom.platformSlug)
 
+        // Detect an unsupported archive format by extension before spending any bandwidth on it
+        // (section 10: "never trust just the declared content-type" — this is still extension-only
+        // detection, just performed early rather than after a download that can't be used anyway).
+        val declaredExtension = file.fileName.substringAfterLast('.', "").lowercase()
+        if (declaredExtension in UNSUPPORTED_ARCHIVE_EXTENSIONS) {
+            return@withContext StagingOutcome.UnsupportedArchiveFormat(declaredExtension)
+        }
+
         val cacheKey = contentCache.key(
             kind = CacheEntryKind.ROM,
             serverKey = serverKey,
@@ -131,9 +157,13 @@ class RomRepositoryImpl(
 
         val cached = contentCache.findValidEntry(cacheKey)
         if (cached != null) {
-            return@withContext StagingOutcome.Success(
-                buildLaunchSpec(romId, cached.contentHash, cached.absolutePath, coreId)
-            )
+            return@withContext when (
+                val resolution = resolveLaunchContentPath(File(cached.absolutePath), file.fileName, cached.contentHash)
+            ) {
+                is ContentPathResolution.Success ->
+                    StagingOutcome.Success(buildLaunchSpec(romId, cached.contentHash, resolution.path, coreId))
+                is ContentPathResolution.Failure -> resolution.outcome
+            }
         }
 
         val expectedSizeBytes = file.sizeBytes.takeIf { it > 0 } ?: rom.fsSizeBytes.takeIf { it > 0 }
@@ -171,7 +201,11 @@ class RomRepositoryImpl(
                     contentHash = contentHash,
                     file = outcome.file,
                 )
-                StagingOutcome.Success(buildLaunchSpec(romId, contentHash, outcome.file.absolutePath, coreId))
+                when (val resolution = resolveLaunchContentPath(outcome.file, file.fileName, contentHash)) {
+                    is ContentPathResolution.Success ->
+                        StagingOutcome.Success(buildLaunchSpec(romId, contentHash, resolution.path, coreId))
+                    is ContentPathResolution.Failure -> resolution.outcome
+                }
             }
             is AtomicFileStore.DownloadOutcome.InsufficientSpace ->
                 StagingOutcome.InsufficientSpace(outcome.requiredBytes, outcome.availableBytes)
@@ -185,6 +219,87 @@ class RomRepositoryImpl(
                 else StagingOutcome.NetworkError("HTTP ${outcome.code}")
             is AtomicFileStore.DownloadOutcome.NetworkError -> StagingOutcome.NetworkError(outcome.message)
         }
+    }
+
+    /**
+     * Resolves the path a native core should actually be launched with:
+     * [archiveFile] itself if [displayFileName] doesn't look like a
+     * supported archive, or the path to a memoized, extracted raw-ROM file
+     * otherwise. [archiveFile]'s own identity/hash still tracks the *archive*
+     * for cache/eviction purposes (matching RomM's declared metadata); the
+     * extracted bytes get no independent cache-database identity of their
+     * own — they are memoized on disk only, keyed by [contentHash], and are
+     * safe to delete/regenerate any time the archive itself is still cached.
+     */
+    private fun resolveLaunchContentPath(
+        archiveFile: File,
+        displayFileName: String,
+        contentHash: String,
+    ): ContentPathResolution {
+        // Detect by extension only — section 10: "never trust just the declared content-type".
+        return when (val extension = displayFileName.substringAfterLast('.', "").lowercase()) {
+            "zip" -> extractForLaunch(archiveFile, contentHash) { file, dir -> ZipArchiveExtractor.extractSingleEntry(file, dir) }
+            "7z" -> extractForLaunch(archiveFile, contentHash) { file, dir -> SevenZArchiveExtractor.extractSingleEntry(file, dir) }
+            "rar", "gz", "tar", "tar.gz", "7zip" -> ContentPathResolution.Failure(StagingOutcome.UnsupportedArchiveFormat(extension))
+            else -> ContentPathResolution.Success(archiveFile.absolutePath)
+        }
+    }
+
+    /**
+     * Runs [extractor] against [archiveFile], memoizing its output under a
+     * `extracted/<contentHash>/` directory so a repeat launch of the same
+     * verified archive never re-extracts. Extraction always happens into a
+     * fresh temp directory first and is atomically renamed into place only
+     * once fully written, so a process death mid-extraction can never leave
+     * a partially-extracted file where a later launch would find it.
+     */
+    private fun extractForLaunch(
+        archiveFile: File,
+        contentHash: String,
+        extractor: (archiveFile: File, destinationDir: File) -> ArchiveExtractionOutcome,
+    ): ContentPathResolution {
+        val extractionRoot = File(contentCache.contentDir(CacheEntryKind.ROM), "extracted")
+        val finalDir = File(extractionRoot, contentHash)
+        val marker = File(finalDir, EXTRACTION_COMPLETE_MARKER)
+        if (marker.isFile) {
+            val existing = finalDir.listFiles { candidate -> candidate.name != EXTRACTION_COMPLETE_MARKER }?.singleOrNull()
+            if (existing != null && existing.isFile) {
+                return ContentPathResolution.Success(existing.absolutePath)
+            }
+            // Marker present but the extracted content is missing/altered — never trust it; re-extract.
+            finalDir.deleteRecursively()
+        }
+
+        val tempDir = File(extractionRoot, ".tmp-$contentHash-${UUID.randomUUID()}")
+        tempDir.mkdirs()
+
+        return when (val outcome = extractor(archiveFile, tempDir)) {
+            is ArchiveExtractionOutcome.Success -> {
+                File(tempDir, EXTRACTION_COMPLETE_MARKER).writeText("")
+                extractionRoot.mkdirs()
+                if (tempDir.renameTo(finalDir)) {
+                    ContentPathResolution.Success(File(finalDir, outcome.file.name).absolutePath)
+                } else {
+                    // Rare cross-filesystem/concurrent-launch race — the bytes already written into
+                    // tempDir are still valid and safely readable; use them directly rather than
+                    // failing an extraction that actually succeeded.
+                    ContentPathResolution.Success(outcome.file.absolutePath)
+                }
+            }
+            is ArchiveExtractionOutcome.MultipleEntries -> {
+                tempDir.deleteRecursively()
+                ContentPathResolution.Failure(StagingOutcome.UnsupportedMultiFile(outcome.count))
+            }
+            is ArchiveExtractionOutcome.Rejected -> {
+                tempDir.deleteRecursively()
+                ContentPathResolution.Failure(StagingOutcome.ArchiveExtractionFailed(outcome.reason))
+            }
+        }
+    }
+
+    private sealed interface ContentPathResolution {
+        data class Success(val path: String) : ContentPathResolution
+        data class Failure(val outcome: StagingOutcome) : ContentPathResolution
     }
 
     private fun buildLaunchSpec(romId: Long, romHash: String, contentPath: String, coreId: String) = LaunchSpec(
@@ -210,6 +325,14 @@ class RomRepositoryImpl(
         RommApiError.TLS_ERROR -> StagingOutcome.NetworkError("TLS error")
         RommApiError.PARSE_ERROR -> StagingOutcome.NetworkError("malformed response")
         RommApiError.ORIGIN_NOT_CONFIGURED -> StagingOutcome.NetworkError("no server configured")
+    }
+
+    private companion object {
+        /** Empty sentinel file marking a fully, successfully extracted archive directory. */
+        const val EXTRACTION_COMPLETE_MARKER = ".complete"
+
+        /** Archive formats detected by extension that this pipeline doesn't (yet) extract. */
+        val UNSUPPORTED_ARCHIVE_EXTENSIONS = setOf("rar", "gz", "tar", "7zip")
     }
 }
 
