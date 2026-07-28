@@ -45,6 +45,23 @@ class NativeLibretroHost {
 
     external fun nativeGetLastError(): String
 
+    /**
+     * Atomically writes the currently loaded core's RETRO_MEMORY_SAVE_RAM
+     * region to [savePath] (write-temp/fsync/rename; LIBRETRO_REFACTOR.md
+     * section 11.1). Returns false if no session is active, the core
+     * exposes no save RAM, or the write fails.
+     */
+    external fun nativeCheckpointSaveRam(savePath: String): Boolean
+
+    /**
+     * Restores RETRO_MEMORY_SAVE_RAM from [savePath] if it exists and is
+     * exactly the size the core currently reports. Returns false (leaving
+     * SRAM untouched) if the file is missing or its size doesn't match —
+     * this is an intentional, honest rejection of any incompatible or
+     * unknown-provenance save rather than a partial restore.
+     */
+    external fun nativeRestoreSaveRam(savePath: String): Boolean
+
     companion object {
         @Volatile
         private var loaded = false

@@ -75,6 +75,22 @@ public:
     void* memoryData(unsigned id);
     size_t memorySize(unsigned id);
 
+    // Atomically writes the current RETRO_MEMORY_SAVE_RAM region to
+    // savePath (LIBRETRO_REFACTOR.md section 11.1). Returns false if the
+    // core exposes no save RAM, or the write fails. Safe to call from the
+    // caller's own thread — this does not run from inside a core callback.
+    bool checkpointSaveRam(const std::string& savePath);
+
+    // Restores RETRO_MEMORY_SAVE_RAM from savePath if it exists and is
+    // exactly the size the core currently reports. Returns false (and
+    // leaves the core's SRAM untouched) if the file is missing or an exact
+    // size match fails — this is a deliberate, honest "incompatible/unknown
+    // provenance" rejection rather than a partial or truncated restore
+    // (section 11.1: "Never apply an existing save solely because its ROM
+    // ID and slot match... verify the exact post-retro_load_game() SRAM
+    // size").
+    bool restoreSaveRam(const std::string& savePath);
+
     bool serialize(void* buffer, size_t size);
     bool unserialize(const void* buffer, size_t size);
     size_t serializeSize();

@@ -1,4 +1,5 @@
 #include "emulation_session.h"
+#include "atomic_file_store.h"
 
 #include <android/log.h>
 #include <cstring>
@@ -149,6 +150,26 @@ void* EmulationSession::memoryData(unsigned id) {
 size_t EmulationSession::memorySize(unsigned id) {
     if (!core_.isLoaded()) return 0;
     return core_.functions().retro_get_memory_size(id);
+}
+
+bool EmulationSession::checkpointSaveRam(const std::string& savePath) {
+    void* data = memoryData(RETRO_MEMORY_SAVE_RAM);
+    size_t size = memorySize(RETRO_MEMORY_SAVE_RAM);
+    if (data == nullptr || size == 0) {
+        LOGE("checkpointSaveRam: core exposes no RETRO_MEMORY_SAVE_RAM region");
+        return false;
+    }
+    return atomicWriteFile(savePath, data, size);
+}
+
+bool EmulationSession::restoreSaveRam(const std::string& savePath) {
+    void* data = memoryData(RETRO_MEMORY_SAVE_RAM);
+    size_t size = memorySize(RETRO_MEMORY_SAVE_RAM);
+    if (data == nullptr || size == 0) {
+        LOGE("restoreSaveRam: core exposes no RETRO_MEMORY_SAVE_RAM region");
+        return false;
+    }
+    return readFileExact(savePath, data, size);
 }
 
 bool EmulationSession::serialize(void* buffer, size_t size) {

@@ -67,4 +67,52 @@ class NativeLibretroHostInstrumentedTest {
         host.nativeStopSession()
         assertTrue(!host.nativeIsRunning())
     }
+
+    @Test
+    fun checkpointAndRestoreSramRoundTripsAcrossSessions() {
+        assertTrue(NativeLibretroHost.ensureLoaded())
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val corePath = NativeLibretroHost.resolveBundledTestCorePath(context)
+        val systemDir = context.filesDir.resolve("system").apply { mkdirs() }.absolutePath
+        val saveDir = context.filesDir.resolve("save_roundtrip").apply { mkdirs() }.absolutePath
+        val checkpointPath = context.filesDir.resolve("save_roundtrip/autosave.srm").absolutePath
+
+        // Missing-file restore must fail cleanly, not crash, before any session exists.
+        assertTrue(!host.nativeRestoreSaveRam(checkpointPath))
+
+        // Session 1: run long enough for the SRAM byte to increment past its
+        // frame-0 initial value of 1 (it increments again at frame 60, ~1s at 60fps).
+        assertTrue(host.nativeLoadTestCore(corePath, systemDir, saveDir))
+        Thread.sleep(1200)
+        assertTrue(host.nativeCheckpointSaveRam(checkpointPath))
+        val checkpointedByte = readFirstByte(checkpointPath)
+        assertTrue("expected SRAM to have incremented past 1, got $checkpointedByte", checkpointedByte >= 2)
+        host.nativeStopSession()
+
+        // Session 2: a fresh core instance re-initializes SRAM to 1 (frame-0
+        // increment). Restoring immediately must bring back session 1's value.
+        assertTrue(host.nativeLoadTestCore(corePath, systemDir, saveDir))
+        val restored = host.nativeRestoreSaveRam(checkpointPath)
+        assertTrue("nativeRestoreSaveRam failed: ${host.nativeGetLastError()}", restored)
+
+        val secondCheckpointPath = context.filesDir.resolve("save_roundtrip/after_restore.srm").absolutePath
+        assertTrue(host.nativeCheckpointSaveRam(secondCheckpointPath))
+        val afterRestoreByte = readFirstByte(secondCheckpointPath)
+
+        // Allow for the emulation thread ticking once more in the brief window
+        // between restore and re-checkpoint, but it must never have merely
+        // defaulted back to the fresh-init value of 1 — that would mean the
+        // restore silently did nothing.
+        assertTrue(
+            "expected restored value ($afterRestoreByte) >= checkpointed value ($checkpointedByte)",
+            afterRestoreByte >= checkpointedByte
+        )
+    }
+
+    private fun readFirstByte(path: String): Int {
+        val bytes = java.io.File(path).readBytes()
+        assertTrue("expected a non-empty SRAM file at $path", bytes.isNotEmpty())
+        return bytes[0].toInt() and 0xFF
+    }
 }

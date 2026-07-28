@@ -52,6 +52,7 @@ class EmulationActivity : ComponentActivity() {
 
     private val host = NativeLibretroHost()
     private var sessionStarted = false
+    private var savePath: String? = null
 
     companion object {
         private const val TAG = "EmulationActivity"
@@ -77,11 +78,21 @@ class EmulationActivity : ComponentActivity() {
         val corePath = NativeLibretroHost.resolveBundledTestCorePath(applicationContext)
         val systemDir = filesDir.resolve("system").apply { mkdirs() }.absolutePath
         val saveDir = filesDir.resolve("save").apply { mkdirs() }.absolutePath
+        val savePath = filesDir.resolve("save/test_core_autosave.srm").absolutePath
 
         sessionStarted = host.nativeLoadTestCore(corePath, systemDir, saveDir)
         if (!sessionStarted) {
             Log.e(TAG, "nativeLoadTestCore failed: ${host.nativeGetLastError()}")
+        } else {
+            // Restore-on-launch (LIBRETRO_REFACTOR.md section 11.1). A missing file
+            // (first launch) or a size mismatch both return false; either way SRAM
+            // stays at whatever retro_load_game() initialized it to, which is the
+            // correct and safe default.
+            val restored = host.nativeRestoreSaveRam(savePath)
+            Log.d(TAG, "restore-on-launch: restored=$restored path=$savePath")
         }
+
+        this.savePath = savePath
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
@@ -115,7 +126,24 @@ class EmulationActivity : ComponentActivity() {
         finish()
     }
 
+    private fun checkpointIfRunning() {
+        if (!sessionStarted) return
+        val path = savePath ?: return
+        val checkpointed = host.nativeCheckpointSaveRam(path)
+        Log.d(TAG, "checkpoint: success=$checkpointed path=$path")
+    }
+
+    override fun onPause() {
+        // Checkpoint on pause, not just on destroy: LIBRETRO_REFACTOR.md section
+        // 11.1 requires checkpointing "on pause or quit", so a task switch or
+        // screen-off doesn't lose progress if the process is later killed outright
+        // (onDestroy is not guaranteed to run in that case).
+        checkpointIfRunning()
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        checkpointIfRunning()
         if (sessionStarted) {
             host.nativeStopSession()
             sessionStarted = false

@@ -133,3 +133,20 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetLastErr
     return env->NewStringUTF(g_session->lastError().c_str());
 }
 
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeCheckpointSaveRam(
+        JNIEnv* env, jobject /*thiz*/, jstring savePath) {
+    if (g_session == nullptr) return JNI_FALSE;
+    std::string path = jstringToStd(env, savePath);
+    return g_session->checkpointSaveRam(path) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeRestoreSaveRam(
+        JNIEnv* env, jobject /*thiz*/, jstring savePath) {
+    if (g_session == nullptr) return JNI_FALSE;
+    std::string path = jstringToStd(env, savePath);
+    return g_session->restoreSaveRam(path) ? JNI_TRUE : JNI_FALSE;
+}

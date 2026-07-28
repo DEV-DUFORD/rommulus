@@ -20,6 +20,7 @@ add_library(romm_libretro_host SHARED
     libretro_host/core_library.cpp
     libretro_host/environment.cpp
     libretro_host/emulation_session.cpp
+    libretro_host/atomic_file_store.cpp
 )
 
 target_include_directories(romm_libretro_host PRIVATE
