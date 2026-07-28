@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -25,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
+import com.romm.androidtv.emulation.video.EmulationSurface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -97,7 +99,7 @@ class EmulationActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
-                    EmulationDiagnosticsScreen(
+                    EmulationScreen(
                         host = host,
                         sessionStarted = sessionStarted,
                         lastError = host.nativeGetLastError(),
@@ -154,13 +156,13 @@ class EmulationActivity : ComponentActivity() {
 }
 
 @Composable
-private fun EmulationDiagnosticsScreen(
+private fun EmulationScreen(
     host: NativeLibretroHost,
     sessionStarted: Boolean,
     lastError: String,
     onStop: () -> Unit
 ) {
-    var diagnostics by remember { mutableStateOf(longArrayOf(0, 0, 0, 0, -1, 0)) }
+    var diagnostics by remember { mutableStateOf(longArrayOf(0, 0, 0, 0, -1, 0, 0, 0)) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionStarted) {
@@ -171,6 +173,41 @@ private fun EmulationDiagnosticsScreen(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (sessionStarted) {
+            // The video surface is the primary visible content
+            // (LIBRETRO_REFACTOR.md section 8.1); diagnostics render as a
+            // semi-transparent overlay on top of it, not in place of it.
+            EmulationSurface(
+                host = host,
+                coreWidth = diagnostics[2].toInt(),
+                coreHeight = diagnostics[3].toInt(),
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        EmulationDiagnosticsOverlay(
+            sessionStarted = sessionStarted,
+            lastError = lastError,
+            diagnostics = diagnostics,
+            onStop = onStop
+        )
+    }
+
+    LaunchedEffect(diagnostics[5]) {
+        if (sessionStarted && diagnostics[5] != 0L) {
+            scope.launch { onStop() }
+        }
+    }
+}
+
+@Composable
+private fun EmulationDiagnosticsOverlay(
+    sessionStarted: Boolean,
+    lastError: String,
+    diagnostics: LongArray,
+    onStop: () -> Unit
+) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -188,6 +225,8 @@ private fun EmulationDiagnosticsScreen(
             Text("Audio frames produced: ${diagnostics[1]}", color = Color.White)
             Text("Last geometry: ${diagnostics[2]}x${diagnostics[3]}", color = Color.White)
             Text("Pixel format: ${diagnostics[4]}", color = Color.White)
+            Text("Audio underrun frames: ${diagnostics[6]}", color = Color.White)
+            Text("Audio overrun frames: ${diagnostics[7]}", color = Color.White)
             Text(
                 text = if (diagnostics[5] != 0L) "Core requested shutdown" else "Running",
                 color = if (diagnostics[5] != 0L) Color(0xFFff9800) else Color(0xFF4caf50)
@@ -196,12 +235,6 @@ private fun EmulationDiagnosticsScreen(
 
         Button(onClick = onStop) {
             Text("Stop and return")
-        }
-    }
-
-    LaunchedEffect(diagnostics[5]) {
-        if (sessionStarted && diagnostics[5] != 0L) {
-            scope.launch { onStop() }
         }
     }
 }

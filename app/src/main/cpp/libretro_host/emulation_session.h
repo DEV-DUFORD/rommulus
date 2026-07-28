@@ -12,10 +12,13 @@
 //     interval for in-flight callbacks, then releases resources.
 #pragma once
 
+#include "audio_output.h"
 #include "core_library.h"
 #include "environment.h"
 #include "frame_scheduler.h"
+#include "video_output.h"
 
+#include <android/native_window.h>
 #include <atomic>
 #include <string>
 #include <thread>
@@ -40,6 +43,12 @@ struct SessionDiagnostics {
     std::atomic<uint32_t> lastHeight{0};
     std::atomic<int> pixelFormat{-1};
     std::atomic<bool> coreRequestedShutdown{false};
+    // Frames of silence inserted because the ring buffer ran dry (Oboe
+    // callback outpaced the emulation thread) and frames dropped because
+    // the ring buffer was full (emulation thread outpaced Oboe) —
+    // LIBRETRO_REFACTOR.md section 8.2's "track underruns, overruns".
+    std::atomic<uint64_t> audioUnderrunFrames{0};
+    std::atomic<uint64_t> audioOverrunFrames{0};
 };
 
 class EmulationSession {
@@ -95,6 +104,13 @@ public:
     bool unserialize(const void* buffer, size_t size);
     size_t serializeSize();
 
+    // Takes ownership of an ANativeWindow reference already acquired by the
+    // caller (e.g. via ANativeWindow_fromSurface in the JNI bridge). Pass
+    // nullptr to detach. Safe to call from the UI thread at any time; see
+    // VideoOutput's thread-safety contract.
+    void attachVideoWindow(ANativeWindow* window);
+    void detachVideoWindow();
+
 private:
     void runLoop();
 
@@ -118,6 +134,11 @@ private:
     EnvironmentHandler environment_;
     SessionDiagnostics diagnostics_;
     std::string lastError_;
+
+    VideoOutput videoOutput_;
+    AudioOutput audioOutput_;
+    double avFps_ = 60.0;
+    double avSampleRate_ = 44100.0;
 
     std::thread thread_;
     std::atomic<bool> threadShouldRun_{false};

@@ -78,16 +78,25 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
 
     threadShouldRun_ = true;
     state_ = SessionState::kRunning;
+
+    struct retro_system_av_info av {};
+    fns.retro_get_system_av_info(&av);
+    avFps_ = av.timing.fps > 0.0 ? av.timing.fps : 60.0;
+    avSampleRate_ = av.timing.sample_rate > 0.0 ? av.timing.sample_rate : 44100.0;
+
+    if (!audioOutput_.start(avSampleRate_)) {
+        // Audio failing to open is not fatal to the session — video and
+        // input still work, and diagnostics/logs make the failure visible.
+        LOGE("audio output failed to start; continuing without audio");
+    }
+
     thread_ = std::thread(&EmulationSession::runLoop, this);
     LOGI("session started, core=%s", corePath.c_str());
     return true;
 }
 
 void EmulationSession::runLoop() {
-    struct retro_system_av_info av {};
-    core_.functions().retro_get_system_av_info(&av);
-    double fps = av.timing.fps > 0.0 ? av.timing.fps : 60.0;
-    FrameScheduler scheduler(fps);
+    FrameScheduler scheduler(avFps_);
 
     while (threadShouldRun_.load()) {
         core_.functions().retro_run();
@@ -118,6 +127,11 @@ void EmulationSession::stop() {
     if (thread_.joinable()) {
         thread_.join();
     }
+
+    // The producer (emulation thread) is now guaranteed stopped, so it's
+    // safe to close the audio stream (its own stop() blocks until Oboe's
+    // realtime callback thread is done, too).
+    audioOutput_.stop();
 
     // Bounded wait for any callback that might still be finishing on another
     // thread (defensive; join() above already guarantees the emulation
@@ -187,6 +201,14 @@ size_t EmulationSession::serializeSize() {
     return core_.functions().retro_serialize_size();
 }
 
+void EmulationSession::attachVideoWindow(ANativeWindow* window) {
+    videoOutput_.attachWindow(window);
+}
+
+void EmulationSession::detachVideoWindow() {
+    videoOutput_.detachWindow();
+}
+
 // ---------------------------------------------------------------------------
 // Trampolines — the callback gate. Each checks the active session and its
 // state before doing any real work, and tracks in-flight calls so stop() can
@@ -206,8 +228,6 @@ bool EmulationSession::environmentTrampoline(unsigned cmd, void* data) {
 }
 
 void EmulationSession::videoRefreshTrampoline(const void* data, unsigned width, unsigned height, size_t pitch) {
-    (void)data;
-    (void)pitch;
     EmulationSession* self = g_active_session.load();
     if (self == nullptr) return;
     SessionState s = self->state_.load();
@@ -219,15 +239,11 @@ void EmulationSession::videoRefreshTrampoline(const void* data, unsigned width, 
     self->diagnostics_.lastHeight.store(height, std::memory_order_relaxed);
     self->diagnostics_.pixelFormat.store(static_cast<int>(self->environment_.pixelFormat()),
                                           std::memory_order_relaxed);
-    // Phase 2 core-loading milestone: frame delivery to a Surface lands with
-    // the video/audio pipeline commit. This trampoline only tracks
-    // diagnostics for now.
+    self->videoOutput_.submitFrame(data, width, height, pitch, self->environment_.pixelFormat());
     self->inFlightCallbacks_.fetch_sub(1, std::memory_order_relaxed);
 }
 
 void EmulationSession::audioSampleTrampoline(int16_t left, int16_t right) {
-    (void)left;
-    (void)right;
     EmulationSession* self = g_active_session.load();
     if (self == nullptr) return;
     SessionState s = self->state_.load();
@@ -235,11 +251,16 @@ void EmulationSession::audioSampleTrampoline(int16_t left, int16_t right) {
 
     self->inFlightCallbacks_.fetch_add(1, std::memory_order_relaxed);
     self->diagnostics_.audioFramesProduced.fetch_add(1, std::memory_order_relaxed);
+    const int16_t frame[2] = {left, right};
+    self->audioOutput_.pushSamples(frame, 1);
+    self->diagnostics_.audioUnderrunFrames.store(self->audioOutput_.underrunFrames(),
+                                                  std::memory_order_relaxed);
+    self->diagnostics_.audioOverrunFrames.store(self->audioOutput_.overrunFrames(),
+                                                 std::memory_order_relaxed);
     self->inFlightCallbacks_.fetch_sub(1, std::memory_order_relaxed);
 }
 
 size_t EmulationSession::audioSampleBatchTrampoline(const int16_t* data, size_t frames) {
-    (void)data;
     EmulationSession* self = g_active_session.load();
     if (self == nullptr) return 0;
     SessionState s = self->state_.load();
@@ -247,6 +268,11 @@ size_t EmulationSession::audioSampleBatchTrampoline(const int16_t* data, size_t 
 
     self->inFlightCallbacks_.fetch_add(1, std::memory_order_relaxed);
     self->diagnostics_.audioFramesProduced.fetch_add(frames, std::memory_order_relaxed);
+    self->audioOutput_.pushSamples(data, frames);
+    self->diagnostics_.audioUnderrunFrames.store(self->audioOutput_.underrunFrames(),
+                                                  std::memory_order_relaxed);
+    self->diagnostics_.audioOverrunFrames.store(self->audioOutput_.overrunFrames(),
+                                                 std::memory_order_relaxed);
     self->inFlightCallbacks_.fetch_sub(1, std::memory_order_relaxed);
     return frames;
 }

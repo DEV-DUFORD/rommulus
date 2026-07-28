@@ -290,18 +290,38 @@ static void flush_frame(void) {
 // ---------------------------------------------------------------------------
 
 static void render_audio_frame(void) {
-    unsigned samples_per_video_frame = (unsigned)(TEST_CORE_SAMPLE_RATE / TEST_CORE_FPS);
+    /* Bresenham-style fractional pacing: TEST_CORE_SAMPLE_RATE / TEST_CORE_FPS
+     * (367.5 for the default 22050Hz/60fps constants) is not an integer, so
+     * naively truncating it every frame would silently drop half a sample's
+     * worth of audio per frame -- a real, measurable long-run rate deficit
+     * (367*60 = 22020Hz actual vs. the 22050Hz this core declares in
+     * retro_get_system_av_info). Carrying the fractional remainder across
+     * frames keeps the long-run average sample count exactly on target
+     * (alternating 367/368-sample frames), matching the declared rate. */
+    static double samples_emitted_total = 0.0;
+    static unsigned samples_emitted_rounded = 0;
+
+    samples_emitted_total += TEST_CORE_SAMPLE_RATE / TEST_CORE_FPS;
+    unsigned target_total = (unsigned)(samples_emitted_total + 0.5);
+    unsigned samples_this_frame = target_total - samples_emitted_rounded;
+    samples_emitted_rounded = target_total;
+
     static int16_t *audio_scratch;
     static unsigned audio_scratch_capacity;
+    /* Fractional pacing only ever varies the per-frame count by one sample
+     * around the truncated value, so reserve a couple of samples' headroom
+     * once rather than resizing every frame. */
+    const unsigned scratch_capacity_needed =
+        (unsigned)(TEST_CORE_SAMPLE_RATE / TEST_CORE_FPS) + 2;
 
-    if (audio_scratch_capacity < samples_per_video_frame) {
+    if (audio_scratch_capacity < scratch_capacity_needed) {
         free(audio_scratch);
-        audio_scratch = (int16_t *)malloc((size_t)samples_per_video_frame * 2 * sizeof(int16_t));
-        audio_scratch_capacity = samples_per_video_frame;
+        audio_scratch = (int16_t *)malloc((size_t)scratch_capacity_needed * 2 * sizeof(int16_t));
+        audio_scratch_capacity = scratch_capacity_needed;
     }
 
     const double phase_step = 2.0 * M_PI * TEST_CORE_TONE_HZ / TEST_CORE_SAMPLE_RATE;
-    for (unsigned i = 0; i < samples_per_video_frame; i++) {
+    for (unsigned i = 0; i < samples_this_frame; i++) {
         int16_t sample = (int16_t)(sin(g_state.tone_phase) * 8000.0);
         audio_scratch[i * 2 + 0] = sample; /* left */
         audio_scratch[i * 2 + 1] = sample; /* right, in phase (deterministic, easy to verify) */
@@ -310,7 +330,7 @@ static void render_audio_frame(void) {
     }
 
     if (audio_batch_cb) {
-        audio_batch_cb(audio_scratch, samples_per_video_frame);
+        audio_batch_cb(audio_scratch, samples_this_frame);
     }
 }
 

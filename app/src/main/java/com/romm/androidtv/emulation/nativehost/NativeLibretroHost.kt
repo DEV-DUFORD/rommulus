@@ -2,6 +2,7 @@ package com.romm.androidtv.emulation.nativehost
 
 import android.content.Context
 import android.os.Build
+import android.view.Surface
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -38,12 +39,23 @@ class NativeLibretroHost {
     external fun nativeIsRunning(): Boolean
 
     /**
-     * `[frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown]`.
+     * `[frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown,
+     * audioUnderrunFrames, audioOverrunFrames]`.
      * `pixelFormat` is `-1` and all counts are `0` when no session is active.
      */
     external fun nativeGetDiagnostics(): LongArray
 
     external fun nativeGetLastError(): String
+
+    /**
+     * Attaches [surface] as the native video output target
+     * (LIBRETRO_REFACTOR.md section 8.1), or detaches the current one if
+     * [surface] is null. This call is synchronous: passing null blocks
+     * until the native side has released its `ANativeWindow` reference, so
+     * it is safe to call from `SurfaceHolder.Callback.surfaceDestroyed`
+     * without a further teardown race.
+     */
+    external fun nativeSetSurface(surface: Surface?)
 
     /**
      * Atomically writes the currently loaded core's RETRO_MEMORY_SAVE_RAM

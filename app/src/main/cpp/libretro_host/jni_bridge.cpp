@@ -8,6 +8,8 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
 #include <string>
 #include <memory>
 
@@ -100,28 +102,30 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeIsRunning(
     return (g_session != nullptr && g_session->isRunning()) ? JNI_TRUE : JNI_FALSE;
 }
 
-// Returns [frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown]
+// Returns [frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown, audioUnderrunFrames, audioOverrunFrames]
 extern "C"
 JNIEXPORT jlongArray JNICALL
 Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetDiagnostics(
         JNIEnv* env, jobject /*thiz*/) {
-    jlongArray result = env->NewLongArray(6);
+    jlongArray result = env->NewLongArray(8);
     if (g_session == nullptr) {
-        jlong zeros[6] = {0, 0, 0, 0, -1, 0};
-        env->SetLongArrayRegion(result, 0, 6, zeros);
+        jlong zeros[8] = {0, 0, 0, 0, -1, 0, 0, 0};
+        env->SetLongArrayRegion(result, 0, 8, zeros);
         return result;
     }
 
     const romm::SessionDiagnostics& d = g_session->diagnostics();
-    jlong values[6] = {
+    jlong values[8] = {
         static_cast<jlong>(d.frameCount.load()),
         static_cast<jlong>(d.audioFramesProduced.load()),
         static_cast<jlong>(d.lastWidth.load()),
         static_cast<jlong>(d.lastHeight.load()),
         static_cast<jlong>(d.pixelFormat.load()),
         static_cast<jlong>(d.coreRequestedShutdown.load() ? 1 : 0),
+        static_cast<jlong>(d.audioUnderrunFrames.load()),
+        static_cast<jlong>(d.audioOverrunFrames.load()),
     };
-    env->SetLongArrayRegion(result, 0, 6, values);
+    env->SetLongArrayRegion(result, 0, 8, values);
     return result;
 }
 
@@ -149,4 +153,29 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeRestoreSav
     if (g_session == nullptr) return JNI_FALSE;
     std::string path = jstringToStd(env, savePath);
     return g_session->restoreSaveRam(path) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Attaches (surface != null) or detaches (surface == null) the video output
+// window. Called from the UI thread whenever EmulationActivity's Surface
+// becomes available/is destroyed (LIBRETRO_REFACTOR.md section 8.1). This
+// call is synchronous: on detach, the ANativeWindow reference is released
+// before this function returns, matching SurfaceHolder.Callback's
+// "don't touch the Surface after surfaceDestroyed() returns" contract.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeSetSurface(
+        JNIEnv* env, jobject /*thiz*/, jobject surface) {
+    if (g_session == nullptr) return;
+
+    if (surface == nullptr) {
+        g_session->detachVideoWindow();
+        return;
+    }
+
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    if (window == nullptr) {
+        LOGE("nativeSetSurface: ANativeWindow_fromSurface returned null");
+        return;
+    }
+    g_session->attachVideoWindow(window);
 }
