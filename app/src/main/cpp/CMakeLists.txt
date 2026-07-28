@@ -17,6 +17,9 @@ add_compile_options(-Wall -Wextra)
 # ---------------------------------------------------------------------------
 add_library(romm_libretro_host SHARED
     libretro_host/jni_bridge.cpp
+    libretro_host/core_library.cpp
+    libretro_host/environment.cpp
+    libretro_host/emulation_session.cpp
 )
 
 target_include_directories(romm_libretro_host PRIVATE

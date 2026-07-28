@@ -19,6 +19,28 @@ class NativeLibretroHost {
     /** True once the native library has loaded successfully. */
     external fun nativeIsAvailable(): Boolean
 
+    /**
+     * Loads the synthetic test core from [corePath] (an absolute path to
+     * `libtest_core.so`, resolved by the caller — never a raw user-supplied
+     * path) and starts the emulation thread. [systemDir]/[saveDir] are
+     * app-private directories exposed to the core via the environment
+     * callbacks. Returns false on any failure; see [nativeGetLastError].
+     */
+    external fun nativeLoadTestCore(corePath: String, systemDir: String, saveDir: String): Boolean
+
+    /** Stops the emulation thread and unloads the core. Safe to call even if nothing is loaded. */
+    external fun nativeStopSession()
+
+    external fun nativeIsRunning(): Boolean
+
+    /**
+     * `[frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown]`.
+     * `pixelFormat` is `-1` and all counts are `0` when no session is active.
+     */
+    external fun nativeGetDiagnostics(): LongArray
+
+    external fun nativeGetLastError(): String
+
     companion object {
         @Volatile
         private var loaded = false

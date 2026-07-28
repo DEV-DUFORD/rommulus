@@ -1,0 +1,110 @@
+// emulation_session.h — owns one loaded core and its emulation thread.
+//
+// Architectural rules from LIBRETRO_REFACTOR.md section 5 this class exists
+// to enforce:
+//   - Only one core session is active in the emulation process.
+//   - All calls into one Libretro core occur on one emulation thread.
+//   - Native callbacks never hold a JNI local reference across calls (this
+//     class makes no JNI calls at all; see jni_bridge.cpp for the boundary).
+//   - A trampoline/callback-gate protects against a core that keeps calling
+//     back after retro_deinit() (section 7.1): teardown marks the gate
+//     stopping, makes callbacks no-op, calls retro_deinit(), waits a bounded
+//     interval for in-flight callbacks, then releases resources.
+#pragma once
+
+#include "core_library.h"
+#include "environment.h"
+#include "frame_scheduler.h"
+
+#include <atomic>
+#include <string>
+#include <thread>
+
+namespace romm {
+
+enum class SessionState {
+    kUninitialized,
+    kLoaded,
+    kRunning,
+    kStopping,
+    kStopped,
+};
+
+// Diagnostics a caller can poll without touching the emulation thread's
+// internal state directly. All fields are atomic so this is safe to read
+// from the JNI-calling thread while the emulation thread is running.
+struct SessionDiagnostics {
+    std::atomic<uint64_t> frameCount{0};
+    std::atomic<uint64_t> audioFramesProduced{0};
+    std::atomic<uint32_t> lastWidth{0};
+    std::atomic<uint32_t> lastHeight{0};
+    std::atomic<int> pixelFormat{-1};
+    std::atomic<bool> coreRequestedShutdown{false};
+};
+
+class EmulationSession {
+public:
+    EmulationSession();
+    ~EmulationSession();
+
+    EmulationSession(const EmulationSession&) = delete;
+    EmulationSession& operator=(const EmulationSession&) = delete;
+
+    // Attempts to become *the* active session for this process. Returns
+    // false if another EmulationSession instance is already active
+    // (LIBRETRO_REFACTOR.md section 6: "the native host uses an atomic
+    // compare-and-set guard that rejects a second active session").
+    bool acquireProcessSlot();
+    void releaseProcessSlot();
+
+    // Loads corePath, runs retro_init()/retro_load_game(nullptr) (no-content
+    // core only in Phase 2), and starts the emulation thread. Returns false
+    // on any failure; check lastError().
+    bool start(const std::string& corePath, const std::string& systemDir, const std::string& saveDir);
+
+    // Stops the emulation thread (bounded wait for in-flight callbacks),
+    // calls retro_unload_game()/retro_deinit(), and unloads the core.
+    void stop();
+
+    bool isRunning() const { return state_.load() == SessionState::kRunning; }
+    const std::string& lastError() const { return lastError_; }
+    const SessionDiagnostics& diagnostics() const { return diagnostics_; }
+
+    // SRAM access — valid only while a core is loaded. Returns nullptr/0 if
+    // the core exposes no save RAM region.
+    void* memoryData(unsigned id);
+    size_t memorySize(unsigned id);
+
+    bool serialize(void* buffer, size_t size);
+    bool unserialize(const void* buffer, size_t size);
+    size_t serializeSize();
+
+private:
+    void runLoop();
+
+    // Static trampolines: libretro core callbacks carry no context pointer,
+    // and only one session is ever active per process, so these dispatch to
+    // the single active instance guarded by the callback gate below.
+    static bool environmentTrampoline(unsigned cmd, void* data);
+    static void videoRefreshTrampoline(const void* data, unsigned width, unsigned height, size_t pitch);
+    static void audioSampleTrampoline(int16_t left, int16_t right);
+    static size_t audioSampleBatchTrampoline(const int16_t* data, size_t frames);
+    static void inputPollTrampoline();
+    static int16_t inputStateTrampoline(unsigned port, unsigned device, unsigned index, unsigned id);
+
+    // Callback gate: while state_ is kStopping/kStopped, trampolines must be
+    // no-ops. inFlightCallbacks_ lets teardown wait for any callback that was
+    // already in progress when stop() was called.
+    std::atomic<int> inFlightCallbacks_{0};
+    std::atomic<SessionState> state_{SessionState::kUninitialized};
+
+    CoreLibrary core_;
+    EnvironmentHandler environment_;
+    SessionDiagnostics diagnostics_;
+    std::string lastError_;
+
+    std::thread thread_;
+    std::atomic<bool> threadShouldRun_{false};
+};
+
+}  // namespace romm

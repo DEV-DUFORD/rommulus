@@ -1,0 +1,51 @@
+// environment.h — Libretro RETRO_ENVIRONMENT_* callback support.
+//
+// LIBRETRO_REFACTOR.md section 7.2: support and test at least the listed
+// commands. Unknown commands return false and are logged once per command
+// (never silently claimed as supported).
+#pragma once
+
+#include "libretro.h"
+#include <string>
+#include <unordered_set>
+
+namespace romm {
+
+// Handles the subset of RETRO_ENVIRONMENT_* commands a no-content synthetic
+// core needs. Owned by one EmulationSession; not thread-safe by itself
+// (only ever called from the single emulation thread, per the section 5
+// architectural rule that all calls into one core occur on one thread).
+class EnvironmentHandler {
+public:
+    EnvironmentHandler();
+
+    // The actual per-command dispatch. Returns true if this host claims to
+    // support (and correctly handled) the command.
+    bool handle(unsigned cmd, void* data);
+
+    enum retro_pixel_format pixelFormat() const { return pixelFormat_; }
+    bool shutdownRequested() const { return shutdownRequested_; }
+    bool supportsNoGame() const { return supportsNoGame_; }
+
+    const std::string& systemDirectory() const { return systemDirectory_; }
+    const std::string& saveDirectory() const { return saveDirectory_; }
+    const std::string& contentDirectory() const { return contentDirectory_; }
+
+    void setSystemDirectory(const std::string& dir) { systemDirectory_ = dir; }
+    void setSaveDirectory(const std::string& dir) { saveDirectory_ = dir; }
+    void setContentDirectory(const std::string& dir) { contentDirectory_ = dir; }
+
+private:
+    enum retro_pixel_format pixelFormat_ = RETRO_PIXEL_FORMAT_0RGB1555;
+    bool shutdownRequested_ = false;
+    bool supportsNoGame_ = false;
+    std::string systemDirectory_;
+    std::string saveDirectory_;
+    std::string contentDirectory_;
+
+    // Commands we've already logged as unsupported, so a core hammering an
+    // unsupported query every frame doesn't spam the log.
+    std::unordered_set<unsigned> loggedUnsupported_;
+};
+
+}  // namespace romm
