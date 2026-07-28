@@ -1,8 +1,12 @@
 package com.romm.androidtv.emulation.process
 
 import android.content.Intent
+import android.hardware.input.InputManager
 import android.os.Bundle
 import android.util.Log
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +29,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
+import com.romm.androidtv.controller.LibretroInputAdapter
+import com.romm.androidtv.controller.model.ControllerSlot
+import com.romm.androidtv.controller.router.ControllerEventRouter
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
 import com.romm.androidtv.emulation.video.EmulationSurface
 import kotlinx.coroutines.delay
@@ -55,6 +65,32 @@ class EmulationActivity : ComponentActivity() {
     private val host = NativeLibretroHost()
     private var sessionStarted = false
     private var savePath: String? = null
+
+    // This activity runs in its own process (:emulation), so it cannot share
+    // MainActivity's ControllerEventRouter instance — each owns its own,
+    // exactly mirroring MainActivity's own registration/dispatch pattern
+    // (LIBRETRO_REFACTOR.md section 9: "Reuse ControllerEventRouter and
+    // GamepadSnapshot; do not route native play through JavaScript"). This
+    // class only calls the router's existing public API; none of its
+    // internal button/axis/slot logic is modified.
+    private val controllerRouter: ControllerEventRouter by lazy { ControllerEventRouter() }
+
+    // Translates the router's four-slot snapshots into Libretro RetroPad
+    // input and pushes them to the native input_state callback.
+    private val inputAdapter: LibretroInputAdapter by lazy {
+        LibretroInputAdapter(controllerRouter) { ports ->
+            val buttonMasks = IntArray(ControllerSlot.SLOT_COUNT)
+            val analogValues = IntArray(ControllerSlot.SLOT_COUNT * 4)
+            ports.forEachIndexed { port, state ->
+                buttonMasks[port] = state.buttonsMask
+                analogValues[port * 4 + 0] = state.leftX
+                analogValues[port * 4 + 1] = state.leftY
+                analogValues[port * 4 + 2] = state.rightX
+                analogValues[port * 4 + 3] = state.rightY
+            }
+            host.nativeUpdateInputState(buttonMasks, analogValues)
+        }
+    }
 
     companion object {
         private const val TAG = "EmulationActivity"
@@ -92,6 +128,17 @@ class EmulationActivity : ComponentActivity() {
             // correct and safe default.
             val restored = host.nativeRestoreSaveRam(savePath)
             Log.d(TAG, "restore-on-launch: restored=$restored path=$savePath")
+
+            val inputManager = getSystemService(INPUT_SERVICE) as InputManager
+            inputManager.registerInputDeviceListener(controllerRouter, null)
+            controllerRouter.attachLifecycle(this)
+            controllerRouter.enumerateExistingDevices(inputManager)
+            lifecycle.addObserver(LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_START) {
+                    controllerRouter.enumerateExistingDevices(inputManager)
+                }
+            })
+            inputAdapter.start(lifecycleScope)
         }
 
         this.savePath = savePath
@@ -146,12 +193,54 @@ class EmulationActivity : ComponentActivity() {
 
     override fun onDestroy() {
         checkpointIfRunning()
+        inputAdapter.stop()
+        try {
+            val inputManager = getSystemService(INPUT_SERVICE) as InputManager
+            inputManager.unregisterInputDeviceListener(controllerRouter)
+        } catch (_: Exception) {
+            // Mirrors MainActivity's own defensive onDestroy unregistration —
+            // the listener may already be gone if the session never
+            // fully started.
+        }
         if (sessionStarted) {
             host.nativeStopSession()
             sessionStarted = false
         }
         isSessionActive.set(false)
         super.onDestroy()
+    }
+
+    /**
+     * Controller input routing while this activity is foregrounded
+     * (LIBRETRO_REFACTOR.md section 9): Android Back stays reserved for
+     * this activity's own handling (never consumed by the controller
+     * router), and game-controller events are routed to the four-slot
+     * router — which [inputAdapter] then feeds to the native input_state
+     * callback — exactly mirroring MainActivity's own dispatch policy.
+     */
+    @Suppress("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            return super.dispatchKeyEvent(event)
+        }
+        if (sessionStarted) {
+            val consumed = controllerRouter.onKeyEvent(event)
+            if (consumed) return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if ((event.source and InputDevice.SOURCE_JOYSTICK) == 0 &&
+            (event.source and InputDevice.SOURCE_GAMEPAD) == 0
+        ) {
+            return super.dispatchGenericMotionEvent(event)
+        }
+        if (sessionStarted) {
+            val consumed = controllerRouter.onMotionEvent(event)
+            if (consumed) return true
+        }
+        return super.dispatchGenericMotionEvent(event)
     }
 }
 
@@ -162,7 +251,7 @@ private fun EmulationScreen(
     lastError: String,
     onStop: () -> Unit
 ) {
-    var diagnostics by remember { mutableStateOf(longArrayOf(0, 0, 0, 0, -1, 0, 0, 0)) }
+    var diagnostics by remember { mutableStateOf(LongArray(20).also { it[4] = -1 }) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionStarted) {
@@ -227,6 +316,29 @@ private fun EmulationDiagnosticsOverlay(
             Text("Pixel format: ${diagnostics[4]}", color = Color.White)
             Text("Audio underrun frames: ${diagnostics[6]}", color = Color.White)
             Text("Audio overrun frames: ${diagnostics[7]}", color = Color.White)
+            // Live per-port RetroPad button masks and left-stick analog
+            // (LIBRETRO_REFACTOR.md section 9): the synthetic test core
+            // only ever reads port 0, but a physical controller may be
+            // assigned any of the four ports depending on what else the OS
+            // enumerates as a controller-like input source, so all four
+            // are shown to make the controller feed verifiable regardless
+            // of port.
+            Text(
+                text = "Ports (button mask hex): " +
+                    "P0=0x${diagnostics[8].toString(16)} " +
+                    "P1=0x${diagnostics[9].toString(16)} " +
+                    "P2=0x${diagnostics[10].toString(16)} " +
+                    "P3=0x${diagnostics[11].toString(16)}",
+                color = Color.White
+            )
+            Text(
+                text = "Ports (left stick X,Y): " +
+                    "P0=(${diagnostics[12]},${diagnostics[13]}) " +
+                    "P1=(${diagnostics[14]},${diagnostics[15]}) " +
+                    "P2=(${diagnostics[16]},${diagnostics[17]}) " +
+                    "P3=(${diagnostics[18]},${diagnostics[19]})",
+                color = Color.White
+            )
             Text(
                 text = if (diagnostics[5] != 0L) "Core requested shutdown" else "Running",
                 color = if (diagnostics[5] != 0L) Color(0xFFff9800) else Color(0xFF4caf50)

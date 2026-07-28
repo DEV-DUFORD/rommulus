@@ -102,20 +102,22 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeIsRunning(
     return (g_session != nullptr && g_session->isRunning()) ? JNI_TRUE : JNI_FALSE;
 }
 
-// Returns [frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown, audioUnderrunFrames, audioOverrunFrames]
+// Returns [frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown,
+//          audioUnderrunFrames, audioOverrunFrames, port0ButtonMask, port1ButtonMask, port2ButtonMask, port3ButtonMask,
+//          port0LeftX, port0LeftY, port1LeftX, port1LeftY, port2LeftX, port2LeftY, port3LeftX, port3LeftY]
 extern "C"
 JNIEXPORT jlongArray JNICALL
 Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetDiagnostics(
         JNIEnv* env, jobject /*thiz*/) {
-    jlongArray result = env->NewLongArray(8);
+    jlongArray result = env->NewLongArray(20);
     if (g_session == nullptr) {
-        jlong zeros[8] = {0, 0, 0, 0, -1, 0, 0, 0};
-        env->SetLongArrayRegion(result, 0, 8, zeros);
+        jlong zeros[20] = {0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        env->SetLongArrayRegion(result, 0, 20, zeros);
         return result;
     }
 
     const romm::SessionDiagnostics& d = g_session->diagnostics();
-    jlong values[8] = {
+    jlong values[20] = {
         static_cast<jlong>(d.frameCount.load()),
         static_cast<jlong>(d.audioFramesProduced.load()),
         static_cast<jlong>(d.lastWidth.load()),
@@ -124,8 +126,20 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetDiagnos
         static_cast<jlong>(d.coreRequestedShutdown.load() ? 1 : 0),
         static_cast<jlong>(d.audioUnderrunFrames.load()),
         static_cast<jlong>(d.audioOverrunFrames.load()),
+        static_cast<jlong>(g_session->debugInputButtonMask(0)),
+        static_cast<jlong>(g_session->debugInputButtonMask(1)),
+        static_cast<jlong>(g_session->debugInputButtonMask(2)),
+        static_cast<jlong>(g_session->debugInputButtonMask(3)),
+        static_cast<jlong>(g_session->debugInputAnalogLeftX(0)),
+        static_cast<jlong>(g_session->debugInputAnalogLeftY(0)),
+        static_cast<jlong>(g_session->debugInputAnalogLeftX(1)),
+        static_cast<jlong>(g_session->debugInputAnalogLeftY(1)),
+        static_cast<jlong>(g_session->debugInputAnalogLeftX(2)),
+        static_cast<jlong>(g_session->debugInputAnalogLeftY(2)),
+        static_cast<jlong>(g_session->debugInputAnalogLeftX(3)),
+        static_cast<jlong>(g_session->debugInputAnalogLeftY(3)),
     };
-    env->SetLongArrayRegion(result, 0, 8, values);
+    env->SetLongArrayRegion(result, 0, 20, values);
     return result;
 }
 
@@ -178,4 +192,38 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeSetSurface
         return;
     }
     g_session->attachVideoWindow(window);
+}
+
+// Pushes the latest four-port RetroPad input snapshot
+// (LIBRETRO_REFACTOR.md section 9). buttonMasks has length 4 (one packed
+// RETRO_DEVICE_ID_JOYPAD_MASK-shaped bitmask per port); analogValues has
+// length 16 (4 ports * [leftX, leftY, rightX, rightY], already clamped to
+// Libretro's signed 16-bit range by LibretroPadMapper on the Kotlin side).
+// Safe to call from any thread other than the emulation thread itself —
+// see InputState's thread-safety contract in input_state.h.
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeUpdateInputState(
+        JNIEnv* env, jobject /*thiz*/, jintArray buttonMasks, jintArray analogValues) {
+    if (g_session == nullptr) return;
+
+    const jsize maskCount = env->GetArrayLength(buttonMasks);
+    const jsize analogCount = env->GetArrayLength(analogValues);
+    if (maskCount != romm::InputState::kPorts || analogCount != romm::InputState::kPorts * 4) {
+        LOGE("nativeUpdateInputState: unexpected array lengths (masks=%d, analog=%d)",
+             static_cast<int>(maskCount), static_cast<int>(analogCount));
+        return;
+    }
+
+    jint masks[romm::InputState::kPorts];
+    jint analog[romm::InputState::kPorts * 4];
+    env->GetIntArrayRegion(buttonMasks, 0, maskCount, masks);
+    env->GetIntArrayRegion(analogValues, 0, analogCount, analog);
+
+    for (int port = 0; port < romm::InputState::kPorts; ++port) {
+        const jint* a = &analog[port * 4];
+        g_session->updateInputState(port, static_cast<int32_t>(masks[port]),
+                                     static_cast<int16_t>(a[0]), static_cast<int16_t>(a[1]),
+                                     static_cast<int16_t>(a[2]), static_cast<int16_t>(a[3]));
+    }
 }

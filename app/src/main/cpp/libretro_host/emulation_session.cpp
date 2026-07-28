@@ -209,6 +209,28 @@ void EmulationSession::detachVideoWindow() {
     videoOutput_.detachWindow();
 }
 
+void EmulationSession::updateInputState(int port, int32_t buttonsMask, int16_t leftX,
+                                         int16_t leftY, int16_t rightX, int16_t rightY) {
+    inputState_.set(port, buttonsMask, leftX, leftY, rightX, rightY);
+}
+
+int32_t EmulationSession::debugInputButtonMask(int port) const {
+    return static_cast<int32_t>(
+        inputState_.query(static_cast<unsigned>(port), RETRO_DEVICE_JOYPAD, 0,
+                           RETRO_DEVICE_ID_JOYPAD_MASK) &
+        0xFFFF);
+}
+
+int16_t EmulationSession::debugInputAnalogLeftX(int port) const {
+    return inputState_.query(static_cast<unsigned>(port), RETRO_DEVICE_ANALOG,
+                              RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
+}
+
+int16_t EmulationSession::debugInputAnalogLeftY(int port) const {
+    return inputState_.query(static_cast<unsigned>(port), RETRO_DEVICE_ANALOG,
+                              RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
+}
+
 // ---------------------------------------------------------------------------
 // Trampolines — the callback gate. Each checks the active session and its
 // state before doing any real work, and tracks in-flight calls so stop() can
@@ -282,21 +304,18 @@ void EmulationSession::inputPollTrampoline() {
     if (self == nullptr) return;
     SessionState s = self->state_.load();
     if (s == SessionState::kStopping || s == SessionState::kStopped) return;
-    // Real controller feed lands with the controller-feed commit. No-op poll
-    // is a valid, honest implementation until then (inputStateTrampoline
-    // below returns neutral/zero for every query).
+    // No-op: InputState already holds the latest snapshot (updated
+    // independently by updateInputState() from the JNI-calling thread), so
+    // there is nothing to "poll" here — inputStateTrampoline below always
+    // reads the freshest available values directly.
 }
 
 int16_t EmulationSession::inputStateTrampoline(unsigned port, unsigned device, unsigned index, unsigned id) {
-    (void)port;
-    (void)device;
-    (void)index;
-    (void)id;
     EmulationSession* self = g_active_session.load();
     if (self == nullptr) return 0;
     SessionState s = self->state_.load();
     if (s == SessionState::kStopping || s == SessionState::kStopped) return 0;
-    return 0;  // neutral: no buttons pressed, analog centered, until the controller-feed commit
+    return self->inputState_.query(port, device, index, id);
 }
 
 }  // namespace romm

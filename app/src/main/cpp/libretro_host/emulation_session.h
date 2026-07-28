@@ -16,6 +16,7 @@
 #include "core_library.h"
 #include "environment.h"
 #include "frame_scheduler.h"
+#include "input_state.h"
 #include "video_output.h"
 
 #include <android/native_window.h>
@@ -111,6 +112,27 @@ public:
     void attachVideoWindow(ANativeWindow* window);
     void detachVideoWindow();
 
+    // Producer-side entry point for the latest four-port input snapshot
+    // (LIBRETRO_REFACTOR.md section 9). Safe to call from any thread other
+    // than the emulation thread itself; see InputState's thread-safety
+    // contract.
+    void updateInputState(int port, int32_t buttonsMask, int16_t leftX, int16_t leftY,
+                           int16_t rightX, int16_t rightY);
+
+    // Debug/diagnostics-only read of a port's current button mask — lets
+    // the debug UI show live per-port state so a physical controller can be
+    // verified regardless of which of the four ports the OS/router
+    // assigned it to (the synthetic test core itself only ever reads
+    // port 0). Safe to call from any thread.
+    int32_t debugInputButtonMask(int port) const;
+
+    // Debug/diagnostics-only read of a port's left-stick X/Y — same
+    // rationale as debugInputButtonMask, extended to analog so partial
+    // stick/trigger movement is visible even when no digital button
+    // threshold has been crossed. Safe to call from any thread.
+    int16_t debugInputAnalogLeftX(int port) const;
+    int16_t debugInputAnalogLeftY(int port) const;
+
 private:
     void runLoop();
 
@@ -137,6 +159,7 @@ private:
 
     VideoOutput videoOutput_;
     AudioOutput audioOutput_;
+    InputState inputState_;
     double avFps_ = 60.0;
     double avSampleRate_ = 44100.0;
 

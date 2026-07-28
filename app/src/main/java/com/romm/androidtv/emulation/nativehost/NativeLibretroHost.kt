@@ -40,8 +40,14 @@ class NativeLibretroHost {
 
     /**
      * `[frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown,
-     * audioUnderrunFrames, audioOverrunFrames]`.
+     * audioUnderrunFrames, audioOverrunFrames, port0ButtonMask, port1ButtonMask, port2ButtonMask, port3ButtonMask,
+     * port0LeftX, port0LeftY, port1LeftX, port1LeftY, port2LeftX, port2LeftY, port3LeftX, port3LeftY]`.
      * `pixelFormat` is `-1` and all counts are `0` when no session is active.
+     * The per-port button masks and left-stick analog values are
+     * debug/diagnostics-only (LIBRETRO_REFACTOR.md section 9) — they show
+     * live per-port RetroPad state regardless of which port a physical
+     * controller was assigned to, since the synthetic test core itself
+     * only ever reads port 0.
      */
     external fun nativeGetDiagnostics(): LongArray
 
@@ -56,6 +62,19 @@ class NativeLibretroHost {
      * without a further teardown race.
      */
     external fun nativeSetSurface(surface: Surface?)
+
+    /**
+     * Pushes the latest four-port RetroPad input snapshot
+     * (LIBRETRO_REFACTOR.md section 9). [buttonMasks] must have length 4
+     * (one packed `RETRO_DEVICE_ID_JOYPAD_MASK`-shaped bitmask per port,
+     * see [com.romm.androidtv.controller.LibretroPadState]); [analogValues]
+     * must have length 16 (4 ports * [leftX, leftY, rightX, rightY], already
+     * clamped to Libretro's signed 16-bit range). Safe to call from any
+     * thread; the native side only ever writes through lock-free atomics
+     * that the emulation thread's `input_state` callback reads from
+     * independently (see `input_state.h`'s thread-safety contract).
+     */
+    external fun nativeUpdateInputState(buttonMasks: IntArray, analogValues: IntArray)
 
     /**
      * Atomically writes the currently loaded core's RETRO_MEMORY_SAVE_RAM
