@@ -40,6 +40,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
+import com.romm.androidtv.auth.AuthRepository
+import com.romm.androidtv.auth.SessionStore
+import com.romm.androidtv.config.SettingsRepository
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.router.ControllerEventRouter
 import com.romm.androidtv.diagnostic.DiagnosticPageHtml
@@ -114,10 +117,29 @@ class MainActivity : ComponentActivity() {
     // OkHttp client — lazily initialized
     private val okHttpClient by lazy { RommOkHttpClient.build() }
 
-    // Parsed origin for efficient same-origin checks
-    private val rommOrigin: RommOrigin? by lazy {
-        RommOrigin.parse(BuildConfig.ROMM_ORIGIN)
+    // Persisted server profile — falls back to the compiled-in BuildConfig origin
+    // until a settings UI exists to override it (LIBRETRO_REFACTOR.md section 5).
+    private val settingsRepository: SettingsRepository by lazy {
+        SettingsRepository(
+            getSharedPreferences(SettingsRepository.PREFS_NAME, MODE_PRIVATE),
+            defaultOrigin = BuildConfig.ROMM_ORIGIN
+        )
     }
+
+    // Durable session record, independent of the WebView cookie jar.
+    private val sessionStore: SessionStore by lazy {
+        SessionStore(getSharedPreferences(SessionStore.PREFS_NAME, MODE_PRIVATE))
+    }
+
+    // Auth repository — owns login/session-verification/cookie-sync network calls so
+    // MainActivity coordinates navigation rather than owning network internals.
+    private val authRepository: AuthRepository by lazy {
+        AuthRepository(okHttpClient, RommOkHttpClient.cookieSyncJar, sessionStore)
+    }
+
+    /** The currently configured RomM origin: persisted override, or the BuildConfig default. */
+    private val currentOrigin: String
+        get() = settingsRepository.currentProfile().origin
 
     // Controller event router — captures, maps, and produces StateFlow snapshots
     private val controllerRouter: ControllerEventRouter by lazy {
@@ -191,19 +213,17 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "DEBUG auth: credentials provided=${!testUser.isNullOrBlank() && !testPass.isNullOrBlank()}")
             if (!testUser.isNullOrBlank() && !testPass.isNullOrBlank()) {
                 lifecycleScope.launch {
-                    val origin = BuildConfig.ROMM_ORIGIN
+                    val origin = currentOrigin
                     if (origin.isNotBlank()) {
                         Log.d(TAG, "DEBUG auth: executing auth flow")
-                        val result = withContext(Dispatchers.IO) {
-                            executeAuthFlow(okHttpClient, origin, testUser, testPass.toCharArray())
-                        }
+                        val result = authRepository.login(origin, testUser, testPass.toCharArray())
                         Log.d(TAG, "DEBUG auth: completed success=${result is AuthFlowResult.Success}")
                         withContext(Dispatchers.Main) {
                             authResult = result
                             if (result is AuthFlowResult.Success) {
                                 verifiedUser = result.verifiedUser
                                 Log.d(TAG, "DEBUG auth: SUCCESS")
-                                RommOkHttpClient.cookieSyncJar.syncToWebView(origin)
+                                authRepository.syncCookiesToWebView(origin)
                                 currentScreen = Screen.AUTHENTICATED_WEBVIEW
                             } else {
                                 Log.e(TAG, "DEBUG auth: FAILED")
@@ -239,17 +259,15 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
 
-            val origin = BuildConfig.ROMM_ORIGIN
+            val origin = currentOrigin
             Log.d(TAG, "Startup: origin configured=${origin.isNotBlank()}")
             if (origin.isNotBlank()) {
                 // Step 1: Import cookies from Android CookieManager into OkHttp store
-                RommOkHttpClient.cookieSyncJar.importFromWebView(origin)
+                authRepository.importCookiesFromWebView(origin)
 
                 // Step 2: Check existing session using imported cookies
                 Log.d(TAG, "Startup: verifying existing session")
-                val result = withContext(Dispatchers.IO) {
-                    verifyExistingSession(okHttpClient, origin)
-                }
+                val result = authRepository.verifySession(origin)
                 Log.d(TAG, "Startup: verify success=${result is AuthFlowResult.Success}")
 
                 when (result) {
@@ -258,7 +276,7 @@ class MainActivity : ComponentActivity() {
                         authResult = result
                         // Step 3: Sync OkHttp cookies back to Android CookieManager for WebView
                         Log.d(TAG, "Startup: session valid, syncing cookies")
-                        RommOkHttpClient.cookieSyncJar.syncToWebView(origin)
+                        authRepository.syncCookiesToWebView(origin)
                         currentScreen = Screen.AUTHENTICATED_WEBVIEW
                     }
                     is AuthFlowResult.Failure -> {
@@ -294,7 +312,7 @@ class MainActivity : ComponentActivity() {
                             },
                             onOpenRomMOrigin = {
                                 currentScreen = Screen.ROMM_ORIGIN
-                                val origin = BuildConfig.ROMM_ORIGIN.takeIf { it.isNotBlank() }
+                                val origin = currentOrigin.takeIf { it.isNotBlank() }
                                     ?: "(not configured)"
                                 openRomMOrigin(origin)
                             },
@@ -314,6 +332,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         Screen.AUTHENTICATED_WEBVIEW -> AuthenticatedWebViewScreen(
+                            origin = currentOrigin,
                             controllerRouter = controllerRouter,
                             gamepadBridge = gamepadBridge,
                             gamepadDiagnostics = gamepadDiagnostics,
@@ -340,21 +359,17 @@ class MainActivity : ComponentActivity() {
     // ---- Heartbeat check (lifecycle-aware coroutine) ----
 
     private fun runHeartbeatCheck() {
-        val origin = BuildConfig.ROMM_ORIGIN
+        val origin = currentOrigin
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                executeHeartbeat(okHttpClient, origin)
-            }
-            withContext(Dispatchers.Main) {
-                when (result) {
-                    is HeartbeatCallResult.Success -> {
-                        heartbeatResponse = result.response
-                        heartbeatError = null
-                    }
-                    is HeartbeatCallResult.Failure -> {
-                        heartbeatResponse = null
-                        heartbeatError = result.error
-                    }
+            val result = authRepository.checkHeartbeat(origin)
+            when (result) {
+                is HeartbeatCallResult.Success -> {
+                    heartbeatResponse = result.response
+                    heartbeatError = null
+                }
+                is HeartbeatCallResult.Failure -> {
+                    heartbeatResponse = null
+                    heartbeatError = result.error
                 }
             }
         }
@@ -363,7 +378,7 @@ class MainActivity : ComponentActivity() {
     // ---- Auth flow (lifecycle-aware coroutine, single-flight guarded) ----
 
     private fun runAuthFlow(username: String, password: CharArray, onAuthComplete: () -> Unit = {}) {
-        val origin = BuildConfig.ROMM_ORIGIN
+        val origin = currentOrigin
         lifecycleScope.launch {
             var isActive = true
             try {
@@ -375,28 +390,22 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
 
-                val result = withContext(Dispatchers.IO) {
-                    executeAuthFlow(okHttpClient, origin, username, password)
-                }
-                withContext(Dispatchers.Main) {
-                    if (isActive) {
-                        authResult = result
-                        onAuthComplete()
-                        if (result is AuthFlowResult.Success) {
-                            verifiedUser = result.verifiedUser
-                            // Suspend-boundary: sync cookies to Android CookieManager for WebView
-                            RommOkHttpClient.cookieSyncJar.syncToWebView(origin)
-                            currentScreen = Screen.AUTHENTICATED_WEBVIEW
-                        }
+                val result = authRepository.login(origin, username, password)
+                if (isActive) {
+                    authResult = result
+                    onAuthComplete()
+                    if (result is AuthFlowResult.Success) {
+                        verifiedUser = result.verifiedUser
+                        // Suspend-boundary: sync cookies to Android CookieManager for WebView
+                        authRepository.syncCookiesToWebView(origin)
+                        currentScreen = Screen.AUTHENTICATED_WEBVIEW
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Auth flow exception", e)
-                withContext(Dispatchers.Main) {
-                    if (isActive) {
-                        authResult = AuthFlowResult.Failure(AuthError.NETWORK_ERROR)
-                        onAuthComplete()
-                    }
+                if (isActive) {
+                    authResult = AuthFlowResult.Failure(AuthError.NETWORK_ERROR)
+                    onAuthComplete()
                 }
             } finally {
                 isActive = false
@@ -925,12 +934,12 @@ fun LoginScreen(
  */
 @Composable
 fun AuthenticatedWebViewScreen(
+    origin: String,
     controllerRouter: ControllerEventRouter,
     gamepadBridge: GamepadInjectionBridge,
     gamepadDiagnostics: GamepadInjectionDiagnostics,
     onLogin: () -> Unit
 ) {
-    val origin = BuildConfig.ROMM_ORIGIN
     val slots by controllerRouter.slotsFlow.collectAsState()
     val bridgeDiagnostics by gamepadDiagnostics.state.collectAsState()
 
