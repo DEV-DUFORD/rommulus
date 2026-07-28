@@ -100,7 +100,8 @@ object CoreManifest {
             upstreamRepository = "https://github.com/LIJI32/SameBoy",
             commitSha = "",
             licenseSummary = "MIT at the upstream revision reviewed in LIBRETRO_REFACTOR.md; " +
-                "full source-tree review still required before shipping.",
+                "full source-tree review still required before shipping. Fully compatible " +
+                "with a GPLv3 application (see docs/PHASE0_DECISIONS.md).",
             commercialUseFinding = CommercialUseFinding.UNREVIEWED,
             supportedSystems = listOf("gb", "gbc"),
             supportedExtensions = listOf(".gb", ".gbc"),
@@ -111,7 +112,10 @@ object CoreManifest {
             coreId = "genesis_plus_gx",
             upstreamRepository = "https://github.com/libretro/Genesis-Plus-GX",
             commitSha = "",
-            licenseSummary = "Reviewed redistribution terms include a no-sale restriction.",
+            licenseSummary = "Reviewed redistribution terms include a no-sale restriction. If the " +
+                "core code itself is GPL, that part is compatible with a GPLv3 app; the no-sale " +
+                "term is an additional restriction GPLv3 section 10 does not permit combining " +
+                "into one covered work without further review (see docs/PHASE0_DECISIONS.md).",
             commercialUseFinding = CommercialUseFinding.NON_COMMERCIAL_RESTRICTED,
             supportedSystems = listOf("genesis", "megadrive", "sms", "gamegear"),
             supportedExtensions = listOf(".md", ".gen", ".bin", ".sms", ".gg"),
@@ -122,7 +126,9 @@ object CoreManifest {
             coreId = "picodrive",
             upstreamRepository = "https://github.com/libretro/picodrive",
             commitSha = "",
-            licenseSummary = "Restrictive/non-commercial terms found in reviewed source.",
+            licenseSummary = "Restrictive/non-commercial terms found in reviewed source. An " +
+                "additional restriction under GPLv3 section 10; see docs/PHASE0_DECISIONS.md " +
+                "for the compatibility risk before combining with a GPLv3 application.",
             commercialUseFinding = CommercialUseFinding.NON_COMMERCIAL_RESTRICTED,
             supportedSystems = listOf("genesis", "megadrive", "32x", "segacd"),
             supportedExtensions = listOf(".md", ".gen", ".bin"),
@@ -133,7 +139,9 @@ object CoreManifest {
             coreId = "snes9x",
             upstreamRepository = "https://github.com/libretro/snes9x",
             commitSha = "",
-            licenseSummary = "Custom non-commercial license.",
+            licenseSummary = "Custom non-commercial license. An additional restriction under " +
+                "GPLv3 section 10; see docs/PHASE0_DECISIONS.md for the compatibility risk " +
+                "before combining with a GPLv3 application.",
             commercialUseFinding = CommercialUseFinding.NON_COMMERCIAL_RESTRICTED,
             supportedSystems = listOf("snes", "sfc"),
             supportedExtensions = listOf(".sfc", ".smc"),
@@ -144,7 +152,8 @@ object CoreManifest {
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",
             commitSha = "",
-            licenseSummary = "GPL and component-specific licensing; requires component-by-component review.",
+            licenseSummary = "GPL and component-specific licensing; requires component-by-component " +
+                "review. GPL components are naturally compatible with a GPLv3 application.",
             commercialUseFinding = CommercialUseFinding.UNREVIEWED,
             supportedSystems = listOf("n64"),
             supportedExtensions = listOf(".n64", ".z64", ".v64"),
