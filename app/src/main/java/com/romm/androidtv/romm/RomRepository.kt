@@ -158,10 +158,10 @@ class RomRepositoryImpl(
         val cached = contentCache.findValidEntry(cacheKey)
         if (cached != null) {
             return@withContext when (
-                val resolution = resolveLaunchContentPath(File(cached.absolutePath), file.fileName, cached.contentHash)
+                val resolution = resolveLaunchContentPath(File(cached.absolutePath), file.fileName, cached.contentHash, file.sha1Hash)
             ) {
                 is ContentPathResolution.Success ->
-                    StagingOutcome.Success(buildLaunchSpec(romId, cached.contentHash, resolution.path, coreId))
+                    StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId))
                 is ContentPathResolution.Failure -> resolution.outcome
             }
         }
@@ -172,8 +172,12 @@ class RomRepositoryImpl(
             return@withContext StagingOutcome.InsufficientSpace(expectedSizeBytes, available)
         }
 
+        // RomM's declared sha1_hash describes the actual ROM content, not a compressed container —
+        // for a zip/7z single file, that hash applies to the *extracted* bytes (verified after
+        // extraction below), never to the archive's own compressed bytes on the wire.
+        val isArchive = declaredExtension in EXTRACTABLE_ARCHIVE_EXTENSIONS
         val url = RommApi.romContentUrl(origin, romId, rom.fsName, fileIds = listOf(file.fileId))
-        val expectedDigests = if (file.sha1Hash.isNotBlank()) {
+        val expectedDigests = if (!isArchive && file.sha1Hash.isNotBlank()) {
             mapOf(AtomicFileStore.SHA1 to file.sha1Hash)
         } else {
             emptyMap()
@@ -201,9 +205,9 @@ class RomRepositoryImpl(
                     contentHash = contentHash,
                     file = outcome.file,
                 )
-                when (val resolution = resolveLaunchContentPath(outcome.file, file.fileName, contentHash)) {
+                when (val resolution = resolveLaunchContentPath(outcome.file, file.fileName, contentHash, file.sha1Hash)) {
                     is ContentPathResolution.Success ->
-                        StagingOutcome.Success(buildLaunchSpec(romId, contentHash, resolution.path, coreId))
+                        StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId))
                     is ContentPathResolution.Failure -> resolution.outcome
                 }
             }
@@ -222,68 +226,93 @@ class RomRepositoryImpl(
     }
 
     /**
-     * Resolves the path a native core should actually be launched with:
-     * [archiveFile] itself if [displayFileName] doesn't look like a
-     * supported archive, or the path to a memoized, extracted raw-ROM file
-     * otherwise. [archiveFile]'s own identity/hash still tracks the *archive*
-     * for cache/eviction purposes (matching RomM's declared metadata); the
-     * extracted bytes get no independent cache-database identity of their
-     * own — they are memoized on disk only, keyed by [contentHash], and are
-     * safe to delete/regenerate any time the archive itself is still cached.
+     * Resolves the path and identity hash a native core should actually be
+     * launched with: [archiveFile] itself (with [archiveContentHash] as its
+     * identity) if [displayFileName] doesn't look like a supported archive,
+     * or the path and content hash of a memoized, extracted raw-ROM file
+     * otherwise. [archiveFile]'s own hash still governs cache/eviction for
+     * the *downloaded* bytes (matching RomM's declared file size), but the
+     * identity handed to [LaunchSpec]/[com.romm.androidtv.emulation.model.SavePathPolicy]
+     * for an archived ROM is always the hash of its *extracted* content —
+     * that's what a core actually loads and what RomM's own `sha1_hash`
+     * describes (RomM hashes the ROM itself, never the container it happens
+     * to be shipped in), and it's what keeps save data addressed by the same
+     * key regardless of which archive format a given copy was packaged as.
      */
     private fun resolveLaunchContentPath(
         archiveFile: File,
         displayFileName: String,
-        contentHash: String,
+        archiveContentHash: String,
+        declaredSha1: String,
     ): ContentPathResolution {
         // Detect by extension only — section 10: "never trust just the declared content-type".
         return when (val extension = displayFileName.substringAfterLast('.', "").lowercase()) {
-            "zip" -> extractForLaunch(archiveFile, contentHash) { file, dir -> ZipArchiveExtractor.extractSingleEntry(file, dir) }
-            "7z" -> extractForLaunch(archiveFile, contentHash) { file, dir -> SevenZArchiveExtractor.extractSingleEntry(file, dir) }
+            "zip" -> extractForLaunch(archiveFile, archiveContentHash, declaredSha1) { file, dir -> ZipArchiveExtractor.extractSingleEntry(file, dir) }
+            "7z" -> extractForLaunch(archiveFile, archiveContentHash, declaredSha1) { file, dir -> SevenZArchiveExtractor.extractSingleEntry(file, dir) }
             "rar", "gz", "tar", "tar.gz", "7zip" -> ContentPathResolution.Failure(StagingOutcome.UnsupportedArchiveFormat(extension))
-            else -> ContentPathResolution.Success(archiveFile.absolutePath)
+            else -> ContentPathResolution.Success(archiveFile.absolutePath, archiveContentHash)
         }
     }
 
     /**
-     * Runs [extractor] against [archiveFile], memoizing its output under a
-     * `extracted/<contentHash>/` directory so a repeat launch of the same
-     * verified archive never re-extracts. Extraction always happens into a
-     * fresh temp directory first and is atomically renamed into place only
-     * once fully written, so a process death mid-extraction can never leave
-     * a partially-extracted file where a later launch would find it.
+     * Runs [extractor] against [archiveFile], memoizing its output (and the
+     * extracted content's own SHA-256, used as the launch identity hash)
+     * under an `extracted/<archiveContentHash>/` directory so a repeat
+     * launch of the same downloaded archive never re-extracts or re-hashes.
+     * Extraction always happens into a fresh temp directory first and is
+     * atomically renamed into place only once fully written and hash-
+     * verified, so a process death mid-extraction can never leave a
+     * partially-extracted or unverified file where a later launch would
+     * find it.
      */
     private fun extractForLaunch(
         archiveFile: File,
-        contentHash: String,
+        archiveContentHash: String,
+        declaredSha1: String,
         extractor: (archiveFile: File, destinationDir: File) -> ArchiveExtractionOutcome,
     ): ContentPathResolution {
         val extractionRoot = File(contentCache.contentDir(CacheEntryKind.ROM), "extracted")
-        val finalDir = File(extractionRoot, contentHash)
+        val finalDir = File(extractionRoot, archiveContentHash)
         val marker = File(finalDir, EXTRACTION_COMPLETE_MARKER)
+        val hashSidecar = File(finalDir, EXTRACTED_HASH_SIDECAR)
         if (marker.isFile) {
-            val existing = finalDir.listFiles { candidate -> candidate.name != EXTRACTION_COMPLETE_MARKER }?.singleOrNull()
-            if (existing != null && existing.isFile) {
-                return ContentPathResolution.Success(existing.absolutePath)
+            val existing = finalDir.listFiles { candidate ->
+                candidate.name != EXTRACTION_COMPLETE_MARKER && candidate.name != EXTRACTED_HASH_SIDECAR
+            }?.singleOrNull()
+            val recordedHash = hashSidecar.takeIf { it.isFile }?.readText()?.trim()
+            if (existing != null && existing.isFile && !recordedHash.isNullOrBlank()) {
+                return ContentPathResolution.Success(existing.absolutePath, recordedHash)
             }
-            // Marker present but the extracted content is missing/altered — never trust it; re-extract.
+            // Marker present but the extracted content/its recorded hash is missing/altered —
+            // never trust it; re-extract.
             finalDir.deleteRecursively()
         }
 
-        val tempDir = File(extractionRoot, ".tmp-$contentHash-${UUID.randomUUID()}")
+        val tempDir = File(extractionRoot, ".tmp-$archiveContentHash-${UUID.randomUUID()}")
         tempDir.mkdirs()
 
         return when (val outcome = extractor(archiveFile, tempDir)) {
             is ArchiveExtractionOutcome.Success -> {
+                val extractedSha1 = sha1Hex(outcome.file)
+                if (declaredSha1.isNotBlank() && !declaredSha1.equals(extractedSha1, ignoreCase = true)) {
+                    tempDir.deleteRecursively()
+                    return ContentPathResolution.Failure(
+                        StagingOutcome.CorruptedDownload(
+                            "extracted content SHA-1 mismatch: expected $declaredSha1, got $extractedSha1"
+                        )
+                    )
+                }
+                val extractedSha256 = sha256Hex(outcome.file)
+                File(tempDir, EXTRACTED_HASH_SIDECAR).writeText(extractedSha256)
                 File(tempDir, EXTRACTION_COMPLETE_MARKER).writeText("")
                 extractionRoot.mkdirs()
                 if (tempDir.renameTo(finalDir)) {
-                    ContentPathResolution.Success(File(finalDir, outcome.file.name).absolutePath)
+                    ContentPathResolution.Success(File(finalDir, outcome.file.name).absolutePath, extractedSha256)
                 } else {
                     // Rare cross-filesystem/concurrent-launch race — the bytes already written into
                     // tempDir are still valid and safely readable; use them directly rather than
                     // failing an extraction that actually succeeded.
-                    ContentPathResolution.Success(outcome.file.absolutePath)
+                    ContentPathResolution.Success(outcome.file.absolutePath, extractedSha256)
                 }
             }
             is ArchiveExtractionOutcome.MultipleEntries -> {
@@ -297,8 +326,25 @@ class RomRepositoryImpl(
         }
     }
 
+    private fun sha1Hex(file: File): String = hashHex(file, "SHA-1")
+
+    private fun sha256Hex(file: File): String = hashHex(file, "SHA-256")
+
+    private fun hashHex(file: File, algorithm: String): String {
+        val digest = java.security.MessageDigest.getInstance(algorithm)
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     private sealed interface ContentPathResolution {
-        data class Success(val path: String) : ContentPathResolution
+        data class Success(val path: String, val romHash: String) : ContentPathResolution
         data class Failure(val outcome: StagingOutcome) : ContentPathResolution
     }
 
@@ -330,6 +376,12 @@ class RomRepositoryImpl(
     private companion object {
         /** Empty sentinel file marking a fully, successfully extracted archive directory. */
         const val EXTRACTION_COMPLETE_MARKER = ".complete"
+
+        /** Sidecar file recording the extracted content's own SHA-256, memoized alongside it. */
+        const val EXTRACTED_HASH_SIDECAR = ".content-sha256"
+
+        /** Archive formats this pipeline knows how to extract raw ROM bytes from. */
+        val EXTRACTABLE_ARCHIVE_EXTENSIONS = setOf("zip", "7z")
 
         /** Archive formats detected by extension that this pipeline doesn't (yet) extract. */
         val UNSUPPORTED_ARCHIVE_EXTENSIONS = setOf("rar", "gz", "tar", "7zip")

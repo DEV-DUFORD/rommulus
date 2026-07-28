@@ -254,9 +254,10 @@ class RomRepositoryImplTest {
         """.trimIndent()
 
         @Test
-        fun `a zip-named single file is downloaded, hash-verified as the archive, then extracted to raw rom bytes`() {
-            val zip = zipBytes("game.gb" to "GBROM-BYTES".toByteArray())
-            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), sha1Hex(zip))))
+        fun `a zip-named single file is downloaded, then its extracted content is verified against RomM's declared sha1`() {
+            val entryBytes = "GBROM-BYTES".toByteArray()
+            val zip = zipBytes("game.gb" to entryBytes)
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), sha1Hex(entryBytes))))
             server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(zip)))
 
             val outcome = runBlocking { repo().stageForLaunch(60) }
@@ -265,15 +266,30 @@ class RomRepositoryImplTest {
             val spec = (outcome as StagingOutcome.Success).launchSpec
             val contentFile = File(spec.contentPath!!)
             assertThat(contentFile.name).isEqualTo("rom.gb")
-            assertThat(contentFile.readBytes()).isEqualTo("GBROM-BYTES".toByteArray())
-            // The archive itself, not the extracted bytes, is what RomM's declared hash verified.
-            assertThat(spec.romHash).isEqualTo(sha256Hex(zip))
+            assertThat(contentFile.readBytes()).isEqualTo(entryBytes)
+            // RomM's declared sha1_hash describes the ROM itself, not the archive it's shipped in —
+            // the launch identity hash must be the extracted content's own SHA-256, not the archive's.
+            assertThat(spec.romHash).isEqualTo(sha256Hex(entryBytes))
         }
 
         @Test
-        fun `a 7z-named single file is downloaded, hash-verified as the archive, then extracted to raw rom bytes`() {
-            val sevenZ = sevenZBytes("game.gbc" to "GBCROM-BYTES".toByteArray())
-            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.7z", sevenZ.size.toLong(), sha1Hex(sevenZ))))
+        fun `a zip whose extracted content's sha1 does not match RomM's declared hash is rejected as CorruptedDownload`() {
+            val entryBytes = "GBROM-BYTES".toByteArray()
+            val zip = zipBytes("game.gb" to entryBytes)
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), "0000wrong0000")))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(zip)))
+
+            val outcome = runBlocking { repo().stageForLaunch(60) }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.CorruptedDownload::class.java)
+            assertThat((outcome as StagingOutcome.CorruptedDownload).reason).contains("extracted content SHA-1 mismatch")
+        }
+
+        @Test
+        fun `a 7z-named single file is downloaded, then its extracted content is verified against RomM's declared sha1`() {
+            val entryBytes = "GBCROM-BYTES".toByteArray()
+            val sevenZ = sevenZBytes("game.gbc" to entryBytes)
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.7z", sevenZ.size.toLong(), sha1Hex(entryBytes))))
             server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(sevenZ)))
 
             val outcome = runBlocking { repo().stageForLaunch(60) }
@@ -282,26 +298,30 @@ class RomRepositoryImplTest {
             val spec = (outcome as StagingOutcome.Success).launchSpec
             val contentFile = File(spec.contentPath!!)
             assertThat(contentFile.name).isEqualTo("rom.gbc")
-            assertThat(contentFile.readBytes()).isEqualTo("GBCROM-BYTES".toByteArray())
+            assertThat(contentFile.readBytes()).isEqualTo(entryBytes)
+            assertThat(spec.romHash).isEqualTo(sha256Hex(entryBytes))
         }
 
         @Test
         fun `a repeated launch of the same zip reuses the memoized extraction rather than re-extracting`() {
             val cache = newCache()
-            val zip = zipBytes("game.gb" to "GBROM-BYTES".toByteArray())
-            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), sha1Hex(zip))))
+            val entryBytes = "GBROM-BYTES".toByteArray()
+            val zip = zipBytes("game.gb" to entryBytes)
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), sha1Hex(entryBytes))))
             server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(zip)))
             val first = runBlocking { repo(cache).stageForLaunch(60) }
             assertThat(first).isInstanceOf(StagingOutcome.Success::class.java)
 
             // Second launch: only the metadata call is enqueued — the archive download is cache-hit,
             // and extraction must be memoized rather than re-run against a (now-absent) content download.
-            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), sha1Hex(zip))))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), sha1Hex(entryBytes))))
             val second = runBlocking { repo(cache).stageForLaunch(60) }
 
             assertThat(second).isInstanceOf(StagingOutcome.Success::class.java)
-            assertThat((second as StagingOutcome.Success).launchSpec.contentPath)
-                .isEqualTo((first as StagingOutcome.Success).launchSpec.contentPath)
+            val firstSpec = (first as StagingOutcome.Success).launchSpec
+            val secondSpec = (second as StagingOutcome.Success).launchSpec
+            assertThat(secondSpec.contentPath).isEqualTo(firstSpec.contentPath)
+            assertThat(secondSpec.romHash).isEqualTo(firstSpec.romHash)
             assertThat(server.requestCount).isEqualTo(3) // 2 metadata fetches + exactly 1 archive download
         }
 
@@ -320,7 +340,7 @@ class RomRepositoryImplTest {
         @Test
         fun `a multi-entry zip surfaces UnsupportedMultiFile instead of an ambiguous extraction`() {
             val zip = zipBytes("a.gb" to "a".toByteArray(), "b.gb" to "b".toByteArray())
-            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), sha1Hex(zip))))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), "")))
             server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(zip)))
 
             val outcome = runBlocking { repo().stageForLaunch(60) }
@@ -332,7 +352,7 @@ class RomRepositoryImplTest {
         @Test
         fun `a corrupted (non-zip) file named zip surfaces ArchiveExtractionFailed, not a crash`() {
             val notAZip = "this is not a zip".toByteArray()
-            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", notAZip.size.toLong(), sha1Hex(notAZip))))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", notAZip.size.toLong(), "")))
             server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(notAZip)))
 
             val outcome = runBlocking { repo().stageForLaunch(60) }
