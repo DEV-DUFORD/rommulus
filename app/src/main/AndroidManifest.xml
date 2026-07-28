@@ -35,5 +35,22 @@
             </intent-filter>
         </activity>
 
+        <!--
+          Runs native Libretro emulation in its own process, isolated from the
+          WebView-hosting main process (LIBRETRO_REFACTOR.md section 6). Not
+          exported: reachable only from within this app, currently only via a
+          debug-only diagnostics entry point in MainActivity. singleTask
+          ensures a repeated launch intent routes to the existing instance
+          rather than creating a second one; onNewIntent() in EmulationActivity
+          rejects it as "player busy" instead of replacing a live session.
+        -->
+        <activity
+            android:name=".emulation.process.EmulationActivity"
+            android:process=":emulation"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:hardwareAccelerated="true"
+            android:screenOrientation="sensorLandscape" />
+
     </application>
 </manifest>

@@ -7,7 +7,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 
 /**
  * Verifies the NDK/CMake toolchain actually produces a working native library
@@ -42,7 +41,7 @@ class NativeLibretroHostInstrumentedTest {
         assertTrue(NativeLibretroHost.ensureLoaded())
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val corePath = resolveTestCorePath(context)
+        val corePath = NativeLibretroHost.resolveBundledTestCorePath(context)
         val systemDir = context.filesDir.resolve("system").apply { mkdirs() }.absolutePath
         val saveDir = context.filesDir.resolve("save").apply { mkdirs() }.absolutePath
 
@@ -67,33 +66,5 @@ class NativeLibretroHostInstrumentedTest {
 
         host.nativeStopSession()
         assertTrue(!host.nativeIsRunning())
-    }
-
-    /**
-     * The synthetic core .so is packaged as a normal JNI library, but this
-     * device runs native libraries directly from the APK ("run-from-apk"
-     * mode) rather than extracting them to a real file, so
-     * `applicationInfo.nativeLibraryDir` doesn't contain an actual file to
-     * `dlopen()`. Extract the current ABI's copy to an app-private file once,
-     * mirroring the real production path where a downloaded/installed core
-     * must exist as a real file before the native host can `dlopen()` it
-     * (LIBRETRO_REFACTOR.md section 7.1: "Package cores with the APK; do not
-     * fetch executable code" — this is the loading mechanics, not a download).
-     */
-    private fun resolveTestCorePath(context: android.content.Context): String {
-        val destination = File(context.filesDir, "native_test/libtest_core.so")
-        if (destination.exists()) return destination.absolutePath
-        destination.parentFile?.mkdirs()
-
-        val abi = android.os.Build.SUPPORTED_ABIS.first()
-        val entryName = "lib/$abi/libtest_core.so"
-        java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { zip ->
-            val entry = zip.getEntry(entryName)
-                ?: error("$entryName not found in APK (${context.applicationInfo.sourceDir})")
-            zip.getInputStream(entry).use { input ->
-                destination.outputStream().use { output -> input.copyTo(output) }
-            }
-        }
-        return destination.absolutePath
     }
 }

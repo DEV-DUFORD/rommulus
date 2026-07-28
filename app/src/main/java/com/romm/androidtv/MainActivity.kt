@@ -3,6 +3,7 @@ package com.romm.androidtv
 import android.hardware.input.InputManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import android.content.Intent
 import android.os.Bundle
 import java.util.Locale
 import android.util.Log
@@ -21,6 +22,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -196,7 +200,11 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when (currentScreen) {
-                    Screen.HOME -> onBackPressedDispatcher.onBackPressed()
+                    // finish() exits the activity directly. Calling
+                    // onBackPressedDispatcher.onBackPressed() here would re-invoke this
+                    // very callback (it's still enabled), causing infinite recursion and
+                    // a StackOverflowError crash.
+                    Screen.HOME -> finish()
                     else -> currentScreen = Screen.HOME
                 }
             }
@@ -518,9 +526,11 @@ fun HomeScreen(
     onOpenRomMOrigin: () -> Unit,
     onOpenControllerDiagnostics: () -> Unit = {}
 ) {
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(scrollState)
             .focusable(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -625,6 +635,29 @@ fun HomeScreen(
                 style = MaterialTheme.typography.titleMedium,
                 color = Color(0xFF4caf50)
             )
+        }
+
+        // Native emulation (Phase 2) debug entry point only. Never shown in a
+        // release build; PlaybackBackend still always resolves to WEBVIEW for
+        // real ROM launches (LIBRETRO_REFACTOR.md sections 4.3 and 6).
+        if (BuildConfig.DEBUG) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            val context = LocalContext.current
+            OutlinedButton(
+                onClick = {
+                    context.startActivity(
+                        Intent(context, com.romm.androidtv.emulation.process.EmulationActivity::class.java)
+                    )
+                },
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "Native Emulation (Debug)",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color(0xFFff9800)
+                )
+            }
         }
     }
 }
