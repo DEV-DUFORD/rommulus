@@ -63,3 +63,9 @@ data class RomDetail(
     val lastPlayedIso: String?,
     val nowPlaying: Boolean,
 )
+
+/** One page of a paginated `GET /api/roms` query, e.g. for a platform/collection detail grid. */
+data class RomPage(
+    val roms: List<LibraryRom>,
+    val total: Int,
+)

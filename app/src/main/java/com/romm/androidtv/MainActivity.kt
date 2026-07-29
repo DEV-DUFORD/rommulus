@@ -105,10 +105,20 @@ class MainActivity : ComponentActivity() {
 
     private enum class Screen {
         HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS,
-        NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH
+        NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
+        NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL
     }
 
     private var currentScreen by mutableStateOf(Screen.HOME)
+
+    // Selection state for the Phase 2 detail screens (UI_REFACTOR.md section 7). `gameDetailParent`
+    // remembers which screen opened the game detail screen, so Back returns to the grid/shelf that
+    // was actually showing (Home, a platform detail grid, or a collection detail grid) rather than
+    // always Home.
+    private var selectedPlatformId by mutableStateOf<Long?>(null)
+    private var selectedCollectionId by mutableStateOf<Long?>(null)
+    private var selectedRomId by mutableStateOf<Long?>(null)
+    private var gameDetailParent by mutableStateOf(Screen.NATIVE_HOME)
 
     @Volatile
     private var diagnosticReport: DiagnosticReport? = null
@@ -189,6 +199,15 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "RomMMainActivity"
     }
 
+    /** Maps a sidebar destination to the [Screen] it opens; SETTINGS has no native screen yet (out of scope, UI_REFACTOR.md). */
+    private fun com.romm.androidtv.library.ui.NavDestination.toScreen(): Screen = when (this) {
+        com.romm.androidtv.library.ui.NavDestination.HOME -> Screen.NATIVE_HOME
+        com.romm.androidtv.library.ui.NavDestination.PLATFORMS -> Screen.NATIVE_PLATFORMS
+        com.romm.androidtv.library.ui.NavDestination.COLLECTIONS -> Screen.NATIVE_COLLECTIONS
+        com.romm.androidtv.library.ui.NavDestination.SEARCH -> Screen.NATIVE_SEARCH
+        com.romm.androidtv.library.ui.NavDestination.SETTINGS -> Screen.NATIVE_HOME
+    }
+
     // Single-flight guard: prevents concurrent auth flow submissions.
     private var authFlowActive = false
 
@@ -234,6 +253,9 @@ class MainActivity : ComponentActivity() {
                     Screen.HOME -> finish()
                     Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH ->
                         currentScreen = Screen.NATIVE_HOME
+                    Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
+                    Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
+                    Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
                     else -> currentScreen = Screen.HOME
                 }
             }
@@ -395,34 +417,116 @@ class MainActivity : ComponentActivity() {
                             gamepadBridge = gamepadBridge,
                             gamepadDiagnostics = gamepadDiagnostics
                         )
-                        Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH -> {
+                        Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
+                        Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL, Screen.NATIVE_GAME_DETAIL -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(libraryRepository)
                             )
                             com.romm.androidtv.library.ui.RommTvTheme {
                                 when (currentScreen) {
+                                    Screen.NATIVE_PLATFORM_DETAIL -> {
+                                        val platformId = selectedPlatformId
+                                        if (platformId != null) {
+                                            val gridViewModel: com.romm.androidtv.library.RomGridViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                                                key = "platform-detail-$platformId",
+                                                factory = com.romm.androidtv.library.RomGridViewModel.Factory(
+                                                    libraryRepository,
+                                                    com.romm.androidtv.library.RomQuery.ByPlatform(platformId),
+                                                ),
+                                            )
+                                            com.romm.androidtv.library.ui.RomGridScreen(
+                                                title = "Platform",
+                                                viewModel = gridViewModel,
+                                                onOpenGameDetail = { romId ->
+                                                    selectedRomId = romId
+                                                    gameDetailParent = Screen.NATIVE_PLATFORM_DETAIL
+                                                    currentScreen = Screen.NATIVE_GAME_DETAIL
+                                                },
+                                            )
+                                        }
+                                    }
+                                    Screen.NATIVE_COLLECTION_DETAIL -> {
+                                        val collectionId = selectedCollectionId
+                                        if (collectionId != null) {
+                                            val gridViewModel: com.romm.androidtv.library.RomGridViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                                                key = "collection-detail-$collectionId",
+                                                factory = com.romm.androidtv.library.RomGridViewModel.Factory(
+                                                    libraryRepository,
+                                                    com.romm.androidtv.library.RomQuery.ByCollection(collectionId),
+                                                ),
+                                            )
+                                            com.romm.androidtv.library.ui.RomGridScreen(
+                                                title = "Collection",
+                                                viewModel = gridViewModel,
+                                                onOpenGameDetail = { romId ->
+                                                    selectedRomId = romId
+                                                    gameDetailParent = Screen.NATIVE_COLLECTION_DETAIL
+                                                    currentScreen = Screen.NATIVE_GAME_DETAIL
+                                                },
+                                            )
+                                        }
+                                    }
+                                    Screen.NATIVE_GAME_DETAIL -> {
+                                        val romId = selectedRomId
+                                        if (romId != null) {
+                                            val detailViewModel: com.romm.androidtv.library.RomDetailViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                                                key = "game-detail-$romId",
+                                                factory = com.romm.androidtv.library.RomDetailViewModel.Factory(libraryRepository, romId),
+                                            )
+                                            com.romm.androidtv.library.ui.GameDetailScreen(viewModel = detailViewModel)
+                                        }
+                                    }
                                     Screen.NATIVE_PLATFORMS -> {
                                         val state by homeViewModel.uiState.collectAsState()
-                                        com.romm.androidtv.library.ui.PlatformsScreen(
-                                            state = state.platforms,
-                                            onRetry = homeViewModel::retryPlatforms
-                                        )
+                                        com.romm.androidtv.library.ui.LibraryScaffold(
+                                            current = com.romm.androidtv.library.ui.NavDestination.PLATFORMS,
+                                            onNavigate = { destination -> currentScreen = destination.toScreen() },
+                                        ) {
+                                            com.romm.androidtv.library.ui.PlatformsScreen(
+                                                state = state.platforms,
+                                                onRetry = homeViewModel::retryPlatforms,
+                                                onOpenPlatform = { platformId ->
+                                                    selectedPlatformId = platformId
+                                                    currentScreen = Screen.NATIVE_PLATFORM_DETAIL
+                                                },
+                                            )
+                                        }
                                     }
                                     Screen.NATIVE_COLLECTIONS -> {
                                         val state by homeViewModel.uiState.collectAsState()
-                                        com.romm.androidtv.library.ui.CollectionsScreen(
-                                            state = state.collections,
-                                            onRetry = homeViewModel::retryCollections
+                                        com.romm.androidtv.library.ui.LibraryScaffold(
+                                            current = com.romm.androidtv.library.ui.NavDestination.COLLECTIONS,
+                                            onNavigate = { destination -> currentScreen = destination.toScreen() },
+                                        ) {
+                                            com.romm.androidtv.library.ui.CollectionsScreen(
+                                                state = state.collections,
+                                                onRetry = homeViewModel::retryCollections,
+                                                onOpenCollection = { collectionId ->
+                                                    selectedCollectionId = collectionId
+                                                    currentScreen = Screen.NATIVE_COLLECTION_DETAIL
+                                                },
+                                            )
+                                        }
+                                    }
+                                    Screen.NATIVE_SEARCH -> com.romm.androidtv.library.ui.LibraryScaffold(
+                                        current = com.romm.androidtv.library.ui.NavDestination.SEARCH,
+                                        onNavigate = { destination -> currentScreen = destination.toScreen() },
+                                    ) {
+                                        com.romm.androidtv.library.ui.SearchScreen()
+                                    }
+                                    else -> com.romm.androidtv.library.ui.LibraryScaffold(
+                                        current = com.romm.androidtv.library.ui.NavDestination.HOME,
+                                        onNavigate = { destination -> currentScreen = destination.toScreen() },
+                                    ) {
+                                        com.romm.androidtv.library.ui.NativeHomeScreen(
+                                            viewModel = homeViewModel,
+                                            onOpenGameDetail = { romId ->
+                                                selectedRomId = romId
+                                                gameDetailParent = Screen.NATIVE_HOME
+                                                currentScreen = Screen.NATIVE_GAME_DETAIL
+                                            },
                                         )
                                     }
-                                    Screen.NATIVE_SEARCH -> com.romm.androidtv.library.ui.SearchScreen()
-                                    else -> com.romm.androidtv.library.ui.NativeHomeScreen(
-                                        viewModel = homeViewModel,
-                                        onOpenPlatforms = { currentScreen = Screen.NATIVE_PLATFORMS },
-                                        onOpenCollections = { currentScreen = Screen.NATIVE_COLLECTIONS },
-                                        onOpenSearch = { currentScreen = Screen.NATIVE_SEARCH },
-                                        onOpenSettings = { /* TODO: native settings screen — out of scope, see UI_REFACTOR.md */ }
-                                    )
                                 }
                             }
                         }

@@ -5,9 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -28,6 +30,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 
 /** One destination reachable from the [NavRail]. */
 enum class NavDestination(val label: String) {
@@ -36,6 +44,49 @@ enum class NavDestination(val label: String) {
     COLLECTIONS("Collections"),
     SEARCH("Search"),
     SETTINGS("Settings"),
+}
+
+private val navIcons: Map<NavDestination, ImageVector> = mapOf(
+    NavDestination.HOME to Icons.Filled.Home,
+    NavDestination.PLATFORMS to Icons.Filled.Apps,
+    NavDestination.COLLECTIONS to Icons.Filled.Collections,
+    NavDestination.SEARCH to Icons.Filled.Search,
+    NavDestination.SETTINGS to Icons.Filled.Settings,
+)
+
+/**
+ * Shared top-level scaffold for the four sidebar-navigable native screens
+ * (Home/Platforms/Collections/Search). Fixes two bugs found on-device
+ * (UI_REFACTOR.md section 7.1): the sidebar was previously only present on
+ * the Home screen (Platforms/Collections/Search were bare full-screen
+ * composables with no way to navigate away except Back), and the sidebar's
+ * selected-item highlight was hardcoded to Home regardless of the actual
+ * current screen. Detail screens (platform/collection/game detail) are
+ * intentionally NOT wrapped in this scaffold — like Leanback detail
+ * fragments, they are full-bleed "drill-down" screens reached via Select,
+ * not sibling destinations reachable via the sidebar.
+ */
+@Composable
+fun LibraryScaffold(
+    current: NavDestination,
+    onNavigate: (NavDestination) -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxSize()
+            .background(RommTvColors.NightHi),
+    ) {
+        NavRail(
+            selected = current,
+            icons = navIcons,
+            onSelect = onNavigate,
+        )
+        Box(modifier = Modifier.fillMaxSize()) {
+            content()
+        }
+    }
 }
 
 /**

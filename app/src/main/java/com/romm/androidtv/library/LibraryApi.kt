@@ -294,8 +294,8 @@ object LibraryApi {
         }
     }
 
-    /** `GET /api/roms`, shaped by [query] (see [RomQuery]). */
-    fun fetchRoms(client: OkHttpClient, origin: String, query: RomQuery, limit: Int = 20): RomListResult {
+    /** `GET /api/roms`, shaped by [query] (see [RomQuery]). [offset] enables pagination for detail-screen grids. */
+    fun fetchRoms(client: OkHttpClient, origin: String, query: RomQuery, limit: Int = 20, offset: Int = 0): RomListResult {
         if (origin.isBlank()) return RomListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
         val base = originUrl(origin)
             ?: return RomListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
@@ -307,7 +307,7 @@ object LibraryApi {
             .addQueryParameter("with_filter_values", "false")
             .addQueryParameter("with_rom_id_index", "false")
             .addQueryParameter("limit", limit.toString())
-            .addQueryParameter("offset", "0")
+            .addQueryParameter("offset", offset.toString())
 
         when (query) {
             is RomQuery.RecentlyAdded -> {

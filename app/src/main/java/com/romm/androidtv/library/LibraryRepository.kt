@@ -21,6 +21,10 @@ interface LibraryRepository {
     suspend fun fetchFavorites(limit: Int = 20): LibraryResult<List<LibraryRom>>
     suspend fun fetchPlatforms(): LibraryResult<List<PlatformSummary>>
     suspend fun fetchCollections(): LibraryResult<List<CollectionSummary>>
+    /** Generic paginated ROM query — powers `PlatformDetailScreen`/`CollectionDetailScreen`. */
+    suspend fun fetchRomsPage(query: RomQuery, limit: Int = 20, offset: Int = 0): LibraryResult<RomPage>
+    /** Full detail for `GameDetailScreen`. */
+    suspend fun fetchRomDetail(romId: Long): LibraryResult<RomDetail>
 }
 
 class LibraryRepositoryImpl(
@@ -39,12 +43,25 @@ class LibraryRepositoryImpl(
         fetchRoms(RomQuery.Favorites, limit)
 
     private suspend fun fetchRoms(query: RomQuery, limit: Int): LibraryResult<List<LibraryRom>> =
+        when (val result = fetchRomsPage(query, limit, offset = 0)) {
+            is LibraryResult.Success -> LibraryResult.Success(result.data.roms)
+            is LibraryResult.Failure -> result
+        }
+
+    override suspend fun fetchRomsPage(query: RomQuery, limit: Int, offset: Int): LibraryResult<RomPage> =
         withContext(Dispatchers.IO) {
-            when (val result = LibraryApi.fetchRoms(client, originProvider(), query, limit)) {
-                is RomListResult.Success -> LibraryResult.Success(result.roms)
+            when (val result = LibraryApi.fetchRoms(client, originProvider(), query, limit, offset)) {
+                is RomListResult.Success -> LibraryResult.Success(RomPage(result.roms, result.total))
                 is RomListResult.Failure -> LibraryResult.Failure(result.error)
             }
         }
+
+    override suspend fun fetchRomDetail(romId: Long): LibraryResult<RomDetail> = withContext(Dispatchers.IO) {
+        when (val result = LibraryApi.fetchRomDetail(client, originProvider(), romId)) {
+            is RomDetailResult.Success -> LibraryResult.Success(result.rom)
+            is RomDetailResult.Failure -> LibraryResult.Failure(result.error)
+        }
+    }
 
     override suspend fun fetchPlatforms(): LibraryResult<List<PlatformSummary>> = withContext(Dispatchers.IO) {
         when (val result = LibraryApi.fetchPlatforms(client, originProvider())) {

@@ -1,22 +1,28 @@
 package com.romm.androidtv.library.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.Collections
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,94 +33,71 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.foundation.lazy.list.TvLazyRow
 import androidx.tv.foundation.lazy.list.items
+import coil.compose.AsyncImage
 import com.romm.androidtv.library.CollectionSummary
 import com.romm.androidtv.library.HomeViewModel
 import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.PlatformSummary
 import com.romm.androidtv.library.SectionState
-import com.romm.androidtv.romm.RommApiError
 
 /**
- * Top-level native browsing screen (UI_REFACTOR.md): a collapsible left
- * [NavRail] plus a vertically scrollable stack of horizontally-scrollable
- * shelves. A shelf is omitted entirely when it has no items (e.g. no
- * favorites configured on the server) rather than rendered empty.
+ * Top-level Home content: a vertically scrollable stack of horizontally
+ * scrollable shelves. A shelf is omitted entirely when it has no items (e.g.
+ * no favorites configured on the server) rather than rendered empty. Meant
+ * to be hosted inside [LibraryScaffold]'s content slot, which owns the
+ * sidebar (UI_REFACTOR.md section 7.1 — this screen previously built its own
+ * Row+NavRail, which meant Platforms/Collections/Search had no sidebar at
+ * all; fixed by extracting that into a shared scaffold).
  */
 @Composable
 fun NativeHomeScreen(
     viewModel: HomeViewModel,
-    onOpenPlatforms: () -> Unit,
-    onOpenCollections: () -> Unit,
-    onOpenSearch: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenGameDetail: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val navIcons = remember {
-        mapOf(
-            NavDestination.HOME to Icons.Filled.Home,
-            NavDestination.PLATFORMS to Icons.Filled.Apps,
-            NavDestination.COLLECTIONS to Icons.Filled.Collections,
-            NavDestination.SEARCH to Icons.Filled.Search,
-            NavDestination.SETTINGS to Icons.Filled.Settings,
-        )
-    }
 
-    Row(
+    LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(RommTvColors.NightHi),
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(RommTvColors.StageLo.copy(alpha = 0.35f), RommTvColors.NightHi),
+                    endY = 600f,
+                ),
+            )
+            .padding(top = 32.dp, start = 8.dp),
     ) {
-        NavRail(
-            selected = NavDestination.HOME,
-            icons = navIcons,
-            onSelect = { destination ->
-                when (destination) {
-                    NavDestination.HOME -> Unit
-                    NavDestination.PLATFORMS -> onOpenPlatforms()
-                    NavDestination.COLLECTIONS -> onOpenCollections()
-                    NavDestination.SEARCH -> onOpenSearch()
-                    NavDestination.SETTINGS -> onOpenSettings()
-                }
-            },
-        )
-
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(RommTvColors.StageLo.copy(alpha = 0.35f), RommTvColors.NightHi),
-                        endY = 600f,
-                    ),
-                )
-                .padding(top = 32.dp, start = 8.dp),
-        ) {
-            item {
-                RomShelf(
-                    title = "Continue Playing",
-                    state = uiState.continuePlaying,
-                    onRetry = viewModel::retryContinuePlaying,
-                )
-            }
-            item {
-                RomShelf(
-                    title = "Recently Added",
-                    state = uiState.recentlyAdded,
-                    onRetry = viewModel::retryRecentlyAdded,
-                )
-            }
-            item {
-                RomShelf(
-                    title = "Favorites",
-                    state = uiState.favorites,
-                    onRetry = viewModel::retryFavorites,
-                )
-            }
+        item {
+            RomShelf(
+                title = "Continue Playing",
+                state = uiState.continuePlaying,
+                onRetry = viewModel::retryContinuePlaying,
+                onCardClick = { onOpenGameDetail(it.id) },
+            )
+        }
+        item {
+            RomShelf(
+                title = "Recently Added",
+                state = uiState.recentlyAdded,
+                onRetry = viewModel::retryRecentlyAdded,
+                onCardClick = { onOpenGameDetail(it.id) },
+            )
+        }
+        item {
+            RomShelf(
+                title = "Favorites",
+                state = uiState.favorites,
+                onRetry = viewModel::retryFavorites,
+                onCardClick = { onOpenGameDetail(it.id) },
+            )
         }
     }
 }
@@ -124,6 +107,7 @@ private fun RomShelf(
     title: String,
     state: SectionState<List<LibraryRom>>,
     onRetry: () -> Unit,
+    onCardClick: (LibraryRom) -> Unit,
 ) {
     // Omit the shelf entirely once we know it's empty — never render an empty row.
     if (state is SectionState.Loaded && state.data.isEmpty()) return
@@ -156,7 +140,7 @@ private fun RomShelf(
 
             is SectionState.Loaded -> {
                 TvLazyRow(
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     items(state.data, key = { it.id }) { rom ->
@@ -164,6 +148,7 @@ private fun RomShelf(
                             title = rom.title,
                             subtitle = rom.platformDisplayName,
                             coverUrl = rom.coverUrl,
+                            onClick = { onCardClick(rom) },
                         )
                     }
                 }
@@ -185,27 +170,53 @@ private fun ShelfPlaceholder(content: @Composable () -> Unit) {
     }
 }
 
-/** Minimal grid screen for platforms — see UI_REFACTOR.md section 4 (out of scope: platform-detail browsing). */
+/** Grid screen for platforms — tapping a tile opens [PlatformDetailScreen] (UI_REFACTOR.md section 7). */
 @Composable
-fun PlatformsScreen(state: SectionState<List<PlatformSummary>>, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+fun PlatformsScreen(
+    state: SectionState<List<PlatformSummary>>,
+    onRetry: () -> Unit,
+    onOpenPlatform: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     TileGridScreen(
         title = "Platforms",
         state = state,
         onRetry = onRetry,
         modifier = modifier,
-        tileContent = { platform -> TileCard(title = platform.displayName, subtitle = "${platform.romCount} games", imageUrl = platform.logoUrl) },
+        key = { it.id },
+        tileContent = { platform ->
+            TileCard(
+                title = platform.displayName,
+                subtitle = "${platform.romCount} games",
+                imageUrl = platform.logoUrl,
+                onClick = { onOpenPlatform(platform.id) },
+            )
+        },
     )
 }
 
-/** Minimal grid screen for collections — see UI_REFACTOR.md section 4 (out of scope: collection-detail browsing). */
+/** Grid screen for collections — tapping a tile opens [CollectionDetailScreen] (UI_REFACTOR.md section 7). */
 @Composable
-fun CollectionsScreen(state: SectionState<List<CollectionSummary>>, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+fun CollectionsScreen(
+    state: SectionState<List<CollectionSummary>>,
+    onRetry: () -> Unit,
+    onOpenCollection: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     TileGridScreen(
         title = "Collections",
         state = state,
         onRetry = onRetry,
         modifier = modifier,
-        tileContent = { collection -> TileCard(title = collection.name, subtitle = "${collection.romCount} games", imageUrl = collection.coverUrl) },
+        key = { it.id },
+        tileContent = { collection ->
+            TileCard(
+                title = collection.name,
+                subtitle = "${collection.romCount} games",
+                imageUrl = collection.coverUrl,
+                onClick = { onOpenCollection(collection.id) },
+            )
+        },
     )
 }
 
@@ -214,6 +225,7 @@ private fun <T> TileGridScreen(
     title: String,
     state: SectionState<List<T>>,
     onRetry: () -> Unit,
+    key: (T) -> Any,
     modifier: Modifier = Modifier,
     tileContent: @Composable (T) -> Unit,
 ) {
@@ -224,7 +236,7 @@ private fun <T> TileGridScreen(
             .padding(24.dp),
     ) {
         Text(text = title, style = MaterialTheme.typography.headlineSmall, color = RommTvColors.TextPrimary)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         when (state) {
             is SectionState.Loading -> CircularProgressIndicator(color = RommTvColors.Romm500)
             is SectionState.Error -> Column {
@@ -238,15 +250,14 @@ private fun <T> TileGridScreen(
                 if (state.data.isEmpty()) {
                     Text(text = "Nothing here yet.", color = RommTvColors.TextSecondary)
                 } else {
-                    LazyColumn {
-                        items(state.data.chunked(4)) { rowItems ->
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                modifier = Modifier.padding(bottom = 16.dp),
-                            ) {
-                                rowItems.forEach { item -> tileContent(item) }
-                            }
-                        }
+                    // Fixed-size cells (not chunked Rows) so a single item never stretches to
+                    // claim the whole row's width (UI_REFACTOR.md section 7.1, bug 1).
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 160.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        items(state.data, key = key) { item -> tileContent(item) }
                     }
                 }
             }
@@ -255,23 +266,59 @@ private fun <T> TileGridScreen(
 }
 
 @Composable
-private fun TileCard(title: String, subtitle: String, imageUrl: String?) {
+private fun TileCard(title: String, subtitle: String, imageUrl: String?, onClick: () -> Unit = {}) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
     Column(modifier = Modifier.padding(4.dp)) {
         Box(
             modifier = Modifier
-                .height(100.dp)
-                .background(RommTvColors.NightLo),
+                .fillMaxWidth()
+                .aspectRatio(16f / 10f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(RommTvColors.NightLo)
+                .border(
+                    width = if (isFocused) 3.dp else 0.dp,
+                    color = if (isFocused) RommTvColors.Romm500 else Color.Transparent,
+                    shape = RoundedCornerShape(8.dp),
+                )
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                ),
+            contentAlignment = Alignment.Center,
         ) {
             if (imageUrl != null) {
-                coil.compose.AsyncImage(
+                AsyncImage(
                     model = imageUrl,
                     contentDescription = title,
                     modifier = Modifier.fillMaxSize(),
                 )
+            } else {
+                androidx.compose.material3.Icon(
+                    imageVector = Icons.Filled.Apps,
+                    contentDescription = null,
+                    tint = RommTvColors.TextSecondary,
+                )
             }
         }
-        Text(text = title, color = RommTvColors.TextPrimary, style = MaterialTheme.typography.bodyMedium)
-        Text(text = subtitle, color = RommTvColors.TextSecondary, style = MaterialTheme.typography.labelSmall)
+        Text(
+            text = title,
+            color = if (isFocused) RommTvColors.Romm300 else RommTvColors.TextPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        )
+        Text(
+            text = subtitle,
+            color = RommTvColors.TextSecondary,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

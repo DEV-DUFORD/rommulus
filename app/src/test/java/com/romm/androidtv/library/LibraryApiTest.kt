@@ -201,6 +201,95 @@ class LibraryApiTest {
     }
 
     @Nested
+    @DisplayName("parseRomDetail")
+    inner class ParseRomDetail {
+
+        @Test
+        fun `parses full rom detail with all fields populated`() {
+            val body = """
+                {
+                    "id": 38035, "name": "Live A Live", "fs_name_no_tags": "Live A Live",
+                    "platform_display_name": "Super Nintendo Entertainment System",
+                    "summary": "A tale told across seven eras.",
+                    "path_cover_small": null,
+                    "path_cover_large": "/assets/romm/resources/roms/14/277/cover/big.png?ts=1",
+                    "url_cover": null,
+                    "merged_screenshots": ["/assets/romm/resources/roms/14/277/screenshots/0.jpg", "https://cdn.example/1.jpg"],
+                    "metadatum": {
+                        "genres": ["RPG"], "companies": ["Square"], "game_modes": ["Single player"],
+                        "player_count": "1", "first_release_date": 788918400000, "average_rating": 91.4
+                    },
+                    "regions": ["USA"], "languages": ["English"],
+                    "fs_size_bytes": 4194304,
+                    "rom_user": {"last_played": "2026-07-27T09:21:05+00:00", "now_playing": true}
+                }
+            """.trimIndent()
+
+            val result = LibraryApi.parseRomDetail(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.id).isEqualTo(38035)
+            assertThat(result.title).isEqualTo("Live A Live")
+            assertThat(result.platformDisplayName).isEqualTo("Super Nintendo Entertainment System")
+            assertThat(result.summary).isEqualTo("A tale told across seven eras.")
+            assertThat(result.coverUrl).isEqualTo("$origin/assets/romm/resources/roms/14/277/cover/big.png?ts=1")
+            assertThat(result.screenshotUrls).containsExactly(
+                "$origin/assets/romm/resources/roms/14/277/screenshots/0.jpg",
+                "https://cdn.example/1.jpg",
+            )
+            assertThat(result.genres).containsExactly("RPG")
+            assertThat(result.companies).containsExactly("Square")
+            assertThat(result.gameModes).containsExactly("Single player")
+            assertThat(result.playerCount).isEqualTo("1")
+            assertThat(result.firstReleaseDateEpochMillis).isEqualTo(788918400000)
+            assertThat(result.averageRating).isEqualTo(91.4f)
+            assertThat(result.regions).containsExactly("USA")
+            assertThat(result.languages).containsExactly("English")
+            assertThat(result.fileSizeBytes).isEqualTo(4194304)
+            assertThat(result.lastPlayedIso).isEqualTo("2026-07-27T09:21:05+00:00")
+            assertThat(result.nowPlaying).isTrue
+        }
+
+        @Test
+        fun `falls back to fs_name_no_tags and blank-strips optional fields when metadatum and rom_user are absent`() {
+            val body = """
+                {
+                    "id": 1, "name": null, "fs_name_no_tags": "Some Rom",
+                    "platform_display_name": "Game Boy",
+                    "summary": "",
+                    "path_cover_small": null, "path_cover_large": null, "url_cover": null,
+                    "merged_screenshots": null,
+                    "metadatum": null,
+                    "regions": null, "languages": null,
+                    "fs_size_bytes": 0,
+                    "rom_user": null
+                }
+            """.trimIndent()
+
+            val result = LibraryApi.parseRomDetail(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.title).isEqualTo("Some Rom")
+            assertThat(result.summary).isNull()
+            assertThat(result.coverUrl).isNull()
+            assertThat(result.screenshotUrls).isEmpty()
+            assertThat(result.genres).isEmpty()
+            assertThat(result.playerCount).isNull()
+            assertThat(result.firstReleaseDateEpochMillis).isNull()
+            assertThat(result.averageRating).isNull()
+            assertThat(result.regions).isEmpty()
+            assertThat(result.fileSizeBytes).isEqualTo(0)
+            assertThat(result.lastPlayedIso).isNull()
+            assertThat(result.nowPlaying).isFalse
+        }
+
+        @Test
+        fun `returns null for malformed json`() {
+            assertThat(LibraryApi.parseRomDetail("not json", origin)).isNull()
+        }
+    }
+
+    @Nested
     @DisplayName("resolveCoverUrl")
     inner class ResolveCoverUrl {
 
@@ -223,3 +312,4 @@ class LibraryApiTest {
         }
     }
 }
+
