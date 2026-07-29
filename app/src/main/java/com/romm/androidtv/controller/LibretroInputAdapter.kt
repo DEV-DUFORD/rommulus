@@ -1,8 +1,10 @@
 package com.romm.androidtv.controller
 
 import com.romm.androidtv.controller.model.ControllerSlot
+import com.romm.androidtv.controller.model.DeviceSignature
 import com.romm.androidtv.controller.model.GamepadSnapshot
 import com.romm.androidtv.controller.model.LogicalControl
+import com.romm.androidtv.controller.model.SlotConnectionState
 import com.romm.androidtv.controller.router.ControllerEventRouter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -127,19 +129,37 @@ object LibretroPadMapper {
 }
 
 /**
- * Maps the four-slot [ControllerSlot] list (indexed by `playerNumber`,
- * 1-based) to four Libretro ports (0-based), applying [LibretroPadMapper]
- * to each slot's current snapshot. A missing slot for a given player number
- * maps to [LibretroPadState.NEUTRAL] (matches how a disconnected slot's own
- * snapshot already resets to [GamepadSnapshot.EMPTY]).
+ * Maps the four-slot [ControllerSlot] list to four Libretro ports (0-based),
+ * applying [LibretroPadMapper] to each slot's current snapshot. Connected
+ * physical controllers are compacted ahead of Android TV system devices such
+ * as `virtual-remote` and `virtual-search`; otherwise those phantom GAMEPAD
+ * devices can consume ports 0-1 before a Bluetooth controller and make
+ * single-player cores (including SameBoy) ignore the real controller.
  *
  * Pure and Android-independent — see `LibretroPadMapperTest`.
  */
-fun mapControllerSlotsToLibretroPorts(slots: List<ControllerSlot>): List<LibretroPadState> =
-    (1..ControllerSlot.SLOT_COUNT).map { playerNumber ->
-        val slot = slots.find { it.playerNumber == playerNumber }
-        if (slot == null) LibretroPadState.NEUTRAL else LibretroPadMapper.map(slot.currentSnapshot)
+fun mapControllerSlotsToLibretroPorts(slots: List<ControllerSlot>): List<LibretroPadState> {
+    val orderedSlots = slots.sortedWith(
+        compareBy<ControllerSlot> { slot ->
+            when {
+                slot.connectionState != SlotConnectionState.CONNECTED -> 2
+                slot.preferredSignature.isAndroidTvVirtualController() -> 1
+                else -> 0
+            }
+        }.thenBy { it.playerNumber }
+    )
+
+    return List(ControllerSlot.SLOT_COUNT) { port ->
+        orderedSlots.getOrNull(port)
+            ?.takeIf { it.connectionState == SlotConnectionState.CONNECTED }
+            ?.let { LibretroPadMapper.map(it.currentSnapshot) }
+            ?: LibretroPadState.NEUTRAL
     }
+}
+
+private fun DeviceSignature?.isAndroidTvVirtualController(): Boolean =
+    this == DeviceSignature.VIRTUAL_REMOTE ||
+        this?.name?.startsWith("virtual-", ignoreCase = true) == true
 
 /**
  * Feeds the existing four-slot [ControllerEventRouter] output to the native

@@ -37,7 +37,10 @@ bool AudioOutput::start(double coreSampleRate) {
     oboe::AudioStreamBuilder builder;
     builder.setDirection(oboe::Direction::Output)
         ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-        ->setSharingMode(oboe::SharingMode::Exclusive)
+        // Shared mode is resilient when Android TV system audio services
+        // start or stop their own streams. Exclusive streams on the target
+        // Google TV Streamer were repeatedly disconnected within seconds.
+        ->setSharingMode(oboe::SharingMode::Shared)
         ->setChannelCount(oboe::ChannelCount::Stereo)
         ->setFormat(oboe::AudioFormat::I16)
         ->setSampleRate(static_cast<int32_t>(sampleRate_))
@@ -79,6 +82,10 @@ void AudioOutput::stop() {
         stream_.reset();
     }
     ring_.reset();
+    // A deliberate session stop starts a new one-shot restart budget. Do not
+    // reset this in start(): onErrorAfterClose() calls start() itself, and
+    // doing so there would turn the bounded retry into an infinite loop.
+    restarting_.store(false, std::memory_order_relaxed);
 }
 
 void AudioOutput::pushSamples(const int16_t* interleaved, size_t frames) {

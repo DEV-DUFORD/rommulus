@@ -78,3 +78,18 @@ done
 This is exactly the transformation upstream's own `libretro/jni/Android.mk`
 performs at its own build time; we ran it once against the pinned commit and
 checked in the result instead of re-running it on every build.
+
+## Local integration patch
+
+`libretro/libretro.c` accepts `ROMM_LIBRETRO_SAMPLE_RATE` as a build-time
+override for the rate passed to `GB_set_sample_rate()`. This project's CMake
+build sets it to 48000 Hz.
+
+Upstream's non-Wii U wrapper emits PCM at half the Game Boy clock
+(approximately 2.1 MHz) and relies on a full libretro frontend to resample it.
+Oboe can convert that stream to the device's 48 kHz hardware rate, but its
+application callback still runs in the 2.1 MHz domain. On the Google TV
+Streamer this held SameBoy to roughly 20 fps and caused continuous audio
+underruns. Asking SameBoy's own APU resampler for 48 kHz output avoids that
+pathological intermediate rate without changing emulation timing or audio
+hardware configuration.

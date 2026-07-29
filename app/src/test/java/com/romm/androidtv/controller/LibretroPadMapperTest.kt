@@ -1,6 +1,7 @@
 package com.romm.androidtv.controller
 
 import com.romm.androidtv.controller.model.ControllerSlot
+import com.romm.androidtv.controller.model.DeviceSignature
 import com.romm.androidtv.controller.model.GamepadSnapshot
 import com.romm.androidtv.controller.model.LogicalControl
 import com.romm.androidtv.controller.model.SlotConnectionState
@@ -190,6 +191,43 @@ class LibretroPadMapperTest {
 
             assertThat(ports).hasSize(4)
             assertThat(ports).allMatch { it == LibretroPadState.NEUTRAL }
+        }
+
+        @Test
+        fun `physical controller is compacted to port zero ahead of Android TV virtual gamepads`() {
+            val slots = ControllerSlot.createAllSlots().toMutableList()
+            slots[0] = slots[0].assign(
+                DeviceSignature("virtual-search", 0x18d1, 0x0100, "virtual-search")
+            )
+            slots[1] = slots[1].assign(
+                DeviceSignature("virtual-remote", 0x18d1, 0x0100, "virtual-remote")
+            )
+            slots[2] = slots[2].assign(
+                DeviceSignature("xbox", 0x045e, 0x0b13, "Xbox Wireless Controller")
+            ).updateSnapshot(snapshotWithButton(LogicalControl.BUTTON_A))
+
+            val ports = mapControllerSlotsToLibretroPorts(slots)
+
+            assertThat(ports[0].buttonsMask).isEqualTo(1 shl 8)
+            assertThat(ports[1]).isEqualTo(LibretroPadState.NEUTRAL)
+            assertThat(ports[2]).isEqualTo(LibretroPadState.NEUTRAL)
+        }
+
+        @Test
+        fun `multiple physical controllers retain their relative slot order`() {
+            val slots = ControllerSlot.createAllSlots().toMutableList()
+            slots[0] = slots[0].assign(DeviceSignature.VIRTUAL_REMOTE)
+            slots[1] = slots[1].assign(
+                DeviceSignature("first", 1, 1, "First Controller")
+            ).updateSnapshot(snapshotWithButton(LogicalControl.BUTTON_A))
+            slots[3] = slots[3].assign(
+                DeviceSignature("second", 2, 2, "Second Controller")
+            ).updateSnapshot(snapshotWithButton(LogicalControl.BUTTON_B))
+
+            val ports = mapControllerSlotsToLibretroPorts(slots)
+
+            assertThat(ports[0].buttonsMask).isEqualTo(1 shl 8)
+            assertThat(ports[1].buttonsMask).isEqualTo(1 shl 0)
         }
     }
 }

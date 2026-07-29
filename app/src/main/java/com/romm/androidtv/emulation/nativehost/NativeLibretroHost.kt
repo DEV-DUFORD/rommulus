@@ -2,8 +2,11 @@ package com.romm.androidtv.emulation.nativehost
 
 import android.content.Context
 import android.os.Build
+import android.util.AtomicFile
 import android.view.Surface
 import java.io.File
+import java.io.IOException
+import java.util.zip.CRC32
 import java.util.zip.ZipFile
 
 /**
@@ -178,13 +181,13 @@ class NativeLibretroHost {
         /**
          * Shared extraction logic for [resolveBundledTestCorePath] and
          * [resolveBundledSameBoyCorePath]: every bundled core is a normal JNI
-         * library shipped in the APK, extracted once to app-private storage
-         * under a name derived from [soFileName] so multiple cores never
-         * collide on disk.
+         * library shipped in the APK, extracted to app-private storage under
+         * a name derived from [soFileName] so multiple cores never collide.
+         * The APK entry CRC is checked on every resolution so an app update
+         * cannot keep loading a stale previously extracted core.
          */
         private fun resolveBundledCoreSharedLibrary(context: Context, soFileName: String): String {
             val destination = File(context.filesDir, "native_cores/$soFileName")
-            if (destination.exists()) return destination.absolutePath
             destination.parentFile?.mkdirs()
 
             val abi = Build.SUPPORTED_ABIS.first()
@@ -192,11 +195,34 @@ class NativeLibretroHost {
             ZipFile(context.applicationInfo.sourceDir).use { zip ->
                 val entry = zip.getEntry(entryName)
                     ?: error("$entryName not found in APK (${context.applicationInfo.sourceDir})")
-                zip.getInputStream(entry).use { input ->
-                    destination.outputStream().use { output -> input.copyTo(output) }
+                if (destination.isFile && destination.length() == entry.size && crc32(destination) == entry.crc) {
+                    return destination.absolutePath
+                }
+
+                val atomicDestination = AtomicFile(destination)
+                val output = atomicDestination.startWrite()
+                try {
+                    zip.getInputStream(entry).use { input -> input.copyTo(output) }
+                    atomicDestination.finishWrite(output)
+                } catch (error: IOException) {
+                    atomicDestination.failWrite(output)
+                    throw error
                 }
             }
             return destination.absolutePath
+        }
+
+        private fun crc32(file: File): Long {
+            val crc = CRC32()
+            file.inputStream().buffered().use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    crc.update(buffer, 0, count)
+                }
+            }
+            return crc.value
         }
     }
 }

@@ -123,12 +123,12 @@ object CoreManifest {
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `sameboy_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/sameboy/{Core,libretro}/* " +
-                "with the exact preprocessor flags upstream's own libretro/Makefile.common + " +
-                "libretro/jni/Android.mk use, -std=c99, and upstream's own libretro/link.T version " +
+                "with upstream's libretro preprocessor flags plus the documented 48 kHz Android " +
+                "audio integration override, -std=c99, and upstream's own libretro/link.T version " +
                 "script; see third_party/cores/sameboy/VENDORING.md)",
             binaryChecksums = mapOf(
-                "armeabi-v7a" to "251cfde8cbe2e4be5d6dad300efb6feb2e90b5bc74c536b5709c4b0b42fb5738",
-                "arm64-v8a" to "f4fda64892a3febdafabc326e616791395c087f7f40ef468f636f76eb37cf944",
+                "armeabi-v7a" to "2b047a180d920fd8f3460308b2ac05e9e7ad5627f3310a94e22731db1727be99",
+                "arm64-v8a" to "b99b4b4486de632ee6c76c7d6d0649eac57d6f04da8826117e726a270ae141b2",
             ),
             reviewedBy = "DEV-DUFORD",
             reviewedOn = "2026-07-28",

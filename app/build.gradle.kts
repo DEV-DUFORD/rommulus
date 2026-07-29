@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.devtools.ksp")
 }
 
 /** Read a property from local.properties (root project). */
@@ -50,7 +51,16 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += ""
-                arguments += listOf("-DANDROID_STL=c++_shared")
+                // Native code always builds optimized (RelWithDebInfo: -O2 -g), regardless of
+                // the Gradle debug/release build type. Emulator cores (SameBoy) are CPU-bound
+                // interpreters where an unoptimized (-O0) build runs at a small fraction of
+                // real-time speed on this project's target hardware — confirmed on-device: the
+                // Phase 4 debug build ran a Game Boy title at ~20fps (vs. the ~59.7fps a Game
+                // Boy actually runs at) with continuous audio underruns, purely because AGP's
+                // default CMAKE_BUILD_TYPE for a debuggable variant is "Debug" (no optimization).
+                // Keeping -g preserves native debuggability/symbols for the debug variant; only
+                // the missing optimization was the problem.
+                arguments += listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=RelWithDebInfo")
             }
         }
     }
@@ -150,6 +160,16 @@ dependencies {
     // ViewModel integration for Compose (viewModel() composable) — UI_REFACTOR.md
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
 
+    // Room: local save-replica records and the pending-operation (upload-queue) database
+    // (LIBRETRO_REFACTOR.md section 11.1/11.4, Phase 5).
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+
+    // WorkManager: durable, retryable post-play save upload, run from the main process and
+    // surviving process death (LIBRETRO_REFACTOR.md section 11.4, Phase 5).
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
     // Coil for Compose image loading (cover art) — UI_REFACTOR.md section 5
     implementation("io.coil-kt:coil-compose:2.6.0")
 
@@ -164,6 +184,8 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     // MockWebServer for network unit tests
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // WorkManager test harness (SynchronousExecutor / TestDriver) for unit-testing the upload worker
+    testImplementation("androidx.work:work-testing:2.9.1")
 
     // Instrumented UI/Compose testing
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

@@ -68,11 +68,11 @@ target_compile_options(romm_libretro_host PRIVATE ${ROMM_WARNING_FLAGS})
 # third_party/cores/sameboy/VENDORING.md for exactly what was vendored, why,
 # and how the checked-in libretro/generated/*_boot.c files were produced.
 #
-# Source list and preprocessor flags mirror upstream's own
+# Source list and baseline preprocessor flags mirror upstream's own
 # libretro/Makefile.common (SOURCES_C) and libretro/jni/Android.mk
-# (COREFLAGS) exactly, so this build faithfully reproduces the exact same
-# core upstream ships for Android, just built through our own CMake/NDK
-# pipeline instead of ndk-build.
+# (COREFLAGS). ROMM_LIBRETRO_SAMPLE_RATE is the one documented integration
+# override: upstream otherwise emits ~2.1MHz PCM and expects a full frontend
+# resampler, which is prohibitively expensive on the target Android TV.
 # ---------------------------------------------------------------------------
 set(SAMEBOY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/cores/sameboy)
 
@@ -126,6 +126,10 @@ target_compile_definitions(sameboy_core PRIVATE
     GB_INTERNAL
     GB_VERSION="1.0.3"
     ANDROID
+    # SameBoy otherwise uses half the Game Boy clock (~2.1MHz). Producing
+    # hardware-rate PCM directly avoids millions of unnecessary samples per
+    # second while preserving the core's own APU resampling path.
+    ROMM_LIBRETRO_SAMPLE_RATE=48000
 )
 
 # Vendored third-party source: not held to this project's own -Wall -Wextra

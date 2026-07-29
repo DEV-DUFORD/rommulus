@@ -670,7 +670,9 @@ static void init_for_current_model(unsigned id)
     GB_set_pixels_output(&gameboy[i],
                          (uint32_t *)(frame_buf + GB_get_screen_width(&gameboy[0]) * GB_get_screen_height(&gameboy[0]) * i));
     GB_set_rgb_encode_callback(&gameboy[i], rgb_encode);
-#ifdef WIIU
+#ifdef ROMM_LIBRETRO_SAMPLE_RATE
+    GB_set_sample_rate(&gameboy[i], ROMM_LIBRETRO_SAMPLE_RATE);
+#elif defined(WIIU)
     GB_set_sample_rate(&gameboy[i], WIIU_SAMPLE_RATE);
 #else
     GB_set_sample_rate(&gameboy[i], GB_get_clock_rate(&gameboy[i]) / 2);

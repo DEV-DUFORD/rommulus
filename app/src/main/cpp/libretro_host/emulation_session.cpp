@@ -319,7 +319,13 @@ size_t EmulationSession::audioSampleBatchTrampoline(const int16_t* data, size_t 
     EmulationSession* self = g_active_session.load();
     if (self == nullptr) return 0;
     SessionState s = self->state_.load();
-    if (s == SessionState::kStopping || s == SessionState::kStopped) return 0;
+    if (s == SessionState::kStopping || s == SessionState::kStopped) {
+        // Libretro defines the return value as frames consumed. Some cores,
+        // including SameBoy, retry the unconsumed tail until this returns a
+        // non-zero count. Discard during teardown but report consumption so
+        // retro_run() can return and the emulation thread can be joined.
+        return frames;
+    }
 
     self->inFlightCallbacks_.fetch_add(1, std::memory_order_relaxed);
     self->diagnostics_.audioFramesProduced.fetch_add(frames, std::memory_order_relaxed);
