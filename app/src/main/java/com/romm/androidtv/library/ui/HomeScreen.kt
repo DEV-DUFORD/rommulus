@@ -322,15 +322,4 @@ private fun TileCard(title: String, subtitle: String, imageUrl: String?, onClick
     }
 }
 
-/** Stub search screen — full search UI is out of scope for this pass (UI_REFACTOR.md section 4). */
-@Composable
-fun SearchScreen(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(RommTvColors.NightHi),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text = "Search — coming soon", color = RommTvColors.TextSecondary, style = MaterialTheme.typography.titleMedium)
-    }
-}
+

@@ -512,7 +512,13 @@ class MainActivity : ComponentActivity() {
                                         current = com.romm.androidtv.library.ui.NavDestination.SEARCH,
                                         onNavigate = { destination -> currentScreen = destination.toScreen() },
                                     ) {
-                                        com.romm.androidtv.library.ui.SearchScreen()
+                                        com.romm.androidtv.library.ui.SearchScreen(
+                                            onGameSelected = { romId ->
+                                                selectedRomId = romId
+                                                gameDetailParent = Screen.NATIVE_SEARCH
+                                                currentScreen = Screen.NATIVE_GAME_DETAIL
+                                            },
+                                        )
                                     }
                                     else -> com.romm.androidtv.library.ui.LibraryScaffold(
                                         current = com.romm.androidtv.library.ui.NavDestination.HOME,
