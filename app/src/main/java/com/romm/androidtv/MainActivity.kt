@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
     private enum class Screen {
         HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS,
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
-        NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL
+        NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL
     }
 
     private var currentScreen by mutableStateOf(Screen.HOME)
@@ -205,7 +205,7 @@ class MainActivity : ComponentActivity() {
         com.romm.androidtv.library.ui.NavDestination.PLATFORMS -> Screen.NATIVE_PLATFORMS
         com.romm.androidtv.library.ui.NavDestination.COLLECTIONS -> Screen.NATIVE_COLLECTIONS
         com.romm.androidtv.library.ui.NavDestination.SEARCH -> Screen.NATIVE_SEARCH
-        com.romm.androidtv.library.ui.NavDestination.SETTINGS -> Screen.NATIVE_HOME
+        com.romm.androidtv.library.ui.NavDestination.SETTINGS -> Screen.NATIVE_SETTINGS
     }
 
     // Single-flight guard: prevents concurrent auth flow submissions.
@@ -251,7 +251,7 @@ class MainActivity : ComponentActivity() {
                     // very callback (it's still enabled), causing infinite recursion and
                     // a StackOverflowError crash.
                     Screen.HOME -> finish()
-                    Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH ->
+                    Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH, Screen.NATIVE_SETTINGS ->
                         currentScreen = Screen.NATIVE_HOME
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
@@ -418,7 +418,7 @@ class MainActivity : ComponentActivity() {
                             gamepadDiagnostics = gamepadDiagnostics
                         )
                         Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
-                        Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL, Screen.NATIVE_GAME_DETAIL -> {
+                        Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL, Screen.NATIVE_GAME_DETAIL -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(libraryRepository)
                             )
@@ -519,6 +519,25 @@ class MainActivity : ComponentActivity() {
                                                 currentScreen = Screen.NATIVE_GAME_DETAIL
                                             },
                                         )
+                                    }
+                                    Screen.NATIVE_SETTINGS -> {
+                                        com.romm.androidtv.library.ui.LibraryScaffold(
+                                            current = com.romm.androidtv.library.ui.NavDestination.SETTINGS,
+                                            onNavigate = { destination -> currentScreen = destination.toScreen() },
+                                        ) {
+                                            com.romm.androidtv.library.ui.SettingsScreen(
+                                                viewModelFactory = com.romm.androidtv.library.SettingsViewModel.Factory(
+                                                    settingsRepository,
+                                                    sessionStore,
+                                                    authRepository,
+                                                    BuildConfig.ROMM_ORIGIN,
+                                                    onSessionInvalidated = {
+                                                        verifiedUser = null
+                                                        currentScreen = Screen.NATIVE_HOME
+                                                    },
+                                                ),
+                                            )
+                                        }
                                     }
                                     else -> com.romm.androidtv.library.ui.LibraryScaffold(
                                         current = com.romm.androidtv.library.ui.NavDestination.HOME,
