@@ -36,3 +36,30 @@ data class CollectionSummary(
     /** Absolute cover-art URL, already resolved against the RomM origin. Null if none available. */
     val coverUrl: String?,
 )
+
+/**
+ * Full detail for a single ROM (`GET /api/roms/{id}`, the full `RomSchema` —
+ * not the `SimpleRomSchema` used by list endpoints). Powers `GameDetailScreen`.
+ */
+data class RomDetail(
+    val id: Long,
+    val title: String,
+    val platformDisplayName: String,
+    val summary: String?,
+    val coverUrl: String?,
+    /** Absolute screenshot URLs, already resolved against the RomM origin. */
+    val screenshotUrls: List<String>,
+    val genres: List<String>,
+    val companies: List<String>,
+    val gameModes: List<String>,
+    val playerCount: String?,
+    /** Epoch millis of first release, or null if unknown. */
+    val firstReleaseDateEpochMillis: Long?,
+    /** 0-100 scale, or null if unknown. */
+    val averageRating: Float?,
+    val regions: List<String>,
+    val languages: List<String>,
+    val fileSizeBytes: Long,
+    val lastPlayedIso: String?,
+    val nowPlaying: Boolean,
+)

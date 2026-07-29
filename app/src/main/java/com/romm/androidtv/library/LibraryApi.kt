@@ -47,6 +47,11 @@ sealed interface CollectionListResult {
     data class Failure(val error: RommApiError, val httpCode: Int? = null) : CollectionListResult
 }
 
+sealed interface RomDetailResult {
+    data class Success(val rom: RomDetail) : RomDetailResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : RomDetailResult
+}
+
 /** Selects which `GET /api/roms` shelf/query to run. */
 sealed interface RomQuery {
     /** `order_by=created_at&order_dir=desc` */
@@ -61,8 +66,11 @@ sealed interface RomQuery {
     /** `search_term=<query>` (not yet surfaced in the UI; reserved for a future search screen). */
     data class Search(val term: String) : RomQuery
 
-    /** `platform_ids=<id>` (not yet surfaced in the UI; reserved for a future platform-detail screen). */
+    /** `platform_ids=<id>` — powers `PlatformDetailScreen`. */
     data class ByPlatform(val platformId: Long) : RomQuery
+
+    /** `collection_id=<id>` — powers `CollectionDetailScreen`. Verified live: distinct from the `collections`/`collection_ids` filters, which mean something else. */
+    data class ByCollection(val collectionId: Long) : RomQuery
 }
 
 @JsonClass(generateAdapter = false)
@@ -108,6 +116,34 @@ internal data class CollectionJson(
     val path_covers_large: List<String>? = null,
 )
 
+@JsonClass(generateAdapter = false)
+internal data class RomMetadatumJson(
+    val genres: List<String> = emptyList(),
+    val companies: List<String> = emptyList(),
+    val game_modes: List<String> = emptyList(),
+    val player_count: String? = null,
+    val first_release_date: Long? = null,
+    val average_rating: Double? = null,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class RomDetailJson(
+    val id: Long = 0,
+    val name: String? = null,
+    val fs_name_no_tags: String = "",
+    val platform_display_name: String = "",
+    val summary: String? = null,
+    val path_cover_small: String? = null,
+    val path_cover_large: String? = null,
+    val url_cover: String? = null,
+    val merged_screenshots: List<String>? = null,
+    val metadatum: RomMetadatumJson? = null,
+    val regions: List<String>? = null,
+    val languages: List<String>? = null,
+    val fs_size_bytes: Long = 0,
+    val rom_user: RomUserJson? = null,
+)
+
 object LibraryApi {
 
     private val moshi = Moshi.Builder()
@@ -116,6 +152,7 @@ object LibraryApi {
     private val platformListAdapter = moshi.adapter<List<PlatformJson>>()
     private val romsPageAdapter = moshi.adapter<RomsPageJson>()
     private val collectionListAdapter = moshi.adapter<List<CollectionJson>>()
+    private val romDetailAdapter = moshi.adapter<RomDetailJson>()
 
     // ---- Pure JSON parsing (unit-testable without a live server) ----
 
@@ -200,6 +237,38 @@ object LibraryApi {
         return absoluteFallback?.takeIf { it.isNotBlank() }
     }
 
+    /**
+     * Parses the JSON body of `GET /api/roms/{id}` (the full `RomSchema`).
+     * Returns null on any malformed input.
+     */
+    fun parseRomDetail(body: String, origin: String): RomDetail? {
+        return try {
+            val json = romDetailAdapter.fromJson(body.trim()) ?: return null
+            val metadatum = json.metadatum
+            RomDetail(
+                id = json.id,
+                title = json.name?.takeIf { it.isNotBlank() } ?: json.fs_name_no_tags,
+                platformDisplayName = json.platform_display_name,
+                summary = json.summary?.takeIf { it.isNotBlank() },
+                coverUrl = resolveCoverUrl(origin, json.path_cover_large ?: json.path_cover_small, json.url_cover),
+                screenshotUrls = json.merged_screenshots.orEmpty().mapNotNull { resolveCoverUrl(origin, it, null) },
+                genres = metadatum?.genres.orEmpty(),
+                companies = metadatum?.companies.orEmpty(),
+                gameModes = metadatum?.game_modes.orEmpty(),
+                playerCount = metadatum?.player_count?.takeIf { it.isNotBlank() },
+                firstReleaseDateEpochMillis = metadatum?.first_release_date,
+                averageRating = metadatum?.average_rating?.toFloat(),
+                regions = json.regions.orEmpty(),
+                languages = json.languages.orEmpty(),
+                fileSizeBytes = json.fs_size_bytes,
+                lastPlayedIso = json.rom_user?.last_played,
+                nowPlaying = json.rom_user?.now_playing ?: false,
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     // ---- Network calls ----
 
     /** `GET /api/platforms`. */
@@ -259,6 +328,9 @@ object LibraryApi {
             is RomQuery.ByPlatform -> {
                 builder.addQueryParameter("platform_ids", query.platformId.toString())
             }
+            is RomQuery.ByCollection -> {
+                builder.addQueryParameter("collection_id", query.collectionId.toString())
+            }
         }
 
         val request = Request.Builder().url(builder.build()).get().build()
@@ -294,6 +366,30 @@ object LibraryApi {
             }
         } catch (e: IOException) {
             CollectionListResult.Failure(classifyIOException(e))
+        }
+    }
+
+    /** `GET /api/roms/{id}` — full detail for `GameDetailScreen`. */
+    fun fetchRomDetail(client: OkHttpClient, origin: String, romId: Long): RomDetailResult {
+        if (origin.isBlank()) return RomDetailResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = originUrl(origin)?.newBuilder()
+            ?.addPathSegment("api")
+            ?.addPathSegment("roms")
+            ?.addPathSegment(romId.toString())
+            ?.build()
+            ?: return RomDetailResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val request = Request.Builder().url(url).get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                classifyResponse(response)?.let { return RomDetailResult.Failure(it, response.code) }
+                val body = response.body?.string()
+                val rom = body?.let { parseRomDetail(it, origin) }
+                if (rom == null) RomDetailResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                else RomDetailResult.Success(rom)
+            }
+        } catch (e: IOException) {
+            RomDetailResult.Failure(classifyIOException(e))
         }
     }
 
