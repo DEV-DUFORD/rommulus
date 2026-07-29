@@ -235,6 +235,37 @@ internal data class SaveSchemaJson(
     val file_size_bytes: Long = 0,
 )
 
+data class ClientToken(val raw: String) {
+    init { require(raw.isNotBlank()) { "ClientToken.raw must not be blank" } }
+}
+
+data class ClientTokenInfo(
+    val token: ClientToken,
+    val expiresAtEpochSeconds: Long?,
+)
+
+sealed interface ClientTokenAcquireResult {
+    data class Success(val info: ClientTokenInfo) : ClientTokenAcquireResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : ClientTokenAcquireResult
+}
+
+@JsonClass(generateAdapter = false)
+internal data class ClientTokenPayloadJson(
+    val name: String = "romm-android-tv",
+    val scopes: List<String> = emptyList(),
+    val expires_in: String? = null,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class ClientTokenResponseJson(
+    val id: Long = 0,
+    val name: String = "",
+    val scopes: List<String> = emptyList(),
+    val raw_token: String = "",
+    val expires_at: String? = null,
+    val created_at: String? = null,
+)
+
 object RommSyncApi {
 
     private val moshi = Moshi.Builder()
@@ -247,6 +278,8 @@ object RommSyncApi {
     private val syncCompletePayloadAdapter = moshi.adapter<SyncCompletePayloadJson>()
     private val syncCompleteResponseAdapter = moshi.adapter<SyncCompleteResponseJson>()
     private val saveSchemaAdapter = moshi.adapter<SaveSchemaJson>()
+    private val clientTokenPayloadAdapter = moshi.adapter<ClientTokenPayloadJson>()
+    private val clientTokenResponseAdapter = moshi.adapter<ClientTokenResponseJson>()
 
     // ---- Pure parse functions (unit-testable without a server) ----
 
@@ -321,6 +354,17 @@ object RommSyncApi {
         null
     }
 
+    fun parseClientTokenResponse(body: String): ClientTokenInfo? = try {
+        val json = clientTokenResponseAdapter.fromJson(body.trim())
+        if (json == null || json.raw_token.isBlank()) null
+        else ClientTokenInfo(
+            token = ClientToken(json.raw_token),
+            expiresAtEpochSeconds = json.expires_at?.let { Instant.parse(it).epochSecond },
+        )
+    } catch (_: Exception) {
+        null
+    }
+
     // ---- Network calls ----
 
     /** `POST /api/devices`. */
@@ -356,6 +400,42 @@ object RommSyncApi {
             }
         } catch (e: IOException) {
             DeviceRegisterResult.Failure(classifyIOException(e))
+        }
+    }
+
+    /**
+     * `POST /api/client-tokens` — acquire a durable ClientToken for this user.
+     * Called from the foreground authenticated login/session-verification lifecycle
+     * (cookie-authenticated client). The returned raw token is persisted via
+     * [ClientTokenStore] for later Bearer-only worker execution.
+     */
+    fun acquireClientToken(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        scopes: List<String>,
+    ): ClientTokenAcquireResult {
+        if (origin.isBlank()) return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "client-tokens") ?: return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val payloadJson = clientTokenPayloadAdapter.toJson(
+            ClientTokenPayloadJson(
+                name = "romm-android-tv",
+                scopes = scopes,
+            ),
+        )
+        val body = payloadJson.toRequestBody("application/json".toMediaType())
+        val httpRequest = okhttp3.Request.Builder().url(url).post(body).build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                classifyResponse(response)?.let { return ClientTokenAcquireResult.Failure(it, response.code) }
+                val responseBody = response.body?.string()
+                val info = responseBody?.let(::parseClientTokenResponse)
+                if (info == null) ClientTokenAcquireResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                else ClientTokenAcquireResult.Success(info)
+            }
+        } catch (e: IOException) {
+            ClientTokenAcquireResult.Failure(classifyIOException(e))
         }
     }
 

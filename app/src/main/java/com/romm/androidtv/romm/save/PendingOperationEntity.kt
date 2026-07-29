@@ -132,6 +132,27 @@ data class PendingOperationEntity(
     val lastError: String? = null,
     val lastHttpCode: Int? = null,
 
+    /**
+     * The canonical full RomM server origin (e.g. "https://romm.example.com") at the
+     * time this operation was created. Persisted here so the worker can resolve the
+     * correct OkHttp client even if [serverKey] alone is ambiguous after a profile rename.
+     */
+    val origin: String? = null,
+
+    /**
+     * The upload filename negotiated during sync (the `fileName` from the
+     * [SyncOperation][com.romm.androidtv.romm.SyncOperation]). Required by
+     * [RommSyncApi.uploadSave] — cannot be reconstructed from a stale replica alone.
+     */
+    val uploadFileName: String? = null,
+
+    /**
+     * The sync negotiation session ID ([SyncNegotiateInfo.sessionId]) under which this
+     * operation was queued. Sent as `session_id` query param on upload for server-side
+     * session bookkeeping.
+     */
+    val sessionId: Long? = null,
+
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
 ) {

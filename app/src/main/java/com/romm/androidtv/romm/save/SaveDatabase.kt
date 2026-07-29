@@ -4,6 +4,8 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Persists [SaveSyncStatus] as its plain enum name; Room has no native enum column type. */
 class SaveSyncStatusConverters {
@@ -39,16 +41,10 @@ class PendingOperationConverters {
  * (Milestone 6, `p5-coordinator`) will need to read/write both within a
  * single transaction (e.g. "mark this save SYNCED and its upload operation
  * SUCCEEDED" must be atomic).
- *
- * `exportSchema` is off for now: this is the first Room database in the app
- * (added this phase) and there is no released build depending on schema
- * history yet. Turn it on and start committing schema JSON files under
- * `app/schemas/` the first time a migration actually matters — i.e. before
- * this ships to anyone with existing local data.
  */
 @Database(
     entities = [SaveReplicaEntity::class, PendingOperationEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(SaveSyncStatusConverters::class, PendingOperationConverters::class)
@@ -58,5 +54,26 @@ abstract class SaveDatabase : RoomDatabase() {
 
     companion object {
         const val DB_NAME = "romm_saves.db"
+
+        /**
+         * Non-destructive migration v1 → v2: adds three nullable columns to
+         * `pending_operations` (origin, uploadFileName, sessionId). Existing rows
+         * retain their original data; new columns default to NULL. Legacy rows
+         * whose new nullable metadata cannot be reconstructed fail explicitly
+         * at executor time rather than being guessed here.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE pending_operations ADD COLUMN origin TEXT DEFAULT NULL",
+                )
+                database.execSQL(
+                    "ALTER TABLE pending_operations ADD COLUMN uploadFileName TEXT DEFAULT NULL",
+                )
+                database.execSQL(
+                    "ALTER TABLE pending_operations ADD COLUMN sessionId INTEGER DEFAULT NULL",
+                )
+            }
+        }
     }
 }

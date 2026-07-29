@@ -256,7 +256,13 @@ class SettingsViewModel(
                 setOriginFn = { origin -> settingsRepository.setOrigin(origin) },
                 clearOverrideFn = { settingsRepository.clearOverride() },
                 getSessionRecord = { sessionStore.current() },
-                clearSessionFn = { sessionStore.clear() },
+                clearSessionFn = {
+                    val session = sessionStore.current()
+                    session?.let { s ->
+                        authRepository.clearClientTokenForCurrentSession(s.origin, s.username ?: "")
+                    }
+                    sessionStore.clear()
+                },
                 checkHeartbeatFn = { origin -> authRepository.checkHeartbeat(origin) },
                 buildDefaultOrigin = buildDefaultOrigin,
                 onSessionInvalidated = onSessionInvalidated,

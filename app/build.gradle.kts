@@ -184,8 +184,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     // MockWebServer for network unit tests
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
-    // WorkManager test harness (SynchronousExecutor / TestDriver) for unit-testing the upload worker
-    testImplementation("androidx.work:work-testing:2.9.1")
 
     // Instrumented UI/Compose testing
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
@@ -194,6 +192,9 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.compose.material3:material3")
     androidTestImplementation("androidx.test.uiautomator:uiautomator:2.2.0")
+    // WorkManager test harness requires real Android Context; moved from testImplementation
+    // per p5-workmanager plan (no Robolectric in this repo).
+    androidTestImplementation("androidx.work:work-testing:2.9.1")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 

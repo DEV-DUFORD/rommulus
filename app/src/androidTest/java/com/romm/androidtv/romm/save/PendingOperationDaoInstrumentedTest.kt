@@ -38,6 +38,9 @@ class PendingOperationDaoInstrumentedTest {
     private fun sample(
         localGenerationEpochMs: Long = 1_000L,
         status: PendingOperationStatus = PendingOperationStatus.PENDING,
+        origin: String? = null,
+        uploadFileName: String? = null,
+        sessionId: Long? = null,
     ) = PendingOperationEntity(
         serverKey = "romm.example.com",
         userKey = "alice",
@@ -47,6 +50,9 @@ class PendingOperationDaoInstrumentedTest {
         operationType = PendingOperationType.UPLOAD,
         localGenerationEpochMs = localGenerationEpochMs,
         status = status,
+        origin = origin,
+        uploadFileName = uploadFileName,
+        sessionId = sessionId,
         createdAtEpochMs = localGenerationEpochMs,
         updatedAtEpochMs = localGenerationEpochMs,
     )
@@ -62,6 +68,36 @@ class PendingOperationDaoInstrumentedTest {
             assertEquals(PendingOperationType.UPLOAD, found?.operationType)
             assertEquals(PendingOperationStatus.PENDING, found?.status)
             assertEquals(1_000L, found?.localGenerationEpochMs)
+        }
+    }
+
+    @Test
+    fun newMetadataFieldsOriginUploadFileNameSessionIdRoundTrip() {
+        runBlocking {
+            val id = dao.insert(
+                sample(
+                    origin = "https://romm.example.com",
+                    uploadFileName = "pokemon_blue.srm",
+                    sessionId = 99L,
+                )
+            )
+            val found = dao.findById(id)
+
+            assertEquals("https://romm.example.com", found?.origin)
+            assertEquals("pokemon_blue.srm", found?.uploadFileName)
+            assertEquals(99L, found?.sessionId)
+        }
+    }
+
+    @Test
+    fun newMetadataFieldsDefaultToNullWhenNotProvided() {
+        runBlocking {
+            val id = dao.insert(sample())
+            val found = dao.findById(id)
+
+            assertNull(found?.origin)
+            assertNull(found?.uploadFileName)
+            assertNull(found?.sessionId)
         }
     }
 

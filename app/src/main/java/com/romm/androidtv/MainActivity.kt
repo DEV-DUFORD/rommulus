@@ -46,6 +46,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import com.romm.androidtv.auth.AuthRepository
 import com.romm.androidtv.auth.SessionStore
+import com.romm.androidtv.romm.ClientTokenStore
 import com.romm.androidtv.cache.CacheDatabase
 import com.romm.androidtv.cache.ContentCache
 import com.romm.androidtv.config.SettingsRepository
@@ -155,7 +156,7 @@ class MainActivity : ComponentActivity() {
     // Auth repository — owns login/session-verification/cookie-sync network calls so
     // MainActivity coordinates navigation rather than owning network internals.
     private val authRepository: AuthRepository by lazy {
-        AuthRepository(okHttpClient, RommOkHttpClient.cookieSyncJar, sessionStore)
+        AuthRepository(okHttpClient, RommOkHttpClient.cookieSyncJar, sessionStore, ClientTokenStore(this))
     }
 
     // Phase 3/4 native content pipeline — quota-limited, identity-keyed cache of

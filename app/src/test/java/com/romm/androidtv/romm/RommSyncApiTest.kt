@@ -314,4 +314,95 @@ class RommSyncApiTest {
             assertThat((result as SaveConfirmResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
         }
     }
+
+    @Nested
+    @DisplayName("client-token parsing and acquisition")
+    inner class ClientTokenTests {
+
+        @Test
+        fun `parseClientTokenResponse parses valid response`() {
+            val info = RommSyncApi.parseClientTokenResponse(
+                """{"id": 1, "name": "romm-android-tv", "scopes": ["assets","device"],
+                    "raw_token": "rmm_abc123", "expires_at": "2025-01-01T00:00:00Z", "created_at": "2026-01-01T00:00:00Z"}"""
+            )
+
+            assertThat(info).isNotNull
+            assertThat(info!!.token.raw).isEqualTo("rmm_abc123")
+            assertThat(info.expiresAtEpochSeconds).isEqualTo(Instant.parse("2025-01-01T00:00:00Z").epochSecond)
+        }
+
+        @Test
+        fun `parseClientTokenResponse handles null expires_at`() {
+            val info = RommSyncApi.parseClientTokenResponse(
+                """{"id": 2, "name": "test", "scopes": ["assets"], "raw_token": "rmm_xyz"}"""
+            )
+
+            assertThat(info).isNotNull
+            assertThat(info!!.token.raw).isEqualTo("rmm_xyz")
+            assertThat(info.expiresAtEpochSeconds).isNull()
+        }
+
+        @Test
+        fun `parseClientTokenResponse returns null for blank raw_token`() {
+            assertThat(RommSyncApi.parseClientTokenResponse(
+                """{"raw_token": ""}"""
+            )).isNull()
+        }
+
+        @Test
+        fun `parseClientTokenResponse returns null for malformed json`() {
+            assertThat(RommSyncApi.parseClientTokenResponse("not json")).isNull()
+        }
+
+        @Test
+        fun `parseClientTokenResponse returns null for malformed expires_at`() {
+            val info = RommSyncApi.parseClientTokenResponse(
+                """{"id": 1, "name": "test", "scopes": ["assets"],
+                    "raw_token": "rmm_valid", "expires_at": "not-a-date"}"""
+            )
+
+            // Malformed ISO-8601 in expires_at causes Instant.parse to throw,
+            // which the outer catch swallows and returns null.
+            assertThat(info).isNull()
+        }
+
+        @Test
+        fun `acquireClientToken 201 returns Success with parsed token`() {
+            server.enqueue(
+                MockResponse().setResponseCode(201).setBody(
+                    """{"id": 1, "name": "romm-android-tv", "scopes": ["assets","device"],
+                        "raw_token": "rmm_live_token", "expires_at": null}"""
+                )
+            )
+
+            val result = RommSyncApi.acquireClientToken(
+                client, baseUrl(), listOf("assets", "device"),
+            )
+
+            assertThat(result).isInstanceOf(ClientTokenAcquireResult.Success::class.java)
+            val success = result as ClientTokenAcquireResult.Success
+            assertThat(success.info.token.raw).isEqualTo("rmm_live_token")
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).isEqualTo("/api/client-tokens")
+            assertThat(recorded.body.readUtf8()).contains("assets").contains("device")
+        }
+
+        @Test
+        fun `acquireClientToken 401 classifies as AUTH_EXPIRED`() {
+            server.enqueue(MockResponse().setResponseCode(401))
+
+            val result = RommSyncApi.acquireClientToken(client, baseUrl(), listOf("assets"))
+
+            assertThat((result as ClientTokenAcquireResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+        }
+
+        @Test
+        fun `acquireClientToken blank origin fails without network call`() {
+            val result = RommSyncApi.acquireClientToken(client, "", listOf("assets"))
+
+            assertThat((result as ClientTokenAcquireResult.Failure).error).isEqualTo(RommApiError.ORIGIN_NOT_CONFIGURED)
+            assertThat(server.requestCount).isEqualTo(0)
+        }
+    }
 }

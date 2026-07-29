@@ -5,12 +5,15 @@ import com.romm.androidtv.network.AuthError
 import com.romm.androidtv.network.AuthFlowResult
 import com.romm.androidtv.network.HeartbeatCallResult
 import com.romm.androidtv.network.RomMCookieSync
+import com.romm.androidtv.romm.ClientToken
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.DisplayName
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import java.net.CookieManager
 import java.net.CookiePolicy
@@ -118,5 +121,170 @@ class AuthRepositoryTest {
 
             assertThat(result).isInstanceOf(HeartbeatCallResult.Success::class.java)
         }
+    }
+
+    @Nested
+    @DisplayName("ClientToken acquisition and persistence")
+    inner class ClientTokenAcquisition {
+
+        private lateinit var tokenStorage: FakeClientTokenStorage
+        private lateinit var repoWithTokens: AuthRepository
+
+        @BeforeEach
+        fun setUp() {
+            val cookieSync = RomMCookieSync(CookieManager(null, CookiePolicy.ACCEPT_ALL))
+            sessionStore = SessionStore(FakeSharedPreferences())
+            tokenStorage = FakeClientTokenStorage()
+            repoWithTokens = AuthRepository(client, cookieSync, sessionStore, tokenStorage)
+        }
+
+        @Test
+        fun `login acquires and persists client token on success`() {
+            runBlocking {
+                // POST /api/login
+                server.enqueue(MockResponse().setResponseCode(200))
+                // heartbeat
+                server.enqueue(
+                    MockResponse().setResponseCode(200).setBody(
+                        """{"version":"5.0.0","setup_complete":true,"userpass_enabled":true,"emulatorjs_enabled":true}"""
+                    )
+                )
+                // /api/users/me
+                server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+                // POST /api/client-tokens
+                server.enqueue(
+                    MockResponse().setResponseCode(201).setBody(
+                        """{"id": 1, "name": "romm-android-tv", "scopes": ["assets","device"],
+                            "raw_token": "rmm_testtoken123", "expires_at": null}"""
+                    )
+                )
+
+                val result = repoWithTokens.login(baseUrl(), "root", "hunter2".toCharArray())
+
+                assertThat(result).isInstanceOf(AuthFlowResult.Success::class.java)
+                assertThat(tokenStorage.storedKeys).containsExactly(listOf(baseUrl(), "root"))
+                assertThat(tokenStorage.storedTokens[listOf(baseUrl(), "root")]).isEqualTo("rmm_testtoken123")
+            }
+        }
+
+        @Test
+        fun `verifySession acquires and persists client token on success`() {
+            runBlocking {
+                // verifyExistingSession: /api/users/me
+                server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+                // heartbeat
+                server.enqueue(
+                    MockResponse().setResponseCode(200).setBody(
+                        """{"version":"5.0.0","setup_complete":true,"userpass_enabled":true,"emulatorjs_enabled":true}"""
+                    )
+                )
+                // POST /api/client-tokens
+                server.enqueue(
+                    MockResponse().setResponseCode(201).setBody(
+                        """{"id": 1, "name": "romm-android-tv", "scopes": ["assets","device"],
+                            "raw_token": "rmm_verifytoken456", "expires_at": null}"""
+                    )
+                )
+
+                val result = repoWithTokens.verifySession(baseUrl())
+
+                assertThat(result).isInstanceOf(AuthFlowResult.Success::class.java)
+                assertThat(tokenStorage.storedKeys).containsExactly(listOf(baseUrl(), "root"))
+            }
+        }
+
+        @Test
+        fun `login reuses existing valid token without server call`() {
+            runBlocking {
+                // Pre-seed a stored token
+                tokenStorage.setToken(baseUrl(), "root", ClientToken("rmm_existing"))
+                assertThat(tokenStorage.storedTokens[listOf(baseUrl(), "root")]).isEqualTo("rmm_existing")
+
+                // POST /api/login (no client-tokens call expected)
+                server.enqueue(MockResponse().setResponseCode(200))
+                server.enqueue(
+                    MockResponse().setResponseCode(200).setBody(
+                        """{"version":"5.0.0","setup_complete":true,"userpass_enabled":true,"emulatorjs_enabled":true}"""
+                    )
+                )
+                server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+
+                val result = repoWithTokens.login(baseUrl(), "root", "hunter2".toCharArray())
+
+                assertThat(result).isInstanceOf(AuthFlowResult.Success::class.java)
+                // Token should still be the original one (not re-acquired)
+                assertThat(tokenStorage.storedTokens[listOf(baseUrl(), "root")]).isEqualTo("rmm_existing")
+                // Only 3 requests: login, heartbeat, users/me — no client-tokens call
+                assertThat(server.requestCount).isEqualTo(3)
+            }
+        }
+
+        @Test
+        fun `login failure does not acquire or persist token`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(401))
+
+                val result = repoWithTokens.login(baseUrl(), "root", "wrong".toCharArray())
+
+                assertThat(result).isInstanceOf(AuthFlowResult.Failure::class.java)
+                assertThat(tokenStorage.storedKeys).isEmpty()
+            }
+        }
+
+        @Test
+        fun `client token acquisition failure does not break login`() {
+            runBlocking {
+                // POST /api/login
+                server.enqueue(MockResponse().setResponseCode(200))
+                // heartbeat
+                server.enqueue(
+                    MockResponse().setResponseCode(200).setBody(
+                        """{"version":"5.0.0","setup_complete":true,"userpass_enabled":true,"emulatorjs_enabled":true}"""
+                    )
+                )
+                // /api/users/me
+                server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+                // POST /api/client-tokens — fails with 500
+                server.enqueue(MockResponse().setResponseCode(500))
+
+                val result = repoWithTokens.login(baseUrl(), "root", "hunter2".toCharArray())
+
+                // Login still succeeds despite token acquisition failure
+                assertThat(result).isInstanceOf(AuthFlowResult.Success::class.java)
+                assertThat(sessionStore.current()).isNotNull
+            }
+        }
+
+        @Test
+        fun `clearClientTokenForCurrentSession removes the stored token`() {
+            runBlocking {
+                tokenStorage.setToken(baseUrl(), "root", ClientToken("rmm_test"))
+                assertThat(tokenStorage.storedKeys).containsExactly(listOf(baseUrl(), "root"))
+
+                repoWithTokens.clearClientTokenForCurrentSession(baseUrl(), "root")
+
+                assertThat(tokenStorage.storedKeys).isEmpty()
+            }
+        }
+    }
+
+    /** In-memory fake ClientTokenStorage for unit testing. */
+    private class FakeClientTokenStorage : ClientTokenStorage {
+        private val tokens = mutableMapOf<List<String>, String>()
+
+        override fun getToken(origin: String, username: String): ClientToken? {
+            return tokens[listOf(origin, username)]?.let { ClientToken(it) }
+        }
+
+        override fun setToken(origin: String, username: String, token: ClientToken) {
+            tokens[listOf(origin, username)] = token.raw
+        }
+
+        override fun clearToken(origin: String, username: String) {
+            tokens.remove(listOf(origin, username))
+        }
+
+        val storedKeys: Set<List<String>> get() = tokens.keys
+        val storedTokens: Map<List<String>, String> get() = tokens.toMap()
     }
 }

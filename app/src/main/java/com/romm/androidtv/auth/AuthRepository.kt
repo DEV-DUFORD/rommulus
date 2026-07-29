@@ -6,6 +6,9 @@ import com.romm.androidtv.network.RomMCookieSync
 import com.romm.androidtv.network.executeAuthFlow
 import com.romm.androidtv.network.executeHeartbeat
 import com.romm.androidtv.network.verifyExistingSession
+import com.romm.androidtv.romm.ClientToken
+import com.romm.androidtv.romm.ClientTokenAcquireResult
+import com.romm.androidtv.romm.RommSyncApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -24,12 +27,26 @@ import okhttp3.OkHttpClient
  *
  * On a successful login or session-restore verification, the result is recorded
  * in [sessionStore] so a durable session fact survives process restarts
- * independent of the WebView cookie jar.
+ * independent of the WebView cookie jar. Additionally, a durable ClientToken
+ * Bearer credential is acquired via [RommSyncApi.acquireClientToken] while the
+ * cookie-authenticated foreground client is valid, and persisted into
+ * [clientTokenStore] for later cookie-independent worker execution (p5-workmanager).
  */
+/**
+ * Interface for durable client-token persistence. Allows unit-testing [AuthRepository]
+ * without Android Keystore/SharedPreferences while production uses [com.romm.androidtv.romm.ClientTokenStore].
+ */
+interface ClientTokenStorage {
+    fun getToken(origin: String, username: String): ClientToken?
+    fun setToken(origin: String, username: String, token: ClientToken)
+    fun clearToken(origin: String, username: String)
+}
+
 class AuthRepository(
     private val client: OkHttpClient,
     private val cookieSync: RomMCookieSync,
     private val sessionStore: SessionStore,
+    private val clientTokenStorage: ClientTokenStorage? = null,
 ) {
 
     /** Executes the full login flow (POST /api/login, heartbeat, /api/users/me). */
@@ -74,9 +91,49 @@ class AuthRepository(
         cookieSync.syncToWebView(origin)
     }
 
+    /** Clears the durable client token for the given scope (explicit sign-out). */
+    fun clearClientTokenForCurrentSession(origin: String, username: String) {
+        clientTokenStorage?.clearToken(origin, username)
+    }
+
     private fun recordIfSuccessful(origin: String, result: AuthFlowResult) {
         if (result is AuthFlowResult.Success) {
             sessionStore.save(origin, result.verifiedUser.username)
+            // Acquire durable ClientToken for worker execution while foreground client is authenticated.
+            acquireAndPersistClientToken(origin, result.verifiedUser.username)
         }
+    }
+
+    /**
+     * Acquires a durable [com.romm.androidtv.romm.ClientToken] via the cookie-authenticated
+     * foreground client and persists it into [clientTokenStore]. Reuses any existing valid
+     * token to avoid unnecessary server calls. Silently ignores acquisition failures —
+     * the worker will fall back to AUTH_REQUIRED if no token is available, which is the
+     * correct terminal state for that case.
+     */
+    private fun acquireAndPersistClientToken(origin: String, username: String?) {
+        val uname = username ?: return
+        val storage = clientTokenStorage ?: return
+
+        // Reuse existing valid token to avoid unnecessary server calls.
+        if (storage.getToken(origin, uname) != null) return
+
+        try {
+            val result = RommSyncApi.acquireClientToken(
+                client = client,
+                origin = origin,
+                scopes = CLIENT_TOKEN_SCOPES,
+            )
+            if (result is ClientTokenAcquireResult.Success) {
+                storage.setToken(origin, uname, result.info.token)
+            }
+        } catch (_: Exception) {
+            // Acquisition failure is non-fatal; worker will handle missing token as AUTH_REQUIRED.
+        }
+    }
+
+    companion object {
+        /** Minimum scopes required for device registration and save upload via Bearer token. */
+        private val CLIENT_TOKEN_SCOPES = listOf("assets", "device")
     }
 }
