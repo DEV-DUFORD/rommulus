@@ -111,6 +111,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    // Extended icon set (SportsEsports, Collections, etc.) used by the native browsing UI
+    implementation("androidx.compose.material:material-icons-extended")
 
     // AndroidX Leanback (TV support library) for leanback feature declaration
     implementation("androidx.leanback:leanback:1.0.0")
@@ -145,6 +147,16 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
+    // ViewModel integration for Compose (viewModel() composable) — UI_REFACTOR.md
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
+
+    // Coil for Compose image loading (cover art) — UI_REFACTOR.md section 5
+    implementation("io.coil-kt:coil-compose:2.6.0")
+
+    // Jetpack Compose for TV: focus-aware lazy lists/rows and D-pad focus restoration,
+    // used by the native browsing UI (UI_REFACTOR.md) instead of hand-rolled focus plumbing.
+    implementation("androidx.tv:tv-foundation:1.0.0-alpha10")
+    implementation("androidx.tv:tv-material:1.0.0")
 
     // Unit testing
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")

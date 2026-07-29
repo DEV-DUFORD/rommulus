@@ -1,0 +1,225 @@
+package com.romm.androidtv.library
+
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.DisplayName
+import org.junit.jupiter.api.Nested
+import org.junit.jupiter.api.Test
+
+/**
+ * Parser-only tests against synthetic fixture JSON matching the real RomM
+ * 5+ response shapes documented in UI_REFACTOR.md section 3 (verified live
+ * against a real server; these fixtures are hand-written, not captured real
+ * data). No network calls, no real server URLs/credentials.
+ */
+@DisplayName("LibraryApi — platform/rom/collection list parsing")
+class LibraryApiTest {
+
+    private val origin = "https://example.test"
+
+    @Nested
+    @DisplayName("parsePlatformList")
+    inner class ParsePlatformList {
+
+        @Test
+        fun `parses normal platform list`() {
+            val body = """
+                [{"id": 34, "slug": "dc", "name": "Dreamcast", "custom_name": "",
+                  "display_name": "Dreamcast", "rom_count": 343, "url_logo": "https://cdn.example/dc.jpg"}]
+            """.trimIndent()
+
+            val result = LibraryApi.parsePlatformList(body)
+
+            assertThat(result).isNotNull
+            assertThat(result).hasSize(1)
+            assertThat(result!![0]).isEqualTo(
+                PlatformSummary(id = 34, displayName = "Dreamcast", romCount = 343, logoUrl = "https://cdn.example/dc.jpg")
+            )
+        }
+
+        @Test
+        fun `falls back to name when display_name and custom_name are blank or missing`() {
+            val body = """
+                [{"id": 21, "slug": "gb", "name": "Game Boy", "custom_name": "",
+                  "rom_count": 609, "url_logo": null}]
+            """.trimIndent()
+
+            val result = LibraryApi.parsePlatformList(body)
+
+            assertThat(result).isNotNull
+            assertThat(result!![0].displayName).isEqualTo("Game Boy")
+            assertThat(result[0].logoUrl).isNull()
+        }
+
+        @Test
+        fun `parses empty array`() {
+            val result = LibraryApi.parsePlatformList("[]")
+            assertThat(result).isNotNull
+            assertThat(result).isEmpty()
+        }
+
+        @Test
+        fun `returns null for malformed json`() {
+            assertThat(LibraryApi.parsePlatformList("not json")).isNull()
+        }
+    }
+
+    @Nested
+    @DisplayName("parseRomsPage")
+    inner class ParseRomsPage {
+
+        @Test
+        fun `parses normal roms page with relative cover path resolved against origin`() {
+            val body = """
+                {"items": [{
+                    "id": 38035, "name": "Live A Live", "fs_name_no_tags": "Live A Live",
+                    "platform_display_name": "Super Nintendo Entertainment System",
+                    "path_cover_small": "/assets/romm/resources/roms/14/277/cover/small.png?ts=1",
+                    "path_cover_large": "/assets/romm/resources/roms/14/277/cover/big.png?ts=1",
+                    "url_cover": null,
+                    "rom_user": {"last_played": "2026-07-27T09:21:05+00:00", "now_playing": false}
+                }], "total": 1}
+            """.trimIndent()
+
+            val result = LibraryApi.parseRomsPage(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.total).isEqualTo(1)
+            assertThat(result.roms).hasSize(1)
+            val rom = result.roms[0]
+            assertThat(rom.id).isEqualTo(38035)
+            assertThat(rom.title).isEqualTo("Live A Live")
+            assertThat(rom.platformDisplayName).isEqualTo("Super Nintendo Entertainment System")
+            assertThat(rom.coverUrl).isEqualTo("$origin/assets/romm/resources/roms/14/277/cover/big.png?ts=1")
+            assertThat(rom.lastPlayedIso).isEqualTo("2026-07-27T09:21:05+00:00")
+            assertThat(rom.nowPlaying).isFalse
+        }
+
+        @Test
+        fun `falls back to fs_name_no_tags when name is null, and to url_cover when no relative path exists`() {
+            val body = """
+                {"items": [{
+                    "id": 1, "name": null, "fs_name_no_tags": "Some Rom",
+                    "platform_display_name": "Game Boy",
+                    "path_cover_small": null, "path_cover_large": null,
+                    "url_cover": "https://cdn.example/cover.jpg",
+                    "rom_user": null
+                }], "total": 1}
+            """.trimIndent()
+
+            val result = LibraryApi.parseRomsPage(body, origin)
+
+            assertThat(result).isNotNull
+            val rom = result!!.roms[0]
+            assertThat(rom.title).isEqualTo("Some Rom")
+            assertThat(rom.coverUrl).isEqualTo("https://cdn.example/cover.jpg")
+            assertThat(rom.lastPlayedIso).isNull()
+            assertThat(rom.nowPlaying).isFalse
+        }
+
+        @Test
+        fun `parses empty items list`() {
+            val result = LibraryApi.parseRomsPage("""{"items": [], "total": 0}""", origin)
+            assertThat(result).isNotNull
+            assertThat(result!!.roms).isEmpty()
+            assertThat(result.total).isEqualTo(0)
+        }
+
+        @Test
+        fun `treats missing items field as empty rather than failing`() {
+            val result = LibraryApi.parseRomsPage("""{"total": 0}""", origin)
+            assertThat(result).isNotNull
+            assertThat(result!!.roms).isEmpty()
+        }
+
+        @Test
+        fun `returns null for malformed json`() {
+            assertThat(LibraryApi.parseRomsPage("not json", origin)).isNull()
+        }
+    }
+
+    @Nested
+    @DisplayName("parseCollectionList")
+    inner class ParseCollectionList {
+
+        @Test
+        fun `parses normal collection list preferring path_cover_large`() {
+            val body = """
+                [{"id": 1, "name": "Duf's Favorites", "rom_count": 17,
+                  "path_cover_large": "/assets/romm/resources/collections/1/cover/big.png",
+                  "path_covers_large": ["/assets/romm/resources/roms/1/cover/big.png"]}]
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollectionList(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!![0]).isEqualTo(
+                CollectionSummary(
+                    id = 1,
+                    name = "Duf's Favorites",
+                    romCount = 17,
+                    coverUrl = "$origin/assets/romm/resources/collections/1/cover/big.png",
+                )
+            )
+        }
+
+        @Test
+        fun `falls back to first of path_covers_large when path_cover_large is null`() {
+            val body = """
+                [{"id": 2, "name": "Kino", "rom_count": 3, "path_cover_large": null,
+                  "path_covers_large": ["/assets/romm/resources/roms/9/cover/big.png", "/assets/x/cover/big.png"]}]
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollectionList(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!![0].coverUrl).isEqualTo("$origin/assets/romm/resources/roms/9/cover/big.png")
+        }
+
+        @Test
+        fun `returns null cover when neither path_cover_large nor path_covers_large has anything`() {
+            val body = """
+                [{"id": 3, "name": "Empty", "rom_count": 0, "path_cover_large": null, "path_covers_large": []}]
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollectionList(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!![0].coverUrl).isNull()
+        }
+
+        @Test
+        fun `parses empty array`() {
+            val result = LibraryApi.parseCollectionList("[]", origin)
+            assertThat(result).isNotNull
+            assertThat(result).isEmpty()
+        }
+
+        @Test
+        fun `returns null for malformed json`() {
+            assertThat(LibraryApi.parseCollectionList("not json", origin)).isNull()
+        }
+    }
+
+    @Nested
+    @DisplayName("resolveCoverUrl")
+    inner class ResolveCoverUrl {
+
+        @Test
+        fun `passes through an already-absolute relative-slot url unchanged`() {
+            val result = LibraryApi.resolveCoverUrl(origin, "https://cdn.example/already-absolute.jpg", null)
+            assertThat(result).isEqualTo("https://cdn.example/already-absolute.jpg")
+        }
+
+        @Test
+        fun `adds a leading slash if the relative path is missing one`() {
+            val result = LibraryApi.resolveCoverUrl(origin, "assets/x/cover.png", null)
+            assertThat(result).isEqualTo("$origin/assets/x/cover.png")
+        }
+
+        @Test
+        fun `returns null when both inputs are null or blank`() {
+            assertThat(LibraryApi.resolveCoverUrl(origin, null, null)).isNull()
+            assertThat(LibraryApi.resolveCoverUrl(origin, "", "")).isNull()
+        }
+    }
+}

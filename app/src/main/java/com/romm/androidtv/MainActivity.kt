@@ -104,7 +104,8 @@ fun Modifier.tvSelect(onSelect: () -> Unit): Modifier = onKeyEvent { event ->
 class MainActivity : ComponentActivity() {
 
     private enum class Screen {
-        HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS
+        HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS,
+        NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH
     }
 
     private var currentScreen by mutableStateOf(Screen.HOME)
@@ -157,6 +158,12 @@ class MainActivity : ComponentActivity() {
     }
     private val romRepository: RomRepositoryImpl by lazy {
         RomRepositoryImpl(okHttpClient, sessionStore, contentCache)
+    }
+
+    // Native browsing UI (UI_REFACTOR.md) — independent of romRepository, which is
+    // scoped to single-ROM launch/staging, not list browsing.
+    private val libraryRepository: com.romm.androidtv.library.LibraryRepository by lazy {
+        com.romm.androidtv.library.LibraryRepositoryImpl(okHttpClient) { currentOrigin }
     }
 
     /** The currently configured RomM origin: persisted override, or the BuildConfig default. */
@@ -213,6 +220,9 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "onCreate: savedInstanceState=$savedInstanceState intent=$intent")
 
         // Back navigation: any non-HOME screen returns to HOME; HOME exits.
+        // Native sub-screens (reached via the NativeHomeScreen sidebar) return to
+        // NATIVE_HOME first, then HOME on a second Back — a small addition to the
+        // same convention, not a parallel nav system (UI_REFACTOR.md section 5).
         // Android Back is always reserved — never delegated to WebView.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -222,6 +232,8 @@ class MainActivity : ComponentActivity() {
                     // very callback (it's still enabled), causing infinite recursion and
                     // a StackOverflowError crash.
                     Screen.HOME -> finish()
+                    Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH ->
+                        currentScreen = Screen.NATIVE_HOME
                     else -> currentScreen = Screen.HOME
                 }
             }
@@ -345,6 +357,9 @@ class MainActivity : ComponentActivity() {
                             onOpenControllerDiagnostics = {
                                 currentScreen = Screen.CONTROLLER_DIAGNOSTICS
                             },
+                            onOpenNativeLibrary = {
+                                currentScreen = Screen.NATIVE_HOME
+                            },
                             onStageAndLaunchRealRom = { romId, onResult ->
                                 stageAndLaunchRealRom(romId, onResult)
                             }
@@ -380,6 +395,37 @@ class MainActivity : ComponentActivity() {
                             gamepadBridge = gamepadBridge,
                             gamepadDiagnostics = gamepadDiagnostics
                         )
+                        Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH -> {
+                            val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                                factory = com.romm.androidtv.library.HomeViewModel.Factory(libraryRepository)
+                            )
+                            com.romm.androidtv.library.ui.RommTvTheme {
+                                when (currentScreen) {
+                                    Screen.NATIVE_PLATFORMS -> {
+                                        val state by homeViewModel.uiState.collectAsState()
+                                        com.romm.androidtv.library.ui.PlatformsScreen(
+                                            state = state.platforms,
+                                            onRetry = homeViewModel::retryPlatforms
+                                        )
+                                    }
+                                    Screen.NATIVE_COLLECTIONS -> {
+                                        val state by homeViewModel.uiState.collectAsState()
+                                        com.romm.androidtv.library.ui.CollectionsScreen(
+                                            state = state.collections,
+                                            onRetry = homeViewModel::retryCollections
+                                        )
+                                    }
+                                    Screen.NATIVE_SEARCH -> com.romm.androidtv.library.ui.SearchScreen()
+                                    else -> com.romm.androidtv.library.ui.NativeHomeScreen(
+                                        viewModel = homeViewModel,
+                                        onOpenPlatforms = { currentScreen = Screen.NATIVE_PLATFORMS },
+                                        onOpenCollections = { currentScreen = Screen.NATIVE_COLLECTIONS },
+                                        onOpenSearch = { currentScreen = Screen.NATIVE_SEARCH },
+                                        onOpenSettings = { /* TODO: native settings screen — out of scope, see UI_REFACTOR.md */ }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -589,6 +635,7 @@ fun HomeScreen(
     onRunDiagnostics: () -> Unit,
     onOpenRomMOrigin: () -> Unit,
     onOpenControllerDiagnostics: () -> Unit = {},
+    onOpenNativeLibrary: () -> Unit = {},
     onStageAndLaunchRealRom: (Long, (StagingOutcome) -> Unit) -> Unit = { _, _ -> }
 ) {
     val scrollState = rememberScrollState()
@@ -699,6 +746,24 @@ fun HomeScreen(
                 text = "Controller Diagnostics",
                 style = MaterialTheme.typography.titleMedium,
                 color = Color(0xFF4caf50)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Native browsing UI preview entry point (UI_REFACTOR.md). Purely additive —
+        // does not replace or alter the WebView browsing flow above.
+        val nativeLibraryFocusRequester = remember { FocusRequester() }
+        OutlinedButton(
+            onClick = onOpenNativeLibrary,
+            modifier = Modifier
+                .focusRequester(nativeLibraryFocusRequester)
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Open Native Library (Preview)",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color(0xFF7259D1)
             )
         }
 
