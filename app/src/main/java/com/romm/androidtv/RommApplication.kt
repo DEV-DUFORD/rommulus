@@ -27,7 +27,7 @@ class RommApplication : Application(), Configuration.Provider {
                     context.applicationContext,
                     SaveDatabase::class.java,
                     SaveDatabase.DB_NAME,
-                ).addMigrations(SaveDatabase.MIGRATION_1_2)
+                ).addMigrations(SaveDatabase.MIGRATION_1_2, SaveDatabase.MIGRATION_2_3, SaveDatabase.MIGRATION_3_4)
                  .build().also { instance = it }
             }
         }

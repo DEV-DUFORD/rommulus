@@ -44,7 +44,7 @@ class PendingOperationConverters {
  */
 @Database(
     entities = [SaveReplicaEntity::class, PendingOperationEntity::class],
-    version = 2,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(SaveSyncStatusConverters::class, PendingOperationConverters::class)
@@ -72,6 +72,82 @@ abstract class SaveDatabase : RoomDatabase() {
                 )
                 database.execSQL(
                     "ALTER TABLE pending_operations ADD COLUMN sessionId INTEGER DEFAULT NULL",
+                )
+            }
+        }
+
+        /**
+         * Non-destructive migration v2 → v3: recreates save_replicas so that
+         * expectedSramSizeBytes becomes nullable (Long → Long?). SQLite cannot
+         * ALTER a NOT NULL column to nullable; the safe additive path is to
+         * recreate the table. All existing rows are copied verbatim; the unique
+         * index and foreign-key characteristics are restored identically.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """CREATE TABLE `save_replicas_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `serverKey` TEXT NOT NULL,
+                        `userKey` TEXT NOT NULL,
+                        `romId` INTEGER NOT NULL,
+                        `romHash` TEXT NOT NULL,
+                        `slot` TEXT NOT NULL,
+                        `coreId` TEXT NOT NULL,
+                        `coreBuildRevision` TEXT NOT NULL,
+                        `expectedSramSizeBytes` INTEGER,
+                        `localHash` TEXT,
+                        `localSizeBytes` INTEGER,
+                        `localWrittenAtEpochMs` INTEGER,
+                        `rommSaveId` INTEGER,
+                        `serverHash` TEXT,
+                        `serverSizeBytes` INTEGER,
+                        `serverUpdatedAtEpochMs` INTEGER,
+                        `syncStatus` TEXT NOT NULL,
+                        `lastError` TEXT
+                    )""",
+                )
+                database.execSQL(
+                    """INSERT INTO `save_replicas_new` (
+                        id, serverKey, userKey, romId, romHash, slot,
+                        coreId, coreBuildRevision, expectedSramSizeBytes,
+                        localHash, localSizeBytes, localWrittenAtEpochMs,
+                        rommSaveId, serverHash, serverSizeBytes,
+                        serverUpdatedAtEpochMs, syncStatus, lastError
+                    ) SELECT
+                        id, serverKey, userKey, romId, romHash, slot,
+                        coreId, coreBuildRevision, expectedSramSizeBytes,
+                        localHash, localSizeBytes, localWrittenAtEpochMs,
+                        rommSaveId, serverHash, serverSizeBytes,
+                        serverUpdatedAtEpochMs, syncStatus, lastError
+                    FROM `save_replicas`""",
+                )
+                database.execSQL("DROP TABLE `save_replicas`")
+                database.execSQL("ALTER TABLE `save_replicas_new` RENAME TO `save_replicas`")
+                database.execSQL(
+                    """CREATE UNIQUE INDEX IF NOT EXISTS
+                        `index_save_replicas_serverKey_userKey_romId_romHash_slot`
+                        ON `save_replicas` (`serverKey`, `userKey`, `romId`, `romHash`, `slot`)""",
+                )
+            }
+        }
+
+        /**
+         * Non-destructive migration v3 → v4: adds three nullable columns to
+         * `pending_operations` (negotiateFileName, negotiateCoreId,
+         * negotiateCoreBuildRevision) for [PendingOperationType.NEGOTIATE_AND_SYNC].
+         * Existing rows retain their original data; new columns default to NULL.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE pending_operations ADD COLUMN negotiateFileName TEXT DEFAULT NULL",
+                )
+                database.execSQL(
+                    "ALTER TABLE pending_operations ADD COLUMN negotiateCoreId TEXT DEFAULT NULL",
+                )
+                database.execSQL(
+                    "ALTER TABLE pending_operations ADD COLUMN negotiateCoreBuildRevision TEXT DEFAULT NULL",
                 )
             }
         }

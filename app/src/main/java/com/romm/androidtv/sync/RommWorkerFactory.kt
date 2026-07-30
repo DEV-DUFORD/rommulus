@@ -21,6 +21,8 @@ import com.romm.androidtv.romm.save.SaveUploadCaller
 import com.romm.androidtv.romm.save.SaveUploadExecutor
 import com.romm.androidtv.romm.save.SaveUploadExecutorImpl
 import com.romm.androidtv.romm.save.SessionReader
+import com.romm.androidtv.romm.save.SyncNegotiateAndSyncExecutor
+import com.romm.androidtv.romm.save.SyncNegotiateAndSyncExecutorImpl
 import okhttp3.OkHttpClient
 
 /**
@@ -89,15 +91,28 @@ class RommWorkerFactory(
                 }
             }
 
+            val deviceIdentityLoader = com.romm.androidtv.romm.save.DeviceIdentityLoader { origin, username ->
+                val result = deviceRepo.ensureRegistered(origin, username)
+                (result as? com.romm.androidtv.romm.DeviceRegistrationResult.Success)?.identity
+            }
+
+            val negotiateAndSyncExecutor: SyncNegotiateAndSyncExecutor = SyncNegotiateAndSyncExecutorImpl(
+                client = workerClient,
+                pendingOperationDao = pendingOpDao,
+                saveReplicaDao = saveReplicaDao,
+                saveContentStore = contentStore,
+                sessionReader = sessionReader,
+                deviceIdentityLoader = deviceIdentityLoader,
+                uploadCaller = saveUploadCaller,
+            )
+
             return SaveUploadExecutorImpl(
                 pendingOperationDao = pendingOpDao,
                 saveReplicaDao = saveReplicaDao,
                 saveContentStore = contentStore,
                 sessionReader = sessionReader,
-                deviceIdentityLoader = com.romm.androidtv.romm.save.DeviceIdentityLoader { origin, username ->
-                    val result = deviceRepo.ensureRegistered(origin, username)
-                    (result as? com.romm.androidtv.romm.DeviceRegistrationResult.Success)?.identity
-                },
+                deviceIdentityLoader = deviceIdentityLoader,
+                negotiateAndSyncExecutor = negotiateAndSyncExecutor,
                 uploadCaller = saveUploadCaller,
             )
         }

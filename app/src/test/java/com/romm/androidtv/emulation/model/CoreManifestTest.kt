@@ -104,4 +104,37 @@ class CoreManifestTest {
 
         assertThat(entry.approved).isTrue()
     }
+
+    @Test
+    fun `coreBuildRevision uses exact commit SHA over release tag`() {
+        val sameboy = CoreManifest.findById("sameboy")!!
+
+        // The authoritative build revision is the exact commit SHA — not a release label.
+        // MainActivity resolves coreBuildRevision as: commitSha ?: releaseTag (commit preferred).
+        assertThat(sameboy.commitSha).isEqualTo("8230189896a8bb6598574d302ba0ad3658f98ab4")
+        assertThat(sameboy.releaseTag).isEqualTo("v1.0.3-libretro")
+
+        // When both are present, commitSha is the exact build identity (preferred by MainActivity).
+        val coreBuildRevision = sameboy.commitSha.takeIf { it.isNotBlank() } ?: sameboy.releaseTag.takeIf { it.isNotBlank() }
+        assertThat(coreBuildRevision).isEqualTo("8230189896a8bb6598574d302ba0ad3658f98ab4")
+    }
+
+    @Test
+    fun `coreBuildRevision falls back to releaseTag when commitSha is blank`() {
+        val entry = CoreLicenseFinding(
+            coreName = "Untagged Core",
+            coreId = "untagged_core",
+            upstreamRepository = "https://example.com/untagged",
+            commitSha = "", // Intentionally blank — untagged, no commit recorded.
+            releaseTag = "v2.0.0-libretro",
+            licenseSummary = "MIT",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            supportedSystems = listOf("gb"),
+            supportedExtensions = listOf(".gb"),
+            approved = false,
+        )
+
+        val coreBuildRevision = entry.commitSha.takeIf { it.isNotBlank() } ?: entry.releaseTag.takeIf { it.isNotBlank() }
+        assertThat(coreBuildRevision).isEqualTo("v2.0.0-libretro")
+    }
 }

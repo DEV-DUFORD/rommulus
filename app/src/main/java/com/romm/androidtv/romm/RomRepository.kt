@@ -11,7 +11,7 @@ import com.romm.androidtv.cache.SevenZArchiveExtractor
 import com.romm.androidtv.cache.ZipArchiveExtractor
 import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.emulation.model.LaunchSpec
-import com.romm.androidtv.network.RommOrigin
+import com.romm.androidtv.network.extractServerKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -125,7 +125,7 @@ class RomRepositoryImpl(
         val session = sessionStore.current() ?: return@withContext StagingOutcome.AuthExpired
         val origin = session.origin
         val userKey = session.username ?: return@withContext StagingOutcome.AuthExpired
-        val serverKey = RommOrigin.parse(origin)?.host ?: origin
+        val serverKey = extractServerKey(origin)
 
         val rom = when (val result = RommApi.fetchRomInfo(client, origin, romId)) {
             is RomInfoResult.Success -> result.rom
@@ -161,7 +161,7 @@ class RomRepositoryImpl(
                 val resolution = resolveLaunchContentPath(File(cached.absolutePath), file.fileName, cached.contentHash, file.sha1Hash)
             ) {
                 is ContentPathResolution.Success ->
-                    StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId))
+                    StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId, file.fileName))
                 is ContentPathResolution.Failure -> resolution.outcome
             }
         }
@@ -207,7 +207,7 @@ class RomRepositoryImpl(
                 )
                 when (val resolution = resolveLaunchContentPath(outcome.file, file.fileName, contentHash, file.sha1Hash)) {
                     is ContentPathResolution.Success ->
-                        StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId))
+                        StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId, file.fileName))
                     is ContentPathResolution.Failure -> resolution.outcome
                 }
             }
@@ -348,7 +348,7 @@ class RomRepositoryImpl(
         data class Failure(val outcome: StagingOutcome) : ContentPathResolution
     }
 
-    private fun buildLaunchSpec(romId: Long, romHash: String, contentPath: String, coreId: String) = LaunchSpec(
+    private fun buildLaunchSpec(romId: Long, romHash: String, contentPath: String, coreId: String, serverSaveFileName: String) = LaunchSpec(
         romId = romId,
         romHash = romHash,
         contentPath = contentPath,
@@ -358,7 +358,8 @@ class RomRepositoryImpl(
         // WEBVIEW on this build (see config/PlaybackBackend.kt), and must keep doing so
         // regardless of anything the content-staging pipeline is capable of preparing.
         backend = com.romm.androidtv.config.PlaybackBackendPolicy.resolve(),
-        sessionId = UUID.randomUUID().toString(),
+        sessionId = java.util.UUID.randomUUID(),
+        serverSaveFileName = serverSaveFileName,
     )
 
     private fun requireOrigin(): String? = sessionStore.current()?.origin

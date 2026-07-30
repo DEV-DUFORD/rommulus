@@ -396,6 +396,118 @@ class SaveUploadExecutorImplTest {
 
     // ---- Helpers ----
 
+    // ---- NEGOTIATE_AND_SYNC draining tests ----
+
+    @Test
+    fun `NEGOTIATE_AND_SYNC delegates to SyncNegotiateAndSyncExecutor`() {
+        runBlocking {
+            val dao = FakePendingOperationDao()
+            val op = PendingOperationEntity(
+                serverKey = "test-server", userKey = "user1", romId = 1L, romHash = "hash-abc",
+                slot = "autosave", operationType = PendingOperationType.NEGOTIATE_AND_SYNC,
+                localGenerationEpochMs = 1000L, origin = "https://romm.example.com",
+                negotiateFileName = "test.srm", negotiateCoreId = "sameboy",
+                negotiateCoreBuildRevision = "v0.14",
+                createdAtEpochMs = 1000L, updatedAtEpochMs = 1000L,
+            )
+            dao.insert(op)
+
+            var delegatedOp: PendingOperationEntity? = null
+            val executor = buildExecutor(
+                pendingOperationDao = dao,
+                negotiateAndSyncBehavior = { opEntity ->
+                    delegatedOp = opEntity
+                    SyncNegotiateAndSyncExecutor.ExecutionOutcome.Completed
+                },
+            )
+
+            val result = executor.drainBatch()
+
+            assertThat(result).isEqualTo(SaveUploadExecutor.DrainResult.Complete)
+            assertThat(delegatedOp).isNotNull
+            assertThat(delegatedOp!!.negotiateFileName).isEqualTo("test.srm")
+        }
+    }
+
+    @Test
+    fun `NEGOTIATE_AND_SYNC retryable returns Retry`() {
+        runBlocking {
+            val dao = FakePendingOperationDao()
+            val op = PendingOperationEntity(
+                serverKey = "test-server", userKey = "user1", romId = 1L, romHash = "hash-abc",
+                slot = "autosave", operationType = PendingOperationType.NEGOTIATE_AND_SYNC,
+                localGenerationEpochMs = 1000L, origin = "https://romm.example.com",
+                negotiateFileName = "test.srm", negotiateCoreId = "sameboy",
+                negotiateCoreBuildRevision = "v0.14",
+                createdAtEpochMs = 1000L, updatedAtEpochMs = 1000L,
+            )
+            dao.insert(op)
+
+            val executor = buildExecutor(
+                pendingOperationDao = dao,
+                negotiateAndSyncBehavior = { _ ->
+                    SyncNegotiateAndSyncExecutor.ExecutionOutcome.Retryable
+                },
+            )
+
+            val result = executor.drainBatch()
+
+            assertThat(result).isEqualTo(SaveUploadExecutor.DrainResult.Retry)
+        }
+    }
+
+    @Test
+    fun `mixed UPLOAD and NEGOTIATE_AND_SYNC operations drain correctly`() {
+        runBlocking {
+            val dao = FakePendingOperationDao()
+            val replicaDao = FakeSaveReplicaDao()
+            val contentStore = FakeSaveContentStore()
+
+            // UPLOAD operation that succeeds.
+            val uploadOp = makePendingOp()
+            dao.insert(uploadOp)
+            contentStore.seedLocal(uploadOp.serverKey, uploadOp.userKey, uploadOp.romId, uploadOp.romHash, uploadOp.slot, byteArrayOf(1))
+            replicaDao.seed(makeReplicaWithGeneration(uploadOp))
+
+            // NEGOTIATE_AND_SYNC operation.
+            val negotiateOp = PendingOperationEntity(
+                serverKey = "test-server", userKey = "user1", romId = 2L, romHash = "hash-def",
+                slot = "autosave", operationType = PendingOperationType.NEGOTIATE_AND_SYNC,
+                localGenerationEpochMs = 2000L, origin = "https://romm.example.com",
+                negotiateFileName = "test2.srm", negotiateCoreId = "sameboy",
+                negotiateCoreBuildRevision = "v0.14",
+                createdAtEpochMs = 2000L, updatedAtEpochMs = 2000L,
+            )
+            dao.insert(negotiateOp)
+
+            var negotiateDelegated: PendingOperationEntity? = null
+            val executor = buildExecutor(
+                pendingOperationDao = dao,
+                saveReplicaDao = replicaDao,
+                saveContentStore = contentStore,
+                uploadBehavior = { _, _ ->
+                    SaveUploadResult.Success(
+                        com.romm.androidtv.romm.ServerSaveInfo(
+                            saveId = 1L, romId = uploadOp.romId, fileName = "test.srm",
+                            slot = uploadOp.slot, emulator = null, contentHash = "abc",
+                            updatedAt = java.time.Instant.now(), fileSizeBytes = 1,
+                        )
+                    )
+                },
+                negotiateAndSyncBehavior = { opEntity ->
+                    negotiateDelegated = opEntity
+                    SyncNegotiateAndSyncExecutor.ExecutionOutcome.Completed
+                },
+            )
+
+            val result = executor.drainBatch()
+
+            assertThat(result).isEqualTo(SaveUploadExecutor.DrainResult.Complete)
+            assertThat(negotiateDelegated).isNotNull
+            assertThat(negotiateDelegated!!.romId).isEqualTo(2L)
+        }
+    }
+
     private fun makePendingOp(
         idOverride: Long = 0L,
         serverKey: String = "test-server",
@@ -449,6 +561,9 @@ class SaveUploadExecutorImplTest {
         uploadBehavior: (String, SaveUploadRequest) -> SaveUploadResult = { _, _ ->
             SaveUploadResult.Failure(RommApiError.NETWORK_ERROR)
         },
+        negotiateAndSyncBehavior: (PendingOperationEntity) -> SyncNegotiateAndSyncExecutor.ExecutionOutcome = { _ ->
+            SyncNegotiateAndSyncExecutor.ExecutionOutcome.Completed
+        },
     ): SaveUploadExecutorImpl {
         return SaveUploadExecutorImpl(
             pendingOperationDao = pendingOperationDao,
@@ -456,6 +571,10 @@ class SaveUploadExecutorImplTest {
             saveContentStore = saveContentStore,
             sessionReader = sessionReader,
             deviceIdentityLoader = deviceIdentityLoader,
+            negotiateAndSyncExecutor = object : SyncNegotiateAndSyncExecutor {
+                override suspend fun executeOne(op: PendingOperationEntity): SyncNegotiateAndSyncExecutor.ExecutionOutcome =
+                    negotiateAndSyncBehavior(op)
+            },
             uploadCaller = SaveUploadCaller { origin, request ->
                 uploadBehavior(origin, request)
             },

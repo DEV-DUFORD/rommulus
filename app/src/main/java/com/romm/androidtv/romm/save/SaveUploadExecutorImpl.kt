@@ -1,5 +1,6 @@
 package com.romm.androidtv.romm.save
 
+import android.util.Log
 import com.romm.androidtv.romm.RommApiError
 import com.romm.androidtv.romm.SaveUploadRequest
 import com.romm.androidtv.romm.SaveUploadResult
@@ -11,10 +12,15 @@ class SaveUploadExecutorImpl(
     private val sessionReader: SessionReader,
     private val deviceIdentityLoader: DeviceIdentityLoader,
     private val uploadCaller: SaveUploadCaller,
+    private val negotiateAndSyncExecutor: SyncNegotiateAndSyncExecutor,
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) : SaveUploadExecutor {
 
     override suspend fun drainBatch(): SaveUploadExecutor.DrainResult {
+        // First, recover any pre-existing RUNNING rows that may have been stranded
+        // by a prior crash or process death.
+        recoverStrandedRunningOperations()
+
         val pending = pendingOperationDao.findByStatus(PendingOperationStatus.PENDING)
         if (pending.isEmpty()) return SaveUploadExecutor.DrainResult.Complete
 
@@ -26,12 +32,58 @@ class SaveUploadExecutorImpl(
         return if (anyRetryable) SaveUploadExecutor.DrainResult.Retry else SaveUploadExecutor.DrainResult.Complete
     }
 
+    /**
+     * Recovers any pre-existing RUNNING rows that may have been stranded by a crash
+     * or process death. Transitions them to RETRYABLE_FAILURE → PENDING so the next
+     * drain cycle can retry them.
+     */
+    private suspend fun recoverStrandedRunningOperations() {
+        val running = pendingOperationDao.findByStatus(PendingOperationStatus.RUNNING)
+        if (running.isEmpty()) return
+
+        for (op in running) {
+            try {
+                val now = clock()
+                val currentAttempt = op.attemptCount
+                Log.w(TAG, "recoverStrandedRunningOperations: recovering stranded RUNNING operation ${op.id} (attempt=$currentAttempt)")
+                pendingOperationDao.updateStatus(
+                    op.id, PendingOperationStatus.RETRYABLE_FAILURE, currentAttempt,
+                    "recovered from stranded RUNNING state", null, now,
+                )
+                pendingOperationDao.updateStatus(
+                    op.id, PendingOperationStatus.PENDING, currentAttempt, null, null, now,
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "recoverStrandedRunningOperations: failed to recover operation ${op.id}", e)
+            }
+        }
+    }
+
     private suspend fun processOne(op: PendingOperationEntity): OperationOutcome {
+        return try {
+            when (op.operationType) {
+                PendingOperationType.UPLOAD -> processUpload(op)
+                PendingOperationType.NEGOTIATE_AND_SYNC -> processNegotiateAndSync(op)
+            }
+        } catch (e: Exception) {
+            // Unexpected exceptions after an operation becomes RUNNING must never strand it.
+            // Transition: RUNNING → RETRYABLE_FAILURE → PENDING with error/attempt count.
+            handleUnexpectedException(op, e)
+        }
+    }
+
+    private suspend fun processNegotiateAndSync(op: PendingOperationEntity): OperationOutcome {
+        return when (negotiateAndSyncExecutor.executeOne(op)) {
+            SyncNegotiateAndSyncExecutor.ExecutionOutcome.Completed -> OperationOutcome.PERMANENT
+            SyncNegotiateAndSyncExecutor.ExecutionOutcome.Retryable -> OperationOutcome.RETRYABLE
+        }
+    }
+
+    private suspend fun processUpload(op: PendingOperationEntity): OperationOutcome {
         val now = clock()
         val currentAttempt = op.attemptCount + 1
         pendingOperationDao.updateStatus(op.id, PendingOperationStatus.RUNNING, currentAttempt, null, null, now)
 
-        // --- Legacy null metadata fails explicitly, never guessed ---
         val origin = op.origin
             ?: return transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.PERMANENT_FAILURE,
                 "legacy operation missing origin metadata", null, now, currentAttempt)
@@ -40,7 +92,6 @@ class SaveUploadExecutorImpl(
             ?: return transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.PERMANENT_FAILURE,
                 "legacy operation missing upload filename", null, now, currentAttempt)
 
-        // --- Validate session and device identity ---
         val session = sessionReader.current()
             ?: return transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.AUTH_REQUIRED,
                 "no active session", null, now, currentAttempt)
@@ -52,7 +103,6 @@ class SaveUploadExecutorImpl(
             ?: return transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.AUTH_REQUIRED,
                 "device not registered", null, now, currentAttempt)
 
-        // --- Validate current SaveReplica generation before upload ---
         val replica = saveReplicaDao.findByScope(op.serverKey, op.userKey, op.romId, op.romHash, op.slot)
             ?: return transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.PERMANENT_FAILURE,
                 "no local SaveReplica found for scope", null, now, currentAttempt)
@@ -62,12 +112,10 @@ class SaveUploadExecutorImpl(
                 "SaveReplica has null local generation — cannot validate", null, now, currentAttempt)
 
         if (replicaGeneration != op.localGenerationEpochMs) {
-            // A newer local write superseded this queued operation; drop it.
             return transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.PERMANENT_FAILURE,
                 "generation mismatch: replica=$replicaGeneration vs operation=${op.localGenerationEpochMs}", null, now, currentAttempt)
         }
 
-        // --- Read exact durable SRAM bytes ---
         val sramBytes = saveContentStore.readLocal(op.serverKey, op.userKey, op.romId, op.romHash, op.slot)
             ?: return transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.PERMANENT_FAILURE,
                 "local SRAM file missing", null, now, currentAttempt)
@@ -119,6 +167,29 @@ class SaveUploadExecutorImpl(
         }
     }
 
+    /**
+     * Handles an unexpected exception that occurred after an operation entered RUNNING.
+     * Performs RUNNING → RETRYABLE_FAILURE → PENDING so the operation is never stranded.
+     * Returns RETRYABLE so the batch drain reports retry needed.
+     */
+    private suspend fun handleUnexpectedException(op: PendingOperationEntity, e: Exception): OperationOutcome {
+        val now = clock()
+        val currentAttempt = op.attemptCount + 1 // This attempt ran, even though it threw.
+        Log.e(TAG, "processOne: unexpected exception for operation ${op.id}", e)
+        try {
+            pendingOperationDao.updateStatus(
+                op.id, PendingOperationStatus.RETRYABLE_FAILURE, currentAttempt,
+                "unexpected exception: ${e.javaClass.simpleName}: ${e.message}", null, now,
+            )
+            pendingOperationDao.updateStatus(
+                op.id, PendingOperationStatus.PENDING, currentAttempt, null, null, now,
+            )
+        } catch (recoveryEx: Exception) {
+            Log.e(TAG, "handleUnexpectedException: FAILED to recover operation ${op.id} — operation may be stranded", recoveryEx)
+        }
+        return OperationOutcome.RETRYABLE
+    }
+
     /** RUNNING -> RETRYABLE_FAILURE -> PENDING, preserving attempt count. */
     private suspend fun transitionRetryable(id: Long, now: Long, attemptCount: Int): OperationOutcome {
         pendingOperationDao.updateStatus(id, PendingOperationStatus.RETRYABLE_FAILURE, attemptCount, "transport failure", null, now)
@@ -136,4 +207,8 @@ class SaveUploadExecutorImpl(
     }
 
     private enum class OperationOutcome { RETRYABLE, PERMANENT, NON_TERMINAL }
+
+    companion object {
+        private val TAG = "SaveUploadExecutor"
+    }
 }

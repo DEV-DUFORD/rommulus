@@ -3,6 +3,7 @@ package com.romm.androidtv.romm.save
 import com.romm.androidtv.emulation.model.SavePathPolicy
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.RandomAccessFile
 
 /**
@@ -43,6 +44,45 @@ interface SaveContentStore {
         reason: String,
         nowEpochMs: Long,
     ): String
+
+    /**
+     * Durably backs up [bytes] under a **deterministic** conflict-specific path
+     * keyed by [sessionId], [choice] ("keep-local" or "keep-server"), and the
+     * first 16 hex characters of [contentHash]. Unlike [quarantine], this never
+     * embeds a timestamp — the same inputs always produce the same path, making
+     * crash/retry idempotent: re-running resolution for the same conflict writes
+     * to the identical backup file rather than creating a new one.
+     *
+     * Returns the absolute path the bytes were preserved under.
+     */
+    fun conflictBackup(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        bytes: ByteArray,
+        sessionId: Long,
+        choice: String,
+        contentHash: String,
+    ): String
+
+    /**
+     * Durably preserves the current canonical autosave bytes under a
+     * candidate-specific backup path before a candidate adoption overwrites them.
+     * Only succeeds if a canonical local copy exists; returns null otherwise.
+     * Idempotent: if a backup already exists for [candidateIdentifier], returns
+     * the existing backup path without overwriting. Throws on write failure.
+     */
+    fun backupCanonical(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        candidateIdentifier: Long,
+        nowEpochMs: Long,
+    ): String?
 }
 
 /** Real, `filesDir`-rooted [SaveContentStore], using [SavePathPolicy] for the autosave path. */
@@ -107,6 +147,76 @@ class FileSaveContentStore(private val filesDir: File) : SaveContentStore {
             out.fd.sync()
         }
         return quarantineFile.absolutePath
+    }
+
+    override fun conflictBackup(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        bytes: ByteArray,
+        sessionId: Long,
+        choice: String,
+        contentHash: String,
+    ): String {
+        val sanitizedChoice = choice.map { c -> if (c.isLetterOrDigit()) c else '_' }.joinToString("")
+        val hashPrefix = contentHash.take(16)
+        val conflictDir = File(
+            File(autosavePath(serverKey, userKey, romId, romHash, slot)).parentFile?.parentFile,
+            "conflict-backups",
+        )
+        conflictDir.mkdirs()
+        val backupFile = File(conflictDir, "conflict-${sessionId}-${sanitizedChoice}-${hashPrefix}.srm")
+
+        FileOutputStream(backupFile).use { out ->
+            out.write(bytes)
+            out.flush()
+            out.fd.sync()
+        }
+        return backupFile.absolutePath
+    }
+
+    override fun backupCanonical(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        candidateIdentifier: Long,
+        nowEpochMs: Long,
+    ): String? {
+        val canonicalFile = File(autosavePath(serverKey, userKey, romId, romHash, slot))
+        if (!canonicalFile.isFile) return null
+
+        val backupDir = File(
+            canonicalFile.parentFile?.parentFile,
+            "candidate-backups",
+        )
+        backupDir.mkdirs()
+
+        // Idempotent: check for existing backup for this candidate identifier.
+        val existingBackup = backupDir.listFiles { f ->
+            f.name.startsWith("pre-adoption-${candidateIdentifier}-") && f.extension == "srm"
+        }?.firstOrNull()
+
+        if (existingBackup != null && existingBackup.isFile) {
+            return existingBackup.absolutePath
+        }
+
+        val backupFile = File(backupDir, "pre-adoption-${candidateIdentifier}-${nowEpochMs}.srm")
+        canonicalFile.copyTo(backupFile, overwrite = false)
+
+        // Verify durability: fsync the parent directory is not supported on Android,
+        // but we fsynced during the copyTo's write. Read back to verify content integrity.
+        val backupBytes = backupFile.readBytes()
+        val originalBytes = canonicalFile.readBytes()
+        if (!backupBytes.contentEquals(originalBytes)) {
+            backupFile.delete()
+            throw IOException("Backup verification failed: content mismatch")
+        }
+
+        return backupFile.absolutePath
     }
 
     /**

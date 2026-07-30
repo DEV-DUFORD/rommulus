@@ -6,7 +6,7 @@ import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.cache.AtomicFileStore
 import com.romm.androidtv.cache.CacheEntryKind
 import com.romm.androidtv.cache.ContentCache
-import com.romm.androidtv.network.RommOrigin
+import com.romm.androidtv.network.extractServerKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -65,7 +65,7 @@ class FirmwareRepositoryImpl(
         if (session == null || requiredFileNames.isEmpty()) {
             return@withContext FirmwareAvailability(present = emptyList(), missing = requiredFileNames, hashMismatches = emptyList())
         }
-        val serverKey = RommOrigin.parse(session.origin)?.host ?: session.origin
+        val serverKey = extractServerKey(session.origin)
         val userKey = session.username ?: return@withContext FirmwareAvailability(emptyList(), requiredFileNames, emptyList())
 
         val firmwareList = when (val result = RommApi.fetchFirmwareList(client, session.origin, platformId)) {
@@ -99,7 +99,7 @@ class FirmwareRepositoryImpl(
     ): FirmwareStagingOutcome = withContext(Dispatchers.IO) {
         val session = sessionStore.current() ?: return@withContext FirmwareStagingOutcome.AuthExpired
         val userKey = session.username ?: return@withContext FirmwareStagingOutcome.AuthExpired
-        val serverKey = RommOrigin.parse(session.origin)?.host ?: session.origin
+        val serverKey = extractServerKey(session.origin)
 
         val firmwareList = when (val result = RommApi.fetchFirmwareList(client, session.origin, platformId)) {
             is FirmwareListResult.Success -> result.firmware

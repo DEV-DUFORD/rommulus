@@ -49,21 +49,33 @@ interface QuarantinePresentationAction {
  * or in Room. This screen never discards data without an explicit backup step. The backup
  * path, naming convention, and retention policy are defined by the production implementation
  * (p5-wiring milestone), not by this interface.
+ *
+ * [sessionId] is the sync negotiation session ID from
+ * [SaveSyncOutcome.ConflictRequiresResolution][com.romm.androidtv.romm.save.SaveSyncOutcome.ConflictRequiresResolution].
+ * It is required for session-aware network calls and deterministic backup naming.
  */
 interface ConflictResolutionAction {
     /**
      * User chose to keep the local copy and discard the server copy.
      * [localEntity] is the current local replica metadata; [serverOperation] describes
-     * the server side of the conflict.
+     * the server side of the conflict; [sessionId] is the original negotiation session.
      */
-    suspend fun resolveKeepLocal(localEntity: SaveReplicaEntity, serverOperation: SyncOperation)
+    suspend fun resolveKeepLocal(
+        sessionId: Long,
+        localEntity: SaveReplicaEntity,
+        serverOperation: SyncOperation,
+    )
 
     /**
      * User chose to keep the server copy and discard the local copy.
      * [localEntity] is the current local replica metadata; [serverOperation] describes
-     * the server side of the conflict.
+     * the server side of the conflict; [sessionId] is the original negotiation session.
      */
-    suspend fun resolveKeepServer(localEntity: SaveReplicaEntity, serverOperation: SyncOperation)
+    suspend fun resolveKeepServer(
+        sessionId: Long,
+        localEntity: SaveReplicaEntity,
+        serverOperation: SyncOperation,
+    )
 
     /**
      * User acknowledged quarantine and dismissed the screen. No data is modified.

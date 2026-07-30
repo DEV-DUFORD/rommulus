@@ -1,3 +1,6 @@
+// Pre-existing: Fragment version is below 1.3.0 but ActivityResult API works at runtime.
+@file:Suppress("InvalidFragmentVersionForActivityResult")
+
 package com.romm.androidtv
 
 import android.hardware.input.InputManager
@@ -20,6 +23,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -53,13 +57,29 @@ import com.romm.androidtv.config.SettingsRepository
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.router.ControllerEventRouter
 import com.romm.androidtv.diagnostic.DiagnosticPageHtml
+import com.romm.androidtv.emulation.model.CandidateExtras
+import com.romm.androidtv.emulation.model.CandidateSaveMetadata
+import com.romm.androidtv.emulation.model.DescriptorState
+import com.romm.androidtv.emulation.model.EmulationResult
+import com.romm.androidtv.emulation.model.EmulationResultHandler
+import com.romm.androidtv.emulation.model.LaunchSessionJournal
+import com.romm.androidtv.emulation.model.SaveLaunchOrchestrator
+import com.romm.androidtv.emulation.model.SessionDescriptorPatch
 import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.gamepad.GamepadInjectionBridge
 import com.romm.androidtv.gamepad.GamepadInjectionDiagnostics
 import com.romm.androidtv.model.*
 import com.romm.androidtv.network.*
+import com.romm.androidtv.romm.DeviceRepositoryImpl
 import com.romm.androidtv.romm.RomRepositoryImpl
 import com.romm.androidtv.romm.StagingOutcome
+import com.romm.androidtv.romm.StagingOutcomeMessage
+import com.romm.androidtv.romm.save.ConflictChoice
+import com.romm.androidtv.romm.save.FileSaveContentStore
+import com.romm.androidtv.romm.save.ResolveConflictRequest
+import com.romm.androidtv.romm.save.SaveSyncCoordinator
+import com.romm.androidtv.romm.save.SaveSyncCoordinatorImpl
+import com.romm.androidtv.romm.save.findSaveReplicaByScope
 import com.romm.androidtv.web.AuthenticatedWebViewScreen
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -107,7 +127,8 @@ class MainActivity : ComponentActivity() {
     private enum class Screen {
         HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS,
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
-        NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL
+        NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
+        NATIVE_CONFLICT, NATIVE_QUARANTINE
     }
 
     private var currentScreen by mutableStateOf(Screen.HOME)
@@ -120,6 +141,10 @@ class MainActivity : ComponentActivity() {
     private var selectedCollectionId by mutableStateOf<Long?>(null)
     private var selectedRomId by mutableStateOf<Long?>(null)
     private var gameDetailParent by mutableStateOf(Screen.NATIVE_HOME)
+
+    // Pre-launch save sync overlay state (conflict/quarantine). Scoped to a single ROM/session;
+    // survives recomposition because it lives on the Activity, not inside remember().
+    private var preLaunchState by mutableStateOf<com.romm.androidtv.library.ui.SavePreLaunchState?>(null)
 
     @Volatile
     private var diagnosticReport: DiagnosticReport? = null
@@ -196,6 +221,40 @@ class MainActivity : ComponentActivity() {
         GamepadInjectionBridge(gamepadDiagnostics)
     }
 
+    // Phase B: SaveSyncCoordinator for pre-launch negotiation and post-play finalization.
+    // Exposed as the interface type; implementation details (DAOs, stores) remain internal.
+    private val saveSyncCoordinator: SaveSyncCoordinator by lazy {
+        val db = com.romm.androidtv.RommApplication.database(this)
+        SaveSyncCoordinatorImpl(
+            client = okHttpClient,
+            sessionStore = sessionStore,
+            deviceRepository = DeviceRepositoryImpl(okHttpClient, com.romm.androidtv.romm.DeviceIdentityStore(getSharedPreferences("device_identity", MODE_PRIVATE))),
+            saveReplicaDao = db.saveReplicaDao(),
+            pendingOperationDao = db.pendingOperationDao(),
+            saveContentStore = FileSaveContentStore(filesDir),
+        )
+    }
+
+    // Phase B: Orchestrates pre-launch save-sync preparation. Eliminates duplicated
+    // sync-outcome handling between debug and native-library flows.
+    private val saveLaunchOrchestrator: SaveLaunchOrchestrator by lazy {
+        SaveLaunchOrchestrator(saveSyncCoordinator)
+    }
+
+    // Phase B: Handles EmulationActivity results and journal-based recovery with
+    // per-session serialization and thread-safe candidate metadata caching.
+    private val emulationResultHandler: EmulationResultHandler by lazy {
+        EmulationResultHandler(
+            coordinator = saveSyncCoordinator,
+            sessionStore = sessionStore,
+            lifecycleScope = lifecycleScope,
+            filesDir = filesDir,
+        )
+    }
+
+    // Phase B: ActivityResultLauncher for EmulationActivity result.
+    private lateinit var emulationLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
+
     companion object {
         private const val TAG = "RomMMainActivity"
     }
@@ -231,6 +290,11 @@ class MainActivity : ComponentActivity() {
             }
         })
 
+        // Phase B: register ActivityResultLauncher for EmulationActivity result.
+        emulationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            handleEmulationActivityResult(result)
+        }
+
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         if (BuildConfig.DEBUG) {
@@ -257,6 +321,12 @@ class MainActivity : ComponentActivity() {
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
                     Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
+                    Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE -> {
+                        // Dismiss overlay; return to the game detail screen for this ROM.
+                        preLaunchState?.clear()
+                        preLaunchState = null
+                        currentScreen = Screen.NATIVE_GAME_DETAIL
+                    }
                     else -> currentScreen = Screen.HOME
                 }
             }
@@ -419,7 +489,8 @@ class MainActivity : ComponentActivity() {
                             gamepadDiagnostics = gamepadDiagnostics
                         )
                         Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
-                        Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL, Screen.NATIVE_GAME_DETAIL -> {
+                        Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL,
+                        Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(libraryRepository)
                             )
@@ -474,7 +545,38 @@ class MainActivity : ComponentActivity() {
                                                 key = "game-detail-$romId",
                                                 factory = com.romm.androidtv.library.RomDetailViewModel.Factory(libraryRepository, romId),
                                             )
-                                            com.romm.androidtv.library.ui.GameDetailScreen(viewModel = detailViewModel)
+                                            // Production overlay: conflict/quarantine screens are only shown within the Native Library flow.
+                                            val state = preLaunchState
+                                            if (state != null && state.matchesScope(romId, state.sessionId) && state.hasOverlay) {
+                                                renderPreLaunchOverlay(state)
+                                            } else {
+                                                com.romm.androidtv.library.ui.GameDetailScreen(
+                                                    viewModel = detailViewModel,
+                                                    onPlay = { playRomId ->
+                                                        nativeLibraryOnPlay(playRomId)
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Screen.NATIVE_CONFLICT -> {
+                                        val state = preLaunchState
+                                        if (state != null && state.conflictModel != null) {
+                                            renderPreLaunchOverlay(state)
+                                        } else {
+                                            // Safety fallback: return to game detail.
+                                            preLaunchState = null
+                                            currentScreen = Screen.NATIVE_GAME_DETAIL
+                                        }
+                                    }
+                                    Screen.NATIVE_QUARANTINE -> {
+                                        val state = preLaunchState
+                                        if (state != null && state.quarantineModel != null) {
+                                            renderPreLaunchOverlay(state)
+                                        } else {
+                                            // Safety fallback: return to game detail.
+                                            preLaunchState = null
+                                            currentScreen = Screen.NATIVE_GAME_DETAIL
                                         }
                                     }
                                     Screen.NATIVE_PLATFORMS -> {
@@ -562,6 +664,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Phase B: recover pending journal entries on resume. If EmulationActivity died
+    // without delivering a result, the journal's ADOPTED state is replayed idempotently.
+    override fun onResume() {
+        super.onResume()
+        emulationResultHandler.recoverPendingSessions()
+    }
+
     // ---- Heartbeat check (lifecycle-aware coroutine) ----
 
     private fun runHeartbeatCheck() {
@@ -594,15 +703,15 @@ class MainActivity : ComponentActivity() {
             val outcome = romRepository.stageForLaunch(romId)
             onResult(outcome)
             if (outcome is StagingOutcome.Success) {
-                launchStagedRom(outcome)
+                launchStagedRom(outcome, onResult)
             }
         }
     }
 
-    private fun launchStagedRom(outcome: StagingOutcome.Success) {
+    private fun launchStagedRom(outcome: StagingOutcome.Success, onResult: (StagingOutcome) -> Unit) {
         val spec = outcome.launchSpec
         val session = sessionStore.current()
-        val serverKey = session?.origin?.let { RommOrigin.parse(it)?.host ?: it } ?: "unknown-server"
+        val serverKey = session?.origin?.let { extractServerKey(it) } ?: "unknown-server"
         val userKey = session?.username ?: "unknown-user"
         val savePath = SavePathPolicy.autosaveSramPath(
             filesDir = filesDir,
@@ -612,8 +721,125 @@ class MainActivity : ComponentActivity() {
             romHash = spec.romHash,
         )
 
-        startActivity(
+        // Phase B: pre-launch sync negotiation via orchestrator — debug presentation policy.
+        lifecycleScope.launch {
+            // Reuse trusted existing replica's expectedSramSizeBytes when available.
+            val sessForReplica = sessionStore.current()
+            val knownSramSize = if (sessForReplica != null) {
+                saveSyncCoordinator.findSaveReplicaByScope(
+                    serverKey = extractServerKey(sessForReplica.origin),
+                    userKey = sessForReplica.username ?: "",
+                    romId = spec.romId,
+                    romHash = spec.romHash,
+                    slot = SavePathPolicy.AUTOSAVE_SLOT,
+                )?.expectedSramSizeBytes
+            } else {
+                null
+            }
+            val preparation = saveLaunchOrchestrator.prepare(
+                romId = spec.romId,
+                romHash = spec.romHash,
+                coreId = spec.coreId,
+                coreBuildRevision = "", // Orchestrator re-resolves from CoreManifest.
+                expectedSramSizeBytes = knownSramSize,
+                fileName = spec.serverSaveFileName,
+            )
+
+            when (preparation) {
+                is SaveLaunchOrchestrator.PreparationResult.Ready ->
+                    launchEmulationActivity(spec, savePath, preparation.candidateMetadata)
+                is SaveLaunchOrchestrator.PreparationResult.Conflict -> {
+                    // Debug policy: show conflict overlay if possible, else report failure.
+                    val sess = sessionStore.current()
+                    val sessUsername = sess?.username
+                    if (sess != null && sessUsername != null) {
+                        val sk = extractServerKey(sess.origin)
+                        val localEntity = saveSyncCoordinator.findSaveReplicaByScope(
+                            serverKey = sk,
+                            userKey = sessUsername,
+                            romId = spec.romId,
+                            romHash = spec.romHash,
+                            slot = SavePathPolicy.AUTOSAVE_SLOT,
+                        )
+                        if (localEntity != null) {
+                            val uiModel = com.romm.androidtv.library.ui.ConflictResolutionMapper.mapConflict(localEntity, preparation.operation)
+                            withContext(Dispatchers.Main) {
+                                preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
+                                    romId = spec.romId,
+                                    sessionId = preparation.sessionId,
+                                    romHash = spec.romHash,
+                                ).apply {
+                                    conflictModel = uiModel
+                                    conflictOperation = preparation.operation
+                                }
+                                selectedRomId = spec.romId
+                                gameDetailParent = Screen.NATIVE_GAME_DETAIL
+                                currentScreen = Screen.NATIVE_CONFLICT
+                            }
+                        } else {
+                            onResult(com.romm.androidtv.romm.StagingOutcome.NetworkError("No local save replica found for ROM ${spec.romId}; cannot resolve conflict."))
+                        }
+                    } else {
+                        onResult(com.romm.androidtv.romm.StagingOutcome.NetworkError("No active session; cannot resolve conflict."))
+                    }
+                }
+                is SaveLaunchOrchestrator.PreparationResult.Quarantined -> {
+                    val uiModel = com.romm.androidtv.library.ui.ConflictResolutionMapper.mapQuarantine(
+                        reason = preparation.reason,
+                        quarantinedPath = preparation.quarantinedPath,
+                        localEntity = null,
+                    )
+                    withContext(Dispatchers.Main) {
+                        preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
+                            romId = spec.romId,
+                            sessionId = null,
+                            romHash = spec.romHash,
+                        ).apply { quarantineModel = uiModel }
+                        selectedRomId = spec.romId
+                        gameDetailParent = Screen.NATIVE_GAME_DETAIL
+                        currentScreen = Screen.NATIVE_QUARANTINE
+                    }
+                }
+                is SaveLaunchOrchestrator.PreparationResult.Failed -> {
+                    Log.e(TAG, "launchStagedRom: launch blocked — ${preparation.reason}")
+                    onResult(com.romm.androidtv.romm.StagingOutcome.NetworkError(preparation.reason))
+                }
+            }
+        }
+    }
+
+    private fun launchEmulationActivity(spec: com.romm.androidtv.emulation.model.LaunchSpec, savePath: String, candidateMetadata: CandidateSaveMetadata?) {
+        // Use LaunchSpec.sessionId (UUID) as the authoritative app session ID for ALL correlation.
+        val appSessionId = spec.sessionIdString
+
+        // Cache candidate metadata keyed by app session ID for finalization lookup (thread-safe).
+        candidateMetadata?.let { meta ->
+            emulationResultHandler.cacheCandidateMetadata(appSessionId, meta)
+        }
+
+        // Patch journal with core metadata for post-play recovery (syncPostPlay needs coreId/coreBuildRevision).
+        try {
+            val journalDir = filesDir.resolve("launch_sessions")
+            val journal = LaunchSessionJournal(journalDir)
+            val coreFinding = com.romm.androidtv.emulation.model.CoreManifest.findById(spec.coreId)
+            val coreBuildRevision = coreFinding?.commitSha?.takeIf { it.isNotBlank() }
+                ?: coreFinding?.releaseTag?.takeIf { it.isNotBlank() }
+            if (coreBuildRevision != null) {
+                journal.patchIdentity(appSessionId, SessionDescriptorPatch(
+                    romId = spec.romId,
+                    romHash = spec.romHash,
+                    coreId = spec.coreId,
+                    coreBuildRevision = coreBuildRevision,
+                    canonicalFileName = spec.serverSaveFileName,
+                ))
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "launchEmulationActivity: failed to patch journal with core metadata", e)
+        }
+
+        emulationLauncher.launch(
             Intent(this, com.romm.androidtv.emulation.process.EmulationActivity::class.java).apply {
+                putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_APP_SESSION_ID, appSessionId)
                 putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_CORE_ID, spec.coreId)
                 putExtra(
                     com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_CONTENT_PATH,
@@ -621,8 +847,342 @@ class MainActivity : ComponentActivity() {
                 )
                 putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_SAVE_PATH, savePath)
                 putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_ROM_ID, spec.romId)
+                candidateMetadata?.let { CandidateExtras.putIntoIntent(this, it) }
             }
         )
+    }
+
+    /**
+     * Phase B: handles the ActivityResult from EmulationActivity. Delegates to [EmulationResultHandler]
+     * which provides per-session serialization and thread-safe candidate metadata caching.
+     */
+    private fun handleEmulationActivityResult(result: androidx.activity.result.ActivityResult) {
+        val data = result.data ?: return
+        val sessionId = data.getStringExtra("session_id") ?: return
+
+        when (result.resultCode) {
+            android.app.Activity.RESULT_OK -> {
+                val checkpointedPath = data.getStringExtra("checkpointed_save_path")
+                val checkpointedHash = data.getStringExtra("checkpointed_save_hash")
+                val resultRomId = data.getLongExtra("rom_id", -1L)
+
+                lifecycleScope.launch {
+                    emulationResultHandler.handleEmulationResult(
+                        sessionId = sessionId,
+                        resultCode = android.app.Activity.RESULT_OK,
+                        checkpointedPath = checkpointedPath,
+                        checkpointedHash = checkpointedHash,
+                        resultRomId = resultRomId,
+                    )
+                }
+            }
+            android.app.Activity.RESULT_CANCELED -> {
+                Log.w(TAG, "handleEmulationActivityResult: cancelled for session $sessionId")
+                emulationResultHandler.removeCandidateMetadata(sessionId)
+            }
+        }
+    }
+
+    // ---- Native Library Play button: stage → sync negotiate → launch or overlay ----
+
+    /**
+     * Entry point invoked by GameDetailScreen's Play button in the Native Library flow.
+     * Stages the ROM, pre-launch-syncs saves, and either launches EmulationActivity
+     * or shows a conflict/quarantine overlay. Does NOT wire served RomM WebView;
+     * does NOT change PlaybackBackendPolicy.
+     */
+    private fun nativeLibraryOnPlay(romId: Long) {
+        lifecycleScope.launch {
+            val outcome = romRepository.stageForLaunch(romId)
+            if (outcome is com.romm.androidtv.romm.StagingOutcome.Success) {
+                launchStagedRomNativeLibrary(outcome)
+            } else {
+                withContext(Dispatchers.Main) {
+                    // Staging failure: show actionable error via pure mapper (never raw toString).
+                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = romId)
+                        .apply { errorMessage = StagingOutcomeMessage.toUserMessage(outcome) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Launch-staged-ROM path for Native Library (conflict/quarantine → overlay).
+     * Uses [SaveLaunchOrchestrator] for shared pre-launch preparation logic.
+     */
+    private fun launchStagedRomNativeLibrary(outcome: com.romm.androidtv.romm.StagingOutcome.Success) {
+        val spec = outcome.launchSpec
+        val session = sessionStore.current()
+        val serverKey = session?.origin?.let { extractServerKey(it) } ?: "unknown-server"
+        val userKey = session?.username ?: "unknown-user"
+        val savePath = com.romm.androidtv.emulation.model.SavePathPolicy.autosaveSramPath(
+            filesDir = filesDir,
+            serverKey = serverKey,
+            userKey = userKey,
+            romId = spec.romId,
+            romHash = spec.romHash,
+        )
+
+        lifecycleScope.launch {
+            // Reuse trusted existing replica's expectedSramSizeBytes when available.
+            val knownSramSize = session?.let { sess ->
+                saveSyncCoordinator.findSaveReplicaByScope(
+                    serverKey = extractServerKey(sess.origin),
+                    userKey = sess.username ?: "",
+                    romId = spec.romId,
+                    romHash = spec.romHash,
+                    slot = SavePathPolicy.AUTOSAVE_SLOT,
+                )?.expectedSramSizeBytes
+            }
+            val preparation = saveLaunchOrchestrator.prepare(
+                romId = spec.romId,
+                romHash = spec.romHash,
+                coreId = spec.coreId,
+                coreBuildRevision = "", // Orchestrator re-resolves from CoreManifest.
+                expectedSramSizeBytes = knownSramSize,
+                fileName = spec.serverSaveFileName,
+            )
+
+            when (preparation) {
+                is SaveLaunchOrchestrator.PreparationResult.Ready ->
+                    launchEmulationActivity(spec, savePath, preparation.candidateMetadata)
+                is SaveLaunchOrchestrator.PreparationResult.Conflict -> {
+                    // Native Library policy: route conflict into overlay.
+                    val sess = sessionStore.current()
+                    val sessUsername = sess?.username
+                    if (sess != null && sessUsername != null) {
+                        val sk = extractServerKey(sess.origin)
+                        val localEntity = saveSyncCoordinator.findSaveReplicaByScope(
+                            serverKey = sk,
+                            userKey = sessUsername,
+                            romId = spec.romId,
+                            romHash = spec.romHash,
+                            slot = SavePathPolicy.AUTOSAVE_SLOT,
+                        )
+                        if (localEntity != null) {
+                            val uiModel = com.romm.androidtv.library.ui.ConflictResolutionMapper.mapConflict(localEntity, preparation.operation)
+                            withContext(Dispatchers.Main) {
+                                preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
+                                    romId = spec.romId, sessionId = preparation.sessionId, romHash = spec.romHash,
+                                ).apply {
+                                    conflictModel = uiModel
+                                    conflictOperation = preparation.operation
+                                }
+                                selectedRomId = spec.romId
+                                currentScreen = Screen.NATIVE_CONFLICT
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                                    .apply { errorMessage = "No local save replica found for ROM ${spec.romId}." }
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                                .apply { errorMessage = "No active session; cannot resolve conflict." }
+                        }
+                    }
+                }
+                is SaveLaunchOrchestrator.PreparationResult.Quarantined -> {
+                    val uiModel = com.romm.androidtv.library.ui.ConflictResolutionMapper.mapQuarantine(
+                        reason = preparation.reason,
+                        quarantinedPath = preparation.quarantinedPath,
+                        localEntity = null,
+                    )
+                    withContext(Dispatchers.Main) {
+                        preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                            .apply { quarantineModel = uiModel }
+                        selectedRomId = spec.romId
+                        currentScreen = Screen.NATIVE_QUARANTINE
+                    }
+                }
+                is SaveLaunchOrchestrator.PreparationResult.Failed -> {
+                    withContext(Dispatchers.Main) {
+                        preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                            .apply { errorMessage = preparation.reason }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Pre-launch overlay rendering (conflict / quarantine / error) ----
+
+    @Composable
+    private fun renderPreLaunchOverlay(state: com.romm.androidtv.library.ui.SavePreLaunchState) {
+        val session = sessionStore.current()
+        val username = session?.username ?: "unknown"
+
+        if (state.conflictModel != null) {
+            val actions = createConflictPresentationActions(state, username)
+            com.romm.androidtv.library.ui.RommTvTheme {
+                com.romm.androidtv.library.ui.SaveConflictScreen(
+                    model = state.conflictModel!!,
+                    actions = actions,
+                )
+            }
+        } else if (state.quarantineModel != null) {
+            val actions = object : com.romm.androidtv.library.ui.QuarantinePresentationAction {
+                override fun dismiss() {
+                    // Non-mutating: returns to game detail without filesystem/Room/network mutation.
+                    state.clear()
+                    preLaunchState = null
+                    currentScreen = Screen.NATIVE_GAME_DETAIL
+                }
+            }
+            com.romm.androidtv.library.ui.RommTvTheme {
+                com.romm.androidtv.library.ui.SaveQuarantineScreen(
+                    model = state.quarantineModel!!,
+                    actions = actions,
+                )
+            }
+        } else if (state.errorMessage != null) {
+            // Transient error display on game detail screen area.
+            com.romm.androidtv.library.ui.RommTvTheme {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                ) {
+                    androidx.compose.material3.Text(
+                        text = "Launch Blocked",
+                        style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
+                        color = com.romm.androidtv.library.ui.RommTvColors.TextPrimary,
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.material3.Text(
+                        text = state.errorMessage!!,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFf44336),
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(24.dp))
+                    androidx.compose.material3.TextButton(onClick = {
+                        state.clear()
+                        preLaunchState = null
+                    }) {
+                        androidx.compose.material3.Text("Go Back", color = com.romm.androidtv.library.ui.RommTvColors.Romm300)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Creates a [ConflictPresentationAction] that delegates to the coordinator's
+     * conflict resolution via its internal interface. Guards duplicate submissions
+     * via [SavePreLaunchState.isResolving]. On success, proceeds to native launch.
+     * On failure, stays on screen showing actionable error.
+     */
+    private fun createConflictPresentationActions(
+        state: com.romm.androidtv.library.ui.SavePreLaunchState,
+        username: String,
+    ): com.romm.androidtv.library.ui.ConflictPresentationAction {
+        return object : com.romm.androidtv.library.ui.ConflictPresentationAction {
+            override fun keepLocal() {
+                if (state.isResolving) return // Duplicate submission guard
+                state.isResolving = true
+                lifecycleScope.launch {
+                    resolveConflictAndRelaunch(
+                        state, ConflictChoice.KEEP_LOCAL, username,
+                    )
+                }
+            }
+
+            override fun keepServer() {
+                if (state.isResolving) return // Duplicate submission guard
+                state.isResolving = true
+                lifecycleScope.launch {
+                    resolveConflictAndRelaunch(
+                        state, ConflictChoice.KEEP_SERVER, username,
+                    )
+                }
+            }
+
+            override fun cancel() {
+                // Non-mutating: returns to game detail without filesystem/Room/network mutation and without launch.
+                state.clear()
+                preLaunchState = null
+                currentScreen = Screen.NATIVE_GAME_DETAIL
+            }
+        }
+    }
+
+    /**
+     * Shared conflict resolution + relaunch logic. Delegates to the coordinator's
+     * internal [SaveSyncCoordinatorInternal.resolveConflict] which owns all DAO/store access.
+     */
+    private suspend fun resolveConflictAndRelaunch(
+        state: com.romm.androidtv.library.ui.SavePreLaunchState,
+        choice: ConflictChoice,
+        username: String,
+    ) {
+        try {
+            val session = sessionStore.current() ?: run {
+                withContext(Dispatchers.Main) {
+                    state.errorMessage = "No active session"
+                    state.isResolving = false
+                }
+                return
+            }
+
+            val conflictModel = state.conflictModel ?: run {
+                withContext(Dispatchers.Main) {
+                    state.errorMessage = "No conflict model available for resolution."
+                    state.isResolving = false
+                }
+                return
+            }
+
+            val result = (saveSyncCoordinator as com.romm.androidtv.romm.save.SaveSyncCoordinatorInternal).resolveConflict(
+                ResolveConflictRequest(
+                    sessionId = state.sessionId ?: 0,
+                    serverOrigin = session.origin,
+                    username = username,
+                    romId = state.romId,
+                    romHash = state.romHash,
+                    slot = SavePathPolicy.AUTOSAVE_SLOT,
+                    choice = choice,
+                    operation = state.conflictOperation,
+                    serverSaveId = conflictModel.server.saveId,
+                    fileName = conflictModel.server.fileName,
+                    serverSlot = conflictModel.server.slot,
+                    serverEmulator = conflictModel.server.coreId,
+                    reason = conflictModel.description.ifBlank { "both changed since last sync" },
+                )
+            )
+
+            if (result is com.romm.androidtv.romm.save.ConflictResolutionResult.Success) {
+                withContext(Dispatchers.Main) {
+                    state.clear()
+                    preLaunchState = null
+                    currentScreen = Screen.NATIVE_GAME_DETAIL
+                }
+                lifecycleScope.launch {
+                    val relaunchOutcome = romRepository.stageForLaunch(state.romId)
+                    if (relaunchOutcome is com.romm.androidtv.romm.StagingOutcome.Success) {
+                        launchStagedRomNativeLibrary(relaunchOutcome)
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = state.romId, romHash = state.romHash)
+                                .apply { errorMessage = "Relaunch failed: ${StagingOutcomeMessage.toUserMessage(relaunchOutcome)}" }
+                        }
+                    }
+                }
+            } else if (result is com.romm.androidtv.romm.save.ConflictResolutionResult.Failure) {
+                withContext(Dispatchers.Main) {
+                    state.errorMessage = "Resolution failed: ${result.reason}"
+                    state.isResolving = false
+                }
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                state.errorMessage = "Resolution error: ${e.message ?: "unknown"}"
+                state.isResolving = false
+            }
+        }
     }
 
     // ---- Auth flow (lifecycle-aware coroutine, single-flight guarded) ----

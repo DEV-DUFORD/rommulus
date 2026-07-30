@@ -310,5 +310,45 @@ class ConflictResolutionMapperTest {
 
             assertThat(model.quarantined.saveId).isNull()
         }
+
+        @Test
+        fun `quarantine model does not fabricate absent metadata`() {
+            val model = ConflictResolutionMapper.mapQuarantine(
+                reason = "unknown-provenance",
+                quarantinedPath = "/data/quarantine/legacy.srm",
+                localEntity = null,
+            )
+
+            // No metadata is fabricated when entity is absent.
+            assertThat(model.quarantined.saveId).isNull()
+            assertThat(model.quarantined.hashPrefix).isNull()
+            assertThat(model.quarantined.sizeText).isNull()
+            assertThat(model.quarantined.coreId).isNull()
+            assertThat(model.quarantined.slot).isNull()
+            assertThat(model.quarantined.romId).isNull()
+            assertThat(model.quarantined.updatedAtText).isNull()
+            // Only the file name (derived from path) and label are present.
+            assertThat(model.quarantined.fileName).isEqualTo("legacy.srm")
+            assertThat(model.quarantined.label).isEqualTo("Quarantined")
+        }
+
+        @Test
+        fun `quarantine model is structurally distinct from conflict model`() {
+            val quarantineModel = ConflictResolutionMapper.mapQuarantine(
+                reason = "size-mismatch",
+                quarantinedPath = "/data/quarantine/save.srm",
+                localEntity = null,
+            )
+
+            val conflictModel = ConflictResolutionMapper.mapConflict(baseLocalEntity, baseServerOp)
+
+            // Quarantine model has no local/server sides — it only has quarantined.
+            assertThat(quarantineModel).isInstanceOf(SaveQuarantineUiModel::class.java)
+            assertThat(conflictModel).isInstanceOf(SaveConflictUiModel::class.java)
+
+            // Verify the types are distinct (cannot cross-assign).
+            assertThat(quarantineModel).isNotInstanceOf(SaveConflictUiModel::class.java)
+            assertThat(conflictModel).isNotInstanceOf(SaveQuarantineUiModel::class.java)
+        }
     }
 }

@@ -584,6 +584,42 @@ object RommSyncApi {
         }
     }
 
+    /**
+     * `GET /api/saves/{id}/content` with `optimistic=false` and no `session_id`.
+     *
+     * Used for keep-local backup reads during conflict resolution: downloads the
+     * server's current save bytes without mutating device-sync bookkeeping or
+     * incrementing session completion counters. Grounded in the pinned endpoint
+     * query schema (`optimistic: bool = True`, `session_id: int | None = None`).
+     */
+    fun downloadSaveContentBackup(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        saveId: Long,
+        deviceId: String,
+    ): SaveDownloadResult {
+        if (origin.isBlank()) return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val base = apiUrl(origin, "saves/$saveId/content") ?: return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val urlBuilder = base.toHttpUrlOrNull()?.newBuilder()
+            ?: return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        urlBuilder.addQueryParameter("device_id", deviceId)
+        urlBuilder.addQueryParameter("optimistic", "false")
+        // Deliberately omit session_id — avoids session operation counting.
+
+        val httpRequest = okhttp3.Request.Builder().url(urlBuilder.build()).get().build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                classifyResponse(response)?.let { return SaveDownloadResult.Failure(it, response.code) }
+                val bytes = response.body?.bytes()
+                if (bytes == null) SaveDownloadResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                else SaveDownloadResult.Success(bytes)
+            }
+        } catch (e: IOException) {
+            SaveDownloadResult.Failure(classifyIOException(e))
+        }
+    }
+
     /** `POST /api/saves/{id}/downloaded` — durable download confirmation (section 11.3). */
     fun confirmDownload(
         client: okhttp3.OkHttpClient,

@@ -4,6 +4,7 @@ import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.cache.CacheDatabase
 import com.romm.androidtv.cache.ContentCache
 import com.romm.androidtv.config.FakeSharedPreferences
+import com.romm.androidtv.emulation.model.sha256Hex
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -106,9 +107,6 @@ class RomRepositoryImplTest {
     private fun sha1Hex(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }
 
-    private fun sha256Hex(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-
     @Nested
     @DisplayName("core resolution")
     inner class CoreResolution {
@@ -170,6 +168,8 @@ class RomRepositoryImplTest {
             assertThat(spec.coreId).isEqualTo("test-core")
             // Never actually routes to native playback regardless of a successfully-staged spec.
             assertThat(spec.backend).isEqualTo(com.romm.androidtv.config.PlaybackBackend.WEBVIEW)
+            // serverSaveFileName is the authoritative RomM file name, distinct from local path.
+            assertThat(spec.serverSaveFileName).isEqualTo("game.gb")
         }
 
         @Test

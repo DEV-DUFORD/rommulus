@@ -39,6 +39,15 @@ enum class SaveSyncStatus {
      * an explicit user import.
      */
     QUARANTINED,
+
+    /**
+     * The server's save was downloaded with validated provenance but unknown
+     * SRAM size. The candidate bytes are quarantined; the core must load
+     * first so JNI can report expectedSramSizeBytes for exact-match validation.
+     * This is distinct from [PENDING_DOWNLOAD] (which implies size is known)
+     * and [QUARANTINED] (which implies permanent rejection).
+     */
+    AWAITING_CORE_VALIDATION,
 }
 
 /**
@@ -81,7 +90,7 @@ data class SaveReplicaEntity(
     // Producer/backend ID, core ID, exact core build revision, and expected SRAM size.
     val coreId: String,
     val coreBuildRevision: String,
-    val expectedSramSizeBytes: Long,
+    val expectedSramSizeBytes: Long? = null,
 
     // Local hash, size, and durable-write time. Null until the first successful checkpoint.
     val localHash: String? = null,
@@ -106,6 +115,6 @@ data class SaveReplicaEntity(
         require(slot.isNotBlank()) { "slot must not be blank" }
         require(coreId.isNotBlank()) { "coreId must not be blank" }
         require(coreBuildRevision.isNotBlank()) { "coreBuildRevision must not be blank" }
-        require(expectedSramSizeBytes >= 0) { "expectedSramSizeBytes must not be negative" }
+        expectedSramSizeBytes?.let { require(it >= 0) { "expectedSramSizeBytes must not be negative" } }
     }
 }

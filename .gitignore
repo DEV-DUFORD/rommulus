@@ -37,3 +37,6 @@ screenshots/
 # APK/AAB (build outputs; never commit)
 *.apk
 **/*.aab
+
+# Deepwork session state (persistent but untracked per deepwork skill)
+.slim/deepwork/

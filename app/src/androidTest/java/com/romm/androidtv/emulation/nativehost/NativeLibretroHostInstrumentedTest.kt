@@ -110,6 +110,31 @@ class NativeLibretroHostInstrumentedTest {
         )
     }
 
+    @Test
+    fun sramSize_noActiveSession_returnsZero() {
+        assertTrue(NativeLibretroHost.ensureLoaded())
+        // Ensure no session is active (tearDown from prior test should have cleaned up, but be explicit).
+        host.nativeStopSession()
+        assertEquals(0L, host.nativeGetSramSizeBytes())
+    }
+
+    @Test
+    fun sramSize_syntheticCore_returnsExpectedSize() {
+        assertTrue(NativeLibretroHost.ensureLoaded())
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val corePath = NativeLibretroHost.resolveBundledTestCorePath(context)
+        val systemDir = context.filesDir.resolve("system").apply { mkdirs() }.absolutePath
+        val saveDir = context.filesDir.resolve("save_sramsize").apply { mkdirs() }.absolutePath
+
+        assertTrue(host.nativeLoadTestCore(corePath, systemDir, saveDir))
+
+        // TEST_CORE_SRAM_SIZE is 64 bytes (test_core.c).
+        assertEquals(64L, host.nativeGetSramSizeBytes())
+
+        host.nativeStopSession()
+    }
+
     private fun readFirstByte(path: String): Int {
         val bytes = java.io.File(path).readBytes()
         assertTrue("expected a non-empty SRAM file at $path", bytes.isNotEmpty())

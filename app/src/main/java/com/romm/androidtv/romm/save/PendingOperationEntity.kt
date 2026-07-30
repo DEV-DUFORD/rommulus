@@ -14,6 +14,14 @@ import androidx.room.PrimaryKey
  */
 enum class PendingOperationType {
     UPLOAD,
+    /**
+     * Post-play negotiated sync: the main process hashed the checkpointed SRAM,
+     * detected a generation change, and durably queued this operation. The
+     * WorkManager executor authenticates, registers, negotiates a *fresh*
+     * session (never reuses a stale pre-play session), and executes the server's
+     * returned action (upload/no-op/download/conflict).
+     */
+    NEGOTIATE_AND_SYNC,
 }
 
 /**
@@ -152,6 +160,26 @@ data class PendingOperationEntity(
      * session bookkeeping.
      */
     val sessionId: Long? = null,
+
+    // ---- NEGOTIATE_AND_SYNC metadata (section 11.3 post-play) ----
+
+    /**
+     * The display file name sent to the server during post-play negotiation.
+     * Required for [PendingOperationType.NEGOTIATE_AND_SYNC]; null for UPLOAD.
+     */
+    val negotiateFileName: String? = null,
+
+    /**
+     * The core ID sent to the server during post-play negotiation.
+     * Required for [PendingOperationType.NEGOTIATE_AND_SYNC]; null for UPLOAD.
+     */
+    val negotiateCoreId: String? = null,
+
+    /**
+     * The exact core build revision sent to the server during post-play negotiation.
+     * Required for [PendingOperationType.NEGOTIATE_AND_SYNC]; null for UPLOAD.
+     */
+    val negotiateCoreBuildRevision: String? = null,
 
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,

@@ -294,6 +294,18 @@ class RommSyncApiTest {
         }
 
         @Test
+        fun `downloadSaveContentBackup uses optimistic=false and omits session_id`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(byteArrayOf(1, 2, 3))))
+
+            val result = RommSyncApi.downloadSaveContentBackup(client, baseUrl(), 55, "device-1")
+
+            assertThat(result).isInstanceOf(SaveDownloadResult.Success::class.java)
+            assertThat((result as SaveDownloadResult.Success).bytes).isEqualTo(byteArrayOf(1, 2, 3))
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).isEqualTo("/api/saves/55/content?device_id=device-1&optimistic=false")
+        }
+
+        @Test
         fun `confirmDownload posts the device id and succeeds on 200`() {
             server.enqueue(MockResponse().setResponseCode(200).setBody("""{"id": 55}"""))
 

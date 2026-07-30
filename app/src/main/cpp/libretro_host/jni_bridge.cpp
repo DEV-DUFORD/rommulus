@@ -206,6 +206,15 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeRestoreSav
     return g_session->restoreSaveRam(path) ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C"
+JNIEXPORT jlong JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetSramSizeBytes(
+        JNIEnv* /*env*/, jobject /*thiz*/) {
+    if (g_session == nullptr) return 0;
+    size_t size = g_session->memorySize(RETRO_MEMORY_SAVE_RAM);
+    return static_cast<jlong>(size);
+}
+
 // Attaches (surface != null) or detaches (surface == null) the video output
 // window. Called from the UI thread whenever EmulationActivity's Surface
 // becomes available/is destroyed (LIBRETRO_REFACTOR.md section 8.1). This

@@ -35,11 +35,23 @@ import androidx.lifecycle.lifecycleScope
 import com.romm.androidtv.controller.LibretroInputAdapter
 import com.romm.androidtv.controller.model.ControllerSlot
 import com.romm.androidtv.controller.router.ControllerEventRouter
+import com.romm.androidtv.emulation.model.AdoptionResult
+import com.romm.androidtv.emulation.model.CandidateAdoptionHelper
+import com.romm.androidtv.emulation.model.CandidateExtras
+import com.romm.androidtv.emulation.model.CandidateSaveMetadata
+import com.romm.androidtv.emulation.model.DescriptorState
+import com.romm.androidtv.emulation.model.EmulationResult
+import com.romm.androidtv.emulation.model.FilesystemCandidateAdoptionHelper
+import com.romm.androidtv.emulation.model.LaunchSessionJournal
+import com.romm.androidtv.emulation.model.SaveBackupStore
+import com.romm.androidtv.emulation.model.SessionDescriptorPatch
+import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
 import com.romm.androidtv.emulation.video.EmulationSurface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -66,6 +78,13 @@ class EmulationActivity : ComponentActivity() {
     private val host = NativeLibretroHost()
     private var sessionStarted = false
     private var savePath: String? = null
+    private var sessionIdForJournal: String? = null
+    private var candidateMetadata: CandidateSaveMetadata? = null
+    private var stageRomId: Long = -1L
+    private var stageRomHash: String = ""
+    /** SHA-256 hex of the last checkpointed SRAM, computed immediately after checkpointing. */
+    @Volatile
+    private var checkpointedHash: String? = null
 
     // This activity runs in its own process (:emulation), so it cannot share
     // MainActivity's ControllerEventRouter instance — each owns its own,
@@ -112,6 +131,8 @@ class EmulationActivity : ComponentActivity() {
         const val EXTRA_CONTENT_PATH = "com.romm.androidtv.emulation.EXTRA_CONTENT_PATH"
         const val EXTRA_SAVE_PATH = "com.romm.androidtv.emulation.EXTRA_SAVE_PATH"
         const val EXTRA_ROM_ID = "com.romm.androidtv.emulation.EXTRA_ROM_ID"
+        /** Authoritative app launch session ID (UUID string from LaunchSpec.sessionId). Required for journal/result correlation. */
+        const val EXTRA_APP_SESSION_ID = "com.romm.androidtv.emulation.EXTRA_APP_SESSION_ID"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -140,6 +161,47 @@ class EmulationActivity : ComponentActivity() {
         val requestedContentPath = intent.getStringExtra(EXTRA_CONTENT_PATH)
         val requestedSavePath = intent.getStringExtra(EXTRA_SAVE_PATH)
 
+        // Phase B: extract optional candidate metadata from AwaitingCoreValidation.
+        this.candidateMetadata = CandidateExtras.extractFromIntent(intent)
+        if (this.candidateMetadata != null) {
+            Log.i(TAG, "onCreate: candidate save detected, will validate post-core-load")
+        }
+
+        // Phase B: Use the authoritative app launch session ID from the intent extra.
+        // This is the UUID from LaunchSpec.sessionId — NOT the RomM sync session ID.
+        val appSessionId = intent.getStringExtra(EXTRA_APP_SESSION_ID)
+            ?: run {
+                Log.w(TAG, "onCreate: missing EXTRA_APP_SESSION_ID, falling back to timestamp")
+                System.currentTimeMillis().toString()
+            }
+        this.sessionIdForJournal = appSessionId
+        val journalDir = filesDir.resolve("launch_sessions").apply { mkdirs() }
+        val journal = LaunchSessionJournal(journalDir)
+        try {
+            // Persist authoritative ROM/core identity in the journal for post-death recovery.
+            val candidateMeta = this.candidateMetadata
+            if (candidateMeta != null && romId > 0) {
+                this.stageRomId = candidateMeta.romId
+                this.stageRomHash = candidateMeta.romHash
+                journal.createOrGet(appSessionId)
+                // Patch identity immediately so process-death recovery has exact values.
+                journal.patchIdentity(appSessionId, SessionDescriptorPatch(
+                    rommSessionId = candidateMeta.rommSessionId,
+                    romId = candidateMeta.romId,
+                    romHash = candidateMeta.romHash,
+                    coreId = candidateMeta.coreId,
+                    coreBuildRevision = candidateMeta.coreBuildRevision,
+                    serverContentHash = candidateMeta.serverContentHash,
+                ))
+            } else {
+                this.stageRomId = if (romId > 0) romId else -1L
+                this.stageRomHash = ""
+                journal.createOrGet(appSessionId)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "onCreate: failed to create journal entry", e)
+        }
+
         if (coreId != null && requestedContentPath != null && requestedSavePath != null) {
             val resolvedCorePath = NativeLibretroHost.resolveBundledCorePathForCoreId(applicationContext, coreId)
             if (resolvedCorePath == null) {
@@ -153,6 +215,18 @@ class EmulationActivity : ComponentActivity() {
             savePath = requestedSavePath
             File(savePath).parentFile?.mkdirs()
             Log.i(TAG, "onCreate: real-content launch coreId=$coreId romId=$romId content=$contentPath")
+
+            // Phase B: validate candidate path is app-private before proceeding.
+            this.candidateMetadata?.let { meta ->
+                val validation = meta.validateAppPrivate(filesDir)
+                if (validation.isFailure) {
+                    Log.e(TAG, "onCreate: candidate path validation failed: ${validation.exceptionOrNull()}")
+                    try { journal.advance(this.sessionIdForJournal!!, DescriptorState.REJECTED, SessionDescriptorPatch(errorDetail = "candidate path escaped app-private dir")) } catch (_: Exception) {}
+                    isSessionActive.set(false)
+                    finish()
+                    return
+                }
+            }
         } else {
             corePath = NativeLibretroHost.resolveBundledTestCorePath(applicationContext)
             contentPath = null
@@ -166,13 +240,112 @@ class EmulationActivity : ComponentActivity() {
         }
         if (!sessionStarted) {
             Log.e(TAG, "core load failed: ${host.nativeGetLastError()}")
+            try { journal.advance(this.sessionIdForJournal!!, DescriptorState.CRASHED, SessionDescriptorPatch(errorDetail = host.nativeGetLastError())) } catch (_: Exception) {}
         } else {
-            // Restore-on-launch (LIBRETRO_REFACTOR.md section 11.1). A missing file
-            // (first launch) or a size mismatch both return false; either way SRAM
-            // stays at whatever retro_load_game() initialized it to, which is the
-            // correct and safe default.
-            val restored = host.nativeRestoreSaveRam(savePath)
-            Log.d(TAG, "restore-on-launch: restored=$restored path=$savePath")
+            // Phase B: advance journal to CORE_LOADED with canonical path and candidate size.
+            try {
+                val nativeSramSize = host.nativeGetSramSizeBytes()
+                if (nativeSramSize > 0L) {
+                    Log.d(TAG, "onCreate: JNI reported expectedSramSizeBytes=$nativeSramSize")
+                }
+                journal.advance(this.sessionIdForJournal!!, DescriptorState.CORE_LOADED,
+                    SessionDescriptorPatch(
+                        canonicalSavePath = savePath,
+                        rommSaveId = this.candidateMetadata?.rommSaveId,
+                        candidateDownloadedSizeBytes = this.candidateMetadata?.downloadedSizeBytes,
+                        expectedSramSizeBytes = if (nativeSramSize > 0L) nativeSramSize else null,
+                    ))
+            } catch (e: Exception) {
+                Log.w(TAG, "onCreate: journal advance to CORE_LOADED failed", e)
+            }
+
+            // Phase B: candidate validation — delegates to interface-driven CandidateAdoptionHelper
+            // for backup-before-restore ordering (LIBRETRO_REFACTOR.md Phase B).
+            val adoptionResult = this.candidateMetadata?.let { meta ->
+                FilesystemCandidateAdoptionHelper().adoptCandidate(
+                    candidateMetadata = meta,
+                    canonicalSavePath = savePath,
+                    nativeSramSizeBytes = host.nativeGetSramSizeBytes(),
+                    backupStore = EmulationSaveBackupStore(filesDir),
+                    nativeRestore = { path -> host.nativeRestoreSaveRam(path) },
+                    nativeCheckpoint = { path -> host.nativeCheckpointSaveRam(path) },
+                )
+            }
+
+            val candidateAdopted = when (adoptionResult) {
+                is AdoptionResult.Adopted -> {
+                    Log.i(TAG, "candidate-validation: adopted → canonical, hash=${adoptionResult.checkpointedHash} size=${adoptionResult.checkpointedSizeBytes}")
+                    if (adoptionResult.backupPath != null) {
+                        Log.i(TAG, "candidate-validation: canonical backed up to ${adoptionResult.backupPath}")
+                    } else {
+                        Log.d(TAG, "candidate-validation: no canonical local copy to back up")
+                    }
+                    try { journal.advance(this.sessionIdForJournal!!, DescriptorState.ADOPTED, SessionDescriptorPatch(
+                        candidatePath = this.candidateMetadata!!.candidatePath,
+                        rommSaveId = this.candidateMetadata!!.rommSaveId,
+                        checkpointedHash = adoptionResult.checkpointedHash,
+                        expectedSramSizeBytes = adoptionResult.checkpointedSizeBytes.takeIf { it > 0L },
+                    )) } catch (_: Exception) {}
+                    true
+                }
+                is AdoptionResult.RejectedSizeMismatch -> {
+                    Log.w(TAG, "candidate-validation: size mismatch — native=${adoptionResult.nativeSramSizeBytes} downloaded=${adoptionResult.downloadedSizeBytes}, rejecting candidate")
+                    try { journal.advance(this.sessionIdForJournal!!, DescriptorState.REJECTED, SessionDescriptorPatch(
+                        candidatePath = this.candidateMetadata!!.candidatePath,
+                        errorDetail = "size-mismatch: native=${adoptionResult.nativeSramSizeBytes} downloaded=${adoptionResult.downloadedSizeBytes}",
+                    )) } catch (_: Exception) {}
+                    false
+                }
+                is AdoptionResult.BackupFailed -> {
+                    Log.e(TAG, "candidate-validation: canonical backup failed — aborting adoption, preserving candidate: ${adoptionResult.error}")
+                    try { journal.advance(this.sessionIdForJournal!!, DescriptorState.REJECTED, SessionDescriptorPatch(
+                        candidatePath = this.candidateMetadata!!.candidatePath,
+                        errorDetail = "canonical backup failed: ${adoptionResult.error}",
+                    )) } catch (_: Exception) {}
+                    false
+                }
+                is AdoptionResult.RestoreFailed -> {
+                    Log.e(TAG, "candidate-validation: native restore failed — preserving candidate and canonical prior copy: ${adoptionResult.error}")
+                    try { journal.advance(this.sessionIdForJournal!!, DescriptorState.REJECTED, SessionDescriptorPatch(
+                        candidatePath = this.candidateMetadata!!.candidatePath,
+                        errorDetail = "candidate restore failed",
+                    )) } catch (_: Exception) {}
+                    false
+                }
+                is AdoptionResult.CheckpointFailed -> {
+                    Log.e(TAG, "candidate-validation: checkpoint failed — preserving candidate and canonical prior copy: ${adoptionResult.error}")
+                    try { journal.advance(this.sessionIdForJournal!!, DescriptorState.REJECTED, SessionDescriptorPatch(
+                        candidatePath = this.candidateMetadata!!.candidatePath,
+                        errorDetail = "canonical checkpoint failed",
+                    )) } catch (_: Exception) {}
+                    false
+                }
+                is AdoptionResult.NoSram -> {
+                    Log.w(TAG, "candidate-validation: core exposes no SRAM (size=${adoptionResult.nativeSramSizeBytes}), rejecting candidate")
+                    false
+                }
+                is AdoptionResult.UnexpectedError -> {
+                    Log.e(TAG, "candidate-validation: unexpected error: ${adoptionResult.error}")
+                    try { journal.advance(this.sessionIdForJournal!!, DescriptorState.REJECTED, SessionDescriptorPatch(
+                        candidatePath = this.candidateMetadata!!.candidatePath,
+                        errorDetail = "validation exception: ${adoptionResult.error}",
+                    )) } catch (_: Exception) {}
+                    false
+                }
+                null -> true // No candidate → treated as successfully launched.
+            }
+
+            if (candidateAdopted) {
+                Log.d(TAG, "candidate adopted, skipping normal restore-on-launch")
+            } else if (this.candidateMetadata != null) {
+                Log.i(TAG, "candidate rejected, falling through to normal restore-on-launch")
+                val restored = host.nativeRestoreSaveRam(savePath)
+                Log.d(TAG, "restore-on-launch (post-rejection): restored=$restored path=$savePath")
+            } else {
+                // Normal no-candidate launch: existing restore-on-launch behavior unchanged.
+                val restored = host.nativeRestoreSaveRam(savePath)
+                Log.d(TAG, "restore-on-launch: restored=$restored path=$savePath")
+            }
 
             val inputManager = getSystemService(INPUT_SERVICE) as InputManager
             inputManager.registerInputDeviceListener(controllerRouter, null)
@@ -214,17 +387,42 @@ class EmulationActivity : ComponentActivity() {
     }
 
     private fun reportPlayerBusyAndFinish() {
-        // No caller-facing result channel exists yet in Phase 2 (no real
-        // launch flow); this is a placeholder for the "player busy" report
-        // LIBRETRO_REFACTOR.md section 6 requires once ROM launches exist.
+        // Phase B: write rejected result and finish with EmulationResult.
+        val sid = sessionIdForJournal ?: return finish()
+        try {
+            val journalDir = filesDir.resolve("launch_sessions")
+            val journal = LaunchSessionJournal(journalDir)
+            journal.advance(sid, DescriptorState.REJECTED, SessionDescriptorPatch(errorDetail = "player busy"))
+        } catch (_: Exception) {}
+        setResult(android.app.Activity.RESULT_CANCELED, Intent("com.romm.androidtv.emulation.RESULT").apply {
+            putExtra("session_id", sid)
+            putExtra("rejected_reason", "another session is already active")
+        })
         finish()
     }
 
-    private fun checkpointIfRunning() {
-        if (!sessionStarted) return
-        val path = savePath ?: return
+    private fun checkpointIfRunning(): Boolean {
+        if (!sessionStarted) return false
+        val path = savePath ?: return false
         val checkpointed = host.nativeCheckpointSaveRam(path)
         Log.d(TAG, "checkpoint: success=$checkpointed path=$path")
+
+        // Compute hash immediately after successful checkpoint — bounded work (small SRAM file),
+        // avoids synchronous readBytes/hash later in onDestroy. Hash is persisted via @Volatile
+        // so setResult can read it safely from any thread.
+        if (checkpointed) {
+            try {
+                val bytes = File(path).readBytes()
+                checkpointedHash = sha256Hex(bytes)
+            } catch (e: Exception) {
+                Log.w(TAG, "checkpointIfRunning: failed to compute hash", e)
+                checkpointedHash = null
+            }
+        } else {
+            checkpointedHash = null
+        }
+
+        return checkpointed
     }
 
     override fun onPause() {
@@ -237,7 +435,7 @@ class EmulationActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        checkpointIfRunning()
+        val checkpointed = checkpointIfRunning()
         inputAdapter.stop()
         try {
             val inputManager = getSystemService(INPUT_SERVICE) as InputManager
@@ -251,8 +449,66 @@ class EmulationActivity : ComponentActivity() {
             host.nativeStopSession()
             sessionStarted = false
         }
+
+        // Phase B: compute and deliver EmulationResult via setResult.
+        val sid = sessionIdForJournal ?: return isSessionActive.also { it.set(false) }.let { super.onDestroy(); return }
+        try {
+            val journalDir = filesDir.resolve("launch_sessions")
+            val journal = LaunchSessionJournal(journalDir)
+            val descriptor = journal.read(sid)
+
+            when (descriptor?.state) {
+                DescriptorState.ADOPTED -> {
+                    // Candidate was adopted during onCreate; checkpointed hash is in the descriptor.
+                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
+                        EmulationResult.Completed(
+                            sessionId = sid,
+                            checkpointedSavePath = savePath,
+                            checkpointedSaveHash = descriptor.checkpointedHash,
+                        )
+                    ))
+                }
+                DescriptorState.REJECTED -> {
+                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
+                        EmulationResult.Completed(
+                            sessionId = sid,
+                            checkpointedSavePath = if (checkpointed) savePath else null,
+                            checkpointedSaveHash = checkpointedHash.takeIf { checkpointed },
+                        )
+                    ))
+                }
+                else -> {
+                    // Normal completion (no candidate or crashed state).
+                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
+                        EmulationResult.Completed(
+                            sessionId = sid,
+                            checkpointedSavePath = if (checkpointed) savePath else null,
+                            checkpointedSaveHash = checkpointedHash.takeIf { checkpointed && savePath != null },
+                        )
+                    ))
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "onDestroy: failed to write result intent", e)
+        }
+
         isSessionActive.set(false)
         super.onDestroy()
+    }
+
+    /**
+     * Builds an Intent carrying [EmulationResult.Completed] as extras for setResult.
+     * The main process reads these via ActivityResultLauncher.
+     * Includes romId/romHash so the caller can validate launch identity matches result identity.
+     */
+    private fun buildResultIntent(result: EmulationResult.Completed): Intent {
+        return Intent("com.romm.androidtv.emulation.RESULT").apply {
+            putExtra("session_id", result.sessionId)
+            result.checkpointedSavePath?.let { putExtra("checkpointed_save_path", it) }
+            result.checkpointedSaveHash?.let { putExtra("checkpointed_save_hash", it) }
+            if (stageRomId > 0L) putExtra("rom_id", stageRomId)
+            if (stageRomHash.isNotBlank()) putExtra("rom_hash", stageRomHash)
+        }
     }
 
     /**
@@ -392,6 +648,90 @@ private fun EmulationDiagnosticsOverlay(
 
         Button(onClick = onStop) {
             Text("Stop and return")
+        }
+    }
+}
+
+/**
+ * Filesystem-only [SaveBackupStore] for use in the `:emulation` process.
+ * No Room, no network — only local filesystem operations via [com.romm.androidtv.emulation.model.SavePathPolicy].
+ * Delegates to the same backup logic as [FileSaveContentStore] but scoped to the
+ * emulation process's available dependencies.
+ */
+private class EmulationSaveBackupStore(private val filesDir: java.io.File) : SaveBackupStore {
+
+    private fun autosavePath(serverKey: String, userKey: String, romId: Long, romHash: String): String =
+        com.romm.androidtv.emulation.model.SavePathPolicy.autosaveSramPath(filesDir, serverKey, userKey, romId, romHash)
+
+    override fun readCanonical(serverKey: String, userKey: String, romId: Long, romHash: String, slot: String): ByteArray? {
+        val file = java.io.File(autosavePath(serverKey, userKey, romId, romHash))
+        return if (file.isFile) file.readBytes() else null
+    }
+
+    override fun backupCanonical(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        candidateIdentifier: Long,
+        nowEpochMs: Long,
+    ): String {
+        val canonicalFile = java.io.File(autosavePath(serverKey, userKey, romId, romHash))
+        if (!canonicalFile.isFile) throw IOException("No canonical file to back up at ${canonicalFile.absolutePath}")
+
+        val backupDir = java.io.File(canonicalFile.parentFile?.parentFile, "candidate-backups")
+        backupDir.mkdirs()
+
+        // Idempotent: check for existing backup for this candidate identifier.
+        val existingBackup = backupDir.listFiles { f ->
+            f.name.startsWith("pre-adoption-${candidateIdentifier}-") && f.extension == "srm"
+        }?.firstOrNull()
+
+        if (existingBackup != null && existingBackup.isFile) {
+            return existingBackup.absolutePath
+        }
+
+        val backupFile = java.io.File(backupDir, "pre-adoption-${candidateIdentifier}-${nowEpochMs}.srm")
+        canonicalFile.copyTo(backupFile, overwrite = false)
+
+        // Verify durability.
+        if (!backupFile.readBytes().contentEquals(canonicalFile.readBytes())) {
+            backupFile.delete()
+            throw IOException("Backup verification failed: content mismatch")
+        }
+        return backupFile.absolutePath
+    }
+
+    override fun readBackup(backupPath: String): ByteArray? {
+        val file = java.io.File(backupPath)
+        return if (file.isFile) file.readBytes() else null
+    }
+
+    override fun writeCanonicalAtomically(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        bytes: ByteArray,
+    ) {
+        val target = java.io.File(autosavePath(serverKey, userKey, romId, romHash))
+        target.parentFile?.mkdirs()
+        val temp = java.io.File(target.parentFile, "${target.name}.tmp")
+        java.io.FileOutputStream(temp).use { out ->
+            out.write(bytes)
+            out.flush()
+            out.fd.sync()
+        }
+        if (!temp.renameTo(target)) {
+            target.parentFile?.mkdirs()
+            java.io.RandomAccessFile(target, "rw").use { raf ->
+                raf.setLength(0)
+                raf.write(temp.readBytes())
+                raf.fd.sync()
+            }
+            temp.delete()
         }
     }
 }

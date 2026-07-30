@@ -45,14 +45,14 @@ import kotlin.math.roundToInt
 /**
  * Native game detail screen (UI_REFACTOR.md section 7.2): hero cover, title
  * and platform, metadata chips, summary, a screenshot shelf, and a Play
- * button. The Play button is an explicit stub for this pass — it does not
- * launch anything (that decision belongs to `LIBRETRO_REFACTOR.md`) — this
- * screen only replaces the *viewing* half of the old WebView flow, not the
- * *launching* half.
+ * button. The Play button invokes [onPlay] with the RomM ROM ID; the caller
+ * is responsible for staging, sync negotiation, conflict/quarantine handling,
+ * and native launch (LIBRETRO_REFACTOR.md sections 10–13).
  */
 @Composable
 fun GameDetailScreen(
     viewModel: RomDetailViewModel,
+    onPlay: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsState()
@@ -77,13 +77,13 @@ fun GameDetailScreen(
                 )
                 TextButton(onClick = viewModel::refresh) { Text("Retry", color = RommTvColors.Romm300) }
             }
-            is SectionState.Loaded -> GameDetailContent(rom = section.data)
+            is SectionState.Loaded -> GameDetailContent(rom = section.data, onPlay = onPlay)
         }
     }
 }
 
 @Composable
-private fun GameDetailContent(rom: RomDetail) {
+private fun GameDetailContent(rom: RomDetail, onPlay: (Long) -> Unit) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -121,7 +121,7 @@ private fun GameDetailContent(rom: RomDetail) {
                         )
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    PlayButton()
+                    PlayButton(onPlay = { onPlay(rom.id) })
                 }
             }
         }
@@ -179,7 +179,7 @@ private fun MetadataChips(rom: RomDetail) {
 }
 
 @Composable
-private fun PlayButton() {
+private fun PlayButton(onPlay: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
@@ -195,9 +195,7 @@ private fun PlayButton() {
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                // Explicit stub for this pass (UI_REFACTOR.md section 7.2): launching is
-                // LIBRETRO_REFACTOR.md's concern, not wired here yet.
-                onClick = { /* TODO: wire once native/webview launch decision is made */ },
+                onClick = onPlay,
             )
             .padding(horizontal = 28.dp, vertical = 12.dp),
     ) {

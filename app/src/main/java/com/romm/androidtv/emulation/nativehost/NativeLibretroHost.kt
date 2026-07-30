@@ -112,6 +112,14 @@ class NativeLibretroHost {
      */
     external fun nativeRestoreSaveRam(savePath: String): Boolean
 
+    /**
+     * Returns the exact byte-size of the currently loaded core's
+     * RETRO_MEMORY_SAVE_RAM region, or 0 when no session is active or the
+     * core exposes no save RAM. Consistent with existing JNI APIs that
+     * return safe zeroed values under those conditions (e.g. diagnostics).
+     */
+    external fun nativeGetSramSizeBytes(): Long
+
     companion object {
         @Volatile
         private var loaded = false

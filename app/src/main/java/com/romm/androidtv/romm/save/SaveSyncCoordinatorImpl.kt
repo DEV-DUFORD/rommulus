@@ -1,7 +1,8 @@
 package com.romm.androidtv.romm.save
 
 import com.romm.androidtv.auth.SessionStore
-import com.romm.androidtv.network.RommOrigin
+import com.romm.androidtv.emulation.model.sha256Hex
+import com.romm.androidtv.network.extractServerKey
 import com.romm.androidtv.romm.ClientSaveState
 import com.romm.androidtv.romm.DeviceRegistrationResult
 import com.romm.androidtv.romm.DeviceRepository
@@ -18,7 +19,6 @@ import com.romm.androidtv.romm.SyncOperation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import java.security.MessageDigest
 import java.time.Instant
 
 /**
@@ -52,13 +52,20 @@ class SaveSyncCoordinatorImpl(
     private val pendingOperationDao: PendingOperationDao,
     private val saveContentStore: SaveContentStore,
     private val clock: () -> Long = { System.currentTimeMillis() },
-) : SaveSyncCoordinator {
+    /** Conflict resolver; defaults to production impl sharing the same DAOs. Tests inject a fake. */
+    private val conflictResolver: ConflictResolver? = null,
+) : SaveSyncCoordinator, SaveSyncCoordinatorInternal {
+
+    /** Lazy singleton: resolves once on first conflict, reuses across calls. */
+    private val resolver: ConflictResolver by lazy {
+        conflictResolver ?: ConflictResolverImpl(client, deviceRepository, saveReplicaDao, saveContentStore, clock)
+    }
 
     override suspend fun syncBeforeLaunch(request: SaveSyncRequest): SaveSyncOutcome = withContext(Dispatchers.IO) {
         val session = sessionStore.current() ?: return@withContext SaveSyncOutcome.Failure(RommApiError.AUTH_EXPIRED)
         val username = session.username ?: return@withContext SaveSyncOutcome.Failure(RommApiError.AUTH_EXPIRED)
         val origin = session.origin
-        val serverKey = RommOrigin.parse(origin)?.host ?: origin
+        val serverKey = extractServerKey(origin)
         val userKey = username
 
         val registration = deviceRepository.ensureRegistered(origin, username)
@@ -124,6 +131,118 @@ class SaveSyncCoordinatorImpl(
         }
     }
 
+    override suspend fun syncPostPlay(request: PostPlayCheckpointRequest): PostPlayCheckpointResult =
+        withContext(Dispatchers.IO) {
+            val existingReplica = saveReplicaDao.findByScope(
+                request.serverKey, request.userKey, request.romId, request.romHash, request.slot,
+            )
+
+            // Unchanged bytes: localHash matches checkpointed hash — no new generation, no work.
+            if (existingReplica?.localHash == request.checkpointedHash) {
+                return@withContext PostPlayCheckpointResult.Unchanged
+            }
+
+            val now = clock()
+
+            // Persist honest SaveReplicaEntity with new generation.
+            val updatedReplica = (existingReplica ?: SaveReplicaEntity(
+                serverKey = request.serverKey,
+                userKey = request.userKey,
+                romId = request.romId,
+                romHash = request.romHash,
+                slot = request.slot,
+                coreId = request.coreId,
+                coreBuildRevision = request.coreBuildRevision,
+            )).copy(
+                localHash = request.checkpointedHash,
+                localSizeBytes = request.checkpointedSizeBytes,
+                localWrittenAtEpochMs = now,
+                syncStatus = SaveSyncStatus.UNSYNCED,
+                lastError = null,
+            )
+            saveReplicaDao.upsert(updatedReplica)
+
+            // Durably enqueue NEGOTIATE_AND_SYNC operation (idempotent dedupe: drop stale, reuse current).
+            pendingOperationDao.deleteStaleForScope(
+                request.serverKey, request.userKey, request.romId, request.romHash, request.slot,
+                PendingOperationType.NEGOTIATE_AND_SYNC, olderThanLocalGenerationEpochMs = now,
+            )
+            val active = pendingOperationDao.findActiveByScope(
+                request.serverKey, request.userKey, request.romId, request.romHash, request.slot,
+                PendingOperationType.NEGOTIATE_AND_SYNC,
+            )
+            val pendingId = active.firstOrNull { it.localGenerationEpochMs == now }?.id ?: run {
+                pendingOperationDao.insert(
+                    PendingOperationEntity(
+                        serverKey = request.serverKey,
+                        userKey = request.userKey,
+                        romId = request.romId,
+                        romHash = request.romHash,
+                        slot = request.slot,
+                        operationType = PendingOperationType.NEGOTIATE_AND_SYNC,
+                        localGenerationEpochMs = now,
+                        status = PendingOperationStatus.PENDING,
+                        origin = null, // Resolved at executor time from session store.
+                        negotiateFileName = request.fileName,
+                        negotiateCoreId = request.coreId,
+                        negotiateCoreBuildRevision = request.coreBuildRevision,
+                        createdAtEpochMs = now,
+                        updatedAtEpochMs = now,
+                    )
+                )
+            }
+
+            PostPlayCheckpointResult.Queued(pendingId)
+        }
+
+    override suspend fun finalizeAdoption(request: FinalizeAdoptionRequest): FinalizeAdoptionResult =
+        withContext(Dispatchers.IO) {
+            val session = sessionStore.current() ?: return@withContext FinalizeAdoptionResult.Failure(RommApiError.AUTH_EXPIRED)
+            val username = session.username ?: return@withContext FinalizeAdoptionResult.Failure(RommApiError.AUTH_EXPIRED)
+            val origin = session.origin
+
+            val registration = deviceRepository.ensureRegistered(origin, username)
+            val deviceId = when (registration) {
+                is DeviceRegistrationResult.Success -> registration.identity.rommDeviceId
+                is DeviceRegistrationResult.Failure ->
+                    return@withContext FinalizeAdoptionResult.Failure(registration.error, registration.httpCode)
+            }
+
+            // Idempotent confirm: re-confirming an already-confirmed download is a no-op on the server.
+            val confirmed = RommSyncApi.confirmDownload(client, origin, request.rommSaveId, deviceId) is SaveConfirmResult.Success
+
+            // Complete the sync session (idempotent: server ignores duplicate completions).
+            completeSession(origin, request.sessionId, completed = 1, failed = 0)
+
+            // Persist the adopted replica honestly with the checkpoint hash from EmulationActivity.
+            val existingReplica = saveReplicaDao.findByScope(
+                request.serverKey, request.userKey, request.romId, request.romHash, request.slot,
+            )
+            val now = clock()
+            saveReplicaDao.upsert(
+                (existingReplica ?: SaveReplicaEntity(
+                    serverKey = request.serverKey,
+                    userKey = request.userKey,
+                    romId = request.romId,
+                    romHash = request.romHash,
+                    slot = request.slot,
+                    coreId = request.coreId,
+                    coreBuildRevision = request.coreBuildRevision,
+                )).copy(
+                    localHash = request.checkpointedHash,
+                    localSizeBytes = request.checkpointedSizeBytes,
+                    localWrittenAtEpochMs = now,
+                    rommSaveId = request.rommSaveId,
+                    serverHash = request.serverContentHash,
+                    syncStatus = SaveSyncStatus.SYNCED,
+                    lastError = null,
+                    expectedSramSizeBytes = request.expectedSramSizeBytes ?: existingReplica?.expectedSramSizeBytes,
+                )
+            )
+
+            FinalizeAdoptionResult.Success(confirmed)
+        }
+
     private suspend fun handleDownload(
         request: SaveSyncRequest,
         serverKey: String,
@@ -141,26 +260,80 @@ class SaveSyncCoordinatorImpl(
             is SaveDownloadResult.Failure -> return SaveSyncOutcome.Failure(result.error, result.httpCode)
         }
 
-        // Section 11.1: verify ROM/core provenance and the exact expected SRAM size before ever
-        // adopting a downloaded save. Missing/mismatched emulator metadata is treated as an
-        // unknown-provenance "legacy save" — quarantined, never adopted, never /downloaded-confirmed.
+        // Section 11.1: verify ROM/core provenance before any adoption. Missing/mismatched emulator
+        // metadata is always quarantined permanently, regardless of whether size is known.
         val provenanceKnown = operation.emulator != null && operation.emulator == request.coreId
-        val sizeMatches = bytes.size.toLong() == request.expectedSramSizeBytes
-        if (!provenanceKnown || !sizeMatches) {
-            val reason = if (!sizeMatches) "size-mismatch" else "unknown-provenance"
+        if (!provenanceKnown) {
             val quarantinedPath = saveContentStore.quarantine(
-                serverKey, userKey, request.romId, request.romHash, request.slot, bytes, reason, clock(),
+                serverKey, userKey, request.romId, request.romHash, request.slot, bytes, "unknown-provenance", clock(),
             )
             saveReplicaDao.upsert(
                 (existingReplica ?: newReplica(request, serverKey, userKey)).copy(
                     syncStatus = SaveSyncStatus.QUARANTINED,
-                    lastError = "quarantined: $reason",
+                    lastError = "quarantined: unknown-provenance",
                 )
             )
             completeSession(origin, negotiation.sessionId, completed = 0, failed = 1)
-            return SaveSyncOutcome.Quarantined(reason, quarantinedPath)
+            return SaveSyncOutcome.Quarantined("unknown-provenance", quarantinedPath)
         }
 
+        // Known trusted size: exact-size gate before adoption.
+        if (request.expectedSramSizeBytes != null) {
+            if (bytes.size.toLong() != request.expectedSramSizeBytes) {
+                val quarantinedPath = saveContentStore.quarantine(
+                    serverKey, userKey, request.romId, request.romHash, request.slot, bytes, "size-mismatch", clock(),
+                )
+                saveReplicaDao.upsert(
+                    (existingReplica ?: newReplica(request, serverKey, userKey)).copy(
+                        syncStatus = SaveSyncStatus.QUARANTINED,
+                        lastError = "quarantined: size-mismatch",
+                    )
+                )
+                completeSession(origin, negotiation.sessionId, completed = 0, failed = 1)
+                return SaveSyncOutcome.Quarantined("size-mismatch", quarantinedPath)
+            }
+            // Trusted known size matches — adopt, confirm, complete.
+            return adoptDownload(serverKey, userKey, origin, deviceId, negotiation, operation, existingReplica, request, bytes, saveId)
+        }
+
+        // Unknown size: provenance validated, download to durable quarantine, do NOT adopt or confirm.
+        // Later orchestration (post-load JNI size query) will decide whether to adopt.
+        val quarantinedPath = saveContentStore.quarantine(
+            serverKey, userKey, request.romId, request.romHash, request.slot, bytes, "awaiting-core-validation", clock(),
+        )
+        saveReplicaDao.upsert(
+            (existingReplica ?: newReplica(request, serverKey, userKey)).copy(
+                rommSaveId = saveId,
+                serverHash = operation.serverContentHash,
+                serverSizeBytes = bytes.size.toLong(),
+                serverUpdatedAtEpochMs = operation.serverUpdatedAt?.toEpochMilli(),
+                syncStatus = SaveSyncStatus.AWAITING_CORE_VALIDATION,
+                lastError = null,
+            )
+        )
+        // Do NOT complete the session here — later orchestration completes it after core validation.
+        return SaveSyncOutcome.AwaitingCoreValidation(
+            sessionId = negotiation.sessionId,
+            rommSaveId = saveId,
+            quarantinedPath = quarantinedPath,
+            downloadedSizeBytes = bytes.size.toLong(),
+            serverContentHash = operation.serverContentHash,
+            emulator = operation.emulator,
+        )
+    }
+
+    private suspend fun adoptDownload(
+        serverKey: String,
+        userKey: String,
+        origin: String,
+        deviceId: String,
+        negotiation: SyncNegotiateInfo,
+        operation: SyncOperation,
+        existingReplica: SaveReplicaEntity?,
+        request: SaveSyncRequest,
+        bytes: ByteArray,
+        saveId: Long,
+    ): SaveSyncOutcome {
         saveContentStore.writeLocalAtomically(serverKey, userKey, request.romId, request.romHash, request.slot, bytes)
         val now = clock()
         saveReplicaDao.upsert(
@@ -231,6 +404,63 @@ class SaveSyncCoordinatorImpl(
         return SaveSyncOutcome.UploadQueued(negotiation.sessionId, pendingId)
     }
 
+    // ---- SaveSyncCoordinatorInternal implementation (DAO access facade) ----
+
+    override suspend fun findReplicaByScope(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+    ): SaveReplicaEntity? = saveReplicaDao.findByScope(serverKey, userKey, romId, romHash, slot)
+
+    override suspend fun resolveConflict(request: ResolveConflictRequest): ConflictResolutionResult {
+        // Use the original domain SyncOperation when available (preserves full serverContentHash
+        // and serverUpdatedAt end-to-end). Fall back to reconstructed operation for backward compat.
+        val operation = request.operation ?: SyncOperation(
+            action = SyncAction.CONFLICT,
+            romId = request.romId,
+            saveId = request.serverSaveId,
+            fileName = request.fileName ?: "autosave.srm",
+            slot = request.serverSlot ?: request.slot,
+            emulator = request.serverEmulator,
+            reason = request.reason,
+            serverUpdatedAt = null,
+            serverContentHash = null,
+        )
+
+        val localEntity = saveReplicaDao.findByScope(
+            extractServerKey(request.serverOrigin),
+            request.username,
+            request.romId,
+            request.romHash,
+            request.slot,
+        ) ?: return ConflictResolutionResult.Failure(
+            RommApiError.PARSE_ERROR,
+            reason = "no-local-replica: cannot resolve conflict without local save replica",
+        )
+
+        return when (request.choice) {
+            ConflictChoice.KEEP_LOCAL -> resolver.resolveKeepLocal(
+                sessionId = request.sessionId,
+                serverOrigin = request.serverOrigin,
+                username = request.username,
+                localEntity = localEntity,
+                operation = operation,
+                localFileName = request.fileName ?: "autosave.srm",
+            )
+            ConflictChoice.KEEP_SERVER -> resolver.resolveKeepServer(
+                sessionId = request.sessionId,
+                serverOrigin = request.serverOrigin,
+                username = request.username,
+                localEntity = localEntity,
+                operation = operation,
+            )
+        }
+    }
+
+    // ---- Private helpers ----
+
     private fun mergeAgreedMetadata(
         existingReplica: SaveReplicaEntity?,
         request: SaveSyncRequest,
@@ -265,10 +495,16 @@ class SaveSyncCoordinatorImpl(
     private suspend fun completeSession(origin: String, sessionId: Long, completed: Int, failed: Int) {
         // Best-effort: an already-applied local outcome (adopted download, queued upload, recorded
         // conflict/quarantine) is not rolled back if this call fails — it only affects the server's
-        // own bookkeeping of the sync session, not local save-data safety.
-        RommSyncApi.completeSyncSession(client, origin, sessionId, SyncCompleteRequest(completed, failed))
+        // own bookkeeping of the sync session, not local save-data safety. Log explicitly.
+        when (val result = RommSyncApi.completeSyncSession(client, origin, sessionId, SyncCompleteRequest(completed, failed))) {
+            is com.romm.androidtv.romm.SyncCompleteResult.Success -> Unit
+            is com.romm.androidtv.romm.SyncCompleteResult.Failure ->
+                Log.warning("completeSyncSession failed (non-fatal, local data safe): session=$sessionId error=${result.error} httpCode=${result.httpCode}")
+        }
     }
 
-    private fun sha256Hex(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private companion object {
+        // JVM-compatible logger: java.util.logging works in both Android and JVM unit tests.
+        val Log = java.util.logging.Logger.getLogger("SaveSyncCoordinator")
+    }
 }

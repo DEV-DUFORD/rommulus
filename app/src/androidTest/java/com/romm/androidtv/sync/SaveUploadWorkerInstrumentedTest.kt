@@ -88,13 +88,17 @@ class SaveUploadWorkerInstrumentedTest {
     }
 
     @Test
-    fun worker_maps_unexpected_exception_to_Result_failure() {
+    fun worker_maps_unexpected_exception_to_Result_retry() {
         drainBehavior = { throw RuntimeException("unexpected bug") }
         val context = ApplicationProvider.getApplicationContext<Context>()
         val worker = buildWorkerWithFactory(context)
 
+        // Production SaveUploadWorker.doWork() catches all top-level exceptions,
+        // logs a message about stranded RUNNING recovery, and returns Result.retry().
+        // The executor's drainBatch() recovers stranded rows at the start of each call,
+        // so retrying gives the next invocation a chance to clean up.
         val result = runBlocking { worker.doWork() }
-        assertEquals(ListenableWorker.Result.failure(), result)
+        assertEquals(ListenableWorker.Result.retry(), result)
     }
 
     private fun buildWorkerWithFactory(context: Context): SaveUploadWorker {
