@@ -106,10 +106,46 @@ class SavePreLaunchStateTest {
         }
 
         @Test
-        fun `hasOverlay is false when only errorMessage is set`() {
+        fun `hasOverlay is true when only errorMessage is set`() {
             val state = SavePreLaunchState(romId = 42)
             state.errorMessage = "some error"
-            assertThat(state.hasOverlay).isFalse()
+            assertThat(state.hasOverlay).isTrue()
+        }
+
+        @Test
+        fun `hasBlockingOverlay is false when only errorMessage is set`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.errorMessage = "some error"
+            assertThat(state.hasBlockingOverlay).isFalse()
+        }
+
+        @Test
+        fun `hasBlockingOverlay is true when conflictModel is set`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.conflictModel = SaveConflictUiModel(
+                description = "test",
+                local = SaveConflictSide(label = "Local", saveId = null, fileName = "x.srm", hashPrefix = null, sizeText = null, coreId = null, slot = null, romId = null, updatedAtText = null),
+                server = SaveConflictSide(label = "Server", saveId = null, fileName = "y.srm", hashPrefix = null, sizeText = null, coreId = null, slot = null, romId = null, updatedAtText = null),
+            )
+            assertThat(state.hasBlockingOverlay).isTrue()
+        }
+
+        @Test
+        fun `hasBlockingOverlay is true when quarantineModel is set`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.quarantineModel = SaveQuarantineUiModel(
+                reason = "size-mismatch",
+                description = "test",
+                quarantined = SaveConflictSide(label = "Q", saveId = null, fileName = "z.srm", hashPrefix = null, sizeText = null, coreId = null, slot = null, romId = null, updatedAtText = null),
+                quarantinedPath = "/tmp/z.srm",
+            )
+            assertThat(state.hasBlockingOverlay).isTrue()
+        }
+
+        @Test
+        fun `hasBlockingOverlay is false initially`() {
+            val state = SavePreLaunchState(romId = 42)
+            assertThat(state.hasBlockingOverlay).isFalse()
         }
     }
 
@@ -158,6 +194,14 @@ class SavePreLaunchStateTest {
         }
 
         @Test
+        fun `clear resets isStaging`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isStaging = true
+            state.clear()
+            assertThat(state.isStaging).isFalse()
+        }
+
+        @Test
         fun `clear resets resolvedEntity`() {
             val state = SavePreLaunchState(romId = 42)
             state.resolvedEntity = com.romm.androidtv.romm.save.SaveReplicaEntity(
@@ -201,6 +245,85 @@ class SavePreLaunchStateTest {
             assertThat(state.isResolving).isTrue()
             state.isResolving = false
             assertThat(state.isResolving).isFalse()
+        }
+
+        @Test
+        fun `isStaging defaults to false`() {
+            val state = SavePreLaunchState(romId = 42)
+            assertThat(state.isStaging).isFalse()
+        }
+
+        @Test
+        fun `isStaging can be set and read`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isStaging = true
+            assertThat(state.isStaging).isTrue()
+            state.isStaging = false
+            assertThat(state.isStaging).isFalse()
+        }
+
+        @Test
+        fun `isStaging and isResolving are independent`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isStaging = true
+            assertThat(state.isStaging).isTrue()
+            assertThat(state.isResolving).isFalse()
+            state.isResolving = true
+            assertThat(state.isStaging).isTrue()
+            assertThat(state.isResolving).isTrue()
+        }
+
+        @Test
+        fun `staging then error state transition`() {
+            val state = SavePreLaunchState(romId = 42)
+            // Initial: no overlay, not staging
+            assertThat(state.hasOverlay).isFalse()
+            assertThat(state.isStaging).isFalse()
+
+            // Start staging
+            state.isStaging = true
+            assertThat(state.isStaging).isTrue()
+            assertThat(state.hasOverlay).isFalse()
+
+            // Staging fails with error
+            state.isStaging = false
+            state.errorMessage = "Session expired; please log in again"
+            assertThat(state.isStaging).isFalse()
+            assertThat(state.hasOverlay).isTrue()
+            assertThat(state.hasBlockingOverlay).isFalse()
+        }
+
+        @Test
+        fun `staging then success clears staging`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isStaging = true
+            // Simulate success: clear staging, no error set
+            state.isStaging = false
+            assertThat(state.isStaging).isFalse()
+            assertThat(state.hasOverlay).isFalse()
+        }
+
+        @Test
+        fun `clear resets isStaging`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isStaging = true
+            state.errorMessage = "error"
+            state.clear()
+            assertThat(state.isStaging).isFalse()
+            assertThat(state.errorMessage).isNull()
+        }
+
+        @Test
+        fun `hasOverlay with both error and conflict prefers combined`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.conflictModel = SaveConflictUiModel(
+                description = "test",
+                local = SaveConflictSide(label = "Local", saveId = null, fileName = "x.srm", hashPrefix = null, sizeText = null, coreId = null, slot = null, romId = null, updatedAtText = null),
+                server = SaveConflictSide(label = "Server", saveId = null, fileName = "y.srm", hashPrefix = null, sizeText = null, coreId = null, slot = null, romId = null, updatedAtText = null),
+            )
+            state.errorMessage = "also an error"
+            assertThat(state.hasOverlay).isTrue()
+            assertThat(state.hasBlockingOverlay).isTrue()
         }
     }
 
@@ -304,6 +427,72 @@ class SavePreLaunchStateTest {
         fun `romHash is preserved when set`() {
             val state = SavePreLaunchState(romId = 42, romHash = "abc123")
             assertThat(state.romHash).isEqualTo("abc123")
+        }
+    }
+
+    @Nested
+    @DisplayName("Auth-expired state")
+    inner class AuthExpiredState {
+
+        @Test
+        fun `isAuthExpired defaults to false`() {
+            val state = SavePreLaunchState(romId = 42)
+            assertThat(state.isAuthExpired).isFalse()
+        }
+
+        @Test
+        fun `isAuthExpired can be set and read`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isAuthExpired = true
+            assertThat(state.isAuthExpired).isTrue()
+            state.isAuthExpired = false
+            assertThat(state.isAuthExpired).isFalse()
+        }
+
+        @Test
+        fun `hasOverlay is true when only isAuthExpired is set`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isAuthExpired = true
+            assertThat(state.hasOverlay).isTrue()
+        }
+
+        @Test
+        fun `hasBlockingOverlay is false when only isAuthExpired is set`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isAuthExpired = true
+            assertThat(state.hasBlockingOverlay).isFalse()
+        }
+
+        @Test
+        fun `clear resets isAuthExpired`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isAuthExpired = true
+            state.clear()
+            assertThat(state.isAuthExpired).isFalse()
+        }
+
+        @Test
+        fun `auth-expired state does not interfere with conflictModel`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isAuthExpired = true
+            state.conflictModel = SaveConflictUiModel(
+                description = "test",
+                local = SaveConflictSide(label = "Local", saveId = null, fileName = "x.srm", hashPrefix = null, sizeText = null, coreId = null, slot = null, romId = null, updatedAtText = null),
+                server = SaveConflictSide(label = "Server", saveId = null, fileName = "y.srm", hashPrefix = null, sizeText = null, coreId = null, slot = null, romId = null, updatedAtText = null),
+            )
+            assertThat(state.isAuthExpired).isTrue()
+            assertThat(state.conflictModel).isNotNull
+            assertThat(state.hasBlockingOverlay).isTrue()
+        }
+
+        @Test
+        fun `auth-expired and error message are independent`() {
+            val state = SavePreLaunchState(romId = 42)
+            state.isAuthExpired = true
+            state.errorMessage = "some error"
+            assertThat(state.isAuthExpired).isTrue()
+            assertThat(state.errorMessage).isEqualTo("some error")
+            assertThat(state.hasOverlay).isTrue()
         }
     }
 }

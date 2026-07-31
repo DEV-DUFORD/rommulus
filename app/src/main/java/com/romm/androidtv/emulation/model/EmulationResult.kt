@@ -18,6 +18,9 @@ sealed interface EmulationResult {
         /** Absolute app-private path to the atomically checkpointed SRAM file, if any changed. */
         val checkpointedSavePath: String?,
         val checkpointedSaveHash: String?,
+        /** Wall-clock bounds of this play session, for `POST /api/play-sessions` reporting (best-effort). */
+        val startEpochMs: Long = -1L,
+        val endEpochMs: Long = -1L,
     ) : EmulationResult
 
     data class Crashed(

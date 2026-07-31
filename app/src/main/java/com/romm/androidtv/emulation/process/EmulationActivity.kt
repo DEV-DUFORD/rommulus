@@ -9,12 +9,17 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -49,6 +55,10 @@ import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
 import com.romm.androidtv.emulation.video.EmulationSurface
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
@@ -67,11 +77,15 @@ import java.util.concurrent.atomic.AtomicBoolean
  * is isolated from both.
  *
  * Process-level launch guard: [isSessionActive] is a simple in-process
- * atomic flag (this activity's process only ever hosts one activity
- * instance, and `singleTask` routes repeat launches to [onNewIntent]).
- * Combined with the native [NativeLibretroHost]'s own atomic
- * compare-and-set process-slot guard, a second concurrent session is
- * rejected at two independent layers.
+ * atomic flag checked in [onCreate], rejecting a second concurrent launch
+ * with [reportPlayerBusyAndFinish]. This activity intentionally uses the
+ * default ("standard") launchMode rather than singleTask/singleInstance:
+ * MainActivity launches it via an ActivityResultLauncher to receive the
+ * EmulationResult, and the platform never delivers activity results to a
+ * singleTask/singleInstance target, so the guard here — not launchMode —
+ * is what prevents a second concurrent session. Combined with the native
+ * [NativeLibretroHost]'s own atomic compare-and-set process-slot guard, a
+ * second concurrent session is rejected at two independent layers.
  */
 class EmulationActivity : ComponentActivity() {
 
@@ -85,6 +99,13 @@ class EmulationActivity : ComponentActivity() {
     /** SHA-256 hex of the last checkpointed SRAM, computed immediately after checkpointing. */
     @Volatile
     private var checkpointedHash: String? = null
+    /**
+     * Wall-clock start of this play session (captured once in [onCreate]), passed back to the
+     * caller in the result [Intent] so it can report a completed play session to
+     * `POST /api/play-sessions` — the only mechanism that advances the server's
+     * `rom_user.last_played`, which drives the RomM Home screen's "Continue Playing" row.
+     */
+    private var sessionStartEpochMs: Long = -1L
 
     // This activity runs in its own process (:emulation), so it cannot share
     // MainActivity's ControllerEventRouter instance — each owns its own,
@@ -112,6 +133,25 @@ class EmulationActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Emits on every remote/controller key press so [EmulationScreen] can transiently reveal the
+     * hold-to-exit back-hint icon (never persistent "debug info" — it fades out on its own).
+     */
+    private val keyActivityEvents = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+
+    /**
+     * Tracks whether the remote's Back key is currently physically held down. The fill/exit
+     * animation itself is driven from inside [EmulationScreen] (a `LaunchedEffect` there has
+     * access to Compose's MonotonicFrameClock); driving an `Animatable` from `lifecycleScope`
+     * instead throws `IllegalStateException: A MonotonicFrameClock is not available` because that
+     * scope is never part of a composition frame — that crash was the earlier "back exits
+     * instantly with no animation" bug (the whole `:emulation` process crashed on Back press).
+     */
+    private val backKeyHeld = MutableStateFlow(false)
+
     companion object {
         private const val TAG = "EmulationActivity"
         private val isSessionActive = AtomicBoolean(false)
@@ -137,6 +177,8 @@ class EmulationActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        sessionStartEpochMs = System.currentTimeMillis()
 
         if (!isSessionActive.compareAndSet(false, true)) {
             Log.w(TAG, "onCreate: a session is already active in this process — refusing to start a second one")
@@ -368,7 +410,9 @@ class EmulationActivity : ComponentActivity() {
                         host = host,
                         sessionStarted = sessionStarted,
                         lastError = host.nativeGetLastError(),
-                        onStop = { finish() }
+                        keyActivityEvents = keyActivityEvents,
+                        backKeyHeld = backKeyHeld,
+                        onStop = { finishAndDeliverResult() }
                     )
                 }
             }
@@ -376,10 +420,12 @@ class EmulationActivity : ComponentActivity() {
     }
 
     /**
-     * A repeated launch intent while this activity is already running
-     * (singleTask) must not replace the live session
-     * (LIBRETRO_REFACTOR.md section 6: "onNewIntent reports 'player busy';
-     * it must not replace a live launch.").
+     * Defensive no-op: with the default ("standard") launchMode this activity
+     * uses, the platform always creates a fresh instance per launch, so
+     * onNewIntent() should never actually be invoked here. Kept only as a
+     * safety net in case a future caller ever adds FLAG_ACTIVITY_SINGLE_TOP
+     * or similar — the real double-launch guard is [isSessionActive] in
+     * onCreate().
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -434,8 +480,84 @@ class EmulationActivity : ComponentActivity() {
         super.onPause()
     }
 
-    override fun onDestroy() {
+    /**
+     * Checkpoints, reads the journal descriptor, calls setResult() with the final
+     * EmulationResult, and only THEN calls finish(). Order matters: the Android
+     * platform locks in whatever result was set via setResult() at the moment
+     * finish() is invoked — calling setResult() reactively from onPause()/onStop()/
+     * onDestroy() (all of which only run as a consequence of finish() having already
+     * been called) is too late and silently delivers the stale default result
+     * (RESULT_CANCELED, no data) to the caller's ActivityResultLauncher callback.
+     * This was empirically confirmed on-device: setResult() completing before the
+     * caller's callback fired was NOT sufficient — finish() must be called after
+     * setResult(), from the same call site.
+     */
+    private fun finishAndDeliverResult() {
         val checkpointed = checkpointIfRunning()
+        deliverResult(checkpointed)
+        finish()
+    }
+
+    /**
+     * Reads the journal descriptor and calls setResult() with the final EmulationResult.
+     * Must be called before finish() (see [finishAndDeliverResult]) — never call this
+     * from a lifecycle callback alone, as by the time onPause()/onDestroy() run in
+     * response to finish(), the result has already been locked in.
+     */
+    private fun deliverResult(checkpointed: Boolean) {
+        Log.i(TAG, "deliverResult: sessionIdForJournal=${sessionIdForJournal != null} checkpointed=$checkpointed")
+        val sid = sessionIdForJournal ?: return
+        try {
+            val journalDir = filesDir.resolve("launch_sessions")
+            val journal = LaunchSessionJournal(journalDir)
+            val descriptor = journal.read(sid)
+            Log.i(TAG, "deliverResult: descriptor.state=${descriptor?.state}")
+
+            when (descriptor?.state) {
+                DescriptorState.ADOPTED -> {
+                    // Candidate was adopted during onCreate; checkpointed hash is in the descriptor.
+                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
+                        EmulationResult.Completed(
+                            sessionId = sid,
+                            checkpointedSavePath = savePath,
+                            checkpointedSaveHash = descriptor.checkpointedHash,
+                            startEpochMs = sessionStartEpochMs,
+                            endEpochMs = System.currentTimeMillis(),
+                        )
+                    ))
+                }
+                DescriptorState.REJECTED -> {
+                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
+                        EmulationResult.Completed(
+                            sessionId = sid,
+                            checkpointedSavePath = if (checkpointed) savePath else null,
+                            checkpointedSaveHash = checkpointedHash.takeIf { checkpointed },
+                            startEpochMs = sessionStartEpochMs,
+                            endEpochMs = System.currentTimeMillis(),
+                        )
+                    ))
+                }
+                else -> {
+                    // Normal completion (no candidate or crashed state).
+                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
+                        EmulationResult.Completed(
+                            sessionId = sid,
+                            checkpointedSavePath = if (checkpointed) savePath else null,
+                            checkpointedSaveHash = checkpointedHash.takeIf { checkpointed && savePath != null },
+                            startEpochMs = sessionStartEpochMs,
+                            endEpochMs = System.currentTimeMillis(),
+                        )
+                    ))
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "deliverResult: failed to write result intent", e)
+        }
+        Log.i(TAG, "deliverResult: finished")
+    }
+
+    override fun onDestroy() {
+        checkpointIfRunning()
         inputAdapter.stop()
         try {
             val inputManager = getSystemService(INPUT_SERVICE) as InputManager
@@ -448,48 +570,6 @@ class EmulationActivity : ComponentActivity() {
         if (sessionStarted) {
             host.nativeStopSession()
             sessionStarted = false
-        }
-
-        // Phase B: compute and deliver EmulationResult via setResult.
-        val sid = sessionIdForJournal ?: return isSessionActive.also { it.set(false) }.let { super.onDestroy(); return }
-        try {
-            val journalDir = filesDir.resolve("launch_sessions")
-            val journal = LaunchSessionJournal(journalDir)
-            val descriptor = journal.read(sid)
-
-            when (descriptor?.state) {
-                DescriptorState.ADOPTED -> {
-                    // Candidate was adopted during onCreate; checkpointed hash is in the descriptor.
-                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
-                        EmulationResult.Completed(
-                            sessionId = sid,
-                            checkpointedSavePath = savePath,
-                            checkpointedSaveHash = descriptor.checkpointedHash,
-                        )
-                    ))
-                }
-                DescriptorState.REJECTED -> {
-                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
-                        EmulationResult.Completed(
-                            sessionId = sid,
-                            checkpointedSavePath = if (checkpointed) savePath else null,
-                            checkpointedSaveHash = checkpointedHash.takeIf { checkpointed },
-                        )
-                    ))
-                }
-                else -> {
-                    // Normal completion (no candidate or crashed state).
-                    setResult(android.app.Activity.RESULT_OK, buildResultIntent(
-                        EmulationResult.Completed(
-                            sessionId = sid,
-                            checkpointedSavePath = if (checkpointed) savePath else null,
-                            checkpointedSaveHash = checkpointedHash.takeIf { checkpointed && savePath != null },
-                        )
-                    ))
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "onDestroy: failed to write result intent", e)
         }
 
         isSessionActive.set(false)
@@ -506,6 +586,8 @@ class EmulationActivity : ComponentActivity() {
             putExtra("session_id", result.sessionId)
             result.checkpointedSavePath?.let { putExtra("checkpointed_save_path", it) }
             result.checkpointedSaveHash?.let { putExtra("checkpointed_save_hash", it) }
+            if (result.startEpochMs > 0L) putExtra("play_session_start_epoch_ms", result.startEpochMs)
+            if (result.endEpochMs > 0L) putExtra("play_session_end_epoch_ms", result.endEpochMs)
             if (stageRomId > 0L) putExtra("rom_id", stageRomId)
             if (stageRomHash.isNotBlank()) putExtra("rom_hash", stageRomHash)
         }
@@ -521,8 +603,38 @@ class EmulationActivity : ComponentActivity() {
      */
     @Suppress("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-            return super.dispatchKeyEvent(event)
+        // The Xbox/game controller must never trigger the back-hint icon or the hold-to-exit
+        // gesture — only the TV remote should. IMPORTANT: this Android TV box (Google TV
+        // Streamer) routes the physical remote's Back/Home/Select buttons through a
+        // "virtual-remote" input device whose source bitmask is KEYBOARD | DPAD | GAMEPAD —
+        // it legitimately carries the GAMEPAD bit (confirmed via `adb shell dumpsys input`).
+        // Excluding on GAMEPAD (as a first attempt did) wrongly filtered out the real remote too.
+        //
+        // JOYSTICK looked like the right differentiator (the Xbox controller device reports
+        // KEYBOARD | GAMEPAD | STYLUS | JOYSTICK; the remote never does) but `event.source` on
+        // an individual button-press KeyEvent only reflects the source *class of that specific
+        // event* — a gamepad face-button press reports source = KEYBOARD | GAMEPAD without the
+        // JOYSTICK bit, even though the originating device supports it (JOYSTICK is only set on
+        // continuous analog-stick MotionEvents, e.g. the D-pad-as-hat-axis case, which explains
+        // why D-pad presses were correctly excluded but face buttons weren't). The reliable
+        // signal is the full originating InputDevice's capability bitmask (confirmed via
+        // `adb shell dumpsys input`), not the per-event source.
+        val deviceSources = event.device?.sources ?: event.source
+        val isRemoteSource = (deviceSources and InputDevice.SOURCE_JOYSTICK) == 0
+
+        if (isRemoteSource) {
+            keyActivityEvents.tryEmit(Unit)
+
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                // Exiting gameplay is a deliberate hold-to-confirm gesture, never a single tap, so
+                // an errant Back press from the TV remote can never discard an in-progress
+                // session. The paired visual countdown lives in EmulationScreen's back-hint icon.
+                when (event.action) {
+                    KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) backKeyHeld.value = true
+                    KeyEvent.ACTION_UP -> backKeyHeld.value = false
+                }
+                return true
+            }
         }
         if (sessionStarted) {
             val consumed = controllerRouter.onKeyEvent(event)
@@ -550,9 +662,20 @@ private fun EmulationScreen(
     host: NativeLibretroHost,
     sessionStarted: Boolean,
     lastError: String,
+    keyActivityEvents: Flow<Unit>,
+    backKeyHeld: Flow<Boolean>,
     onStop: () -> Unit
 ) {
+    // Diagnostics are polled silently to drive the core-requested-shutdown auto-stop below; none
+    // of it is rendered on screen — gameplay should show only the game itself.
     var diagnostics by remember { mutableStateOf(LongArray(20).also { it[4] = -1 }) }
+    var showBackHint by remember { mutableStateOf(false) }
+    // Owned entirely inside this composition: a LaunchedEffect's coroutine has access to
+    // Compose's MonotonicFrameClock, which Animatable.animateTo requires. Driving this same
+    // Animatable from the Activity's lifecycleScope instead throws
+    // "IllegalStateException: A MonotonicFrameClock is not available" and crashes the whole
+    // :emulation process — that was the earlier "back exits instantly, no animation" bug.
+    val backHoldProgress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionStarted) {
@@ -563,25 +686,53 @@ private fun EmulationScreen(
         }
     }
 
+    // Reveal the hold-to-exit back-hint icon on any remote/controller key press; collectLatest
+    // restarts the idle-hide delay on every fresh press so the icon stays up while interacting.
+    LaunchedEffect(Unit) {
+        keyActivityEvents.collectLatest {
+            showBackHint = true
+            delay(BACK_HINT_IDLE_HIDE_MS)
+            showBackHint = false
+        }
+    }
+
+    // Drives the fill/unfill of the hold-to-exit ring. collectLatest cancels the in-flight
+    // animateTo the instant the held state flips, so releasing Back early reverses the fill
+    // instead of completing it; only a fill that reaches 1f (the full hold duration) exits.
+    LaunchedEffect(Unit) {
+        backKeyHeld.collectLatest { held ->
+            if (held) {
+                backHoldProgress.animateTo(1f, tween(durationMillis = BACK_HOLD_DURATION_MS, easing = LinearEasing))
+                onStop()
+            } else {
+                backHoldProgress.animateTo(0f, tween(durationMillis = 150))
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         if (sessionStarted) {
-            // The video surface is the primary visible content
-            // (LIBRETRO_REFACTOR.md section 8.1); diagnostics render as a
-            // semi-transparent overlay on top of it, not in place of it.
+            // The video surface is the only visible content during normal play.
             EmulationSurface(
                 host = host,
                 coreWidth = diagnostics[2].toInt(),
                 coreHeight = diagnostics[3].toInt(),
                 modifier = Modifier.fillMaxSize()
             )
+        } else {
+            Text(
+                text = "Session failed to start: $lastError",
+                color = Color(0xFFf44336),
+                modifier = Modifier.padding(32.dp)
+            )
         }
 
-        EmulationDiagnosticsOverlay(
-            sessionStarted = sessionStarted,
-            lastError = lastError,
-            diagnostics = diagnostics,
-            onStop = onStop
-        )
+        if (showBackHint || backHoldProgress.value > 0f) {
+            BackHintIcon(
+                progress = backHoldProgress.value,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)
+            )
+        }
     }
 
     LaunchedEffect(diagnostics[5]) {
@@ -591,64 +742,31 @@ private fun EmulationScreen(
     }
 }
 
+/** How long the back-hint icon stays visible after the most recent key press with no hold in progress. */
+private const val BACK_HINT_IDLE_HIDE_MS = 2500L
+
+/** How long the remote's Back key must be held to confirm exiting gameplay. */
+private const val BACK_HOLD_DURATION_MS = 1200
+
+/**
+ * Hold-to-exit affordance: a back arrow ringed by a determinate progress indicator that fills as
+ * the user holds the remote's Back button, giving clear visual feedback before gameplay exits.
+ */
 @Composable
-private fun EmulationDiagnosticsOverlay(
-    sessionStarted: Boolean,
-    lastError: String,
-    diagnostics: LongArray,
-    onStop: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(
-            text = "Native Emulation Diagnostics (Phase 2 debug)",
-            style = MaterialTheme.typography.headlineSmall,
-            color = Color.White
+private fun BackHintIcon(progress: Float, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.size(56.dp), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxSize(),
+            color = Color.White,
+            trackColor = Color.White.copy(alpha = 0.25f),
+            strokeWidth = 3.dp,
         )
-
-        if (!sessionStarted) {
-            Text("Session failed to start: $lastError", color = Color(0xFFf44336))
-        } else {
-            Text("Frame count: ${diagnostics[0]}", color = Color.White)
-            Text("Audio frames produced: ${diagnostics[1]}", color = Color.White)
-            Text("Last geometry: ${diagnostics[2]}x${diagnostics[3]}", color = Color.White)
-            Text("Pixel format: ${diagnostics[4]}", color = Color.White)
-            Text("Audio underrun frames: ${diagnostics[6]}", color = Color.White)
-            Text("Audio overrun frames: ${diagnostics[7]}", color = Color.White)
-            // Live per-port RetroPad button masks and left-stick analog
-            // (LIBRETRO_REFACTOR.md section 9): the synthetic test core
-            // only ever reads port 0, but a physical controller may be
-            // assigned any of the four ports depending on what else the OS
-            // enumerates as a controller-like input source, so all four
-            // are shown to make the controller feed verifiable regardless
-            // of port.
-            Text(
-                text = "Ports (button mask hex): " +
-                    "P0=0x${diagnostics[8].toString(16)} " +
-                    "P1=0x${diagnostics[9].toString(16)} " +
-                    "P2=0x${diagnostics[10].toString(16)} " +
-                    "P3=0x${diagnostics[11].toString(16)}",
-                color = Color.White
-            )
-            Text(
-                text = "Ports (left stick X,Y): " +
-                    "P0=(${diagnostics[12]},${diagnostics[13]}) " +
-                    "P1=(${diagnostics[14]},${diagnostics[15]}) " +
-                    "P2=(${diagnostics[16]},${diagnostics[17]}) " +
-                    "P3=(${diagnostics[18]},${diagnostics[19]})",
-                color = Color.White
-            )
-            Text(
-                text = if (diagnostics[5] != 0L) "Core requested shutdown" else "Running",
-                color = if (diagnostics[5] != 0L) Color(0xFFff9800) else Color(0xFF4caf50)
-            )
-        }
-
-        Button(onClick = onStop) {
-            Text("Stop and return")
-        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "Hold Back to exit",
+            tint = Color.White,
+        )
     }
 }
 

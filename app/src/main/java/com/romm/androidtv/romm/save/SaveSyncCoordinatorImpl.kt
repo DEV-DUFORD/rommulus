@@ -54,6 +54,14 @@ class SaveSyncCoordinatorImpl(
     private val clock: () -> Long = { System.currentTimeMillis() },
     /** Conflict resolver; defaults to production impl sharing the same DAOs. Tests inject a fake. */
     private val conflictResolver: ConflictResolver? = null,
+    /**
+     * Invoked every time a [PendingOperationEntity] (upload or negotiate-and-sync) is durably
+     * queued, so the caller can schedule the [com.romm.androidtv.sync.SaveUploadWorker] batch via
+     * [com.romm.androidtv.sync.SaveUploadEnqueueHelper]. Queuing a row in Room alone never causes
+     * it to be uploaded — something must call this to actually schedule the WorkManager job.
+     * Defaults to a no-op so plain-JVM unit tests never need an Android [android.content.Context].
+     */
+    private val onOperationQueued: () -> Unit = {},
 ) : SaveSyncCoordinator, SaveSyncCoordinatorInternal {
 
     /** Lazy singleton: resolves once on first conflict, reuses across calls. */
@@ -103,7 +111,14 @@ class SaveSyncCoordinatorImpl(
 
         val operation = negotiation.operations.firstOrNull { op ->
             op.romId == request.romId && (op.slot == null || op.slot == request.slot)
-        } ?: return@withContext SaveSyncOutcome.Failure(RommApiError.PARSE_ERROR)
+        } ?: run {
+            // A missing operation entry is NOT a parse failure: the server omits an operation
+            // entirely when there is nothing to reconcile for this rom/slot (e.g. the very first
+            // launch of a title with no local save and no save recorded on the server yet).
+            // Nothing was assigned to complete, so report zero completed/failed to the server.
+            completeSession(origin, negotiation.sessionId, completed = 0, failed = 0)
+            return@withContext SaveSyncOutcome.NoOpSynced(negotiation.sessionId)
+        }
 
         when (operation.action) {
             SyncAction.NO_OP -> {
@@ -192,6 +207,7 @@ class SaveSyncCoordinatorImpl(
                 )
             }
 
+            onOperationQueued()
             PostPlayCheckpointResult.Queued(pendingId)
         }
 
@@ -241,6 +257,50 @@ class SaveSyncCoordinatorImpl(
             )
 
             FinalizeAdoptionResult.Success(confirmed)
+        }
+
+    override suspend fun recordPlaySession(request: PlaySessionRecordRequest): PlaySessionRecordResult =
+        withContext(Dispatchers.IO) {
+            // Backend requires end_time > start_time; a session with no measurable duration has
+            // nothing to report and would otherwise fail server-side validation.
+            if (request.endEpochMs <= request.startEpochMs) {
+                return@withContext PlaySessionRecordResult.Success(createdCount = 0, skippedCount = 0)
+            }
+
+            val session = sessionStore.current() ?: return@withContext PlaySessionRecordResult.Failure(RommApiError.AUTH_EXPIRED)
+            val username = session.username ?: return@withContext PlaySessionRecordResult.Failure(RommApiError.AUTH_EXPIRED)
+            val origin = session.origin
+
+            val registration = deviceRepository.ensureRegistered(origin, username)
+            val deviceId = when (registration) {
+                is DeviceRegistrationResult.Success -> registration.identity.rommDeviceId
+                is DeviceRegistrationResult.Failure ->
+                    return@withContext PlaySessionRecordResult.Failure(registration.error, registration.httpCode)
+            }
+
+            when (
+                val result = RommSyncApi.ingestPlaySessions(
+                    client,
+                    origin,
+                    com.romm.androidtv.romm.PlaySessionIngestRequest(
+                        deviceId = deviceId,
+                        sessions = listOf(
+                            com.romm.androidtv.romm.PlaySessionEntry(
+                                romId = request.romId,
+                                saveSlot = request.slot,
+                                startTime = Instant.ofEpochMilli(request.startEpochMs),
+                                endTime = Instant.ofEpochMilli(request.endEpochMs),
+                                durationMs = request.endEpochMs - request.startEpochMs,
+                            )
+                        ),
+                    ),
+                )
+            ) {
+                is com.romm.androidtv.romm.PlaySessionIngestResult.Success ->
+                    PlaySessionRecordResult.Success(result.createdCount, result.skippedCount)
+                is com.romm.androidtv.romm.PlaySessionIngestResult.Failure ->
+                    PlaySessionRecordResult.Failure(result.error, result.httpCode)
+            }
         }
 
     private suspend fun handleDownload(
@@ -401,6 +461,7 @@ class SaveSyncCoordinatorImpl(
 
         saveReplicaDao.upsert(existingReplica.copy(syncStatus = SaveSyncStatus.PENDING_UPLOAD, lastError = null))
         completeSession(origin, negotiation.sessionId, completed = 1, failed = 0)
+        onOperationQueued()
         return SaveSyncOutcome.UploadQueued(negotiation.sessionId, pendingId)
     }
 

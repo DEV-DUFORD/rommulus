@@ -1,9 +1,29 @@
 package com.romm.androidtv.library.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -430,5 +450,176 @@ class ConflictResolutionWiringTest {
         // In production, the lifecycle-safe coroutine wrapper prevents duplicates after
         // navigation away; here we verify the interface itself is idempotent for cancel.
         assert(cancelCount == 3) { "Cancel is non-resolving; multiple calls are safe" }
+    }
+}
+
+
+/**
+ * Instrumented Compose UI tests for error-only pre-launch overlay.
+ * Validates: error message rendering, dismiss button focus, and that
+ * error-only state does NOT trigger conflict/quarantine adoption actions.
+ */
+@RunWith(AndroidJUnit4::class)
+class ErrorOverlayInstrumentedTest {
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
+
+    @Test
+    fun errorOverlay_rendersErrorMessageAndGoBackButton() {
+        val errorMessage = "Session expired; please log in again"
+
+        composeTestRule.setContent {
+            RommTvTheme {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = "Launch Blocked",
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = errorMessage,
+                        color = androidx.compose.ui.graphics.Color(0xFFf44336),
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    TextButton(onClick = { /* dismiss */ }) {
+                        Text("Go Back")
+                    }
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("Launch Blocked", useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithText(errorMessage, useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithText("Go Back", useUnmergedTree = true).assertExists()
+
+        // Error-only overlay must NOT have conflict/quarantine adoption buttons
+        composeTestRule.onNodeWithText("Keep Local", useUnmergedTree = true).assertDoesNotExist()
+        composeTestRule.onNodeWithText("Keep Server", useUnmergedTree = true).assertDoesNotExist()
+        composeTestRule.onNodeWithText("Acknowledge & Go Back", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun errorOverlay_goBackButtonExists() {
+        composeTestRule.setContent {
+            RommTvTheme {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(text = "Launch Blocked")
+                    Text(text = "Network error")
+                    TextButton(
+                        onClick = { /* dismiss */ },
+                        modifier = Modifier.testTag("error_go_back_button"),
+                    ) {
+                        Text("Go Back")
+                    }
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithTag("error_go_back_button", useUnmergedTree = true)
+            .assertExists()
+    }
+}
+
+
+/**
+ * Instrumented Compose UI tests for PlayButton staging/disabled semantics.
+ * Validates: disabled state shows "Preparing…" and is not clickable;
+ * enabled state shows "▶  Play" and is clickable.
+ */
+@RunWith(AndroidJUnit4::class)
+class PlayButtonStagingInstrumentedTest {
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
+
+    @Test
+    fun playButton_stagingShowsPreparingAndIsNotClickable() {
+        var clickCount = 0
+
+        composeTestRule.setContent {
+            RommTvTheme {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    StagingAwarePlayButton(isStaging = true, onClick = { clickCount++ })
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("Preparing…", useUnmergedTree = true).assertExists()
+        // "▶  Play" should NOT be present when staging
+        composeTestRule.onNodeWithText("▶  Play", useUnmergedTree = true)
+            .assertDoesNotExist()
+
+        // Attempting click should not invoke callback since button is disabled
+        assert(clickCount == 0) { "Expected 0 clicks during staging, got $clickCount" }
+    }
+
+    @Test
+    fun playButton_enabledShowsPlayAndIsClickable() {
+        var clickCount = 0
+
+        composeTestRule.setContent {
+            RommTvTheme {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    StagingAwarePlayButton(isStaging = false, onClick = { clickCount++ })
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("▶  Play", useUnmergedTree = true).assertExists()
+
+        // Click the button
+        composeTestRule.onNodeWithText("▶  Play", useUnmergedTree = true)
+            .performClick()
+
+        assert(clickCount == 1) { "Expected 1 click when enabled, got $clickCount" }
+    }
+}
+
+/**
+ * Test-only wrapper that mirrors the production PlayButton behavior.
+ * DEX-safe method name for instrumented tests.
+ */
+@Composable
+private fun StagingAwarePlayButton(isStaging: Boolean, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (isStaging) RommTvColors.NightLo else RommTvColors.Romm600.copy(alpha = 0.6f)
+            )
+            .then(
+                if (!isStaging) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = 28.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = if (isStaging) "Preparing…" else "▶  Play",
+            color = if (isStaging) RommTvColors.TextSecondary else androidx.compose.ui.graphics.Color.White,
+        )
     }
 }

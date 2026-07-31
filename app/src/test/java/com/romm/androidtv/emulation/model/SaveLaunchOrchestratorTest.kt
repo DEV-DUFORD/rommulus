@@ -54,6 +54,42 @@ class SaveLaunchOrchestratorTest {
             val f = SaveLaunchOrchestrator.PreparationResult.Failed("Save sync failed: NETWORK_ERROR.")
             assertThat(f.reason).contains("NETWORK_ERROR")
         }
+
+        @Test
+        fun `AuthExpired is a singleton data object`() {
+            val ae = SaveLaunchOrchestrator.PreparationResult.AuthExpired
+            // AuthExpired carries no payload; it's a typed marker for reconciliation.
+            assertThat(ae).isInstanceOf(SaveLaunchOrchestrator.PreparationResult::class.java)
+        }
+
+        @Test
+        fun `all PreparationResult variants are exhaustible`() {
+            val results: List<SaveLaunchOrchestrator.PreparationResult> = listOf(
+                SaveLaunchOrchestrator.PreparationResult.Ready(null),
+                SaveLaunchOrchestrator.PreparationResult.Conflict(
+                    sessionId = 1L,
+                    operation = com.romm.androidtv.romm.SyncOperation(
+                        action = com.romm.androidtv.romm.SyncAction.CONFLICT,
+                        romId = 1L, saveId = null, fileName = "", slot = null,
+                        emulator = null, reason = "", serverUpdatedAt = null, serverContentHash = null,
+                    ),
+                ),
+                SaveLaunchOrchestrator.PreparationResult.Quarantined(reason = "x", quarantinedPath = "/tmp/x"),
+                SaveLaunchOrchestrator.PreparationResult.AuthExpired,
+                SaveLaunchOrchestrator.PreparationResult.Failed("error"),
+            )
+            // Exhaustive when compiles only if all variants are covered.
+            results.forEach { result ->
+                val classified: String = when (result) {
+                    is SaveLaunchOrchestrator.PreparationResult.Ready -> "ready"
+                    is SaveLaunchOrchestrator.PreparationResult.Conflict -> "conflict"
+                    is SaveLaunchOrchestrator.PreparationResult.Quarantined -> "quarantined"
+                    SaveLaunchOrchestrator.PreparationResult.AuthExpired -> "auth-expired"
+                    is SaveLaunchOrchestrator.PreparationResult.Failed -> "failed"
+                }
+                assertThat(classified).`as`("variant $result").isNotNull
+            }
+        }
     }
 
     // ---- Defect 2: expectedSramSizeBytes known-size fast path vs unknown-size candidate path ----

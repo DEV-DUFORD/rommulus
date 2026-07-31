@@ -223,16 +223,38 @@ class MainActivity : ComponentActivity() {
 
     // Phase B: SaveSyncCoordinator for pre-launch negotiation and post-play finalization.
     // Exposed as the interface type; implementation details (DAOs, stores) remain internal.
+    // Uses a cookie-free bearer-authenticated client backed by encrypted ClientTokenStore,
+    // matching RommWorkerFactory's durable credential rule.
     private val saveSyncCoordinator: SaveSyncCoordinator by lazy {
         val db = com.romm.androidtv.RommApplication.database(this)
+        val tokenStore = com.romm.androidtv.romm.ClientTokenStore(this)
+        val bearerClient = buildBearerAuthClient(tokenStore)
+        val devicePrefs = getSharedPreferences(com.romm.androidtv.romm.DeviceIdentityStore.PREFS_NAME, MODE_PRIVATE)
         SaveSyncCoordinatorImpl(
-            client = okHttpClient,
+            client = bearerClient,
             sessionStore = sessionStore,
-            deviceRepository = DeviceRepositoryImpl(okHttpClient, com.romm.androidtv.romm.DeviceIdentityStore(getSharedPreferences("device_identity", MODE_PRIVATE))),
+            deviceRepository = DeviceRepositoryImpl(bearerClient, com.romm.androidtv.romm.DeviceIdentityStore(devicePrefs)),
             saveReplicaDao = db.saveReplicaDao(),
             pendingOperationDao = db.pendingOperationDao(),
             saveContentStore = FileSaveContentStore(filesDir),
+            onOperationQueued = { com.romm.androidtv.sync.SaveUploadEnqueueHelper.enqueue(applicationContext) },
         )
+    }
+
+    /**
+     * Builds a cookie-free, bearer-authenticated OkHttp client backed by [ClientTokenStore].
+     * Used exclusively for foreground device registration and save-sync write operations.
+     * Never imports WebView cookies — follows the durable credential rule from RommWorkerFactory.
+     */
+    private fun buildBearerAuthClient(tokenStore: com.romm.androidtv.romm.ClientTokenStore): okhttp3.OkHttpClient {
+        return okhttp3.OkHttpClient.Builder()
+            .addInterceptor(com.romm.androidtv.romm.BearerAuthInterceptor {
+                val session = sessionStore.current()
+                session?.let { s ->
+                    tokenStore.getToken(s.origin, s.username ?: "")?.raw
+                }
+            })
+            .build()
     }
 
     // Phase B: Orchestrates pre-launch save-sync preparation. Eliminates duplicated
@@ -257,6 +279,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "RomMMainActivity"
+        /** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
+        private const val DIAG_TAG = "RommAuthDx"
     }
 
     /** Maps a sidebar destination to the [Screen] it opens; SETTINGS has no native screen yet (out of scope, UI_REFACTOR.md). */
@@ -392,6 +416,9 @@ class MainActivity : ComponentActivity() {
 
             val origin = currentOrigin
             Log.d(TAG, "Startup: origin configured=${origin.isNotBlank()}")
+            val sessionBefore = sessionStore.current()
+            val sessionPresent = sessionBefore != null
+            Log.d(DIAG_TAG, "MainActivity.startup: sessionPresent=$sessionPresent")
             if (origin.isNotBlank()) {
                 // Step 1: Import cookies from Android CookieManager into OkHttp store
                 authRepository.importCookiesFromWebView(origin)
@@ -405,14 +432,28 @@ class MainActivity : ComponentActivity() {
                     is AuthFlowResult.Success -> {
                         verifiedUser = result.verifiedUser
                         authResult = result
-                        // Step 3: Sync OkHttp cookies back to Android CookieManager for WebView
+                        // Keep WebView cookies fresh (it remains available as a settings-only
+                        // fallback), but boot straight into Native Library — it no longer requires
+                        // a manual Back-out-of-WebView step to reach.
                         Log.d(TAG, "Startup: session valid, syncing cookies")
                         authRepository.syncCookiesToWebView(origin)
-                        currentScreen = Screen.AUTHENTICATED_WEBVIEW
+                        currentScreen = Screen.NATIVE_HOME
+                        Log.d(DIAG_TAG, "MainActivity.startup: nav NATIVE_HOME verify=success")
                     }
                     is AuthFlowResult.Failure -> {
                         authResult = result
-                        Log.d(TAG, "Startup: session expired/missing, staying on HOME")
+                        Log.d(TAG, "Startup: verify failed error=${result.error} httpCode=${result.httpCode}")
+                        Log.d(DIAG_TAG, "MainActivity.startup: verify failure error=${result.error.name} httpCode=${result.httpCode}")
+                        // Only clear stale session when authentication is definitively expired/invalid.
+                        // Transient network/TLS errors must NOT clear the SessionStore — the cookies
+                        // may still be valid and a retry on next launch could succeed.
+                        if (result.error == com.romm.androidtv.network.AuthError.VERIFICATION_FAILED) {
+                            val stale = sessionStore.current()
+                            if (stale != null) {
+                                Log.d(TAG, "Startup: clearing expired session usernamePresent=${stale.username != null}")
+                                authRepository.clearExpiredSession(stale.origin, stale.username ?: "")
+                            }
+                        }
                     }
                 }
             }
@@ -451,6 +492,7 @@ class MainActivity : ComponentActivity() {
                                 currentScreen = Screen.CONTROLLER_DIAGNOSTICS
                             },
                             onOpenNativeLibrary = {
+                                Log.d(DIAG_TAG, "MainActivity.nav: HOME->NATIVE_HOME")
                                 currentScreen = Screen.NATIVE_HOME
                             },
                             onStageAndLaunchRealRom = { romId, onResult ->
@@ -476,6 +518,7 @@ class MainActivity : ComponentActivity() {
                             gamepadDiagnostics = gamepadDiagnostics,
                             onLogin = {
                                 Log.d(TAG, "WebView navigated to /login — transitioning to native Login")
+                                Log.d(DIAG_TAG, "MainActivity.nav: WebView->LOGIN serverRedirect")
                                 currentScreen = Screen.LOGIN
                             }
                         )
@@ -545,17 +588,37 @@ class MainActivity : ComponentActivity() {
                                                 key = "game-detail-$romId",
                                                 factory = com.romm.androidtv.library.RomDetailViewModel.Factory(libraryRepository, romId),
                                             )
-                                            // Production overlay: conflict/quarantine screens are only shown within the Native Library flow.
+                                            // Production overlay: only conflict/quarantine (blocking) overlays replace the game detail screen.
+                                            // Error-only states render inline within GameDetailScreen.
                                             val state = preLaunchState
-                                            if (state != null && state.matchesScope(romId, state.sessionId) && state.hasOverlay) {
+                                            if (state != null && state.matchesScope(romId, state.sessionId) && state.hasBlockingOverlay) {
                                                 renderPreLaunchOverlay(state)
                                             } else {
                                                 com.romm.androidtv.library.ui.GameDetailScreen(
-                                                    viewModel = detailViewModel,
-                                                    onPlay = { playRomId ->
-                                                        nativeLibraryOnPlay(playRomId)
-                                                    },
-                                                )
+                                                        viewModel = detailViewModel,
+                                                        onPlay = { playRomId ->
+                                                            nativeLibraryOnPlay(playRomId)
+                                                        },
+                                                        isStaging = state?.let { s ->
+                                                            s.matchesScope(romId, s.sessionId) && s.isStaging
+                                                        } ?: false,
+                                                        errorMessage = state?.let { s ->
+                                                            if (s.matchesScope(romId, s.sessionId)) s.errorMessage else null
+                                                        },
+                                                        onDismissError = {
+                                                            // Clear error-only overlay; Play re-enabled.
+                                                            preLaunchState = null
+                                                        },
+                                                        isAuthExpired = state?.let { s ->
+                                                            s.matchesScope(romId, s.sessionId) && s.isAuthExpired
+                                                        } ?: false,
+                                                         onLogin = {
+                                                             // Navigate to LOGIN screen; do NOT auto-submit credentials.
+                                                             Log.d(DIAG_TAG, "MainActivity.nav: NATIVE_GAME_DETAIL->LOGIN authExpiredPrompt")
+                                                             preLaunchState = null
+                                                             currentScreen = Screen.LOGIN
+                                                         },
+                                                    )
                                             }
                                         }
                                     }
@@ -636,6 +699,10 @@ class MainActivity : ComponentActivity() {
                                                     BuildConfig.ROMM_ORIGIN,
                                                     onSessionInvalidated = {
                                                         verifiedUser = null
+                                                        currentScreen = Screen.NATIVE_HOME
+                                                    },
+                                                    onLoginSuccess = {
+                                                        // Native login from Settings: no WebView round-trip needed.
                                                         currentScreen = Screen.NATIVE_HOME
                                                     },
                                                 ),
@@ -804,6 +871,11 @@ class MainActivity : ComponentActivity() {
                     Log.e(TAG, "launchStagedRom: launch blocked — ${preparation.reason}")
                     onResult(com.romm.androidtv.romm.StagingOutcome.NetworkError(preparation.reason))
                 }
+                SaveLaunchOrchestrator.PreparationResult.AuthExpired -> {
+                    // Debug path: treat auth-expired as a network error with actionable message.
+                    Log.e(TAG, "launchStagedRom: auth expired during sync")
+                    onResult(com.romm.androidtv.romm.StagingOutcome.AuthExpired)
+                }
             }
         }
     }
@@ -821,6 +893,10 @@ class MainActivity : ComponentActivity() {
         try {
             val journalDir = filesDir.resolve("launch_sessions")
             val journal = LaunchSessionJournal(journalDir)
+            // Must exist before patchIdentity() can target it — createOrGet() is idempotent,
+            // so this is safe even if EmulationActivity's own onCreate() later calls it again
+            // for the same session ID.
+            journal.createOrGet(appSessionId)
             val coreFinding = com.romm.androidtv.emulation.model.CoreManifest.findById(spec.coreId)
             val coreBuildRevision = coreFinding?.commitSha?.takeIf { it.isNotBlank() }
                 ?: coreFinding?.releaseTag?.takeIf { it.isNotBlank() }
@@ -857,14 +933,18 @@ class MainActivity : ComponentActivity() {
      * which provides per-session serialization and thread-safe candidate metadata caching.
      */
     private fun handleEmulationActivityResult(result: androidx.activity.result.ActivityResult) {
+        Log.i(TAG, "handleEmulationActivityResult: ENTERED resultCode=${result.resultCode} hasData=${result.data != null}")
         val data = result.data ?: return
         val sessionId = data.getStringExtra("session_id") ?: return
+        Log.i(TAG, "handleEmulationActivityResult: sessionId present, dispatching")
 
         when (result.resultCode) {
             android.app.Activity.RESULT_OK -> {
                 val checkpointedPath = data.getStringExtra("checkpointed_save_path")
                 val checkpointedHash = data.getStringExtra("checkpointed_save_hash")
                 val resultRomId = data.getLongExtra("rom_id", -1L)
+                val playSessionStartEpochMs = data.getLongExtra("play_session_start_epoch_ms", -1L)
+                val playSessionEndEpochMs = data.getLongExtra("play_session_end_epoch_ms", -1L)
 
                 lifecycleScope.launch {
                     emulationResultHandler.handleEmulationResult(
@@ -873,6 +953,8 @@ class MainActivity : ComponentActivity() {
                         checkpointedPath = checkpointedPath,
                         checkpointedHash = checkpointedHash,
                         resultRomId = resultRomId,
+                        playSessionStartEpochMs = playSessionStartEpochMs,
+                        playSessionEndEpochMs = playSessionEndEpochMs,
                     )
                 }
             }
@@ -890,19 +972,145 @@ class MainActivity : ComponentActivity() {
      * Stages the ROM, pre-launch-syncs saves, and either launches EmulationActivity
      * or shows a conflict/quarantine overlay. Does NOT wire served RomM WebView;
      * does NOT change PlaybackBackendPolicy.
+     *
+     * Duplicate-entry guard: if current [preLaunchState] for the same [romId] is already
+     * staging, this call returns immediately — repeated clicks cannot launch multiple pipelines.
+     * On failure, clears staging then sets error (recomposition-safe order).
+     * On success, proceeds to activity launch and clears preLaunchState.
      */
     private fun nativeLibraryOnPlay(romId: Long) {
+        // Duplicate-entry guard: reject if same romId is already staging.
+        val existing = preLaunchState
+        if (existing != null && existing.matchesScope(romId, existing.sessionId) && existing.isStaging) {
+            Log.d(DIAG_TAG, "MainActivity.nativeLibraryOnPlay: duplicate rejected")
+            return
+        }
+
+        Log.d(DIAG_TAG, "MainActivity.nativeLibraryOnPlay: entered romId=$romId")
         lifecycleScope.launch {
-            val outcome = romRepository.stageForLaunch(romId)
-            if (outcome is com.romm.androidtv.romm.StagingOutcome.Success) {
-                launchStagedRomNativeLibrary(outcome)
-            } else {
+            // Clear old error on retry; set staging BEFORE async work so UI recomposes.
+            val state = com.romm.androidtv.library.ui.SavePreLaunchState(romId = romId)
+                .apply { isStaging = true }
+            preLaunchState = state
+
+            try {
+                val outcome = romRepository.stageForLaunch(romId)
+                if (outcome is com.romm.androidtv.romm.StagingOutcome.Success) {
+                    // Success: clear staging before launching so UI doesn't show stale "Preparing…".
+                    state.isStaging = false
+                    launchStagedRomNativeLibrary(outcome)
+                } else {
+                    withContext(Dispatchers.Main) {
+                        // Failure transition: clear staging FIRST, then set error.
+                        // Order matters: Compose recomposes on each mutableStateOf write,
+                        // so clearing staging first removes "Preparing…" before error appears.
+                        state.isStaging = false
+                        state.errorMessage = StagingOutcomeMessage.toUserMessage(outcome)
+                    }
+                }
+            } catch (t: Throwable) {
                 withContext(Dispatchers.Main) {
-                    // Staging failure: show actionable error via pure mapper (never raw toString).
-                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = romId)
-                        .apply { errorMessage = StagingOutcomeMessage.toUserMessage(outcome) }
+                    state.isStaging = false
+                    state.errorMessage = "Launch preparation failed: ${t.message}"
                 }
             }
+        }
+    }
+
+    /**
+     * Dispatches a [SaveLaunchOrchestrator.PreparationResult] into UI state or activity launch.
+     * This is the shared dispatcher used by both initial preparation and post-reconciliation retry.
+     */
+    private suspend fun dispatchPreparationResult(
+        preparation: SaveLaunchOrchestrator.PreparationResult,
+        spec: com.romm.androidtv.emulation.model.LaunchSpec,
+        savePath: String,
+    ) {
+        when (preparation) {
+            is SaveLaunchOrchestrator.PreparationResult.Ready -> {
+                preLaunchState = null
+                launchEmulationActivity(spec, savePath, preparation.candidateMetadata)
+            }
+            is SaveLaunchOrchestrator.PreparationResult.Conflict -> {
+                handleConflictPreparation(preparation, spec)
+            }
+            is SaveLaunchOrchestrator.PreparationResult.Quarantined -> {
+                handleQuarantinePreparation(preparation, spec)
+            }
+            is SaveLaunchOrchestrator.PreparationResult.AuthExpired -> {
+                // Retry path: do NOT recurse into another reconciliation; treat as terminal failure.
+                Log.d(DIAG_TAG, "MainActivity.dispatchPrepResult: authExpired terminal")
+                withContext(Dispatchers.Main) {
+                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                        .apply { isAuthExpired = true }
+                }
+            }
+            is SaveLaunchOrchestrator.PreparationResult.Failed -> {
+                withContext(Dispatchers.Main) {
+                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                        .apply { errorMessage = preparation.reason }
+                }
+            }
+        }
+    }
+
+    /** Routes a Conflict preparation result into the conflict-resolution overlay. */
+    private suspend fun handleConflictPreparation(
+        preparation: SaveLaunchOrchestrator.PreparationResult.Conflict,
+        spec: com.romm.androidtv.emulation.model.LaunchSpec,
+    ) {
+        val sess = sessionStore.current()
+        val sessUsername = sess?.username
+        if (sess != null && sessUsername != null) {
+            val sk = extractServerKey(sess.origin)
+            val localEntity = saveSyncCoordinator.findSaveReplicaByScope(
+                serverKey = sk,
+                userKey = sessUsername,
+                romId = spec.romId,
+                romHash = spec.romHash,
+                slot = SavePathPolicy.AUTOSAVE_SLOT,
+            )
+            if (localEntity != null) {
+                val uiModel = com.romm.androidtv.library.ui.ConflictResolutionMapper.mapConflict(localEntity, preparation.operation)
+                withContext(Dispatchers.Main) {
+                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
+                        romId = spec.romId, sessionId = preparation.sessionId, romHash = spec.romHash,
+                    ).apply {
+                        conflictModel = uiModel
+                        conflictOperation = preparation.operation
+                    }
+                    selectedRomId = spec.romId
+                    currentScreen = Screen.NATIVE_CONFLICT
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                        .apply { errorMessage = "No local save replica found for ROM ${spec.romId}." }
+                }
+            }
+        } else {
+            withContext(Dispatchers.Main) {
+                preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                    .apply { errorMessage = "No active session; cannot resolve conflict." }
+            }
+        }
+    }
+
+    /** Routes a Quarantined preparation result into the quarantine overlay. */
+    private suspend fun handleQuarantinePreparation(
+        preparation: SaveLaunchOrchestrator.PreparationResult.Quarantined,
+        spec: com.romm.androidtv.emulation.model.LaunchSpec,
+    ) {
+        val uiModel = com.romm.androidtv.library.ui.ConflictResolutionMapper.mapQuarantine(
+            reason = preparation.reason,
+            quarantinedPath = preparation.quarantinedPath,
+            localEntity = null,
+        )
+        withContext(Dispatchers.Main) {
+            preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
+                .apply { quarantineModel = uiModel }
+            selectedRomId = spec.romId
+            currentScreen = Screen.NATIVE_QUARANTINE
         }
     }
 
@@ -944,64 +1152,56 @@ class MainActivity : ComponentActivity() {
             )
 
             when (preparation) {
-                is SaveLaunchOrchestrator.PreparationResult.Ready ->
-                    launchEmulationActivity(spec, savePath, preparation.candidateMetadata)
-                is SaveLaunchOrchestrator.PreparationResult.Conflict -> {
-                    // Native Library policy: route conflict into overlay.
+                is SaveLaunchOrchestrator.PreparationResult.AuthExpired -> {
+                    // Pre-launch recovery: attempt exactly one foreground reconciliation.
                     val sess = sessionStore.current()
-                    val sessUsername = sess?.username
-                    if (sess != null && sessUsername != null) {
-                        val sk = extractServerKey(sess.origin)
-                        val localEntity = saveSyncCoordinator.findSaveReplicaByScope(
-                            serverKey = sk,
-                            userKey = sessUsername,
-                            romId = spec.romId,
-                            romHash = spec.romHash,
-                            slot = SavePathPolicy.AUTOSAVE_SLOT,
-                        )
-                        if (localEntity != null) {
-                            val uiModel = com.romm.androidtv.library.ui.ConflictResolutionMapper.mapConflict(localEntity, preparation.operation)
-                            withContext(Dispatchers.Main) {
-                                preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
-                                    romId = spec.romId, sessionId = preparation.sessionId, romHash = spec.romHash,
-                                ).apply {
-                                    conflictModel = uiModel
-                                    conflictOperation = preparation.operation
-                                }
-                                selectedRomId = spec.romId
-                                currentScreen = Screen.NATIVE_CONFLICT
-                            }
+                    val origin = sess?.origin ?: currentOrigin
+                    val username = sess?.username
+                    val sessionPresent = sess != null
+                    Log.d(DIAG_TAG, "MainActivity.launchNative: authExpired sessionPresent=$sessionPresent")
+                    val reconciled = if (username != null && origin.isNotBlank()) {
+                        // Verify cookie session is still valid, then force-acquire durable token.
+                        val verifyResult = authRepository.verifySession(origin)
+                        val verifyOk = verifyResult is AuthFlowResult.Success
+                        Log.d(DIAG_TAG, "MainActivity.launchNative: verifySession=${if (verifyOk) "ok" else "fail"}")
+                        if (verifyOk) {
+                            authRepository.forceReconcileClientToken(origin, username)
                         } else {
-                            withContext(Dispatchers.Main) {
-                                preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
-                                    .apply { errorMessage = "No local save replica found for ROM ${spec.romId}." }
-                            }
+                            false
                         }
                     } else {
+                        false
+                    }
+
+                    Log.d(DIAG_TAG, "MainActivity.launchNative: reconciled=$reconciled")
+                    if (reconciled) {
+                        // Retry preparation once after successful reconciliation.
+                        val retryPreparation = saveLaunchOrchestrator.prepare(
+                            romId = spec.romId,
+                            romHash = spec.romHash,
+                            coreId = spec.coreId,
+                            coreBuildRevision = "",
+                            expectedSramSizeBytes = knownSramSize,
+                            fileName = spec.serverSaveFileName,
+                        )
+                        // Dispatch retry result (no recursive auth-expired recovery).
+                        dispatchPreparationResult(retryPreparation, spec, savePath)
+                    } else {
+                        // Reconciliation failed: clear stale session/token and expose auth-expired state.
+                        if (username != null && origin.isNotBlank()) {
+                            Log.d(DIAG_TAG, "MainActivity.launchNative: clearing expired session after reconcile failure")
+                            authRepository.clearExpiredSession(origin, username)
+                        }
                         withContext(Dispatchers.Main) {
                             preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
-                                .apply { errorMessage = "No active session; cannot resolve conflict." }
+                                .apply { isAuthExpired = true }
                         }
                     }
                 }
-                is SaveLaunchOrchestrator.PreparationResult.Quarantined -> {
-                    val uiModel = com.romm.androidtv.library.ui.ConflictResolutionMapper.mapQuarantine(
-                        reason = preparation.reason,
-                        quarantinedPath = preparation.quarantinedPath,
-                        localEntity = null,
-                    )
-                    withContext(Dispatchers.Main) {
-                        preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
-                            .apply { quarantineModel = uiModel }
-                        selectedRomId = spec.romId
-                        currentScreen = Screen.NATIVE_QUARANTINE
-                    }
-                }
-                is SaveLaunchOrchestrator.PreparationResult.Failed -> {
-                    withContext(Dispatchers.Main) {
-                        preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
-                            .apply { errorMessage = preparation.reason }
-                    }
+
+                else -> {
+                    // All non-AuthExpired results (Ready, Conflict, Quarantined, Failed) are dispatched normally.
+                    dispatchPreparationResult(preparation, spec, savePath)
                 }
             }
         }
@@ -1038,7 +1238,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
         } else if (state.errorMessage != null) {
-            // Transient error display on game detail screen area.
+            // Safety fallback: error-only overlay (normally rendered inline in GameDetailScreen).
             com.romm.androidtv.library.ui.RommTvTheme {
                 androidx.compose.foundation.layout.Column(
                     modifier = Modifier
@@ -1062,6 +1262,7 @@ class MainActivity : ComponentActivity() {
                     androidx.compose.material3.TextButton(onClick = {
                         state.clear()
                         preLaunchState = null
+                        currentScreen = Screen.NATIVE_GAME_DETAIL
                     }) {
                         androidx.compose.material3.Text("Go Back", color = com.romm.androidtv.library.ui.RommTvColors.Romm300)
                     }
@@ -1200,6 +1401,7 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
 
+                Log.d(DIAG_TAG, "MainActivity.runAuthFlow: login began usernamePresent=true")
                 val result = authRepository.login(origin, username, password)
                 if (isActive) {
                     authResult = result
@@ -1209,6 +1411,10 @@ class MainActivity : ComponentActivity() {
                         // Suspend-boundary: sync cookies to Android CookieManager for WebView
                         authRepository.syncCookiesToWebView(origin)
                         currentScreen = Screen.AUTHENTICATED_WEBVIEW
+                        Log.d(DIAG_TAG, "MainActivity.runAuthFlow: login success nav AUTHENTICATED_WEBVIEW")
+                    } else {
+                        val httpCode = (result as? AuthFlowResult.Failure)?.httpCode ?: -1
+                        Log.d(DIAG_TAG, "MainActivity.runAuthFlow: login failure httpCode=$httpCode")
                     }
                 }
             } catch (e: Exception) {

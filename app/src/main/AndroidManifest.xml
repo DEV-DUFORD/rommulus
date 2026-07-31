@@ -41,16 +41,29 @@
           Runs native Libretro emulation in its own process, isolated from the
           WebView-hosting main process (LIBRETRO_REFACTOR.md section 6). Not
           exported: reachable only from within this app, currently only via a
-          debug-only diagnostics entry point in MainActivity. singleTask
-          ensures a repeated launch intent routes to the existing instance
-          rather than creating a second one; onNewIntent() in EmulationActivity
-          rejects it as "player busy" instead of replacing a live session.
+          debug-only diagnostics entry point in MainActivity and the native
+          library's game launch flow.
+
+          IMPORTANT: launchMode is intentionally left as the default
+          ("standard"), NOT singleTask/singleInstance. MainActivity launches
+          this activity via an ActivityResultLauncher (emulationLauncher) to
+          receive the EmulationResult back via setResult()/finish(); the
+          Android platform never delivers activity results to a target
+          declared singleTask or singleInstance (the framework nulls out the
+          "resultTo" caller reference for those launch modes), so a prior
+          singleTask declaration here silently and permanently broke result
+          delivery — MainActivity's onActivityResult callback was never
+          invoked, which meant save-sync, Continue Playing, and journal
+          finalization never ran after a play session ended. Double-launch
+          protection against a second concurrent session is instead provided
+          by EmulationActivity's in-process `isSessionActive` AtomicBoolean
+          guard in onCreate(), which is equivalent for this single-process
+          activity host and does not depend on launchMode/onNewIntent.
         -->
         <activity
             android:name=".emulation.process.EmulationActivity"
             android:process=":emulation"
             android:exported="false"
-            android:launchMode="singleTask"
             android:hardwareAccelerated="true"
             android:screenOrientation="sensorLandscape" />
 

@@ -15,6 +15,14 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.time.Instant
 
+/** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
+private const val TAG = "RommAuthDx"
+
+/** Safe diagnostic logger: swallows unmocked android.util.Log in JVM unit tests. */
+private fun diagLog(priority: Int, message: String) {
+    try { android.util.Log.println(priority, TAG, message) } catch (_: Exception) { /* JVM test env */ }
+}
+
 /**
  * Typed models and network calls for RomM's device-registration and
  * negotiated-save-sync endpoints (LIBRETRO_REFACTOR.md section 11.2/11.3).
@@ -123,6 +131,63 @@ sealed interface SyncCompleteResult {
     data class Success(val sessionStatus: String) : SyncCompleteResult
     data class Failure(val error: RommApiError, val httpCode: Int? = null) : SyncCompleteResult
 }
+
+// ---- Play-session ingestion (POST /api/play-sessions) ----
+// Drives the server's `rom_user.last_played`/`now_playing` fields (backend/handler/play_session_handler.py),
+// which is what the RomM Home screen's "Continue Playing" row is actually sourced from
+// (`last_played=true&order_by=last_played` — see LibraryApi.kt's RomQuery.ContinuePlaying). Native
+// play never called this endpoint at all, so titles played through the native library never
+// appeared there even though gameplay and save-sync both worked correctly.
+
+/** Mirrors the backend's `PlaySessionEntry` (`endpoints/play_sessions.py`). */
+data class PlaySessionEntry(
+    val romId: Long,
+    /** Stable slot name (e.g. "autosave"), or null for an untracked/manual session. */
+    val saveSlot: String?,
+    val startTime: Instant,
+    val endTime: Instant,
+    val durationMs: Long,
+)
+
+data class PlaySessionIngestRequest(
+    val deviceId: String?,
+    val sessions: List<PlaySessionEntry>,
+)
+
+sealed interface PlaySessionIngestResult {
+    data class Success(val createdCount: Int, val skippedCount: Int) : PlaySessionIngestResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : PlaySessionIngestResult
+}
+
+@JsonClass(generateAdapter = false)
+internal data class PlaySessionEntryJson(
+    val rom_id: Long,
+    val save_slot: String? = null,
+    val start_time: String,
+    val end_time: String,
+    val duration_ms: Long,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class PlaySessionIngestPayloadJson(
+    val device_id: String? = null,
+    val sessions: List<PlaySessionEntryJson>,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class PlaySessionIngestResultJson(
+    val index: Int = 0,
+    val status: String = "",
+    val id: Long? = null,
+    val detail: String? = null,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class PlaySessionIngestResponseJson(
+    val results: List<PlaySessionIngestResultJson> = emptyList(),
+    val created_count: Int = 0,
+    val skipped_count: Int = 0,
+)
 
 @JsonClass(generateAdapter = false)
 internal data class ClientSaveStateJson(
@@ -277,6 +342,8 @@ object RommSyncApi {
     private val syncNegotiateResponseAdapter = moshi.adapter<SyncNegotiateResponseJson>()
     private val syncCompletePayloadAdapter = moshi.adapter<SyncCompletePayloadJson>()
     private val syncCompleteResponseAdapter = moshi.adapter<SyncCompleteResponseJson>()
+    private val playSessionIngestPayloadAdapter = moshi.adapter<PlaySessionIngestPayloadJson>()
+    private val playSessionIngestResponseAdapter = moshi.adapter<PlaySessionIngestResponseJson>()
     private val saveSchemaAdapter = moshi.adapter<SaveSchemaJson>()
     private val clientTokenPayloadAdapter = moshi.adapter<ClientTokenPayloadJson>()
     private val clientTokenResponseAdapter = moshi.adapter<ClientTokenResponseJson>()
@@ -327,6 +394,13 @@ object RommSyncApi {
 
     fun parseSyncCompleteResponse(body: String): String? = try {
         syncCompleteResponseAdapter.fromJson(body.trim())?.session?.status?.ifBlank { null }
+    } catch (_: Exception) {
+        null
+    }
+
+    fun parsePlaySessionIngestResponse(body: String): Pair<Int, Int>? = try {
+        val json = playSessionIngestResponseAdapter.fromJson(body.trim())
+        json?.let { it.created_count to it.skipped_count }
     } catch (_: Exception) {
         null
     }
@@ -392,14 +466,26 @@ object RommSyncApi {
 
         return try {
             client.newCall(httpRequest).execute().use { response ->
-                classifyResponse(response)?.let { return DeviceRegisterResult.Failure(it, response.code) }
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.registerDevice: failure error=${classification.name} httpCode=${response.code}")
+                    return DeviceRegisterResult.Failure(classification, response.code)
+                }
                 val responseBody = response.body?.string()
                 val info = responseBody?.let(::parseDeviceCreateResponse)
-                if (info == null) DeviceRegisterResult.Failure(RommApiError.PARSE_ERROR, response.code)
-                else DeviceRegisterResult.Success(info, alreadyExisted = response.code == 200)
+                if (info == null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.registerDevice: parseFailed httpCode=${response.code}")
+                    DeviceRegisterResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    val alreadyExisted = response.code == 200
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.registerDevice: success status=${if (alreadyExisted) "reused" else "created"}")
+                    DeviceRegisterResult.Success(info, alreadyExisted = alreadyExisted)
+                }
             }
         } catch (e: IOException) {
-            DeviceRegisterResult.Failure(classifyIOException(e))
+            val error = classifyIOException(e)
+            diagLog(android.util.Log.WARN, "RommSyncApi.registerDevice: ioError $error")
+            DeviceRegisterResult.Failure(error)
         }
     }
 
@@ -415,27 +501,60 @@ object RommSyncApi {
         scopes: List<String>,
     ): ClientTokenAcquireResult {
         if (origin.isBlank()) return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
-        val url = apiUrl(origin, "client-tokens") ?: return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
 
-        val payloadJson = clientTokenPayloadAdapter.toJson(
-            ClientTokenPayloadJson(
-                name = "romm-android-tv",
-                scopes = scopes,
-            ),
-        )
-        val body = payloadJson.toRequestBody("application/json".toMediaType())
-        val httpRequest = okhttp3.Request.Builder().url(url).post(body).build()
+        val httpRequest: okhttp3.Request = try {
+            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase urlConstruction")
+            val url = apiUrl(origin, "client-tokens") ?: return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase payloadSerialization")
+            val payloadJson = clientTokenPayloadAdapter.toJson(
+                ClientTokenPayloadJson(
+                    name = "romm-android-tv",
+                    scopes = scopes,
+                ),
+            )
+            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase requestBody")
+            val body = payloadJson.toRequestBody("application/json".toMediaType())
+            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase requestBuilder")
+            val builder = okhttp3.Request.Builder().url(url).post(body)
+            // Cookie-authenticated POST /api/client-tokens is CSRF-protected: the matching
+            // romm_csrftoken cookie value must also be sent as X-CSRFToken. Presence-only diag.
+            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase csrfHeader")
+            val httpUrl = url.toHttpUrlOrNull()
+            val csrfToken = httpUrl?.let { client.cookieJar.loadForRequest(it) }
+                ?.firstOrNull { it.name == "romm_csrftoken" }
+                ?.value
+            if (csrfToken != null) {
+                builder.header("X-CSRFToken", csrfToken)
+            }
+            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: csrfTokenPresent=${csrfToken != null}")
+            builder.build()
+        } catch (e: Exception) {
+            diagLog(android.util.Log.WARN, "RommSyncApi.acquireClientToken: constructionFailed ${e.javaClass.simpleName}")
+            return ClientTokenAcquireResult.Failure(RommApiError.NETWORK_ERROR)
+        }
 
         return try {
+            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase executeStart")
             client.newCall(httpRequest).execute().use { response ->
-                classifyResponse(response)?.let { return ClientTokenAcquireResult.Failure(it, response.code) }
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: failure error=${classification.name} httpCode=${response.code}")
+                    return ClientTokenAcquireResult.Failure(classification, response.code)
+                }
                 val responseBody = response.body?.string()
                 val info = responseBody?.let(::parseClientTokenResponse)
-                if (info == null) ClientTokenAcquireResult.Failure(RommApiError.PARSE_ERROR, response.code)
-                else ClientTokenAcquireResult.Success(info)
+                if (info == null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: parseFailed httpCode=${response.code}")
+                    ClientTokenAcquireResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: success scopes=$scopes")
+                    ClientTokenAcquireResult.Success(info)
+                }
             }
         } catch (e: IOException) {
-            ClientTokenAcquireResult.Failure(classifyIOException(e))
+            val error = classifyIOException(e)
+            diagLog(android.util.Log.WARN, "RommSyncApi.acquireClientToken: ioError $error")
+            ClientTokenAcquireResult.Failure(error)
         }
     }
 
@@ -469,14 +588,26 @@ object RommSyncApi {
 
         return try {
             client.newCall(httpRequest).execute().use { response ->
-                classifyResponse(response)?.let { return SyncNegotiateResult.Failure(it, response.code) }
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.negotiate: failure error=${classification.name} httpCode=${response.code}")
+                    return SyncNegotiateResult.Failure(classification, response.code)
+                }
                 val responseBody = response.body?.string()
                 val info = responseBody?.let(::parseSyncNegotiateResponse)
-                if (info == null) SyncNegotiateResult.Failure(RommApiError.PARSE_ERROR, response.code)
-                else SyncNegotiateResult.Success(info)
+                if (info == null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.negotiate: parseFailed httpCode=${response.code}")
+                    SyncNegotiateResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    val opCount = info.operations.size
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.negotiate: success ops=$opCount")
+                    SyncNegotiateResult.Success(info)
+                }
             }
         } catch (e: IOException) {
-            SyncNegotiateResult.Failure(classifyIOException(e))
+            val error = classifyIOException(e)
+            diagLog(android.util.Log.WARN, "RommSyncApi.negotiate: ioError $error")
+            SyncNegotiateResult.Failure(error)
         }
     }
 
@@ -510,6 +641,61 @@ object RommSyncApi {
             }
         } catch (e: IOException) {
             SyncCompleteResult.Failure(classifyIOException(e))
+        }
+    }
+
+    /**
+     * `POST /api/play-sessions`. Reports completed gameplay so the server can advance
+     * `rom_user.last_played`/`now_playing` — this is what makes a title appear in the RomM Home
+     * screen's "Continue Playing" row (see `RomQuery.ContinuePlaying` in `LibraryApi.kt`).
+     * Best-effort by design: a failure here must never block save-sync or gameplay.
+     */
+    fun ingestPlaySessions(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        request: PlaySessionIngestRequest,
+    ): PlaySessionIngestResult {
+        if (origin.isBlank()) return PlaySessionIngestResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "play-sessions") ?: return PlaySessionIngestResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val payloadJson = playSessionIngestPayloadAdapter.toJson(
+            PlaySessionIngestPayloadJson(
+                device_id = request.deviceId,
+                sessions = request.sessions.map { s ->
+                    PlaySessionEntryJson(
+                        rom_id = s.romId,
+                        save_slot = s.saveSlot,
+                        start_time = s.startTime.toString(),
+                        end_time = s.endTime.toString(),
+                        duration_ms = s.durationMs,
+                    )
+                },
+            )
+        )
+        val body = payloadJson.toRequestBody("application/json".toMediaType())
+        val httpRequest = okhttp3.Request.Builder().url(url).post(body).build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.ingestPlaySessions: failure error=${classification.name} httpCode=${response.code}")
+                    return PlaySessionIngestResult.Failure(classification, response.code)
+                }
+                val responseBody = response.body?.string()
+                val counts = responseBody?.let(::parsePlaySessionIngestResponse)
+                if (counts == null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.ingestPlaySessions: parseFailed httpCode=${response.code}")
+                    PlaySessionIngestResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.ingestPlaySessions: success created=${counts.first} skipped=${counts.second}")
+                    PlaySessionIngestResult.Success(counts.first, counts.second)
+                }
+            }
+        } catch (e: IOException) {
+            val error = classifyIOException(e)
+            diagLog(android.util.Log.WARN, "RommSyncApi.ingestPlaySessions: ioError $error")
+            PlaySessionIngestResult.Failure(error)
         }
     }
 

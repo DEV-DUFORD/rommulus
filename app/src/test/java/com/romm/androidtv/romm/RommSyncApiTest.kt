@@ -226,6 +226,98 @@ class RommSyncApiTest {
     }
 
     @Nested
+    @DisplayName("ingestPlaySessions")
+    inner class IngestPlaySessions {
+        @Test
+        fun `success parses created and skipped counts and posts to play-sessions`() {
+            server.enqueue(
+                MockResponse().setResponseCode(201)
+                    .setBody("""{"results": [{"index": 0, "status": "created", "id": 5, "detail": null}], "created_count": 1, "skipped_count": 0}""")
+            )
+
+            val result = RommSyncApi.ingestPlaySessions(
+                client, baseUrl(),
+                PlaySessionIngestRequest(
+                    deviceId = "device-abc",
+                    sessions = listOf(
+                        PlaySessionEntry(
+                            romId = 42L,
+                            saveSlot = "autosave",
+                            startTime = Instant.parse("2024-01-01T00:00:00Z"),
+                            endTime = Instant.parse("2024-01-01T00:10:00Z"),
+                            durationMs = 600_000L,
+                        )
+                    ),
+                ),
+            )
+
+            assertThat(result).isInstanceOf(PlaySessionIngestResult.Success::class.java)
+            assertThat((result as PlaySessionIngestResult.Success).createdCount).isEqualTo(1)
+            assertThat(result.skippedCount).isEqualTo(0)
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).isEqualTo("/api/play-sessions")
+            assertThat(recorded.method).isEqualTo("POST")
+        }
+
+        @Test
+        fun `401 classifies as AUTH_EXPIRED`() {
+            server.enqueue(MockResponse().setResponseCode(401))
+
+            val result = RommSyncApi.ingestPlaySessions(
+                client, baseUrl(),
+                PlaySessionIngestRequest(
+                    deviceId = "device-abc",
+                    sessions = listOf(
+                        PlaySessionEntry(
+                            romId = 1L,
+                            saveSlot = null,
+                            startTime = Instant.EPOCH,
+                            endTime = Instant.EPOCH.plusSeconds(60),
+                            durationMs = 60_000L,
+                        )
+                    ),
+                ),
+            )
+
+            assertThat((result as PlaySessionIngestResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+        }
+
+        @Test
+        fun `blank origin fails without a network call`() {
+            val result = RommSyncApi.ingestPlaySessions(
+                client, "",
+                PlaySessionIngestRequest(deviceId = null, sessions = emptyList()),
+            )
+
+            assertThat((result as PlaySessionIngestResult.Failure).error).isEqualTo(RommApiError.ORIGIN_NOT_CONFIGURED)
+            assertThat(server.requestCount).isEqualTo(0)
+        }
+
+        @Test
+        fun `malformed response body classifies as PARSE_ERROR`() {
+            server.enqueue(MockResponse().setResponseCode(201).setBody("not json"))
+
+            val result = RommSyncApi.ingestPlaySessions(
+                client, baseUrl(),
+                PlaySessionIngestRequest(
+                    deviceId = "device-abc",
+                    sessions = listOf(
+                        PlaySessionEntry(
+                            romId = 1L,
+                            saveSlot = null,
+                            startTime = Instant.EPOCH,
+                            endTime = Instant.EPOCH.plusSeconds(60),
+                            durationMs = 60_000L,
+                        )
+                    ),
+                ),
+            )
+
+            assertThat((result as PlaySessionIngestResult.Failure).error).isEqualTo(RommApiError.PARSE_ERROR)
+        }
+    }
+
+    @Nested
     @DisplayName("uploadSave — multipart upload and conflict handling")
     inner class UploadSave {
         @Test
@@ -415,6 +507,149 @@ class RommSyncApiTest {
 
             assertThat((result as ClientTokenAcquireResult.Failure).error).isEqualTo(RommApiError.ORIGIN_NOT_CONFIGURED)
             assertThat(server.requestCount).isEqualTo(0)
+        }
+
+        @Test
+        fun `acquireClientToken sends matching X-CSRFToken header from cookie jar`() {
+            // Cookie-authenticated POST /api/client-tokens is CSRF-protected: the client must
+            // mirror the romm_csrftoken cookie value into the X-CSRFToken header.
+            val csrfUrl = server.url("/")
+            val cookieJar = object : okhttp3.CookieJar {
+                override fun saveFromResponse(url: okhttp3.HttpUrl, cookies: List<okhttp3.Cookie>) {}
+                override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> = listOf(
+                    okhttp3.Cookie.Builder()
+                        .name("romm_csrftoken")
+                        .value("csrf-value-123")
+                        .domain(csrfUrl.host)
+                        .build(),
+                    okhttp3.Cookie.Builder()
+                        .name("romm_session")
+                        .value("session-value-456")
+                        .domain(csrfUrl.host)
+                        .build(),
+                )
+            }
+            val csrfClient = OkHttpClient.Builder().cookieJar(cookieJar).build()
+
+            server.enqueue(
+                MockResponse().setResponseCode(201).setBody(
+                    """{"id": 1, "name": "romm-android-tv", "scopes": ["assets.read","assets.write","devices.read","devices.write"],
+                        "raw_token": "rmm_csrf_token", "expires_at": null}"""
+                )
+            )
+
+            val result = RommSyncApi.acquireClientToken(
+                csrfClient, baseUrl(), listOf("assets.read", "assets.write", "devices.read", "devices.write"),
+            )
+
+            assertThat(result).isInstanceOf(ClientTokenAcquireResult.Success::class.java)
+            val recorded = server.takeRequest()
+            assertThat(recorded.getHeader("X-CSRFToken")).isEqualTo("csrf-value-123")
+        }
+
+        @Test
+        fun `acquireClientToken omits X-CSRFToken header when no csrf cookie present`() {
+            server.enqueue(
+                MockResponse().setResponseCode(201).setBody(
+                    """{"id": 1, "name": "romm-android-tv", "scopes": ["assets.read","assets.write","devices.read","devices.write"],
+                        "raw_token": "rmm_no_csrf", "expires_at": null}"""
+                )
+            )
+
+            RommSyncApi.acquireClientToken(
+                client, baseUrl(), listOf("assets.read", "assets.write", "devices.read", "devices.write"),
+            )
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.getHeader("X-CSRFToken")).isNull()
+        }
+    }
+
+    /**
+     * Regression coverage for the full physical-device reproduction chain:
+     * startup cookie import → verifySession → durable client-token acquisition → Bearer-only
+     * device registration → sync negotiation. Exercises the exact boundary that previously threw
+     * before an HTTP result was ever classified (client-token acquisition invoked off the IO
+     * dispatcher), without requiring real credentials or a live WebView cookie jar.
+     */
+    @Nested
+    @DisplayName("End-to-end: authenticated cookie session -> durable token -> Bearer device/sync")
+    inner class EndToEndAuthenticatedFlow {
+
+        @Test
+        fun `durable token acquisition, device registration, and sync negotiation all succeed with correct scopes and bearer token`() {
+            // 1. POST /api/client-tokens — cookie-authenticated acquisition with exact scopes.
+            server.enqueue(
+                MockResponse().setResponseCode(201).setBody(
+                    """{"id": 10, "name": "romm-android-tv",
+                        "scopes": ["assets.read","assets.write","devices.read","devices.write"],
+                        "raw_token": "rmm_e2e_token", "expires_at": null}"""
+                )
+            )
+            val tokenResult = RommSyncApi.acquireClientToken(
+                client,
+                baseUrl(),
+                scopes = listOf("assets.read", "assets.write", "devices.read", "devices.write"),
+            )
+            assertThat(tokenResult).isInstanceOf(ClientTokenAcquireResult.Success::class.java)
+            val acquiredToken = (tokenResult as ClientTokenAcquireResult.Success).info.token
+
+            val tokenRequest = server.takeRequest()
+            assertThat(tokenRequest.path).isEqualTo("/api/client-tokens")
+            // Exact backend-pinned scopes, not the rejected assets/device shorthand.
+            assertThat(tokenRequest.body.readUtf8())
+                .contains("assets.read").contains("assets.write")
+                .contains("devices.read").contains("devices.write")
+
+            // 2. Bearer-only client (cookie-free) built from the durable token, matching the
+            // background-auth rule: never use a live WebView cookie jar for this traffic.
+            val bearerClient = OkHttpClient.Builder()
+                .addInterceptor(BearerAuthInterceptor { acquiredToken.raw })
+                .build()
+
+            // 3. POST /api/devices — device registration presents the Bearer token, not cookies.
+            server.enqueue(
+                MockResponse().setResponseCode(201)
+                    .setBody("""{"device_id": "device-1", "name": null, "created_at": "2026-01-01T00:00:00Z"}""")
+            )
+            val deviceResult = RommSyncApi.registerDevice(
+                bearerClient, baseUrl(), DeviceRegisterRequest(clientDeviceIdentifier = "install-uuid-e2e"),
+            )
+            assertThat(deviceResult).isInstanceOf(DeviceRegisterResult.Success::class.java)
+            val deviceRequest = server.takeRequest()
+            assertThat(deviceRequest.getHeader("Authorization")).isEqualTo("Bearer rmm_e2e_token")
+
+            // 4. POST /api/sync/negotiate — negotiation also authenticates via the durable Bearer.
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"session_id": 42, "operations": [], "total_upload": 0, "total_download": 0,
+                        "total_conflict": 0, "total_no_op": 0}"""
+                )
+            )
+            val negotiateResult = RommSyncApi.negotiateSync(
+                bearerClient, baseUrl(), SyncNegotiateRequest("device-1", emptyList()),
+            )
+            assertThat(negotiateResult).isInstanceOf(SyncNegotiateResult.Success::class.java)
+            val negotiateRequest = server.takeRequest()
+            assertThat(negotiateRequest.getHeader("Authorization")).isEqualTo("Bearer rmm_e2e_token")
+        }
+
+        @Test
+        fun `device registration without a durable token is rejected as AUTH_EXPIRED, never falling back to cookies`() {
+            // Simulates the terminal loop: no durable token was ever persisted, so the
+            // cookie-free Bearer client sends no Authorization header and the server rejects it.
+            val bearerClientNoToken = OkHttpClient.Builder()
+                .addInterceptor(BearerAuthInterceptor { null })
+                .build()
+
+            server.enqueue(MockResponse().setResponseCode(403).setBody("""{"detail":"AUTH_EXPIRED"}"""))
+            val deviceResult = RommSyncApi.registerDevice(
+                bearerClientNoToken, baseUrl(), DeviceRegisterRequest(clientDeviceIdentifier = "install-uuid-e2e-2"),
+            )
+
+            assertThat((deviceResult as DeviceRegisterResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+            val recorded = server.takeRequest()
+            assertThat(recorded.getHeader("Authorization")).isNull()
         }
     }
 }

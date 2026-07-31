@@ -2,10 +2,19 @@ package com.romm.androidtv.emulation.model
 
 import android.util.Log
 import com.romm.androidtv.library.ui.ConflictResolutionMapper
+import com.romm.androidtv.romm.RommApiError
 import com.romm.androidtv.romm.StagingOutcome
 import com.romm.androidtv.romm.save.SaveSyncCoordinator
 import com.romm.androidtv.romm.save.SaveSyncOutcome
 import com.romm.androidtv.romm.save.SaveSyncRequest
+
+/** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
+private const val DIAG_TAG = "RommAuthDx"
+
+/** Safe diagnostic logger: swallows unmocked android.util.Log in JVM unit tests. */
+private fun diagLog(priority: Int, message: String) {
+    try { android.util.Log.println(priority, DIAG_TAG, message) } catch (_: Exception) { /* JVM test env */ }
+}
 
 /**
  * Orchestrates pre-launch save-sync preparation for both debug and native-library flows.
@@ -55,10 +64,13 @@ class SaveLaunchOrchestrator(
             )
         } catch (e: Exception) {
             Log.e(logTag, "prepare: pre-launch sync threw exception", e)
-            return PreparationResult.Failed("Save sync error: ${e.message ?: "unknown"}. Check network connectivity.")
+            diagLog(android.util.Log.WARN, "SaveLaunchOrch.prepare: exception ${e.javaClass.simpleName}")
+            return PreparationResult.Failed("Save sync error: ${e.message ?: "unknown"}")
         }
 
-        return mapSyncOutcome(syncOutcome, romId, romHash, coreId, resolvedCoreBuildRevision)
+        val result = mapSyncOutcome(syncOutcome, romId, romHash, coreId, resolvedCoreBuildRevision)
+        diagLog(android.util.Log.DEBUG, "SaveLaunchOrch.prepare: result=${result.javaClass.simpleName}")
+        return result
     }
 
     private suspend fun mapSyncOutcome(
@@ -67,7 +79,8 @@ class SaveLaunchOrchestrator(
         romHash: String,
         coreId: String,
         coreBuildRevision: String,
-    ): PreparationResult = when (outcome) {
+    ): PreparationResult {
+        return when (outcome) {
         is SaveSyncOutcome.AwaitingCoreValidation -> {
             val candidateMetadata = CandidateSaveMetadata(
                 rommSessionId = outcome.sessionId,
@@ -112,7 +125,12 @@ class SaveLaunchOrchestrator(
         }
         is SaveSyncOutcome.Failure -> {
             Log.w(logTag, "prepare: pre-launch sync failed (${outcome.error})")
-            PreparationResult.Failed("Save sync failed: ${outcome.error.name}. Check network and try again.")
+            // Preserve typed AUTH_EXPIRED so caller can attempt reconciliation.
+            if (outcome.error == RommApiError.AUTH_EXPIRED) {
+                return PreparationResult.AuthExpired
+            }
+            PreparationResult.Failed("Save sync failed: ${outcome.error.name}")
+        }
         }
     }
 
@@ -160,7 +178,10 @@ class SaveLaunchOrchestrator(
         /** Quarantined download; caller may show quarantine overlay. */
         data class Quarantined(val reason: String, val quarantinedPath: String) : PreparationResult
 
-        /** Launch blocked with an actionable error message. */
+        /** Bearer-authenticated sync returned AUTH_EXPIRED (401/403). Caller should reconcile or prompt login. */
+        data object AuthExpired : PreparationResult
+
+        /** Launch blocked with an actionable error message (non-auth failure). */
         data class Failed(val reason: String) : PreparationResult
     }
 }

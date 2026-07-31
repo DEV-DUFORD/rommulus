@@ -11,6 +11,8 @@ import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.romm.save.ConflictResolutionResult
 import com.romm.androidtv.romm.save.FinalizeAdoptionRequest
 import com.romm.androidtv.romm.save.FinalizeAdoptionResult
+import com.romm.androidtv.romm.save.PlaySessionRecordRequest
+import com.romm.androidtv.romm.save.PlaySessionRecordResult
 import com.romm.androidtv.romm.save.PostPlayCheckpointRequest
 import com.romm.androidtv.romm.save.PostPlayCheckpointResult
 import com.romm.androidtv.romm.save.ResolveConflictRequest
@@ -630,6 +632,19 @@ class EmulationResultHandlerAwaitedTest {
             val e = finalizeAdoptionThrows
             if (e != null) throw e
             return finalizeAdoptionResult
+        }
+
+        var recordPlaySessionCalled = false
+        var recordPlaySessionRequest: PlaySessionRecordRequest? = null
+        var recordPlaySessionResult: PlaySessionRecordResult = PlaySessionRecordResult.Success(1, 0)
+        var recordPlaySessionThrows: Throwable? = null
+
+        override suspend fun recordPlaySession(request: PlaySessionRecordRequest): PlaySessionRecordResult {
+            recordPlaySessionCalled = true
+            recordPlaySessionRequest = request
+            val e = recordPlaySessionThrows
+            if (e != null) throw e
+            return recordPlaySessionResult
         }
 
         override suspend fun findReplicaByScope(

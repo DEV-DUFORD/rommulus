@@ -1,8 +1,9 @@
 package com.romm.androidtv.library.ui
 
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableStateOf
 import com.romm.androidtv.romm.SyncOperation
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Scoped pre-launch overlay state for a single ROM/session.
@@ -12,9 +13,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * carries exactly one (romId, sessionId) pair and the caller must match both before
  * reading or clearing.
  *
- * Thread-safety: [isResolving] uses an [AtomicBoolean] for thread-safe duplicate submission
- * guards across coroutine boundaries. All other fields are mutated only on the Main dispatcher
- * per Compose conventions.
+ * Compose observability: [isStaging], [isResolving], and [errorMessage] are exposed as
+ * [MutableState] so that mutations trigger recomposition. All mutations must occur on the
+ * Main dispatcher per Compose conventions. The controller (MainActivity) enforces a
+ * duplicate-entry guard before creating or replacing state — do NOT rely on this class
+ * for thread-safe entry guarding.
  */
 @Stable
 class SavePreLaunchState(
@@ -47,22 +50,45 @@ class SavePreLaunchState(
         set(value) { _quarantineModel = value }
 
     /** Transient error message shown on the overlay screen (resolution failure, etc.). */
-    private var _errorMessage: String? = null
+    private val _errorMessageState: MutableState<String?> = mutableStateOf(null)
     var errorMessage: String?
-        get() = _errorMessage
-        set(value) { _errorMessage = value }
+        get() = _errorMessageState.value
+        set(value) { _errorMessageState.value = value }
 
-    /** Thread-safe guard for duplicate resolution submissions. Uses AtomicBoolean. */
-    private val _isResolving = AtomicBoolean(false)
+    /**
+     * Compose-observable guard for duplicate resolution submissions.
+     * Mutations must occur on Main dispatcher.
+     */
+    private val _isResolvingState: MutableState<Boolean> = mutableStateOf(false)
     var isResolving: Boolean
-        get() = _isResolving.get()
-        set(value) { _isResolving.set(value) }
+        get() = _isResolvingState.value
+        set(value) { _isResolvingState.value = value }
+
+    /**
+     * Compose-observable guard for duplicate staging submissions (Play button taps).
+     * Prevents concurrent stage/sync/launch pipelines for the same ROM.
+     * Mutations must occur on Main dispatcher.
+     */
+    private val _isStagingState: MutableState<Boolean> = mutableStateOf(false)
+    var isStaging: Boolean
+        get() = _isStagingState.value
+        set(value) { _isStagingState.value = value }
 
     /** The resolved canonical entity after successful Keep Local/Keep Server. Null until set. */
     private var _resolvedEntity: com.romm.androidtv.romm.save.SaveReplicaEntity? = null
     var resolvedEntity: com.romm.androidtv.romm.save.SaveReplicaEntity?
         get() = _resolvedEntity
         set(value) { _resolvedEntity = value }
+
+    /**
+     * Compose-observable flag indicating bearer-auth expired during pre-launch sync.
+     * When true, the UI renders an inline state with a "Log in" action instead of
+     * a generic error. Mutations must occur on Main dispatcher.
+     */
+    private val _isAuthExpiredState: MutableState<Boolean> = mutableStateOf(false)
+    var isAuthExpired: Boolean
+        get() = _isAuthExpiredState.value
+        set(value) { _isAuthExpiredState.value = value }
 
     /**
      * Clears all transient overlay state. Called when the user dismisses (Cancel/Dismiss)
@@ -74,11 +100,22 @@ class SavePreLaunchState(
         quarantineModel = null
         errorMessage = null
         isResolving = false
+        isStaging = false
+        isAuthExpired = false
         resolvedEntity = null
     }
 
-    /** Returns true if this state represents an active overlay (conflict or quarantine). */
+    /**
+     * Returns true if this state represents any active overlay: conflict, quarantine,
+     * error-only, or auth-expired. Error-only and auth-expired states render inline within
+     * GameDetailScreen (not as blocking overlays). Use [hasBlockingOverlay] to gate
+     * full-screen overlay replacement.
+     */
     val hasOverlay: Boolean
+        get() = conflictModel != null || quarantineModel != null || errorMessage != null || isAuthExpired
+
+    /** Returns true only for overlays that replace the game detail screen (conflict or quarantine). */
+    val hasBlockingOverlay: Boolean
         get() = conflictModel != null || quarantineModel != null
 
     /**

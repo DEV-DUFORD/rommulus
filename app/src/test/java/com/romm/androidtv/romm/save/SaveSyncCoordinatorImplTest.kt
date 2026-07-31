@@ -122,6 +122,27 @@ class SaveSyncCoordinatorImplTest {
     }
 
     @Test
+    fun `negotiate response with no operation for this rom is treated as no-op, not a parse failure`() {
+        runBlocking {
+            // Fresh title: no local save, nothing recorded on the server either. The server
+            // legitimately omits an operation entry entirely in this case (there is nothing to
+            // reconcile) — this must not surface as PARSE_ERROR and block the game from launching.
+            enqueueDeviceRegistered()
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"session_id": 7, "operations": [], "total_upload": 0, "total_download": 0, "total_conflict": 0, "total_no_op": 0}"""
+                )
+            )
+            enqueueComplete()
+
+            val outcome = coordinator.syncBeforeLaunch(request())
+
+            assertThat(outcome).isEqualTo(SaveSyncOutcome.NoOpSynced(7))
+            assertThat(saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")).isNull()
+        }
+    }
+
+    @Test
     fun `download adopts server bytes, confirms, and completes the session`() {
         runBlocking {
             enqueueDeviceRegistered()
