@@ -40,6 +40,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.SearchUiState
 import com.romm.androidtv.library.SearchViewModel
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Full search screen for the native browsing UI (UI_REFACTOR.md section 4).
@@ -54,11 +55,12 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
     onGameSelected: (Long) -> Unit = {},
     hideUnsupportedSystems: () -> Boolean = { false },
+    hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
 ) {
     val context = LocalContext.current
     val viewModel: SearchViewModel = viewModel(
         factory = remember(context) {
-            SearchViewModel.Factory(context, hideUnsupportedSystems)
+            SearchViewModel.Factory(context, hideUnsupportedSystems, hideUnsupportedSystemsFlow)
         },
     )
 

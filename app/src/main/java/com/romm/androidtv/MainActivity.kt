@@ -558,6 +558,7 @@ class MainActivity : ComponentActivity() {
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(
                                     libraryRepository,
                                     hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
+                                    hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
                                 )
                             )
                             // Re-fetch Continue Playing right after exiting a game (continuePlayingRefreshTick's
@@ -579,6 +580,7 @@ class MainActivity : ComponentActivity() {
                                                     libraryRepository,
                                                     com.romm.androidtv.library.RomQuery.ByPlatform(platformId),
                                                     hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
+                                                    hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
                                                 ),
                                             )
                                             com.romm.androidtv.library.ui.RomGridScreen(
@@ -601,6 +603,7 @@ class MainActivity : ComponentActivity() {
                                                     libraryRepository,
                                                     com.romm.androidtv.library.RomQuery.ByCollection(collectionId),
                                                     hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
+                                                    hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
                                                 ),
                                             )
                                             com.romm.androidtv.library.ui.RomGridScreen(
@@ -741,6 +744,7 @@ class MainActivity : ComponentActivity() {
                                                 currentScreen = Screen.NATIVE_GAME_DETAIL
                                             },
                                             hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
+                                            hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
                                         )
                                     }
                                     Screen.NATIVE_SETTINGS -> {

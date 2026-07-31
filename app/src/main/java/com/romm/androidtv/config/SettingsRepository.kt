@@ -1,6 +1,10 @@
 package com.romm.androidtv.config
 
 import android.content.SharedPreferences
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Persists the RomM [ServerProfile] across process restarts.
@@ -40,8 +44,19 @@ class SettingsRepository(
      */
     fun hideUnsupportedSystems(): Boolean = prefs.getBoolean(KEY_HIDE_UNSUPPORTED, false)
 
+    /**
+     * Reactive source-of-truth for the hide-unsupported-systems preference.
+     * Emits the current value on subscription and updates whenever
+     * [setHideUnsupportedSystems] is called. Library ViewModels collect this
+     * flow to refresh their data immediately when the user toggles the setting
+     * from the Settings screen, without requiring navigation or app restart.
+     */
+    private val _hideUnsupportedSystemsFlow = MutableStateFlow(hideUnsupportedSystems())
+    val hideUnsupportedSystemsFlow: StateFlow<Boolean> = _hideUnsupportedSystemsFlow.asStateFlow()
+
     fun setHideUnsupportedSystems(hide: Boolean) {
         prefs.edit().putBoolean(KEY_HIDE_UNSUPPORTED, hide).apply()
+        _hideUnsupportedSystemsFlow.value = hide
     }
 
     companion object {

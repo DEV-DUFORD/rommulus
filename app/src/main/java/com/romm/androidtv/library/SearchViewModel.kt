@@ -13,9 +13,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /** Page size for search pagination. */
@@ -60,6 +62,7 @@ class SearchViewModel(
     private val repository: LibraryRepository,
     testScope: CoroutineScope? = null,
     private val hideUnsupportedSystems: () -> Boolean = { false },
+    hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
 ) : ViewModel() {
 
     /** Internal scope: uses injected [testScope] in tests, [viewModelScope] in production. */
@@ -73,6 +76,25 @@ class SearchViewModel(
     /** Monotonically increasing token; bumped on every new search or blank-query reset so that
      * stale in-flight pagination responses for an older generation are discarded. */
     @Volatile private var generation: Int = 0
+
+    init {
+        // React to preference changes from Settings: re-execute the current search
+        // when the hide-unsupported-systems toggle flips. The initial emission is
+        // dropped because there's no active query at construction time.
+        hideUnsupportedSystemsFlow?.let { flow ->
+            scope.launch {
+                flow.drop(1).collect { refresh() }
+            }
+        }
+    }
+
+    /** Re-execute the current search from scratch, resetting pagination state.
+     * No-op if there is no active query (idle state). */
+    fun refresh() {
+        val activeTerm = _uiState.value.activeQuery ?: return
+        val raw = _uiState.value.query
+        executeSearch(raw, activeTerm)
+    }
 
     /** Update the search query text (e.g. from TextField [onValueChange]).
      * Auto-fires a debounced search after [DEBOUNCE_MS] ms of inactivity. */
@@ -139,7 +161,12 @@ class SearchViewModel(
                 }
                 is LibraryResult.Failure -> {
                     if (generation == capturedGeneration) {
-                        _uiState.value = _uiState.value.copy(isLoading = false)
+                        _uiState.value = _uiState.value.copy(
+                            error = result.error,
+                            isLoading = false,
+                        )
+                    } else {
+                        // A newer generation owns the loading state; do not corrupt it.
                     }
                 }
             }
@@ -162,6 +189,7 @@ class SearchViewModel(
         debounceJob?.cancel()
         debounceJob = null
         generation++ // New generation invalidates any stale in-flight loadMore.
+        val capturedGeneration = generation
 
         searchJob = scope.launch {
             val isHidingUnsupported = hideUnsupportedSystems() // Snapshot once for this operation.
@@ -177,18 +205,28 @@ class SearchViewModel(
                 offset = 0,
             )) {
                 is LibraryResult.Success -> {
-                    _uiState.value = _uiState.value.copy(
-                        roms = result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported),
-                        rawFetchedCount = result.data.roms.size,
-                        total = result.data.total,
-                        isLoading = false,
-                    )
+                    // Guard against non-cooperative repos that return after cancellation.
+                    if (generation == capturedGeneration) {
+                        _uiState.value = _uiState.value.copy(
+                            roms = result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported),
+                            rawFetchedCount = result.data.roms.size,
+                            total = result.data.total,
+                            isLoading = false,
+                        )
+                    } else {
+                        // A newer search has begun; clear loading state to avoid stale spinner.
+                        _uiState.value = _uiState.value.copy(isLoading = false)
+                    }
                 }
                 is LibraryResult.Failure -> {
-                    _uiState.value = _uiState.value.copy(
-                        error = result.error,
-                        isLoading = false,
-                    )
+                    if (generation == capturedGeneration) {
+                        _uiState.value = _uiState.value.copy(
+                            error = result.error,
+                            isLoading = false,
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(isLoading = false)
+                    }
                 }
             }
         }
@@ -198,6 +236,7 @@ class SearchViewModel(
     class Factory(
         private val context: Context,
         private val hideUnsupportedSystems: () -> Boolean = { false },
+        private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
         private val dispatcher: CoroutineDispatcher = Dispatchers.Main,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -206,7 +245,7 @@ class SearchViewModel(
             val settings = SettingsRepository(prefs, BuildConfig.ROMM_ORIGIN)
             val originProvider: () -> String = { settings.currentProfile().origin }
             val repository = LibraryRepositoryImpl(RommOkHttpClient.build(), originProvider)
-            return SearchViewModel(repository, null, hideUnsupportedSystems) as T
+            return SearchViewModel(repository, null, hideUnsupportedSystems, hideUnsupportedSystemsFlow) as T
         }
     }
 }
