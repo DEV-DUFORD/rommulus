@@ -14,6 +14,8 @@ data class PlatformSummary(
     val romCount: Int,
     /** Absolute external logo URL (e.g. IGDB CDN), or null if RomM has none on file. */
     val logoUrl: String?,
+    /** RomM's canonical platform slug (e.g. "gb", "genesis") — used to check native core support. Blank if the server did not return one. */
+    val slug: String = "",
 )
 
 /** One entry in a `GET /api/roms` listing (a row in a Home shelf, or a search/platform result). */

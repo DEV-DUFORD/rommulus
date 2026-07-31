@@ -21,3 +21,12 @@ fun isPlatformNativelySupported(platformSlug: String): Boolean =
  */
 fun List<LibraryRom>.filterUnsupportedIfHidden(hide: Boolean): List<LibraryRom> =
     if (hide) filter { isPlatformNativelySupported(it.platformSlug) } else this
+
+/**
+ * Filters out platforms that have no approved native core, when [hide] is true.
+ * Used by the same Settings toggle to hide unsupported platform cards from the
+ * Platforms grid on the Home screen. Named distinctly from the LibraryRom variant
+ * to avoid JVM signature clashes (type-erased List<T> extensions).
+ */
+fun List<PlatformSummary>.filterUnsupportedPlatformsIfHidden(hide: Boolean): List<PlatformSummary> =
+    if (hide) filter { isPlatformNativelySupported(it.slug) } else this

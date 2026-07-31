@@ -145,8 +145,9 @@ class HomeViewModel(
         val gen = generation
         viewModelScope.launch {
             _uiState.update { it.copy(platforms = SectionState.Loading) }
+            val hideFlag = hideUnsupportedSystems()
             val state = when (val result = repository.fetchPlatforms()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data)
+                is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedPlatformsIfHidden(hideFlag))
                 is LibraryResult.Failure -> SectionState.Error(result.error)
             }
             if (generation == gen) {
@@ -211,8 +212,9 @@ class HomeViewModel(
 
     private suspend fun loadPlatformsInternal(gen: Int) {
         _uiState.update { it.copy(platforms = SectionState.Loading) }
+        val hideFlag = hideUnsupportedSystems()
         val state = when (val result = repository.fetchPlatforms()) {
-            is LibraryResult.Success -> SectionState.Loaded(result.data)
+            is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedPlatformsIfHidden(hideFlag))
             is LibraryResult.Failure -> SectionState.Error(result.error)
         }
         if (generation == gen) {

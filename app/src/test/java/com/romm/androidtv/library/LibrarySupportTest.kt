@@ -118,4 +118,80 @@ class LibrarySupportTest {
         assertThat(filtered).hasSize(1)
         assertThat(filtered[0].title).isEqualTo("Pokemon")
     }
+
+    // ---- PlatformSummary.filterUnsupportedPlatformsIfHidden ----
+
+    @Test
+    fun `PlatformSummary filterUnsupportedPlatformsIfHidden with hide false returns all items unchanged`() {
+        val platforms = listOf(
+            PlatformSummary(id = 1, displayName = "Game Boy", romCount = 50, logoUrl = null, slug = "gb"),
+            PlatformSummary(id = 2, displayName = "Genesis", romCount = 30, logoUrl = null, slug = "genesis"),
+        )
+
+        assertThat(platforms.filterUnsupportedPlatformsIfHidden(hide = false))
+            .containsExactlyElementsOf(platforms)
+    }
+
+    @Test
+    fun `PlatformSummary filterUnsupportedPlatformsIfHidden with hide false preserves reference identity`() {
+        val platforms = listOf(
+            PlatformSummary(id = 1, displayName = "Game Boy", romCount = 50, logoUrl = null, slug = "gb"),
+        )
+
+        assertThat(platforms.filterUnsupportedPlatformsIfHidden(hide = false)).isSameAs(platforms)
+    }
+
+    @Test
+    fun `PlatformSummary filterUnsupportedPlatformsIfHidden with hide true keeps only supported platforms`() {
+        val platforms = listOf(
+            PlatformSummary(id = 1, displayName = "Game Boy", romCount = 50, logoUrl = null, slug = "gb"),
+            PlatformSummary(id = 2, displayName = "Genesis", romCount = 30, logoUrl = null, slug = "genesis"),
+            PlatformSummary(id = 3, displayName = "GB Color", romCount = 40, logoUrl = null, slug = "gbc"),
+        )
+
+        val filtered = platforms.filterUnsupportedPlatformsIfHidden(hide = true)
+
+        assertThat(filtered).hasSize(2)
+        assertThat(filtered.map { it.displayName }).containsExactly("Game Boy", "GB Color")
+    }
+
+    @Test
+    fun `PlatformSummary filterUnsupportedPlatformsIfHidden treats blank slug as unsupported`() {
+        val platforms = listOf(
+            PlatformSummary(id = 1, displayName = "Unknown", romCount = 5, logoUrl = null, slug = ""),
+            PlatformSummary(id = 2, displayName = "Game Boy", romCount = 50, logoUrl = null, slug = "gb"),
+        )
+
+        val filtered = platforms.filterUnsupportedPlatformsIfHidden(hide = true)
+
+        assertThat(filtered).hasSize(1)
+        assertThat(filtered[0].displayName).isEqualTo("Game Boy")
+    }
+
+    @Test
+    fun `PlatformSummary filterUnsupportedPlatformsIfHidden preserves ordering`() {
+        val platforms = listOf(
+            PlatformSummary(id = 1, displayName = "Genesis", romCount = 30, logoUrl = null, slug = "genesis"),
+            PlatformSummary(id = 2, displayName = "Game Boy", romCount = 50, logoUrl = null, slug = "gb"),
+            PlatformSummary(id = 3, displayName = "GB Color", romCount = 40, logoUrl = null, slug = "gbc"),
+        )
+
+        val filtered = platforms.filterUnsupportedPlatformsIfHidden(hide = true)
+
+        assertThat(filtered.map { it.slug }).containsExactly("gb", "gbc")
+    }
+
+    @Test
+    fun `PlatformSummary filterUnsupportedPlatformsIfHidden retains supported platform with zero games`() {
+        val platforms = listOf(
+            PlatformSummary(id = 1, displayName = "Game Boy", romCount = 0, logoUrl = null, slug = "gb"),
+            PlatformSummary(id = 2, displayName = "Genesis", romCount = 30, logoUrl = null, slug = "genesis"),
+        )
+
+        val filtered = platforms.filterUnsupportedPlatformsIfHidden(hide = true)
+
+        assertThat(filtered).hasSize(1)
+        assertThat(filtered[0].slug).isEqualTo("gb")
+        assertThat(filtered[0].romCount).isEqualTo(0)
+    }
 }

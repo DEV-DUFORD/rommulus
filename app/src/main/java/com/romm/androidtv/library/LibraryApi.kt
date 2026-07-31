@@ -76,6 +76,7 @@ sealed interface RomQuery {
 @JsonClass(generateAdapter = false)
 internal data class PlatformJson(
     val id: Long = 0,
+    val slug: String = "",
     val name: String = "",
     val custom_name: String? = null,
     val display_name: String? = null,
@@ -170,6 +171,7 @@ object LibraryApi {
                         ?: it.name,
                     romCount = it.rom_count,
                     logoUrl = it.url_logo,
+                    slug = it.slug,
                 )
             }
         } catch (_: Exception) {

@@ -32,7 +32,7 @@ class LibraryApiTest {
             assertThat(result).isNotNull
             assertThat(result).hasSize(1)
             assertThat(result!![0]).isEqualTo(
-                PlatformSummary(id = 34, displayName = "Dreamcast", romCount = 343, logoUrl = "https://cdn.example/dc.jpg")
+                PlatformSummary(id = 34, displayName = "Dreamcast", romCount = 343, logoUrl = "https://cdn.example/dc.jpg", slug = "dc")
             )
         }
 
@@ -47,6 +47,7 @@ class LibraryApiTest {
 
             assertThat(result).isNotNull
             assertThat(result!![0].displayName).isEqualTo("Game Boy")
+            assertThat(result[0].slug).isEqualTo("gb")
             assertThat(result[0].logoUrl).isNull()
         }
 
