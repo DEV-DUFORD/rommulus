@@ -374,7 +374,14 @@ class EmulationActivity : ComponentActivity() {
                     )) } catch (_: Exception) {}
                     false
                 }
-                null -> true // No candidate → treated as successfully launched.
+                // No candidate at all (the common case: negotiate returned no_op/upload, not
+                // download) is NOT "adopted" — it must still fall through to the normal
+                // restore-on-launch branch below, which is what actually loads the existing
+                // local autosave into the core's SRAM. Returning `true` here was the bug: it
+                // made onCreate() silently skip host.nativeRestoreSaveRam(savePath) on every
+                // ordinary relaunch, so a correctly-uploaded/checkpointed local save file was
+                // never loaded back into the core and the game always started fresh.
+                null -> false
             }
 
             if (candidateAdopted) {

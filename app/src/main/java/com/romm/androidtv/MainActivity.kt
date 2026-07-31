@@ -142,6 +142,14 @@ class MainActivity : ComponentActivity() {
     private var selectedRomId by mutableStateOf<Long?>(null)
     private var gameDetailParent by mutableStateOf(Screen.NATIVE_HOME)
 
+    /**
+     * Bumped once per successfully-processed EmulationActivity result so the Native Library
+     * home screen's Continue Playing section refreshes immediately after exiting a game,
+     * instead of only on the next cold app start. Observed by a `LaunchedEffect` alongside
+     * `HomeViewModel`'s creation (see `NATIVE_HOME` composable branch).
+     */
+    private var continuePlayingRefreshTick by mutableStateOf(0)
+
     // Pre-launch save sync overlay state (conflict/quarantine). Scoped to a single ROM/session;
     // survives recomposition because it lives on the Activity, not inside remember().
     private var preLaunchState by mutableStateOf<com.romm.androidtv.library.ui.SavePreLaunchState?>(null)
@@ -537,6 +545,14 @@ class MainActivity : ComponentActivity() {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(libraryRepository)
                             )
+                            // Re-fetch Continue Playing right after exiting a game (continuePlayingRefreshTick's
+                            // doc comment) instead of waiting for the next cold app start. Skips the initial
+                            // tick==0 composition since HomeViewModel.init already loads it once.
+                            androidx.compose.runtime.LaunchedEffect(continuePlayingRefreshTick) {
+                                if (continuePlayingRefreshTick > 0) {
+                                    homeViewModel.retryContinuePlaying()
+                                }
+                            }
                             com.romm.androidtv.library.ui.RommTvTheme {
                                 when (currentScreen) {
                                     Screen.NATIVE_PLATFORM_DETAIL -> {
@@ -933,10 +949,8 @@ class MainActivity : ComponentActivity() {
      * which provides per-session serialization and thread-safe candidate metadata caching.
      */
     private fun handleEmulationActivityResult(result: androidx.activity.result.ActivityResult) {
-        Log.i(TAG, "handleEmulationActivityResult: ENTERED resultCode=${result.resultCode} hasData=${result.data != null}")
         val data = result.data ?: return
         val sessionId = data.getStringExtra("session_id") ?: return
-        Log.i(TAG, "handleEmulationActivityResult: sessionId present, dispatching")
 
         when (result.resultCode) {
             android.app.Activity.RESULT_OK -> {
@@ -956,6 +970,9 @@ class MainActivity : ComponentActivity() {
                         playSessionStartEpochMs = playSessionStartEpochMs,
                         playSessionEndEpochMs = playSessionEndEpochMs,
                     )
+                    // Refresh Continue Playing immediately rather than waiting for the next
+                    // cold app start — see continuePlayingRefreshTick's doc comment.
+                    continuePlayingRefreshTick++
                 }
             }
             android.app.Activity.RESULT_CANCELED -> {
