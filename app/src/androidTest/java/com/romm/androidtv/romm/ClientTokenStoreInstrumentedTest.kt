@@ -3,6 +3,8 @@ package com.romm.androidtv.romm
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -12,7 +14,8 @@ import org.junit.runner.RunWith
 
 /**
  * Android instrumented tests for [ClientTokenStore]: encrypt/decrypt round-trip,
- * scope isolation, clear behavior, and corrupt ciphertext handling.
+ * scope isolation, clear behavior, corrupt ciphertext handling, and generated-IV
+ * uniqueness (Android 14 Keystore IV delegation).
  * Requires real Android Context (Keystore + SharedPreferences).
  */
 @RunWith(AndroidJUnit4::class)
@@ -145,5 +148,41 @@ class ClientTokenStoreInstrumentedTest {
 
         val retrieved = store.getToken(origin, username)
         assertNull("Should return null when no ciphertext is stored", retrieved)
+    }
+
+    /** Each setToken call must produce a unique Keystore-generated IV (nonce). */
+    @Test
+    fun generatedIvIsUniqueAcrossWrites() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val prefs = context.getSharedPreferences(ClientTokenStore.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val scopeKey = "${origin.lowercase()}|${username.lowercase()}"
+
+        store.setToken(origin, username, ClientToken("rmm_iv_test"))
+        val nonce1 = prefs.getString("${scopeKey}.nonce", null)
+        assertNotNull("First write must persist a nonce", nonce1)
+
+        store.setToken(origin, username, ClientToken("rmm_iv_test_2"))
+        val nonce2 = prefs.getString("${scopeKey}.nonce", null)
+        assertNotNull("Second write must persist a nonce", nonce2)
+
+        assertNotEquals(
+            "Keystore-generated IVs must differ across writes (no IV reuse)",
+            nonce1, nonce2
+        )
+    }
+
+    /** Verify that the persisted ciphertext and nonce are both present after setToken. */
+    @Test
+    fun setTokenPersistsBothCiphertextAndNonceAtomically() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val prefs = context.getSharedPreferences(ClientTokenStore.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val scopeKey = "${origin.lowercase()}|${username.lowercase()}"
+
+        store.setToken(origin, username, ClientToken("rmm_atomic_test"))
+
+        val enc = prefs.getString("${scopeKey}.enc", null)
+        val nonce = prefs.getString("${scopeKey}.nonce", null)
+        assertNotNull("Ciphertext must be persisted", enc)
+        assertNotNull("Nonce/IV must be persisted", nonce)
     }
 }

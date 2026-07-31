@@ -4,6 +4,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
+/** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
+private const val TAG = "RommAuthDx"
+
+/** Safe diagnostic logger: swallows unmocked android.util.Log in JVM unit tests. */
+private fun diagLog(priority: Int, message: String) {
+    try { android.util.Log.println(priority, TAG, message) } catch (_: Exception) { /* JVM test env */ }
+}
+
 /**
  * Real [DeviceRepository] implementation backed by [RommSyncApi.registerDevice]
  * and cached via [DeviceIdentityStore] (LIBRETRO_REFACTOR.md section 11.2).
@@ -37,12 +45,16 @@ class DeviceRepositoryImpl(
             when (result) {
                 is DeviceRegisterResult.Success -> {
                     identityStore.saveDeviceId(serverOrigin, username, result.device.deviceId)
+                    diagLog(android.util.Log.DEBUG, "DeviceRepository.ensureRegistered: success status=${if (result.alreadyExisted) "reused" else "created"}")
                     DeviceRegistrationResult.Success(
                         identity = DeviceIdentity(installationId, result.device.deviceId),
                         alreadyExisted = result.alreadyExisted,
                     )
                 }
-                is DeviceRegisterResult.Failure -> DeviceRegistrationResult.Failure(result.error, result.httpCode)
+                is DeviceRegisterResult.Failure -> {
+                    diagLog(android.util.Log.DEBUG, "DeviceRepository.ensureRegistered: failure error=${result.error.name} httpCode=${result.httpCode}")
+                    DeviceRegistrationResult.Failure(result.error, result.httpCode)
+                }
             }
         }
 

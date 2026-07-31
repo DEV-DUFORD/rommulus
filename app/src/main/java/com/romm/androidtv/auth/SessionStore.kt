@@ -2,6 +2,14 @@ package com.romm.androidtv.auth
 
 import android.content.SharedPreferences
 
+/** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
+private const val TAG = "RommAuthDx"
+
+/** Safe diagnostic logger: swallows unmocked android.util.Log in JVM unit tests. */
+private fun diagLog(priority: Int, message: String) {
+    try { android.util.Log.println(priority, TAG, message) } catch (_: Exception) { /* JVM test env */ }
+}
+
 /**
  * Durable record of the last verified RomM session, independent of WebView's
  * cookie store (LIBRETRO_REFACTOR.md section 5, `auth/SessionStore.kt`; Phase 1
@@ -30,13 +38,20 @@ class SessionStore(private val prefs: SharedPreferences) {
             .putString(KEY_USERNAME, username)
             .putLong(KEY_VERIFIED_AT, verifiedAtEpochMillis)
             .apply()
+        val usernamePresent = username != null
+        diagLog(android.util.Log.DEBUG, "SessionStore.save: completed usernamePresent=$usernamePresent")
     }
 
     fun current(): Record? {
-        val origin = prefs.getString(KEY_ORIGIN, null) ?: return null
+        val origin = prefs.getString(KEY_ORIGIN, null) ?: run {
+            diagLog(android.util.Log.DEBUG, "SessionStore.current: absent")
+            return null
+        }
         val username = prefs.getString(KEY_USERNAME, null)
         val verifiedAt = prefs.getLong(KEY_VERIFIED_AT, 0L)
-        return Record(origin, username, verifiedAt)
+        val record = Record(origin, username, verifiedAt)
+        diagLog(android.util.Log.DEBUG, "SessionStore.current: present=true")
+        return record
     }
 
     fun clear() {
@@ -45,6 +60,9 @@ class SessionStore(private val prefs: SharedPreferences) {
             .remove(KEY_USERNAME)
             .remove(KEY_VERIFIED_AT)
             .apply()
+        val after = current()
+        val keysAbsent = after == null
+        diagLog(android.util.Log.DEBUG, "SessionStore.clear: completed keysAbsent=$keysAbsent")
     }
 
     companion object {

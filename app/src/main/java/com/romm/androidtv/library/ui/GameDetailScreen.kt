@@ -48,12 +48,25 @@ import kotlin.math.roundToInt
  * button. The Play button invokes [onPlay] with the RomM ROM ID; the caller
  * is responsible for staging, sync negotiation, conflict/quarantine handling,
  * and native launch (LIBRETRO_REFACTOR.md sections 10–13).
+ *
+ * @param isStaging When true, the Play button shows "Preparing…" and is disabled.
+ * @param errorMessage Transient error message rendered inline below the Play button;
+ *   does NOT replace this screen (caller handles blocking overlays separately).
+ * @param onDismissError Called when user dismisses the inline error. Retrying via Play also clears it.
+ * @param isAuthExpired When true, replaces the Play button with a "Session expired" state
+ *   and a "Log in" action. Takes precedence over [errorMessage].
+ * @param onLogin Called when user taps "Log in" from the auth-expired state. Does NOT auto-submit credentials.
  */
 @Composable
 fun GameDetailScreen(
+    modifier: Modifier = Modifier,
     viewModel: RomDetailViewModel,
     onPlay: (Long) -> Unit,
-    modifier: Modifier = Modifier,
+    isStaging: Boolean = false,
+    errorMessage: String? = null,
+    onDismissError: () -> Unit = {},
+    isAuthExpired: Boolean = false,
+    onLogin: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -77,13 +90,29 @@ fun GameDetailScreen(
                 )
                 TextButton(onClick = viewModel::refresh) { Text("Retry", color = RommTvColors.Romm300) }
             }
-            is SectionState.Loaded -> GameDetailContent(rom = section.data, onPlay = onPlay)
+            is SectionState.Loaded -> GameDetailContent(
+                rom = section.data,
+                onPlay = onPlay,
+                isStaging = isStaging,
+                errorMessage = errorMessage,
+                onDismissError = onDismissError,
+                isAuthExpired = isAuthExpired,
+                onLogin = onLogin,
+            )
         }
     }
 }
 
 @Composable
-private fun GameDetailContent(rom: RomDetail, onPlay: (Long) -> Unit) {
+private fun GameDetailContent(
+    rom: RomDetail,
+    onPlay: (Long) -> Unit,
+    isStaging: Boolean,
+    errorMessage: String?,
+    onDismissError: () -> Unit,
+    isAuthExpired: Boolean,
+    onLogin: () -> Unit,
+) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -121,7 +150,29 @@ private fun GameDetailContent(rom: RomDetail, onPlay: (Long) -> Unit) {
                         )
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    PlayButton(onPlay = { onPlay(rom.id) })
+                    if (isAuthExpired) {
+                        AuthExpiredState(onLogin = onLogin, onDismiss = onDismissError)
+                    } else {
+                        PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging)
+                        if (errorMessage != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = errorMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFf44336),
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                )
+                                TextButton(onClick = onDismissError) {
+                                    Text("Dismiss", color = RommTvColors.Romm300)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -178,28 +229,73 @@ private fun MetadataChips(rom: RomDetail) {
     }
 }
 
+/**
+ * Inline auth-expired state rendered below the ROM metadata.
+ * Shows "Session expired" message with a "Log in" action and Dismiss.
+ */
 @Composable
-private fun PlayButton(onPlay: () -> Unit) {
+private fun AuthExpiredState(onLogin: () -> Unit, onDismiss: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Session expired; please log in to continue",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFf44336),
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onLogin) {
+                Text("Log in", color = RommTvColors.Romm300)
+            }
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss", color = RommTvColors.TextSecondary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayButton(onPlay: () -> Unit, isStaging: Boolean = false) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(if (isFocused) RommTvColors.Romm500 else RommTvColors.Romm600.copy(alpha = 0.6f))
+            .background(
+                if (isStaging) RommTvColors.NightLo
+                else if (isFocused) RommTvColors.Romm500
+                else RommTvColors.Romm600.copy(alpha = 0.6f)
+            )
             .border(
-                width = if (isFocused) 2.dp else 0.dp,
+                width = if (isFocused && !isStaging) 2.dp else 0.dp,
                 color = RommTvColors.Romm300,
                 shape = RoundedCornerShape(8.dp),
             )
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onPlay,
+            .then(
+                if (!isStaging) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onPlay,
+                    )
+                } else {
+                    Modifier
+                }
             )
             .padding(horizontal = 28.dp, vertical = 12.dp),
     ) {
-        Text(text = "▶  Play", style = MaterialTheme.typography.titleMedium, color = Color.White)
+        Text(
+            text = if (isStaging) "Preparing…" else "▶  Play",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (isStaging) RommTvColors.TextSecondary else Color.White,
+        )
     }
 }
 

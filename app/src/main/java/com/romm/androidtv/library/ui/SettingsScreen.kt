@@ -39,6 +39,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.romm.androidtv.library.ConnectionCheckState
+import com.romm.androidtv.library.SettingsLoginState
 import com.romm.androidtv.library.SettingsViewModel
 
 /**
@@ -65,6 +66,9 @@ fun SettingsScreen(
     val checkConnectionFocusRequester = remember { FocusRequester() }
     val saveFocusRequester = remember { FocusRequester() }
     val restoreDefaultFocusRequester = remember { FocusRequester() }
+    val usernameFieldFocusRequester = remember { FocusRequester() }
+    val passwordFieldFocusRequester = remember { FocusRequester() }
+    val loginFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         focusManager.clearFocus()
@@ -237,7 +241,7 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // ---- Session info section (read-only) ----
+        // ---- Session section (username/password + login) ----
         Text(
             text = "Session",
             style = MaterialTheme.typography.titleLarge,
@@ -249,6 +253,89 @@ fun SettingsScreen(
             label = "Username",
             value = uiState.currentUsername ?: "(not logged in)",
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        TextField(
+            value = uiState.usernameText,
+            onValueChange = viewModel::onUsernameTextChanged,
+            label = { Text("Username", color = RommTvColors.TextSecondary) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            keyboardActions = KeyboardActions(
+                onNext = { focusManager.moveFocus(FocusDirection.Down) },
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(usernameFieldFocusRequester),
+            colors = androidx.compose.material3.TextFieldDefaults.colors(
+                focusedContainerColor = RommTvColors.NightLo,
+                unfocusedContainerColor = RommTvColors.NightLo,
+                focusedIndicatorColor = RommTvColors.Romm500,
+                unfocusedIndicatorColor = RommTvColors.TextSecondary.copy(alpha = 0.3f),
+            ),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        TextField(
+            value = uiState.passwordText,
+            onValueChange = viewModel::onPasswordTextChanged,
+            label = { Text("Password", color = RommTvColors.TextSecondary) },
+            singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(
+                onDone = { viewModel.onLogin() },
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(passwordFieldFocusRequester),
+            colors = androidx.compose.material3.TextFieldDefaults.colors(
+                focusedContainerColor = RommTvColors.NightLo,
+                unfocusedContainerColor = RommTvColors.NightLo,
+                focusedIndicatorColor = RommTvColors.Romm500,
+                unfocusedIndicatorColor = RommTvColors.TextSecondary.copy(alpha = 0.3f),
+            ),
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        SettingsActionButton(
+            label = "Log In",
+            focusRequester = loginFocusRequester,
+            isLoading = uiState.loginState is SettingsLoginState.Loading,
+            onClick = viewModel::onLogin,
+        )
+
+        // Login feedback
+        when (val loginState = uiState.loginState) {
+            is SettingsLoginState.Success -> {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF4caf50),
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                    Text("Logged in", color = Color(0xFF4caf50))
+                }
+            }
+            is SettingsLoginState.Error -> {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.Error,
+                        contentDescription = null,
+                        tint = Color(0xFFf44336),
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                    Text(text = loginState.message, color = Color(0xFFf44336))
+                }
+            }
+            else -> {}
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 

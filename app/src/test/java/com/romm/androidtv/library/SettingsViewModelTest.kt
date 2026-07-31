@@ -6,6 +6,9 @@ import com.romm.androidtv.network.HeartbeatCallResult
 import com.romm.androidtv.model.HeartbeatError
 import com.romm.androidtv.model.HeartbeatResponse
 import kotlinx.coroutines.*
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -28,11 +31,16 @@ class SettingsViewModelTest {
     fun setUp() {
         testJob = Job()
         testScope = CoroutineScope(Dispatchers.Unconfined + testJob)
+        // ViewModel.viewModelScope requires a working Dispatchers.Main even when a coroutine is
+        // launched onto another dispatcher — there is no Robolectric/Android runtime in this
+        // plain JVM unit test, so the real Main dispatcher is unavailable and must be substituted.
+        Dispatchers.setMain(UnconfinedTestDispatcher())
     }
 
     @AfterEach
     fun tearDown() {
         testJob.cancel()
+        Dispatchers.resetMain()
     }
 
     // ---- Helper to construct VM with configurable mocks ----
@@ -42,6 +50,8 @@ class SettingsViewModelTest {
         var sessionRecord: SessionStore.Record? = null,
         var invalidated: Boolean = false,
         var heartbeatCalls: Int = 0,
+        var loginCalls: Int = 0,
+        var loginSuccessInvoked: Boolean = false,
     )
 
     private fun makeViewModel(
@@ -49,6 +59,9 @@ class SettingsViewModelTest {
         initialSession: SessionStore.Record? = null,
         buildDefault: String = "https://build-default.example.com",
         heartbeatResult: HeartbeatCallResult = HeartbeatCallResult.Failure(HeartbeatError.NETWORK_ERROR),
+        loginResult: com.romm.androidtv.network.AuthFlowResult = com.romm.androidtv.network.AuthFlowResult.Failure(
+            com.romm.androidtv.network.AuthError.NETWORK_ERROR,
+        ),
     ): Pair<SettingsViewModel, TestMocks> {
         val mocks = TestMocks(
             storedOrigin = initialOrigin,
@@ -64,6 +77,8 @@ class SettingsViewModelTest {
             getSessionRecord = { mocks.sessionRecord },
             clearSessionFn = { mocks.sessionRecord = null },
             checkHeartbeatFn = { _ -> mocks.heartbeatCalls++; heartbeatResult },
+            loginFn = { _, _, _ -> mocks.loginCalls++; loginResult },
+            onLoginSuccess = { mocks.loginSuccessInvoked = true },
             buildDefaultOrigin = buildDefault,
             onSessionInvalidated = { mocks.invalidated = true },
         )
@@ -352,5 +367,75 @@ class SettingsViewModelTest {
         val state = vm.uiState.value
         assertThat(state.connectionCheck).isInstanceOf(ConnectionCheckState.Error::class.java)
         assertThat((state.connectionCheck as ConnectionCheckState.Error).message).isEqualTo("HTTP error from server")
+    }
+
+    // ---- Native credentials login (Settings screen) ----
+
+    @Test
+    fun `login succeeds, clears password, and notifies onLoginSuccess`() = runBlocking {
+        val (vm, mocks) = makeViewModel(
+            initialOrigin = "https://romm.example.com",
+            loginResult = com.romm.androidtv.network.AuthFlowResult.Success(
+                heartbeatAfterLogin = com.romm.androidtv.model.HeartbeatResponse(
+                    version = "5.0.0", setupComplete = true, userpassEnabled = true, emulatorJsEnabled = true,
+                ),
+                verifiedUser = com.romm.androidtv.network.VerifiedUser(username = "root", isAdmin = true),
+            ),
+        )
+
+        vm.onUsernameTextChanged("root")
+        vm.onPasswordTextChanged("hunter2")
+        vm.onLogin()
+
+        val state = vm.uiState.value
+        assertThat(mocks.loginCalls).isEqualTo(1)
+        assertThat(mocks.loginSuccessInvoked).isTrue()
+        assertThat(state.loginState).isInstanceOf(SettingsLoginState.Success::class.java)
+        assertThat(state.passwordText).isEmpty()
+        assertThat(state.currentUsername).isEqualTo("root")
+    }
+
+    @Test
+    fun `login failure surfaces a formatted error and clears password without navigating`() = runBlocking {
+        val (vm, mocks) = makeViewModel(
+            initialOrigin = "https://romm.example.com",
+            loginResult = com.romm.androidtv.network.AuthFlowResult.Failure(
+                com.romm.androidtv.network.AuthError.INVALID_CREDENTIALS,
+            ),
+        )
+
+        vm.onUsernameTextChanged("root")
+        vm.onPasswordTextChanged("wrong")
+        vm.onLogin()
+
+        val state = vm.uiState.value
+        assertThat(mocks.loginSuccessInvoked).isFalse()
+        assertThat(state.loginState).isInstanceOf(SettingsLoginState.Error::class.java)
+        assertThat((state.loginState as SettingsLoginState.Error).message).isEqualTo("Invalid username or password")
+        assertThat(state.passwordText).isEmpty()
+    }
+
+    @Test
+    fun `login with blank username or password is rejected without a network call`() = runBlocking {
+        val (vm, mocks) = makeViewModel(initialOrigin = "https://romm.example.com")
+
+        vm.onUsernameTextChanged("")
+        vm.onPasswordTextChanged("")
+        vm.onLogin()
+
+        assertThat(mocks.loginCalls).isEqualTo(0)
+        assertThat(vm.uiState.value.loginState).isInstanceOf(SettingsLoginState.Error::class.java)
+    }
+
+    @Test
+    fun `login with an invalid origin is rejected without a network call`() = runBlocking {
+        val (vm, mocks) = makeViewModel(initialOrigin = "")
+
+        vm.onUsernameTextChanged("root")
+        vm.onPasswordTextChanged("hunter2")
+        vm.onLogin()
+
+        assertThat(mocks.loginCalls).isEqualTo(0)
+        assertThat(vm.uiState.value.loginState).isInstanceOf(SettingsLoginState.Error::class.java)
     }
 }

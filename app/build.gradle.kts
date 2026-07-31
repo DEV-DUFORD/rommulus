@@ -184,6 +184,9 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     // MockWebServer for network unit tests
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // Provides a controllable Dispatchers.Main for ViewModel unit tests (no Robolectric in this
+    // repo) — required by SettingsViewModel tests that exercise viewModelScope.launch.
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 
     // Instrumented UI/Compose testing
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

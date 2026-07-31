@@ -24,6 +24,14 @@ sealed interface ConnectionCheckState {
     data class Error(val message: String) : ConnectionCheckState
 }
 
+/** Login-action result states for the Settings screen credentials form. */
+sealed interface SettingsLoginState {
+    object Idle : SettingsLoginState
+    object Loading : SettingsLoginState
+    object Success : SettingsLoginState
+    data class Error(val message: String) : SettingsLoginState
+}
+
 /** Full UI state emitted by [SettingsViewModel]. */
 data class SettingsUiState(
     /** Text shown in the origin TextField — always preserves exactly what the user typed. */
@@ -44,6 +52,12 @@ data class SettingsUiState(
     val appVersion: String = BuildConfig.VERSION_NAME,
     /** True when the edited originText differs from persisted currentOrigin. */
     val originChanged: Boolean = false,
+    /** Text in the username field of the credentials form. Never persisted directly. */
+    val usernameText: String = "",
+    /** Text in the password field of the credentials form. Cleared after every login attempt. */
+    val passwordText: String = "",
+    /** State of the in-progress/last login attempt from this screen. */
+    val loginState: SettingsLoginState = SettingsLoginState.Idle,
 )
 
 /**
@@ -68,6 +82,8 @@ class SettingsViewModel(
     private val getSessionRecord: () -> SessionStore.Record?,
     private val clearSessionFn: () -> Unit,
     private val checkHeartbeatFn: suspend (String) -> HeartbeatCallResult,
+    private val loginFn: suspend (origin: String, username: String, password: CharArray) -> com.romm.androidtv.network.AuthFlowResult,
+    private val onLoginSuccess: () -> Unit,
     private val buildDefaultOrigin: String,
     private val onSessionInvalidated: () -> Unit,
 ) : ViewModel() {
@@ -211,6 +227,75 @@ class SettingsViewModel(
         }
     }
 
+    /** Called on every password TextField [onValueChange]. Never persisted; cleared on attempt. */
+    fun onPasswordTextChanged(newText: String) {
+        _uiState.value = _uiState.value.copy(passwordText = newText, loginState = SettingsLoginState.Idle)
+    }
+
+    /** Called on every username TextField [onValueChange]. */
+    fun onUsernameTextChanged(newText: String) {
+        _uiState.value = _uiState.value.copy(usernameText = newText, loginState = SettingsLoginState.Idle)
+    }
+
+    /**
+     * Logs in with the username/password entered in this screen, against the currently
+     * persisted origin. On success, records the session/durable token exactly like the
+     * existing login flow and notifies [onLoginSuccess] so the caller can navigate away
+     * (e.g. straight into Native Library) without requiring the WebView login form.
+     */
+    fun onLogin() {
+        val state = _uiState.value
+        val username = state.usernameText.trim()
+        val password = state.passwordText
+        val origin = state.currentOrigin
+
+        if (username.isBlank() || password.isBlank()) {
+            _uiState.value = state.copy(
+                loginState = SettingsLoginState.Error("Username and password are required"),
+            )
+            return
+        }
+        if (validateOrigin(origin) != null) {
+            _uiState.value = state.copy(
+                loginState = SettingsLoginState.Error("Fix the server address before logging in"),
+            )
+            return
+        }
+
+        _uiState.value = state.copy(loginState = SettingsLoginState.Loading)
+        viewModelScope.launch {
+            val result = loginFn(origin, username, password.toCharArray())
+            when (result) {
+                is com.romm.androidtv.network.AuthFlowResult.Success -> {
+                    _uiState.value = _uiState.value.copy(
+                        // Password never lingers in state once the attempt is resolved.
+                        passwordText = "",
+                        currentUsername = result.verifiedUser.username,
+                        loginState = SettingsLoginState.Success,
+                    )
+                    onLoginSuccess()
+                }
+                is com.romm.androidtv.network.AuthFlowResult.Failure -> {
+                    _uiState.value = _uiState.value.copy(
+                        passwordText = "",
+                        loginState = SettingsLoginState.Error(formatAuthError(result.error)),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun formatAuthError(error: com.romm.androidtv.network.AuthError): String = when (error) {
+        com.romm.androidtv.network.AuthError.INVALID_CREDENTIALS -> "Invalid username or password"
+        com.romm.androidtv.network.AuthError.SERVER_ERROR -> "Server error during login"
+        com.romm.androidtv.network.AuthError.NETWORK_ERROR -> "Network unreachable"
+        com.romm.androidtv.network.AuthError.TLS_ERROR -> "TLS / certificate error"
+        com.romm.androidtv.network.AuthError.POST_LOGIN_HEARTBEAT_FAILED -> "Server unreachable after login"
+        com.romm.androidtv.network.AuthError.VERIFICATION_FAILED -> "Login could not be verified"
+        com.romm.androidtv.network.AuthError.ORIGIN_NOT_CONFIGURED -> "Origin not configured"
+        com.romm.androidtv.network.AuthError.LOGIN_NOT_AVAILABLE -> "Login is not available on this server"
+    }
+
     // ---- Validation ----
 
     /** Returns null if [origin] is valid, or a human-readable error string. */
@@ -248,6 +333,7 @@ class SettingsViewModel(
         private val authRepository: AuthRepository,
         private val buildDefaultOrigin: String,
         private val onSessionInvalidated: () -> Unit,
+        private val onLoginSuccess: () -> Unit = {},
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -264,6 +350,8 @@ class SettingsViewModel(
                     sessionStore.clear()
                 },
                 checkHeartbeatFn = { origin -> authRepository.checkHeartbeat(origin) },
+                loginFn = { origin, username, password -> authRepository.login(origin, username, password) },
+                onLoginSuccess = onLoginSuccess,
                 buildDefaultOrigin = buildDefaultOrigin,
                 onSessionInvalidated = onSessionInvalidated,
             ) as T

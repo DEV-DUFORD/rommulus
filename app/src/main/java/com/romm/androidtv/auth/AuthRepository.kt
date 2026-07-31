@@ -13,6 +13,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
+/** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
+private const val TAG = "RommAuthDx"
+
+/** Safe diagnostic logger: swallows unmocked android.util.Log in JVM unit tests. */
+private fun diagLog(priority: Int, message: String) {
+    try { android.util.Log.println(priority, TAG, message) } catch (_: Exception) { /* JVM test env */ }
+}
+
 /**
  * Repository seam over the native RomM authentication flow
  * (LIBRETRO_REFACTOR.md section 5, `auth/AuthRepository.kt`).
@@ -49,21 +57,29 @@ class AuthRepository(
     private val clientTokenStorage: ClientTokenStorage? = null,
 ) {
 
-    /** Executes the full login flow (POST /api/login, heartbeat, /api/users/me). */
+    /** Executes the full login flow (POST /api/login, heartbeat, /api/users/me). On success, replaces any stale local token. */
     suspend fun login(origin: String, username: String, password: CharArray): AuthFlowResult {
         val result = withContext(Dispatchers.IO) {
             executeAuthFlow(client, origin, username, password)
         }
-        recordIfSuccessful(origin, result)
+        // Explicit sign-in always replaces stale local token safely.
+        // Runs on IO: client-token acquisition is itself a blocking network call and must
+        // never execute on the caller's (often Main) dispatcher.
+        withContext(Dispatchers.IO) {
+            recordIfSuccessful(origin, result, forceReplaceToken = true)
+        }
         return result
     }
 
-    /** Checks whether existing session cookies (already imported into OkHttp) are still valid. */
+    /** Checks whether existing session cookies (already imported into OkHttp) are still valid. Does not churn existing tokens. */
     suspend fun verifySession(origin: String): AuthFlowResult {
         val result = withContext(Dispatchers.IO) {
             verifyExistingSession(client, origin)
         }
-        recordIfSuccessful(origin, result)
+        // Session verification ensures a token exists but does not replace an existing one.
+        withContext(Dispatchers.IO) {
+            recordIfSuccessful(origin, result, forceReplaceToken = false)
+        }
         return result
     }
 
@@ -96,27 +112,121 @@ class AuthRepository(
         clientTokenStorage?.clearToken(origin, username)
     }
 
-    private fun recordIfSuccessful(origin: String, result: AuthFlowResult) {
+    /**
+     * Force-reconcile: acquire a fresh ClientToken via the cookie-authenticated foreground
+     * client and persist it into [clientTokenStore]. Used when a bearer-authenticated sync
+     * operation fails with AUTH_EXPIRED but the cookie session is still valid.
+     *
+     * Returns true if a replacement token was acquired and persisted. Returns false when:
+     * - no storage is configured,
+     * - the username is unknown (cannot scope the token),
+     * - or acquisition from the server fails.
+     *
+     * Always replaces any stale local token for this scope before attempting acquisition.
+     *
+     * Suspend + [Dispatchers.IO]: this performs a blocking OkHttp call. Callers (e.g.
+     * `MainActivity`'s `lifecycleScope.launch`, which defaults to Main) must never invoke the
+     * underlying network call directly on Main — doing so throws a non-`IOException` runtime
+     * exception (`NetworkOnMainThreadException`) that escapes `RommSyncApi`'s `IOException`-only
+     * catch, before any HTTP result is ever classified.
+     */
+    suspend fun forceReconcileClientToken(origin: String, username: String): Boolean = withContext(Dispatchers.IO) {
+        val storage = clientTokenStorage ?: run {
+            diagLog(android.util.Log.DEBUG, "forceReconcileClientToken: skipped storage=null")
+            return@withContext false
+        }
+        // Remove potentially revoked/stale token first so the server issues a fresh one.
+        storage.clearToken(origin, username)
+        try {
+            val result = RommSyncApi.acquireClientToken(
+                client = client,
+                origin = origin,
+                scopes = CLIENT_TOKEN_SCOPES,
+            )
+            when (result) {
+                is ClientTokenAcquireResult.Success -> {
+                    storage.setToken(origin, username, result.info.token)
+                    diagLog(android.util.Log.DEBUG, "forceReconcileClientToken: reconciled=true")
+                    true
+                }
+                is ClientTokenAcquireResult.Failure -> {
+                    val httpCode = result.httpCode ?: -1
+                    diagLog(android.util.Log.WARN, "forceReconcileClientToken: reconciled=false error=${result.error.name} httpCode=$httpCode")
+                    false
+                }
+            }
+        } catch (_: Exception) {
+            // Acquisition failure; caller will handle as terminal auth-expired.
+            diagLog(android.util.Log.WARN, "forceReconcileClientToken: exception during reconciliation")
+            false
+        }
+    }
+
+    /**
+     * Ensures a durable ClientToken exists for the current session scope after a successful
+     * verification. If one is already stored, this is a no-op. Only acquires when missing.
+     */
+    suspend fun ensureClientTokenExists(origin: String, username: String): Boolean {
+        val storage = clientTokenStorage ?: run {
+            diagLog(android.util.Log.DEBUG, "ensureClientTokenExists: skipped storage=null")
+            return false
+        }
+        if (storage.getToken(origin, username) != null) {
+            diagLog(android.util.Log.DEBUG, "ensureClientTokenExists: alreadyPresent=true")
+            return true
+        }
+        val result = forceReconcileClientToken(origin, username)
+        diagLog(android.util.Log.DEBUG, "ensureClientTokenExists: afterForceReconcile=$result")
+        return result
+    }
+
+    /**
+     * Clears both the [SessionStore] record and the matching durable ClientToken for this
+     * scope. Called when authentication is definitively expired/invalid (not transient errors).
+     */
+    fun clearExpiredSession(origin: String, username: String) {
+        diagLog(android.util.Log.DEBUG, "clearExpiredSession: clearing session+token")
+        sessionStore.clear()
+        clientTokenStorage?.clearToken(origin, username)
+    }
+
+    private fun recordIfSuccessful(origin: String, result: AuthFlowResult, forceReplaceToken: Boolean) {
         if (result is AuthFlowResult.Success) {
+            val usernamePresent = result.verifiedUser.username != null
+            diagLog(android.util.Log.DEBUG, "recordIfSuccessful: success=true usernamePresent=$usernamePresent")
             sessionStore.save(origin, result.verifiedUser.username)
             // Acquire durable ClientToken for worker execution while foreground client is authenticated.
-            acquireAndPersistClientToken(origin, result.verifiedUser.username)
+            acquireAndPersistClientToken(origin, result.verifiedUser.username, forceReplaceToken)
+        } else {
+            val httpCode = (result as? AuthFlowResult.Failure)?.httpCode ?: -1
+            diagLog(android.util.Log.WARN, "recordIfSuccessful: success=false httpCode=$httpCode")
         }
     }
 
     /**
      * Acquires a durable [com.romm.androidtv.romm.ClientToken] via the cookie-authenticated
      * foreground client and persists it into [clientTokenStore]. Reuses any existing valid
-     * token to avoid unnecessary server calls. Silently ignores acquisition failures —
-     * the worker will fall back to AUTH_REQUIRED if no token is available, which is the
-     * correct terminal state for that case.
+     * token to avoid unnecessary server calls unless [forceReplace] is true (explicit login).
+     * Silently ignores acquisition failures — the worker will fall back to AUTH_REQUIRED if
+     * no token is available, which is the correct terminal state for that case.
      */
-    private fun acquireAndPersistClientToken(origin: String, username: String?) {
-        val uname = username ?: return
-        val storage = clientTokenStorage ?: return
+    private fun acquireAndPersistClientToken(origin: String, username: String?, forceReplace: Boolean = false) {
+        val uname = username ?: run {
+            diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: skipped username=null")
+            return
+        }
+        val storage = clientTokenStorage ?: run {
+            diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: skipped storage=null")
+            return
+        }
 
-        // Reuse existing valid token to avoid unnecessary server calls.
-        if (storage.getToken(origin, uname) != null) return
+        // On explicit login (forceReplace=true), always replace stale token.
+        // On session verification, reuse existing valid token to avoid churn.
+        val tokenAlreadyPresent = storage.getToken(origin, uname) != null
+        if (!forceReplace && tokenAlreadyPresent) {
+            diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: reused existing forceReplace=$forceReplace")
+            return
+        }
 
         try {
             val result = RommSyncApi.acquireClientToken(
@@ -124,16 +234,33 @@ class AuthRepository(
                 origin = origin,
                 scopes = CLIENT_TOKEN_SCOPES,
             )
-            if (result is ClientTokenAcquireResult.Success) {
-                storage.setToken(origin, uname, result.info.token)
+            when (result) {
+                is ClientTokenAcquireResult.Success -> {
+                    storage.setToken(origin, uname, result.info.token)
+                    diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: acquired+persisted scopes=${CLIENT_TOKEN_SCOPES}")
+                }
+                is ClientTokenAcquireResult.Failure -> {
+                    val httpCode = result.httpCode ?: -1
+                    diagLog(android.util.Log.WARN, "acquireAndPersistClientToken: acquireFailed error=${result.error.name} httpCode=$httpCode")
+                }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // Acquisition failure is non-fatal; worker will handle missing token as AUTH_REQUIRED.
+            diagLog(android.util.Log.WARN, "acquireAndPersistClientToken: exception ${e.javaClass.simpleName}")
         }
     }
 
     companion object {
-        /** Minimum scopes required for device registration and save upload via Bearer token. */
-        private val CLIENT_TOKEN_SCOPES = listOf("assets", "device")
+        /**
+         * Minimum scopes required for device registration, save upload via Bearer token, and
+         * play-session reporting (needed for "Continue Playing").
+         * RomM's `POST /api/client-tokens` requires exact scope strings; the generic
+         * `assets`/`device` shorthand is rejected by the pinned backend contract.
+         */
+        private val CLIENT_TOKEN_SCOPES = listOf(
+            "assets.read", "assets.write",
+            "devices.read", "devices.write",
+            "roms.user.read", "roms.user.write",
+        )
     }
 }
