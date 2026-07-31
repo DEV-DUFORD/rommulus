@@ -131,7 +131,7 @@ class SaveSyncCoordinatorImpl(
 
             SyncAction.DOWNLOAD -> handleDownload(request, serverKey, userKey, origin, deviceId, negotiation, operation, existingReplica)
 
-            SyncAction.UPLOAD -> handleUploadQueue(request, serverKey, userKey, origin, negotiation, existingReplica, localBytes)
+            SyncAction.UPLOAD -> handleUploadQueue(request, serverKey, userKey, origin, deviceId, negotiation, operation, existingReplica, localBytes)
 
             SyncAction.CONFLICT -> {
                 saveReplicaDao.upsert(
@@ -536,15 +536,32 @@ class SaveSyncCoordinatorImpl(
         serverKey: String,
         userKey: String,
         origin: String,
+        deviceId: String,
         negotiation: SyncNegotiateInfo,
+        operation: SyncOperation,
         existingReplica: SaveReplicaEntity?,
         localBytes: ByteArray?,
     ): SaveSyncOutcome {
         val generation = existingReplica?.localWrittenAtEpochMs
         if (localBytes == null || generation == null) {
             // The server negotiated "upload" but this device has no local save on record at all —
-            // nothing durable to queue. A real mismatch worth surfacing rather than silently queuing.
-            return SaveSyncOutcome.Failure(RommApiError.PARSE_ERROR)
+            // there is nothing durable to queue for upload. This is NOT necessarily an error: it is
+            // exactly the "first sync" scenario (a cloud save already exists — e.g. uploaded from
+            // another device or the web UI — but this device has never downloaded it). Rather than
+            // failing outright on the bad assumption that a local baseline must already exist,
+            // fall back to treating the server's copy as authoritative: if the server told us which
+            // save this scope maps to (operation.saveId), download and adopt it exactly like a
+            // negotiated DOWNLOAD action would (provenance + exact-size gates still apply).
+            val saveId = operation.saveId
+            if (saveId == null) {
+                // Truly nothing anywhere for this scope (no local, no addressable server save) —
+                // nothing to reconcile. Report zero completed/failed, matching the "no matching
+                // operation" branch above.
+                completeSession(origin, negotiation.sessionId, completed = 0, failed = 0)
+                return SaveSyncOutcome.NoOpSynced(negotiation.sessionId)
+            }
+            val downloadOperation = operation.copy(action = SyncAction.DOWNLOAD)
+            return handleDownload(request, serverKey, userKey, origin, deviceId, negotiation, downloadOperation, existingReplica)
         }
 
         // Idempotent resume (section 11.4 dedupe rule): drop any queued operation for an older

@@ -190,6 +190,28 @@ class NativeLibretroHost {
             resolveBundledCoreSharedLibrary(context, "libsameboy_core.so")
 
         /**
+         * Resolves an absolute, dlopen-able path to the bundled, approved
+         * Genesis Plus GX core (LIBRETRO_REFACTOR.md section 13, Phase 7) —
+         * approved under the owner's recorded Phase 7 licensing-risk
+         * decision (see [com.romm.androidtv.emulation.model.CoreLicenseFinding.ownerRiskAcceptedBy]
+         * on its `genesis_plus_gx` [com.romm.androidtv.emulation.model.CoreManifest] entry).
+         * Same run-from-apk extraction rationale as [resolveBundledTestCorePath].
+         */
+        fun resolveBundledGenesisPlusGxCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libgenesis_plus_gx_core.so")
+
+        /**
+         * Resolves an absolute, dlopen-able path to the bundled, approved
+         * Snes9x core (LIBRETRO_REFACTOR.md section 13, Phase 7) — approved
+         * under the owner's recorded Phase 7 licensing-risk decision (see
+         * [com.romm.androidtv.emulation.model.CoreLicenseFinding.ownerRiskAcceptedBy]
+         * on its `snes9x` [com.romm.androidtv.emulation.model.CoreManifest] entry).
+         * Same run-from-apk extraction rationale as [resolveBundledTestCorePath].
+         */
+        fun resolveBundledSnes9xCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libsnes9x_core.so")
+
+        /**
          * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
          * to its bundled shared-library path, or null if [coreId] has no
          * bundled core in this build. Deliberately does not fall back to any
@@ -198,12 +220,16 @@ class NativeLibretroHost {
          */
         fun resolveBundledCorePathForCoreId(context: Context, coreId: String): String? = when (coreId) {
             "sameboy" -> resolveBundledSameBoyCorePath(context)
+            "genesis_plus_gx" -> resolveBundledGenesisPlusGxCorePath(context)
+            "snes9x" -> resolveBundledSnes9xCorePath(context)
             else -> null
         }
 
         /**
-         * Shared extraction logic for [resolveBundledTestCorePath] and
-         * [resolveBundledSameBoyCorePath]: every bundled core is a normal JNI
+         * Shared extraction logic for [resolveBundledTestCorePath],
+         * [resolveBundledSameBoyCorePath], [resolveBundledGenesisPlusGxCorePath],
+         * and [resolveBundledSnes9xCorePath]:
+         * every bundled core is a normal JNI
          * library shipped in the APK, extracted to app-private storage under
          * a name derived from [soFileName] so multiple cores never collide.
          * The APK entry CRC is checked on every resolution so an app update

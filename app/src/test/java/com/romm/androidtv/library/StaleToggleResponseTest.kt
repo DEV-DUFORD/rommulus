@@ -53,7 +53,7 @@ class StaleToggleResponseTest {
         LibraryRom(id = id, title = "Supported $id", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false)
 
     private fun makeUnsupportedRom(id: Long): LibraryRom =
-        LibraryRom(id = id, title = "Unsupported $id", platformDisplayName = "Genesis", platformSlug = "genesis", coverUrl = null, lastPlayedIso = null, nowPlaying = false)
+        LibraryRom(id = id, title = "Unsupported $id", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false)
 
     /** Dedicated dispatcher for non-cooperative blocking (ignores Kotlin cancellation). */
     private val blockingDispatcher = blockingExecutor.asCoroutineDispatcher()

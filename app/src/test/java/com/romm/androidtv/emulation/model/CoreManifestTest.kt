@@ -6,11 +6,12 @@ import org.junit.jupiter.api.Test
 class CoreManifestTest {
 
     @Test
-    fun `only SameBoy is approved, following its Phase 4 individual license review`() {
-        // Every other core in the manifest is still an unreviewed/restricted starting fact
-        // from Phase 0 (LIBRETRO_REFACTOR.md section 4.1) — approving one core in Phase 4
-        // must not silently approve any other entry.
-        assertThat(CoreManifest.approvedEntries().map { it.coreId }).containsExactly("sameboy")
+    fun `SameBoy, Genesis Plus GX, and Snes9x are approved, following their individual license reviews`() {
+        // PicoDrive and Mupen64Plus remain unreviewed/restricted starting facts from Phase 0
+        // (LIBRETRO_REFACTOR.md section 4.1) — approving these three cores must not silently
+        // approve any other entry.
+        assertThat(CoreManifest.approvedEntries().map { it.coreId })
+            .containsExactlyInAnyOrder("sameboy", "genesis_plus_gx", "snes9x")
     }
 
     @Test
@@ -23,6 +24,46 @@ class CoreManifestTest {
         assertThat(sameboy.reviewedOn).isNotBlank()
         assertThat(sameboy.commitSha).isNotBlank()
         assertThat(sameboy.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(sameboy.ownerRiskAcceptedBy).isBlank()
+        assertThat(sameboy.ownerRiskAcceptedOn).isBlank()
+    }
+
+    @Test
+    fun `Genesis Plus GX's approval records a named reviewer, commit, restricted finding, and the owner's risk acceptance`() {
+        val gpgx = CoreManifest.findById("genesis_plus_gx")
+
+        assertThat(gpgx).isNotNull
+        assertThat(gpgx!!.approved).isTrue()
+        assertThat(gpgx.reviewedBy).isEqualTo("DEV-DUFORD")
+        assertThat(gpgx.reviewedOn).isNotBlank()
+        assertThat(gpgx.commitSha).isNotBlank()
+        assertThat(gpgx.commercialUseFinding).isEqualTo(CommercialUseFinding.NON_COMMERCIAL_RESTRICTED)
+        assertThat(gpgx.ownerRiskAcceptedBy).isNotBlank()
+        assertThat(gpgx.ownerRiskAcceptedOn).isNotBlank()
+        assertThat(gpgx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(gpgx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(gpgx.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+    }
+
+    @Test
+    fun `Snes9x's approval records a named reviewer, commit, restricted finding, and the owner's risk acceptance`() {
+        val snes9x = CoreManifest.findById("snes9x")
+
+        assertThat(snes9x).isNotNull
+        assertThat(snes9x!!.approved).isTrue()
+        assertThat(snes9x.reviewedBy).isEqualTo("DEV-DUFORD")
+        assertThat(snes9x.reviewedOn).isNotBlank()
+        assertThat(snes9x.commitSha).isNotBlank()
+        assertThat(snes9x.commercialUseFinding).isEqualTo(CommercialUseFinding.NON_COMMERCIAL_RESTRICTED)
+        assertThat(snes9x.ownerRiskAcceptedBy).isNotBlank()
+        assertThat(snes9x.ownerRiskAcceptedOn).isNotBlank()
+        assertThat(snes9x.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(snes9x.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(snes9x.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
     }
 
     @Test
@@ -33,14 +74,15 @@ class CoreManifestTest {
     }
 
     @Test
-    fun `restrictive cores are recorded as non-commercial restricted`() {
-        val restricted = listOf("genesis_plus_gx", "picodrive", "snes9x")
+    fun `remaining restrictive cores are recorded as non-commercial restricted and unapproved`() {
+        val restricted = listOf("picodrive")
 
         restricted.forEach { coreId ->
             val entry = CoreManifest.findById(coreId)
             assertThat(entry).isNotNull
             assertThat(entry!!.commercialUseFinding)
                 .isEqualTo(CommercialUseFinding.NON_COMMERCIAL_RESTRICTED)
+            assertThat(entry.approved).isFalse()
         }
     }
 
@@ -68,7 +110,7 @@ class CoreManifestTest {
     }
 
     @Test
-    fun `an approved entry cannot have a restricted commercial-use finding`() {
+    fun `an approved entry cannot have a restricted commercial-use finding without an owner risk acceptance`() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) {
             CoreLicenseFinding(
                 coreName = "Test Core",
@@ -82,8 +124,52 @@ class CoreManifestTest {
                 reviewedBy = "reviewer",
                 reviewedOn = "2026-07-27",
                 approved = true,
+                // ownerRiskAcceptedBy / ownerRiskAcceptedOn intentionally omitted
             )
         }
+    }
+
+    @Test
+    fun `a restricted entry cannot record an owner risk acceptance without being approved-eligible`() {
+        // ownerRiskAcceptedBy/On may only be set alongside a NON_COMMERCIAL_RESTRICTED finding —
+        // recording one against a permissive/copyleft-ok finding would be a meaningless, misleading
+        // record (there is no risk to accept), so the constructor rejects it outright.
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) {
+            CoreLicenseFinding(
+                coreName = "Test Core",
+                coreId = "test_core",
+                upstreamRepository = "https://example.com/test-core",
+                commitSha = "abc123",
+                licenseSummary = "MIT",
+                commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+                supportedSystems = listOf("gb"),
+                supportedExtensions = listOf(".gb"),
+                ownerRiskAcceptedBy = "PROJECT-OWNER",
+                ownerRiskAcceptedOn = "2026-07-31",
+                approved = false,
+            )
+        }
+    }
+
+    @Test
+    fun `a restricted entry with a recorded owner risk acceptance can be approved`() {
+        val entry = CoreLicenseFinding(
+            coreName = "Test Core",
+            coreId = "test_core",
+            upstreamRepository = "https://example.com/test-core",
+            commitSha = "abc123",
+            licenseSummary = "Non-commercial",
+            commercialUseFinding = CommercialUseFinding.NON_COMMERCIAL_RESTRICTED,
+            supportedSystems = listOf("gb"),
+            supportedExtensions = listOf(".gb"),
+            reviewedBy = "reviewer",
+            reviewedOn = "2026-07-27",
+            ownerRiskAcceptedBy = "PROJECT-OWNER",
+            ownerRiskAcceptedOn = "2026-07-31",
+            approved = true,
+        )
+
+        assertThat(entry.approved).isTrue()
     }
 
     @Test

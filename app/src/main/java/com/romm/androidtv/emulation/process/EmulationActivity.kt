@@ -597,12 +597,23 @@ class EmulationActivity : ComponentActivity() {
 
             when (descriptor?.state) {
                 DescriptorState.ADOPTED -> {
-                    // Candidate was adopted during onCreate; checkpointed hash is in the descriptor.
+                    // Candidate was adopted during onCreate, but the SRAM has almost certainly
+                    // changed since then (that's the whole point of playing). Use the just-taken
+                    // checkpoint hash from checkpointIfRunning() (this activity's live
+                    // `checkpointedHash` field) — NOT `descriptor.checkpointedHash`, which is the
+                    // stale, pre-gameplay adoption-time hash. Reporting the stale hash here made
+                    // EmulationResultHandler's post-play sync compare the fresh checkpoint against
+                    // itself (finalizeAdoption() writes localHash = this same stale value, then
+                    // syncPostPlay() sees it "match" and treats real gameplay progress as
+                    // unchanged) — silently skipping the upload for exactly the "cloud save
+                    // exists, no local replica yet" first-adoption scenario. Only fall back to the
+                    // stale descriptor hash if this session never got as far as producing its own
+                    // checkpoint (e.g. checkpoint failed and the caller forced a quit anyway).
                     setResult(android.app.Activity.RESULT_OK, buildResultIntent(
                         EmulationResult.Completed(
                             sessionId = sid,
                             checkpointedSavePath = savePath,
-                            checkpointedSaveHash = descriptor.checkpointedHash,
+                            checkpointedSaveHash = (checkpointedHash.takeIf { checkpointed }) ?: descriptor.checkpointedHash,
                             startEpochMs = sessionStartEpochMs,
                             endEpochMs = System.currentTimeMillis(),
                         )
@@ -806,7 +817,17 @@ private fun EmulationScreen(
         backKeyHeld.collectLatest { held ->
             if (held) {
                 backHoldProgress.animateTo(1f, tween(durationMillis = BACK_HOLD_DURATION_MS, easing = LinearEasing))
-                onStop()
+                // If the save-failure overlay is already showing, the user has already been
+                // warned once (checkpoint failed) and is holding Back again to leave anyway.
+                // Routing this back through plain onStop() would just retry the same failing
+                // checkpoint and re-show the identical blocking overlay — a dead-end loop with
+                // no way out via the remote. Honor a second hold-to-exit as an explicit
+                // "quit anyway" instead, matching the overlay's own button.
+                if (saveFailureShown) {
+                    onQuitAnywayAfterSaveFailure()
+                } else {
+                    onStop()
+                }
             } else {
                 backHoldProgress.animateTo(0f, tween(durationMillis = 150))
             }

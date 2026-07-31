@@ -58,9 +58,24 @@ data class CoreLicenseFinding(
     val reviewedBy: String = "",
     val reviewedOn: String = "",
     /**
+     * Who accepted the product-level licensing risk for a [CommercialUseFinding.NON_COMMERCIAL_RESTRICTED]
+     * core, and when. Must stay blank for any core whose [commercialUseFinding] is
+     * [CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK] — this is a distinct, narrower decision
+     * from an ordinary license review, not a substitute for one. See the 2026-07-31 "Owner
+     * licensing-risk decision" in `HANDOFF.md` and `docs/PHASE0_DECISIONS.md`: it authorizes
+     * proceeding with a specific restrictively-licensed core in this free, ad-free, open-source
+     * app; it does not assert the restriction is actually GPLv3-compatible, and it must be
+     * revisited before any monetized/ads/paid build.
+     */
+    val ownerRiskAcceptedBy: String = "",
+    val ownerRiskAcceptedOn: String = "",
+    /**
      * Whether this core is cleared to ship in a production build. Must be false unless
-     * [reviewedBy] and [reviewedOn] are populated and [commercialUseFinding] is
-     * [CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK].
+     * [reviewedBy] and [reviewedOn] are populated, and either [commercialUseFinding] is
+     * [CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK], or it is
+     * [CommercialUseFinding.NON_COMMERCIAL_RESTRICTED] with [ownerRiskAcceptedBy] and
+     * [ownerRiskAcceptedOn] both recorded (an explicit, dated owner risk acceptance —
+     * never a silent default).
      */
     val approved: Boolean = false,
 ) {
@@ -68,12 +83,25 @@ data class CoreLicenseFinding(
         require(coreName.isNotBlank()) { "coreName must not be blank" }
         require(coreId.isNotBlank()) { "coreId must not be blank" }
         require(supportedSystems.isNotEmpty()) { "supportedSystems must not be empty" }
+        val ownerRiskFieldsSet = ownerRiskAcceptedBy.isNotBlank() || ownerRiskAcceptedOn.isNotBlank()
+        require(
+            !ownerRiskFieldsSet || commercialUseFinding == CommercialUseFinding.NON_COMMERCIAL_RESTRICTED
+        ) {
+            "core '$coreId' must not record an owner risk acceptance unless its commercial-use " +
+                "finding is NON_COMMERCIAL_RESTRICTED; a permissive/copyleft-ok or unreviewed " +
+                "finding has no risk to accept"
+        }
         if (approved) {
             require(commitSha.isNotBlank()) { "approved core '$coreId' must record commitSha" }
             require(reviewedBy.isNotBlank()) { "approved core '$coreId' must record reviewedBy" }
             require(reviewedOn.isNotBlank()) { "approved core '$coreId' must record reviewedOn" }
-            require(commercialUseFinding == CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK) {
-                "approved core '$coreId' must have a permitted commercial-use finding"
+            val riskAccepted = ownerRiskAcceptedBy.isNotBlank() && ownerRiskAcceptedOn.isNotBlank()
+            require(
+                commercialUseFinding == CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK || riskAccepted
+            ) {
+                "approved core '$coreId' must have a permitted commercial-use finding, or a " +
+                    "recorded owner risk acceptance (ownerRiskAcceptedBy/ownerRiskAcceptedOn) if " +
+                    "commercialUseFinding is NON_COMMERCIAL_RESTRICTED"
             }
         }
     }
@@ -138,15 +166,47 @@ object CoreManifest {
             coreName = "Genesis Plus GX",
             coreId = "genesis_plus_gx",
             upstreamRepository = "https://github.com/libretro/Genesis-Plus-GX",
-            commitSha = "",
-            licenseSummary = "Reviewed redistribution terms include a no-sale restriction. If the " +
-                "core code itself is GPL, that part is compatible with a GPLv3 app; the no-sale " +
-                "term is an additional restriction GPLv3 section 10 does not permit combining " +
-                "into one covered work without further review (see docs/PHASE0_DECISIONS.md).",
+            commitSha = "ca93fec870378f3bff65931bcd828d5e756cce75",
+            releaseTag = "", // Upstream carries no release tags; commitSha is the exact pin.
+            licenseSummary = "Custom BSD-style redistribution license (Charles MacDonald 1998-2003, " +
+                "Eke-Eke 2007-2026, portions Nicola Salmoria/MAME team) covering the core code " +
+                "itself, adding a no-sale/no-commercial-use condition and a modified-source-offer " +
+                "condition beyond a plain BSD license (upstream LICENSE.txt, verbatim). This is an " +
+                "additional restriction under GPLv3 section 10 (see docs/PHASE0_DECISIONS.md); " +
+                "this core relies on the owner's dated risk-acceptance recorded below and in " +
+                "HANDOFF.md's 2026-07-31 Phase 7 entry, not on a GPLv3-compatibility finding. " +
+                "Vendored subcomponents carry their own separate, permissive/copyleft-compatible " +
+                "licenses that add no further restriction: Nuked OPN2 (ym3438.c, LGPL-2.1-or-later), " +
+                "Tremor (core/sound/tremor, BSD-style/Xiph), minimp3 (core/sound/minimp3, CC0 1.0), " +
+                "zlib 1.2.11 (zlib license), and the vendored libretro-common helper sources (each " +
+                "individually MIT-licensed per its own file header). Only the files this core's " +
+                "Android build actually compiles are vendored (no Gamecube/Wii/PSP2/UWP build " +
+                "files, no CHD/libchdr/lzma/zstd Sega CD compressed-disc-image support — this " +
+                "core's CoreManifest scope is cartridge-only: genesis, megadrive, sms, gamegear). " +
+                "See third_party/cores/genesis_plus_gx/VENDORING.md for the complete file-by-file " +
+                "vendoring rationale and exclusions.",
             commercialUseFinding = CommercialUseFinding.NON_COMMERCIAL_RESTRICTED,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
             supportedSystems = listOf("genesis", "megadrive", "sms", "gamegear"),
             supportedExtensions = listOf(".md", ".gen", ".bin", ".sms", ".gg"),
-            approved = false,
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `genesis_plus_gx_core` CMake target " +
+                "in app/src/main/cpp/CMakeLists.txt, compiling " +
+                "third_party/cores/genesis_plus_gx/{core,libretro}/* with upstream's own " +
+                "libretro/jni/Android.mk COREFLAGS minus HAVE_CHD/USE_LIBCHDR, upstream's own " +
+                "libretro/link.T version script, and -D_ARM_ASSEM_ only for armeabi-v7a; see " +
+                "third_party/cores/genesis_plus_gx/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "351a9b87e6aaccb67b8c6d6b8c2299373046b478f1852b0ee3ee3ae54e16d26d",
+                "arm64-v8a" to "b187d807bd4730374303cf43247d268000dbe2bef635e8b704e168b6b3973931",
+            ),
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-07-31",
+            ownerRiskAcceptedBy = "PROJECT-OWNER",
+            ownerRiskAcceptedOn = "2026-07-31",
+            approved = true,
         ),
         CoreLicenseFinding(
             coreName = "PicoDrive",
@@ -164,15 +224,46 @@ object CoreManifest {
         CoreLicenseFinding(
             coreName = "Snes9x",
             coreId = "snes9x",
-            upstreamRepository = "https://github.com/libretro/snes9x",
-            commitSha = "",
-            licenseSummary = "Custom non-commercial license. An additional restriction under " +
-                "GPLv3 section 10; see docs/PHASE0_DECISIONS.md for the compatibility risk " +
-                "before combining with a GPLv3 application.",
+            upstreamRepository = "https://github.com/snes9xgit/snes9x",
+            commitSha = "921f9f7b83660eb44ad263022a57a4a029057c37",
+            releaseTag = "1.63",
+            licenseSummary = "The project's own non-commercial redistribution license (many named " +
+                "contributors 1996-2023; the libretro port itself additionally copyrighted " +
+                "2011-2017 by Hans-Kristian Arntzen and Daniel De Matteis \"under no " +
+                "circumstances will commercial rights be given\") covering the core and all " +
+                "enhancement-chip emulation, explicitly \"freeware for PERSONAL USE only\" " +
+                "(upstream LICENSE, verbatim). This is an additional restriction under GPLv3 " +
+                "section 10 (see docs/PHASE0_DECISIONS.md); this core relies on the owner's " +
+                "dated risk-acceptance recorded below and in HANDOFF.md's Phase 7 entries, not " +
+                "on a GPLv3-compatibility finding. One vendored subcomponent carries its own " +
+                "separate, copyleft-compatible license that adds no further restriction: " +
+                "snes_ntsc (core/filter/snes_ntsc.c, LGPL-2.1). Only the files this core's " +
+                "libretro/Android build actually compiles are vendored (no GTK+/Win32/macOS/Qt " +
+                "desktop GUI, no Vulkan renderer or its vendored third-party libraries, no " +
+                "netplay, no JMA/ZIP ROM-archive readers, no interactive debugger). See " +
+                "third_party/cores/snes9x/VENDORING.md for the complete file-by-file vendoring " +
+                "rationale and exclusions.",
             commercialUseFinding = CommercialUseFinding.NON_COMMERCIAL_RESTRICTED,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
             supportedSystems = listOf("snes", "sfc"),
             supportedExtensions = listOf(".sfc", ".smc"),
-            approved = false,
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `snes9x_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/snes9x/{core," +
+                "libretro}/* with upstream's own libretro/jni/Android.mk COREFLAGS, -std=c++14, " +
+                "and upstream's own libretro/link.T version script; see " +
+                "third_party/cores/snes9x/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "a03aa51d30713ea6374541f7f08329892097928c50c6af785928ba57dcd1760e",
+                "arm64-v8a" to "cd3bda8613969b9263e9a899d98f727e8895ef0bddeb88695611a11196391fef",
+            ),
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-07-31",
+            ownerRiskAcceptedBy = "PROJECT-OWNER",
+            ownerRiskAcceptedOn = "2026-07-31",
+            approved = true,
         ),
         CoreLicenseFinding(
             coreName = "Mupen64Plus",

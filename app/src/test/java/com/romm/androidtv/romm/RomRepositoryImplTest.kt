@@ -135,18 +135,52 @@ class RomRepositoryImplTest {
         }
 
         @Test
-        fun `the real, default resolver still rejects a platform with no approved core`() {
+        fun `the real, default resolver now approves genesis for Genesis Plus GX since its Phase 7 review`() {
             val genesisRomJson = """
                 {"id": 50, "fs_name": "game.md", "fs_size_bytes": 4, "platform_slug": "genesis", "has_multiple_files": false,
                  "files": [{"id": 1, "file_name": "game.md", "file_size_bytes": 4, "is_top_level": true}]}
             """.trimIndent()
             server.enqueue(MockResponse().setResponseCode(200).setBody(genesisRomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
 
             val outcome = runBlocking {
                 RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(50)
             }
 
-            assertThat(outcome).isEqualTo(StagingOutcome.NoApprovedCore("genesis"))
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("genesis_plus_gx")
+        }
+
+        @Test
+        fun `the real, default resolver now approves snes for Snes9x since its Phase 7 review`() {
+            val snesRomJson = """
+                {"id": 52, "fs_name": "game.sfc", "fs_size_bytes": 4, "platform_slug": "snes", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.sfc", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(snesRomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(52)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("snes9x")
+        }
+
+        @Test
+        fun `the real, default resolver still rejects a platform with no approved core`() {
+            val n64RomJson = """
+                {"id": 51, "fs_name": "game.n64", "fs_size_bytes": 4, "platform_slug": "n64", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.n64", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(n64RomJson))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(51)
+            }
+
+            assertThat(outcome).isEqualTo(StagingOutcome.NoApprovedCore("n64"))
         }
     }
 

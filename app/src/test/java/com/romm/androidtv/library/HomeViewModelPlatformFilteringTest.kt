@@ -42,7 +42,7 @@ class HomeViewModelPlatformFilteringTest {
         id = 1, displayName = "Game Boy", romCount = 50, logoUrl = null, slug = "gb",
     )
     private val unsupportedPlatform = PlatformSummary(
-        id = 2, displayName = "Genesis", romCount = 30, logoUrl = null, slug = "genesis",
+        id = 2, displayName = "N64", romCount = 30, logoUrl = null, slug = "n64",
     )
     private val blankSlugPlatform = PlatformSummary(
         id = 3, displayName = "Unknown", romCount = 5, logoUrl = null, slug = "",
@@ -74,7 +74,7 @@ class HomeViewModelPlatformFilteringTest {
         val state = vm.uiState.value
         val platforms = state.platforms as SectionState.Loaded<List<PlatformSummary>>
         assertThat(platforms.data).hasSize(2)
-        assertThat(platforms.data.map { it.displayName }).containsExactly("Game Boy", "Genesis")
+        assertThat(platforms.data.map { it.displayName }).containsExactly("Game Boy", "N64")
     }
 
     @Test
@@ -156,7 +156,7 @@ class HomeViewModelPlatformFilteringTest {
         state = vm.uiState.value
         platforms = state.platforms as SectionState.Loaded<List<PlatformSummary>>
         assertThat(platforms.data).hasSize(2)
-        assertThat(platforms.data.map { it.displayName }).containsExactly("Game Boy", "Genesis")
+        assertThat(platforms.data.map { it.displayName }).containsExactly("Game Boy", "N64")
     }
 
     @Test
@@ -175,7 +175,7 @@ class HomeViewModelPlatformFilteringTest {
 
         val state = vm.uiState.value
         val platforms = state.platforms as SectionState.Loaded<List<PlatformSummary>>
-        // Both gb and gbc are supported; genesis is filtered. Zero romCount does NOT filter.
+        // Both gb and gbc are supported; snes is filtered. Zero romCount does NOT filter.
         assertThat(platforms.data).hasSize(2)
         assertThat(platforms.data.map { it.slug }).containsExactly("gb", "gbc")
     }
@@ -183,10 +183,10 @@ class HomeViewModelPlatformFilteringTest {
     @Test
     fun `platform ordering is preserved after filtering`() {
         val gb = PlatformSummary(id = 1, displayName = "GB", romCount = 10, logoUrl = null, slug = "gb")
-        val genesis = PlatformSummary(id = 2, displayName = "Genesis", romCount = 5, logoUrl = null, slug = "genesis")
+        val snes = PlatformSummary(id = 2, displayName = "N64", romCount = 5, logoUrl = null, slug = "n64")
         val gbc = PlatformSummary(id = 3, displayName = "GBC", romCount = 8, logoUrl = null, slug = "gbc")
 
-        val repo = emptyMockRepo(listOf(genesis, gb, gbc))
+        val repo = emptyMockRepo(listOf(snes, gb, gbc))
         val preferenceFlow = MutableStateFlow(true)
 
         val vm = HomeViewModel(
@@ -197,7 +197,7 @@ class HomeViewModelPlatformFilteringTest {
 
         val state = vm.uiState.value
         val platforms = state.platforms as SectionState.Loaded<List<PlatformSummary>>
-        // Genesis filtered out; gb and gbc remain in their original relative order.
+        // N64 filtered out; gb and gbc remain in their original relative order.
         assertThat(platforms.data).hasSize(2)
         assertThat(platforms.data.map { it.slug }).containsExactly("gb", "gbc")
     }

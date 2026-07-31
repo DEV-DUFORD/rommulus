@@ -237,6 +237,54 @@ class SaveSyncCoordinatorImplTest {
     }
 
     @Test
+    fun `upload action with no local replica and a server save falls back to download-adopt instead of failing`() {
+        // Regression test for the "first sync" bug: a cloud save already exists (e.g. uploaded
+        // from another device or the web UI) but this device has never downloaded anything yet —
+        // no SaveReplicaEntity, no local bytes. If the server still negotiates "upload" for this
+        // scope (e.g. because it saw no reported client state), the coordinator must NOT fail on
+        // the bad assumption that a local baseline already exists; it must treat the server's copy
+        // as authoritative, download it, and adopt it locally — exactly like a "download" action.
+        runBlocking {
+            enqueueDeviceRegistered()
+            enqueueNegotiate(
+                """{"action": "upload", "rom_id": 1, "save_id": 42, "file_name": "autosave.srm", "slot": "autosave", "emulator": "sameboy", "reason": "no client state reported", "server_content_hash": "hash1"}"""
+            )
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(byteArrayOf(1, 2, 3))))
+            server.enqueue(MockResponse().setResponseCode(200)) // /downloaded confirm
+            enqueueComplete()
+
+            val outcome = coordinator.syncBeforeLaunch(request())
+
+            assertThat(outcome).isEqualTo(SaveSyncOutcome.Downloaded(7, 42, 3, true))
+            val adopted = saveContentStore.readLocal("localhost", "alice", 1L, "hash-a", "autosave")
+            assertThat(adopted).isEqualTo(byteArrayOf(1, 2, 3))
+            val replica = saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")
+            assertThat(replica).isNotNull
+            assertThat(replica!!.syncStatus).isEqualTo(SaveSyncStatus.SYNCED)
+            assertThat(replica.rommSaveId).isEqualTo(42)
+            assertThat(replica.lastError).isNull()
+        }
+    }
+
+    @Test
+    fun `upload action with no local replica and no server save id is a benign no-op, not a failure`() {
+        // Nothing local and nothing addressable on the server for this scope — there is genuinely
+        // nothing to reconcile. Must not surface as PARSE_ERROR / block launch.
+        runBlocking {
+            enqueueDeviceRegistered()
+            enqueueNegotiate(
+                """{"action": "upload", "rom_id": 1, "file_name": "autosave.srm", "slot": "autosave", "reason": "not on server"}"""
+            )
+            enqueueComplete()
+
+            val outcome = coordinator.syncBeforeLaunch(request())
+
+            assertThat(outcome).isEqualTo(SaveSyncOutcome.NoOpSynced(7))
+            assertThat(saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")).isNull()
+        }
+    }
+
+    @Test
     fun `upload is idempotent across repeated syncs for the same local generation`() {
         runBlocking {
             saveContentStore.seedLocal("localhost", "alice", 1L, "hash-a", "autosave", byteArrayOf(9, 9, 9))
