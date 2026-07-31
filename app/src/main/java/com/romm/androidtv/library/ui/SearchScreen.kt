@@ -53,10 +53,13 @@ import com.romm.androidtv.library.SearchViewModel
 fun SearchScreen(
     modifier: Modifier = Modifier,
     onGameSelected: (Long) -> Unit = {},
+    hideUnsupportedSystems: () -> Boolean = { false },
 ) {
     val context = LocalContext.current
     val viewModel: SearchViewModel = viewModel(
-        factory = remember(context) { SearchViewModel.Factory(context) },
+        factory = remember(context) {
+            SearchViewModel.Factory(context, hideUnsupportedSystems)
+        },
     )
 
     val uiState by viewModel.uiState.collectAsState()
@@ -95,10 +98,18 @@ fun SearchScreen(
             ),
         )
 
-        // ---- Total count (when results exist) ----
-        if (uiState.total > 0) {
+        // ---- Result count label ----
+        // Uses explicit hideUnsupportedSystems from SearchUiState (snapshotted once per fetch).
+        // Toggle ON: always displays current visible count ("N results"), never raw server total.
+        // Toggle OFF: displays server total ("N results").
+        if (uiState.roms.isNotEmpty()) {
+            val visibleCount = uiState.roms.size
+            val labelText = when {
+                uiState.hideUnsupportedSystems -> "$visibleCount result${if (visibleCount != 1) "s" else ""}"
+                else -> "${uiState.total} result${if (uiState.total != 1) "s" else ""}"
+            }
             Text(
-                text = "${uiState.total} result${if (uiState.total != 1) "s" else ""}",
+                text = labelText,
                 style = MaterialTheme.typography.bodySmall,
                 color = RommTvColors.TextSecondary,
                 modifier = Modifier.padding(top = 8.dp),

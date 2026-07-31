@@ -29,7 +29,7 @@ data class SearchUiState(
     val query: String = "",
     /** Whether a network request is currently in flight. */
     val isLoading: Boolean = false,
-    /** Accumulated search results across pages. */
+    /** Accumulated (possibly filtered) search results across pages. */
     val roms: List<LibraryRom> = emptyList(),
     /** Total number of matching ROMs on the server (0 until first page loads). */
     val total: Int = 0,
@@ -37,6 +37,14 @@ data class SearchUiState(
     val error: RommApiError? = null,
     /** Normalized (trimmed) term used for API calls and pagination. Null when idle. Decouples display text from request term so leading/trailing spaces are never lost in the TextField. */
     val activeQuery: String? = null,
+    /** Cumulative count of unfiltered items received from the server across all pages.
+     * Used exclusively for computing the correct server offset and termination;
+     * does not change when [roms] is filtered by the hide-unsupported toggle. */
+    val rawFetchedCount: Int = 0,
+    /** Whether the hide-unsupported-systems filter was active during the most recent fetch.
+     * Snapshotted once per operation so filtering and UI state stay consistent.
+     * When true the result-count label always shows visible count; when false it shows server total. */
+    val hideUnsupportedSystems: Boolean = false,
 )
 
 /**
@@ -51,6 +59,7 @@ data class SearchUiState(
 class SearchViewModel(
     private val repository: LibraryRepository,
     testScope: CoroutineScope? = null,
+    private val hideUnsupportedSystems: () -> Boolean = { false },
 ) : ViewModel() {
 
     /** Internal scope: uses injected [testScope] in tests, [viewModelScope] in production. */
@@ -100,7 +109,7 @@ class SearchViewModel(
     /** Load the next page of results for the current query. */
     fun loadMore() {
         val current = _uiState.value
-        if (current.isLoading || current.roms.size >= current.total) return
+        if (current.isLoading || current.rawFetchedCount >= current.total) return
 
         val activeTerm = current.activeQuery ?: return
 
@@ -108,17 +117,19 @@ class SearchViewModel(
         val capturedGeneration = generation
 
         searchJob = scope.launch {
-            _uiState.value = current.copy(isLoading = true)
+            val isHidingUnsupported = hideUnsupportedSystems() // Snapshot once for this operation.
+            _uiState.value = current.copy(isLoading = true, hideUnsupportedSystems = isHidingUnsupported)
             when (val result = repository.fetchRomsPage(
                 RomQuery.Search(activeTerm),
                 SEARCH_PAGE_SIZE,
-                offset = current.roms.size,
+                offset = current.rawFetchedCount,
             )) {
                 is LibraryResult.Success -> {
                     // Discard if the generation changed while we were fetching (query changed or cleared).
                     if (generation == capturedGeneration) {
                         _uiState.value = _uiState.value.copy(
-                            roms = current.roms + result.data.roms,
+                            roms = current.roms + result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported),
+                            rawFetchedCount = current.rawFetchedCount + result.data.roms.size,
                             total = result.data.total,
                             isLoading = false,
                         )
@@ -153,10 +164,12 @@ class SearchViewModel(
         generation++ // New generation invalidates any stale in-flight loadMore.
 
         searchJob = scope.launch {
+            val isHidingUnsupported = hideUnsupportedSystems() // Snapshot once for this operation.
             _uiState.value = SearchUiState(
                 query = rawQuery,
                 activeQuery = normalizedTerm,
                 isLoading = true,
+                hideUnsupportedSystems = isHidingUnsupported,
             )
             when (val result = repository.fetchRomsPage(
                 RomQuery.Search(normalizedTerm),
@@ -165,7 +178,8 @@ class SearchViewModel(
             )) {
                 is LibraryResult.Success -> {
                     _uiState.value = _uiState.value.copy(
-                        roms = result.data.roms,
+                        roms = result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported),
+                        rawFetchedCount = result.data.roms.size,
                         total = result.data.total,
                         isLoading = false,
                     )
@@ -183,6 +197,7 @@ class SearchViewModel(
     /** Factory — used by [com.romm.androidtv.library.ui.SearchScreen] to construct the ViewModel. */
     class Factory(
         private val context: Context,
+        private val hideUnsupportedSystems: () -> Boolean = { false },
         private val dispatcher: CoroutineDispatcher = Dispatchers.Main,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -191,7 +206,7 @@ class SearchViewModel(
             val settings = SettingsRepository(prefs, BuildConfig.ROMM_ORIGIN)
             val originProvider: () -> String = { settings.currentProfile().origin }
             val repository = LibraryRepositoryImpl(RommOkHttpClient.build(), originProvider)
-            return SearchViewModel(repository) as T
+            return SearchViewModel(repository, null, hideUnsupportedSystems) as T
         }
     }
 }

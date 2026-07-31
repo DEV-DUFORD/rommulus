@@ -740,6 +740,7 @@ class MainActivity : ComponentActivity() {
                                                 gameDetailParent = Screen.NATIVE_SEARCH
                                                 currentScreen = Screen.NATIVE_GAME_DETAIL
                                             },
+                                            hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                         )
                                     }
                                     Screen.NATIVE_SETTINGS -> {
