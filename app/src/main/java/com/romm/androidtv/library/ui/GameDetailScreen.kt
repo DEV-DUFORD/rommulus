@@ -56,6 +56,8 @@ import kotlin.math.roundToInt
  * @param isAuthExpired When true, replaces the Play button with a "Session expired" state
  *   and a "Log in" action. Takes precedence over [errorMessage].
  * @param onLogin Called when user taps "Log in" from the auth-expired state. Does NOT auto-submit credentials.
+ * @param onChooseSave Called when the user picks the "Choose Save" affordance next to Play,
+ *   to open the save-picker screen (browse all server saves for this ROM and adopt one before launch).
  */
 @Composable
 fun GameDetailScreen(
@@ -67,6 +69,7 @@ fun GameDetailScreen(
     onDismissError: () -> Unit = {},
     isAuthExpired: Boolean = false,
     onLogin: () -> Unit = {},
+    onChooseSave: (Long) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -98,6 +101,7 @@ fun GameDetailScreen(
                 onDismissError = onDismissError,
                 isAuthExpired = isAuthExpired,
                 onLogin = onLogin,
+                onChooseSave = onChooseSave,
             )
         }
     }
@@ -112,6 +116,7 @@ private fun GameDetailContent(
     onDismissError: () -> Unit,
     isAuthExpired: Boolean,
     onLogin: () -> Unit,
+    onChooseSave: (Long) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -153,7 +158,11 @@ private fun GameDetailContent(
                     if (isAuthExpired) {
                         AuthExpiredState(onLogin = onLogin, onDismiss = onDismissError)
                     } else {
-                        PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            ChooseSaveButton(onClick = { onChooseSave(rom.id) }, enabled = !isStaging)
+                        }
                         if (errorMessage != null) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(
@@ -295,6 +304,45 @@ private fun PlayButton(onPlay: () -> Unit, isStaging: Boolean = false) {
             text = if (isStaging) "Preparing…" else "▶  Play",
             style = MaterialTheme.typography.titleMedium,
             color = if (isStaging) RommTvColors.TextSecondary else Color.White,
+        )
+    }
+}
+
+@Composable
+private fun ChooseSaveButton(onClick: () -> Unit, enabled: Boolean = true) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (!enabled) RommTvColors.NightLo
+                else if (isFocused) RommTvColors.NightHi
+                else RommTvColors.NightLo
+            )
+            .border(
+                width = if (isFocused && enabled) 2.dp else 1.dp,
+                color = if (isFocused && enabled) RommTvColors.Romm300 else RommTvColors.TextSecondary.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(8.dp),
+            )
+            .then(
+                if (enabled) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = "Choose Save",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (enabled) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
         )
     }
 }

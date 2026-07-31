@@ -129,6 +129,10 @@ class SaveUploadExecutorImpl(
             overwrite = true,
             fileName = uploadFileName,
             bytes = sramBytes,
+            // See SyncNegotiateAndSyncExecutorImpl's identical comment: keeps this device's own
+            // "autosave" slot at a short recent history (5 files) rather than growing unbounded.
+            autocleanup = true,
+            autocleanupLimit = 5,
         )
         val uploadResult = uploadCaller.call(origin, uploadRequest)
 

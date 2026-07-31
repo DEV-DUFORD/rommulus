@@ -208,6 +208,9 @@ class ConflictResolverImpl(
                 overwrite = true,
                 fileName = localFileName,
                 bytes = localBytes,
+                // Same autosave-slot autocleanup as the ordinary upload paths.
+                autocleanup = true,
+                autocleanupLimit = 5,
             ),
         )
 

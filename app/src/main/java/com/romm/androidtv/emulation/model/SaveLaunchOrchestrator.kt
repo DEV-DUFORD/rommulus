@@ -73,6 +73,54 @@ class SaveLaunchOrchestrator(
         return result
     }
 
+    /**
+     * Native save-picker variant of [prepare]: the user has already chosen a specific server
+     * save (from [com.romm.androidtv.romm.RommSyncApi.listSaves]) rather than letting negotiate
+     * decide. Calls [SaveSyncCoordinator.adoptChosenSave] instead of
+     * [SaveSyncCoordinator.syncBeforeLaunch] and reuses the exact same [mapSyncOutcome] mapping,
+     * so downstream callers (MainActivity's `dispatchPreparationResult`) need no special-casing —
+     * a mismatch still surfaces as [PreparationResult.Quarantined], never a silent overwrite.
+     */
+    suspend fun prepareWithChosenSave(
+        romId: Long,
+        romHash: String,
+        coreId: String,
+        expectedSramSizeBytes: Long?,
+        chosenSaveId: Long,
+        chosenSaveEmulator: String?,
+        chosenSaveContentHash: String?,
+    ): PreparationResult {
+        val coreFinding = CoreManifest.findById(coreId)
+            ?: return PreparationResult.Failed("No approved core manifest for $coreId")
+
+        val resolvedCoreBuildRevision = coreFinding.commitSha.takeIf { it.isNotBlank() }
+            ?: coreFinding.releaseTag.takeIf { it.isNotBlank() }
+            ?: return PreparationResult.Failed("Core manifest incomplete for $coreId")
+
+        val syncOutcome = try {
+            coordinator.adoptChosenSave(
+                com.romm.androidtv.romm.save.AdoptSaveRequest(
+                    romId = romId,
+                    romHash = romHash,
+                    coreId = coreId,
+                    coreBuildRevision = resolvedCoreBuildRevision,
+                    expectedSramSizeBytes = expectedSramSizeBytes,
+                    chosenSaveId = chosenSaveId,
+                    chosenSaveEmulator = chosenSaveEmulator,
+                    chosenSaveContentHash = chosenSaveContentHash,
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(logTag, "prepareWithChosenSave: adoption threw exception", e)
+            diagLog(android.util.Log.WARN, "SaveLaunchOrch.prepareWithChosenSave: exception ${e.javaClass.simpleName}")
+            return PreparationResult.Failed("Save adopt error: ${e.message ?: "unknown"}")
+        }
+
+        val result = mapSyncOutcome(syncOutcome, romId, romHash, coreId, resolvedCoreBuildRevision)
+        diagLog(android.util.Log.DEBUG, "SaveLaunchOrch.prepareWithChosenSave: result=${result.javaClass.simpleName}")
+        return result
+    }
+
     private suspend fun mapSyncOutcome(
         outcome: SaveSyncOutcome,
         romId: Long,

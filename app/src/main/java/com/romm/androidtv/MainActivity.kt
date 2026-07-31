@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
         HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS,
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
         NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
-        NATIVE_CONFLICT, NATIVE_QUARANTINE
+        NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER
     }
 
     private var currentScreen by mutableStateOf(Screen.HOME)
@@ -153,6 +153,11 @@ class MainActivity : ComponentActivity() {
     // Pre-launch save sync overlay state (conflict/quarantine). Scoped to a single ROM/session;
     // survives recomposition because it lives on the Activity, not inside remember().
     private var preLaunchState by mutableStateOf<com.romm.androidtv.library.ui.SavePreLaunchState?>(null)
+
+    // Native save-picker ("Choose Save") state. `savePickerStagedOutcome` holds the ROM already
+    // staged while the list loads, so selecting an entry can adopt+launch without re-staging.
+    private var savePickerState by mutableStateOf<com.romm.androidtv.library.ui.SavePickerState?>(null)
+    private var savePickerStagedOutcome by mutableStateOf<com.romm.androidtv.romm.StagingOutcome.Success?>(null)
 
     @Volatile
     private var diagnosticReport: DiagnosticReport? = null
@@ -353,6 +358,12 @@ class MainActivity : ComponentActivity() {
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
                     Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
+                    Screen.NATIVE_SAVE_PICKER -> {
+                        // Dismiss picker; no filesystem/Room/network mutation occurred yet.
+                        savePickerState = null
+                        savePickerStagedOutcome = null
+                        currentScreen = Screen.NATIVE_GAME_DETAIL
+                    }
                     Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE -> {
                         // Dismiss overlay; return to the game detail screen for this ROM.
                         preLaunchState?.clear()
@@ -541,7 +552,8 @@ class MainActivity : ComponentActivity() {
                         )
                         Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
                         Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL,
-                        Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE -> {
+                        Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
+                        Screen.NATIVE_SAVE_PICKER -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(libraryRepository)
                             )
@@ -615,6 +627,9 @@ class MainActivity : ComponentActivity() {
                                                         onPlay = { playRomId ->
                                                             nativeLibraryOnPlay(playRomId)
                                                         },
+                                                        onChooseSave = { chooseRomId ->
+                                                            nativeLibraryOnChooseSave(chooseRomId)
+                                                        },
                                                         isStaging = state?.let { s ->
                                                             s.matchesScope(romId, s.sessionId) && s.isStaging
                                                         } ?: false,
@@ -655,6 +670,26 @@ class MainActivity : ComponentActivity() {
                                         } else {
                                             // Safety fallback: return to game detail.
                                             preLaunchState = null
+                                            currentScreen = Screen.NATIVE_GAME_DETAIL
+                                        }
+                                    }
+                                    Screen.NATIVE_SAVE_PICKER -> {
+                                        val pickerState = savePickerState
+                                        if (pickerState != null) {
+                                            com.romm.androidtv.library.ui.SavePickerScreen(
+                                                state = pickerState,
+                                                onSelect = { entry -> nativeLibraryOnChooseSaveSelected(entry) },
+                                                onBack = {
+                                                    savePickerState = null
+                                                    savePickerStagedOutcome = null
+                                                    currentScreen = Screen.NATIVE_GAME_DETAIL
+                                                },
+                                                onRetry = {
+                                                    selectedRomId?.let { nativeLibraryOnChooseSave(it) }
+                                                },
+                                            )
+                                        } else {
+                                            // Safety fallback: return to game detail.
                                             currentScreen = Screen.NATIVE_GAME_DETAIL
                                         }
                                     }
@@ -1031,6 +1066,148 @@ class MainActivity : ComponentActivity() {
                     state.errorMessage = "Launch preparation failed: ${t.message}"
                 }
             }
+        }
+    }
+
+    /**
+     * Entry point invoked by GameDetailScreen's "Choose Save" affordance. Stages the ROM (needed
+     * for its LaunchSpec — content path, coreId, romHash — used later if the user picks a save),
+     * then lists every server save for the ROM (all cores/devices; SRAM saves are cross-core
+     * compatible for the same platform, so no core filter is applied). Does not download or
+     * adopt anything yet — selecting a row is handled by [nativeLibraryOnChooseSaveSelected].
+     */
+    private fun nativeLibraryOnChooseSave(romId: Long) {
+        Log.d(DIAG_TAG, "MainActivity.nativeLibraryOnChooseSave: entered romId=$romId")
+        savePickerState = com.romm.androidtv.library.ui.SavePickerState.Loading
+        savePickerStagedOutcome = null
+        currentScreen = Screen.NATIVE_SAVE_PICKER
+
+        lifecycleScope.launch {
+            try {
+                val stagingOutcome = romRepository.stageForLaunch(romId)
+                if (stagingOutcome !is com.romm.androidtv.romm.StagingOutcome.Success) {
+                    withContext(Dispatchers.Main) {
+                        savePickerState = com.romm.androidtv.library.ui.SavePickerState.Error(
+                            StagingOutcomeMessage.toUserMessage(stagingOutcome)
+                        )
+                    }
+                    return@launch
+                }
+                savePickerStagedOutcome = stagingOutcome
+                val spec = stagingOutcome.launchSpec
+
+                val romTitle = when (val detail = libraryRepository.fetchRomDetail(romId)) {
+                    is com.romm.androidtv.library.LibraryResult.Success -> detail.data.title
+                    is com.romm.androidtv.library.LibraryResult.Failure -> "Game #$romId"
+                }
+
+                when (val listResult = saveSyncCoordinator.listSavesForRom(romId)) {
+                    is com.romm.androidtv.romm.SaveListResult.Success -> {
+                        val session = sessionStore.current()
+                        val currentlyAdoptedSaveId = session?.let { sess ->
+                            saveSyncCoordinator.findSaveReplicaByScope(
+                                serverKey = extractServerKey(sess.origin),
+                                userKey = sess.username ?: "",
+                                romId = spec.romId,
+                                romHash = spec.romHash,
+                                slot = SavePathPolicy.AUTOSAVE_SLOT,
+                            )?.rommSaveId
+                        }
+
+                        val entries = listResult.saves
+                            // Shows every save for this ROM regardless of which core produced it —
+                            // SRAM saves are cross-core compatible for the same platform (e.g. a
+                            // sameboy save loads fine under gambatte), so filtering by coreId would
+                            // hide perfectly valid choices.
+                            .sortedByDescending { it.updatedAt }
+                            .map { save ->
+                                com.romm.androidtv.library.ui.SavePickerEntryUiModel(
+                                    saveId = save.saveId,
+                                    fileName = save.fileName,
+                                    coreId = save.emulator,
+                                    sizeText = com.romm.androidtv.library.ui.ConflictResolutionMapper.formatSize(save.fileSizeBytes),
+                                    updatedAtText = com.romm.androidtv.library.ui.ConflictResolutionMapper.formatInstant(
+                                        save.updatedAt?.toEpochMilli()
+                                    ),
+                                    isCurrentlyAdopted = save.saveId == currentlyAdoptedSaveId,
+                                    contentHash = save.contentHash,
+                                )
+                            }
+
+                        withContext(Dispatchers.Main) {
+                            savePickerState = com.romm.androidtv.library.ui.SavePickerState.Loaded(
+                                com.romm.androidtv.library.ui.SavePickerUiModel(romTitle = romTitle, entries = entries)
+                            )
+                        }
+                    }
+                    is com.romm.androidtv.romm.SaveListResult.Failure -> {
+                        withContext(Dispatchers.Main) {
+                            savePickerState = com.romm.androidtv.library.ui.SavePickerState.Error(
+                                "Couldn't load saves (${listResult.error})"
+                            )
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) {
+                    savePickerState = com.romm.androidtv.library.ui.SavePickerState.Error(
+                        "Failed to load saves: ${t.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Handles the user picking one entry in the save picker: returns to the game detail screen
+     * immediately (matching the ordinary Play flow's screen state) and downloads+adopts the
+     * chosen save via [SaveLaunchOrchestrator.prepareWithChosenSave], then dispatches the result
+     * exactly like an ordinary launch — Ready launches EmulationActivity, Quarantined/Conflict
+     * show their existing overlays, Failed/AuthExpired surface as an error/auth-expired state.
+     */
+    private fun nativeLibraryOnChooseSaveSelected(entry: com.romm.androidtv.library.ui.SavePickerEntryUiModel) {
+        val outcome = savePickerStagedOutcome ?: return
+        val spec = outcome.launchSpec
+        Log.d(DIAG_TAG, "MainActivity.nativeLibraryOnChooseSaveSelected: romId=${spec.romId} chosenSaveId=${entry.saveId}")
+
+        savePickerState = null
+        savePickerStagedOutcome = null
+        currentScreen = Screen.NATIVE_GAME_DETAIL
+
+        val session = sessionStore.current()
+        val serverKey = session?.origin?.let { extractServerKey(it) } ?: "unknown-server"
+        val userKey = session?.username ?: "unknown-user"
+        val savePath = SavePathPolicy.autosaveSramPath(
+            filesDir = filesDir,
+            serverKey = serverKey,
+            userKey = userKey,
+            romId = spec.romId,
+            romHash = spec.romHash,
+        )
+
+        preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId)
+            .apply { isStaging = true }
+
+        lifecycleScope.launch {
+            val knownSramSize = session?.let { sess ->
+                saveSyncCoordinator.findSaveReplicaByScope(
+                    serverKey = extractServerKey(sess.origin),
+                    userKey = sess.username ?: "",
+                    romId = spec.romId,
+                    romHash = spec.romHash,
+                    slot = SavePathPolicy.AUTOSAVE_SLOT,
+                )?.expectedSramSizeBytes
+            }
+            val preparation = saveLaunchOrchestrator.prepareWithChosenSave(
+                romId = spec.romId,
+                romHash = spec.romHash,
+                coreId = spec.coreId,
+                expectedSramSizeBytes = knownSramSize,
+                chosenSaveId = entry.saveId,
+                chosenSaveEmulator = entry.coreId,
+                chosenSaveContentHash = entry.contentHash,
+            )
+            dispatchPreparationResult(preparation, spec, savePath)
         }
     }
 

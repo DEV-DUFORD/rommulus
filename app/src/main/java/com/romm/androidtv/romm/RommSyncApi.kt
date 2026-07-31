@@ -258,6 +258,15 @@ data class SaveUploadRequest(
     val overwrite: Boolean,
     val fileName: String,
     val bytes: ByteArray,
+    /**
+     * When true (with [slot] set), the server deletes older saves in that slot beyond
+     * [autocleanupLimit] right after this upload succeeds (`add_save`'s `autocleanup`/
+     * `autocleanup_limit` query params). Used so this device's own uploads into the
+     * "autosave" slot never accumulate more than [autocleanupLimit] file(s) server-side,
+     * even though the server still mints a new timestamped filename per upload.
+     */
+    val autocleanup: Boolean = false,
+    val autocleanupLimit: Int = 10,
 )
 
 data class ServerSaveInfo(
@@ -286,6 +295,11 @@ sealed interface SaveDownloadResult {
 sealed interface SaveConfirmResult {
     data object Success : SaveConfirmResult
     data class Failure(val error: RommApiError, val httpCode: Int? = null) : SaveConfirmResult
+}
+
+sealed interface SaveListResult {
+    data class Success(val saves: List<ServerSaveInfo>) : SaveListResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : SaveListResult
 }
 
 @JsonClass(generateAdapter = false)
@@ -345,6 +359,9 @@ object RommSyncApi {
     private val playSessionIngestPayloadAdapter = moshi.adapter<PlaySessionIngestPayloadJson>()
     private val playSessionIngestResponseAdapter = moshi.adapter<PlaySessionIngestResponseJson>()
     private val saveSchemaAdapter = moshi.adapter<SaveSchemaJson>()
+    private val saveSchemaListAdapter = moshi.adapter<List<SaveSchemaJson>>(
+        com.squareup.moshi.Types.newParameterizedType(List::class.java, SaveSchemaJson::class.java)
+    )
     private val clientTokenPayloadAdapter = moshi.adapter<ClientTokenPayloadJson>()
     private val clientTokenResponseAdapter = moshi.adapter<ClientTokenResponseJson>()
 
@@ -418,6 +435,25 @@ object RommSyncApi {
             updatedAt = json.updated_at?.let(::parseInstantOrNull),
             fileSizeBytes = json.file_size_bytes,
         )
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Parses a `GET /api/saves` list response body (a bare JSON array of save schemas). */
+    fun parseSaveSchemaList(body: String): List<ServerSaveInfo>? = try {
+        val json = saveSchemaListAdapter.fromJson(body.trim())
+        json?.filter { it.id > 0 }?.map { j ->
+            ServerSaveInfo(
+                saveId = j.id,
+                romId = j.rom_id,
+                fileName = j.file_name,
+                slot = j.slot,
+                emulator = j.emulator,
+                contentHash = j.content_hash,
+                updatedAt = j.updated_at?.let(::parseInstantOrNull),
+                fileSizeBytes = j.file_size_bytes,
+            )
+        }
     } catch (_: Exception) {
         null
     }
@@ -715,6 +751,10 @@ object RommSyncApi {
         urlBuilder.addQueryParameter("device_id", request.deviceId)
         request.sessionId?.let { urlBuilder.addQueryParameter("session_id", it.toString()) }
         urlBuilder.addQueryParameter("overwrite", request.overwrite.toString())
+        if (request.autocleanup) {
+            urlBuilder.addQueryParameter("autocleanup", "true")
+            urlBuilder.addQueryParameter("autocleanup_limit", request.autocleanupLimit.toString())
+        }
 
         val multipart = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
@@ -803,6 +843,54 @@ object RommSyncApi {
             }
         } catch (e: IOException) {
             SaveDownloadResult.Failure(classifyIOException(e))
+        }
+    }
+
+    /**
+     * `GET /api/saves?rom_id=X&device_id=Y` — lists every save the user owns for a ROM,
+     * across every slot/device (mirrors RomM's own web UI "All Saves" list). Used by the
+     * native save picker (section 13 follow-up) so the user can choose an existing server
+     * save to download-and-adopt before launch, instead of the app always negotiating its
+     * own single "autosave" slot. [deviceId] is optional: when supplied, the response
+     * includes this device's own sync status per save, but omitting it still returns the
+     * full list (device-agnostic read, matches `get_saves`'s `device_id: str | None`).
+     */
+    fun listSaves(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        romId: Long,
+        deviceId: String? = null,
+    ): SaveListResult {
+        if (origin.isBlank()) return SaveListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val base = apiUrl(origin, "saves") ?: return SaveListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val urlBuilder = base.toHttpUrlOrNull()?.newBuilder()
+            ?: return SaveListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        urlBuilder.addQueryParameter("rom_id", romId.toString())
+        deviceId?.let { urlBuilder.addQueryParameter("device_id", it) }
+
+        val httpRequest = okhttp3.Request.Builder().url(urlBuilder.build()).get().build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.listSaves: failure error=${classification.name} httpCode=${response.code}")
+                    return SaveListResult.Failure(classification, response.code)
+                }
+                val responseBody = response.body?.string()
+                val saves = responseBody?.let(::parseSaveSchemaList)
+                if (saves == null) {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.listSaves: parseFailed httpCode=${response.code}")
+                    SaveListResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    diagLog(android.util.Log.DEBUG, "RommSyncApi.listSaves: success count=${saves.size}")
+                    SaveListResult.Success(saves)
+                }
+            }
+        } catch (e: IOException) {
+            val error = classifyIOException(e)
+            diagLog(android.util.Log.WARN, "RommSyncApi.listSaves: ioError $error")
+            SaveListResult.Failure(error)
         }
     }
 

@@ -187,6 +187,11 @@ class SyncNegotiateAndSyncExecutorImpl(
             overwrite = true,
             fileName = fileName,
             bytes = sramBytes,
+            // Keep this device's own "autosave" slot from growing unbounded server-side —
+            // the server still mints a new timestamped file per upload, but only the newest
+            // 5 are retained. Other slots/devices/manual web-UI saves are untouched.
+            autocleanup = true,
+            autocleanupLimit = 5,
         )
         val uploadResult = uploadCaller.call(origin, uploadRequest)
 

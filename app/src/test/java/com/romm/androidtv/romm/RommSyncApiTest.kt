@@ -359,6 +359,108 @@ class RommSyncApiTest {
             assertThat(result).isInstanceOf(SaveUploadResult.Conflict::class.java)
             assertThat((result as SaveUploadResult.Conflict).httpCode).isEqualTo(409)
         }
+
+        @Test
+        fun `autocleanup true sends autocleanup and autocleanup_limit query params`() {
+            server.enqueue(
+                MockResponse().setResponseCode(200)
+                    .setBody(
+                        """{"id": 55, "rom_id": 1, "file_name": "autosave.srm", "slot": "autosave",
+                            "emulator": "sameboy", "content_hash": "hash1",
+                            "updated_at": "2026-01-01T00:00:00Z", "file_size_bytes": 8192}"""
+                    )
+            )
+
+            RommSyncApi.uploadSave(
+                client, baseUrl(),
+                SaveUploadRequest(
+                    romId = 1, slot = "autosave", emulator = "sameboy",
+                    deviceId = "device-1", sessionId = null, overwrite = true,
+                    fileName = "autosave.srm", bytes = byteArrayOf(1, 2, 3),
+                    autocleanup = true, autocleanupLimit = 1,
+                ),
+            )
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("autocleanup=true").contains("autocleanup_limit=1")
+        }
+
+        @Test
+        fun `autocleanup false (default) omits autocleanup query params entirely`() {
+            server.enqueue(
+                MockResponse().setResponseCode(200)
+                    .setBody(
+                        """{"id": 55, "rom_id": 1, "file_name": "autosave.srm", "slot": "autosave",
+                            "emulator": "sameboy", "content_hash": "hash1",
+                            "updated_at": "2026-01-01T00:00:00Z", "file_size_bytes": 8192}"""
+                    )
+            )
+
+            RommSyncApi.uploadSave(
+                client, baseUrl(),
+                SaveUploadRequest(1, "autosave", "sameboy", "device-1", null, overwrite = false, "autosave.srm", byteArrayOf(1)),
+            )
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).doesNotContain("autocleanup")
+        }
+    }
+
+    @Nested
+    @DisplayName("listSaves — GET /api/saves for the native save picker")
+    inner class ListSaves {
+        @Test
+        fun `success parses every save in the list, filtering out any without a valid id`() {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """[
+                        {"id": 10, "rom_id": 1, "file_name": "autosave [2026-01-01_00-00-00].srm", "slot": "autosave",
+                         "emulator": "sameboy", "content_hash": "hash1", "updated_at": "2026-01-01T00:00:00Z", "file_size_bytes": 100},
+                        {"id": 11, "rom_id": 1, "file_name": "manual.srm", "slot": null,
+                         "emulator": "sameboy", "content_hash": "hash2", "updated_at": "2026-01-02T00:00:00Z", "file_size_bytes": 200},
+                        {"id": 0, "rom_id": 1, "file_name": "invalid.srm"}
+                    ]"""
+                )
+            )
+
+            val result = RommSyncApi.listSaves(client, baseUrl(), romId = 1, deviceId = "device-1")
+
+            assertThat(result).isInstanceOf(SaveListResult.Success::class.java)
+            val saves = (result as SaveListResult.Success).saves
+            assertThat(saves).hasSize(2)
+            assertThat(saves.map { it.saveId }).containsExactly(10L, 11L)
+            assertThat(saves[0].emulator).isEqualTo("sameboy")
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("rom_id=1").contains("device_id=device-1")
+        }
+
+        @Test
+        fun `deviceId is optional and omitted from the query when null`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("[]"))
+
+            RommSyncApi.listSaves(client, baseUrl(), romId = 1, deviceId = null)
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("rom_id=1").doesNotContain("device_id")
+        }
+
+        @Test
+        fun `401 classifies as AUTH_EXPIRED`() {
+            server.enqueue(MockResponse().setResponseCode(401))
+
+            val result = RommSyncApi.listSaves(client, baseUrl(), romId = 1)
+
+            assertThat((result as SaveListResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+        }
+
+        @Test
+        fun `malformed response body classifies as PARSE_ERROR`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("not json"))
+
+            val result = RommSyncApi.listSaves(client, baseUrl(), romId = 1)
+
+            assertThat((result as SaveListResult.Failure).error).isEqualTo(RommApiError.PARSE_ERROR)
+        }
     }
 
     @Nested

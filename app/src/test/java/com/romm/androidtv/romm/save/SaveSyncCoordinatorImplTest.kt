@@ -716,4 +716,113 @@ class SaveSyncCoordinatorImplTest {
         }
     }
 
+    // ---- adoptChosenSave (native save-picker "Choose Save" flow) ----
+
+    private fun adoptRequest(
+        romId: Long = 1L,
+        romHash: String = "hash-a",
+        expectedSramSizeBytes: Long? = 3L,
+        chosenSaveId: Long = 99L,
+        chosenSaveEmulator: String? = "sameboy",
+        chosenSaveContentHash: String? = "hash-picked",
+    ) = AdoptSaveRequest(
+        romId = romId,
+        romHash = romHash,
+        coreId = "sameboy",
+        coreBuildRevision = "v1.0.3-libretro",
+        expectedSramSizeBytes = expectedSramSizeBytes,
+        chosenSaveId = chosenSaveId,
+        chosenSaveEmulator = chosenSaveEmulator,
+        chosenSaveContentHash = chosenSaveContentHash,
+    )
+
+    @Test
+    fun `adoptChosenSave device registration failure short-circuits before any download`() {
+        runBlocking {
+            server.enqueue(MockResponse().setResponseCode(401))
+
+            val outcome = coordinator.adoptChosenSave(adoptRequest())
+
+            assertThat(outcome).isInstanceOf(SaveSyncOutcome.Failure::class.java)
+            assertThat((outcome as SaveSyncOutcome.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+            assertThat(server.requestCount).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `adoptChosenSave with known matching size downloads and adopts without a negotiate session`() {
+        runBlocking {
+            enqueueDeviceRegistered()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(byteArrayOf(1, 2, 3))))
+            server.enqueue(MockResponse().setResponseCode(200)) // /downloaded confirm
+            enqueueComplete() // best-effort sync/sessions/0/complete
+
+            val outcome = coordinator.adoptChosenSave(adoptRequest(chosenSaveId = 99L))
+
+            assertThat(outcome).isEqualTo(SaveSyncOutcome.Downloaded(0L, 99L, 3, true))
+            assertThat(saveContentStore.readLocal("localhost", "alice", 1L, "hash-a", "autosave"))
+                .isEqualTo(byteArrayOf(1, 2, 3))
+            val replica = saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")
+            assertThat(replica!!.syncStatus).isEqualTo(SaveSyncStatus.SYNCED)
+            assertThat(replica.rommSaveId).isEqualTo(99L)
+            assertThat(saveContentStore.quarantinedFiles).isEmpty()
+            // device-register, download content, /downloaded confirm, sync/sessions/0/complete — never negotiate.
+            assertThat(server.requestCount).isEqualTo(4)
+        }
+    }
+
+    @Test
+    fun `adoptChosenSave with a mismatched emulator still adopts normally (SRAM saves are cross-core compatible)`() {
+        runBlocking {
+            enqueueDeviceRegistered()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(byteArrayOf(9, 9, 9))))
+            server.enqueue(MockResponse().setResponseCode(200)) // /downloaded confirm
+            enqueueComplete() // best-effort sync/sessions/0/complete
+
+            val outcome = coordinator.adoptChosenSave(
+                adoptRequest(chosenSaveEmulator = "some-other-core", expectedSramSizeBytes = 3L)
+            )
+
+            assertThat(outcome).isEqualTo(SaveSyncOutcome.Downloaded(0L, 99L, 3, true))
+            assertThat(saveContentStore.readLocal("localhost", "alice", 1L, "hash-a", "autosave"))
+                .isEqualTo(byteArrayOf(9, 9, 9))
+            val replica = saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")
+            assertThat(replica!!.syncStatus).isEqualTo(SaveSyncStatus.SYNCED)
+            assertThat(saveContentStore.quarantinedFiles).isEmpty()
+        }
+    }
+
+    @Test
+    fun `adoptChosenSave with wrong size is quarantined and never confirmed`() {
+        runBlocking {
+            enqueueDeviceRegistered()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(byteArrayOf(1, 2)))) // 2 bytes, expected 3
+
+            val outcome = coordinator.adoptChosenSave(adoptRequest(expectedSramSizeBytes = 3L))
+
+            assertThat(outcome).isInstanceOf(SaveSyncOutcome.Quarantined::class.java)
+            assertThat((outcome as SaveSyncOutcome.Quarantined).reason).isEqualTo("size-mismatch")
+            assertThat(server.requestCount).isEqualTo(2)
+        }
+    }
+
+    @Test
+    fun `adoptChosenSave with unknown expected size quarantines pending post-load JNI validation, never confirms`() {
+        runBlocking {
+            enqueueDeviceRegistered()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(byteArrayOf(1, 2, 3, 4))))
+
+            val outcome = coordinator.adoptChosenSave(adoptRequest(expectedSramSizeBytes = null, chosenSaveId = 42L))
+
+            assertThat(outcome).isInstanceOf(SaveSyncOutcome.AwaitingCoreValidation::class.java)
+            val awaiting = outcome as SaveSyncOutcome.AwaitingCoreValidation
+            assertThat(awaiting.rommSaveId).isEqualTo(42L)
+            assertThat(awaiting.downloadedSizeBytes).isEqualTo(4L)
+            val replica = saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")
+            assertThat(replica!!.syncStatus).isEqualTo(SaveSyncStatus.AWAITING_CORE_VALIDATION)
+            // device-register + download only — no confirm/complete until post-load JNI validation.
+            assertThat(server.requestCount).isEqualTo(2)
+        }
+    }
+
 }

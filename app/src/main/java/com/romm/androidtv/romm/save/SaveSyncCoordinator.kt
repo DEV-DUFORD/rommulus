@@ -42,6 +42,35 @@ interface SaveSyncCoordinator {
     suspend fun syncPostPlay(request: PostPlayCheckpointRequest): PostPlayCheckpointResult
 
     /**
+     * Downloads and adopts one specific, user-chosen server save (the native save-picker
+     * screen's "Choose Save" flow), bypassing the normal negotiate-driven [syncBeforeLaunch]
+     * decision entirely — the user has already told the app which save they want, so there is
+     * nothing left to negotiate. Unlike [syncBeforeLaunch]'s auto-sync download path, this does
+     * NOT gate on emulator/core provenance: SRAM saves are cross-core compatible for the same
+     * platform (a save produced by one core loads fine under a different, compatible core), so
+     * a chosen save's reported `emulator` not matching [AdoptSaveRequest.coreId] is not treated
+     * as a sign of an incompatible or untrustworthy save — the user explicitly picked it from
+     * this ROM's own save list. Still runs an exact-size check when the expected SRAM size is
+     * already known (a save that plainly can't fit the console's expected SRAM size is
+     * quarantined, never silently adopted); an unknown size still defers final adoption to
+     * post-load JNI validation exactly like the normal download path (returns
+     * [SaveSyncOutcome.AwaitingCoreValidation]). Reuses [SaveSyncOutcome] rather than a new sealed
+     * type since every existing branch (Downloaded/Quarantined/AwaitingCoreValidation/Failure)
+     * already models exactly what this needs; the [SaveSyncOutcome.Downloaded]/
+     * [SaveSyncOutcome.AwaitingCoreValidation] `sessionId` is `0L` here (there is no negotiate
+     * sync-session backing an explicit adoption) — downstream `completeSession`/`finalizeAdoption`
+     * calls already treat that server bookkeeping as best-effort/non-fatal.
+     */
+    suspend fun adoptChosenSave(request: AdoptSaveRequest): SaveSyncOutcome
+
+    /**
+     * Lists every server save for one ROM (native save-picker screen's "Choose Save" flow),
+     * across all slots/devices — mirrors RomM's own web UI "All Saves" list rather than just
+     * this device's own "autosave" slot history. Read-only: never mutates local state.
+     */
+    suspend fun listSavesForRom(romId: Long): com.romm.androidtv.romm.SaveListResult
+
+    /**
      * Finalizes a candidate adoption after EmulationActivity's post-load JNI size validation
      * succeeds (LIBRETRO_REFACTOR.md section 11.3, Phase B wiring). Called only from the main
      * process after the emulation process has durably checkpointed the adopted SRAM.
@@ -106,6 +135,29 @@ data class SaveSyncRequest(
     val expectedSramSizeBytes: Long?,
     /** Display file name sent to the server on upload/negotiate (e.g. the ROM's own save file name). */
     val fileName: String,
+)
+
+/**
+ * Request to download and adopt one specific, user-chosen server save — the native save-picker
+ * screen's "Choose Save" flow. [chosenSaveId]/[chosenSaveEmulator]/[chosenSaveContentHash] come
+ * straight from the [RommSyncApi.listSaves] row the user tapped (no extra lookup needed).
+ */
+data class AdoptSaveRequest(
+    val romId: Long,
+    val romHash: String,
+    val slot: String = SavePathPolicy.AUTOSAVE_SLOT,
+    val coreId: String,
+    val coreBuildRevision: String,
+    /** Nullable: only set when a prior trusted replica or JNI query already knows the exact SRAM size. */
+    val expectedSramSizeBytes: Long?,
+    val chosenSaveId: Long,
+    /**
+     * The chosen save's `emulator` field, as returned by the list — carried through for display
+     * and journaling only; NOT gated against [coreId] (SRAM saves are cross-core compatible for
+     * the same platform, so a mismatch here is not treated as untrustworthy).
+     */
+    val chosenSaveEmulator: String?,
+    val chosenSaveContentHash: String?,
 )
 
 sealed interface SaveSyncOutcome {

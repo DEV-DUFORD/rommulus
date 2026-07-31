@@ -31,9 +31,17 @@ class CandidateSaveMetadataTest {
     }
 
     @Test
-    fun `zero rommSessionId throws`() {
+    fun `zero rommSessionId is accepted as the no-real-session sentinel`() {
+        // Used by the native save-picker's explicit adoption flow, which has no real
+        // negotiate session backing it (see rommSessionId's KDoc).
+        val meta = CandidateSaveMetadata(rommSessionId = 0L, rommSaveId = 1L, candidatePath = "/path", downloadedSizeBytes = 1L, serverContentHash = null, emulator = null, romId = 1L, romHash = "hash", coreId = "core", coreBuildRevision = "rev")
+        assertThat(meta.rommSessionId).isEqualTo(0L)
+    }
+
+    @Test
+    fun `negative rommSessionId throws`() {
         assertThatThrownBy {
-            CandidateSaveMetadata(rommSessionId = 0L, rommSaveId = 1L, candidatePath = "/path", downloadedSizeBytes = 1L, serverContentHash = null, emulator = null, romId = 1L, romHash = "hash", coreId = "core", coreBuildRevision = "rev")
+            CandidateSaveMetadata(rommSessionId = -1L, rommSaveId = 1L, candidatePath = "/path", downloadedSizeBytes = 1L, serverContentHash = null, emulator = null, romId = 1L, romHash = "hash", coreId = "core", coreBuildRevision = "rev")
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 

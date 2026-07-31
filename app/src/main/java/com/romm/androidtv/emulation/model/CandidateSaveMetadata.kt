@@ -15,7 +15,16 @@ import java.io.File
  * from the staged LaunchSpec and CoreManifest; no fabricated values are permitted.
  */
 data class CandidateSaveMetadata(
-    /** RomM's sync session ID (Long). Distinct from the app launch session UUID in LaunchSpec.sessionId. */
+    /**
+     * RomM's sync session ID (Long). Distinct from the app launch session UUID in
+     * LaunchSpec.sessionId. `0L` is a valid sentinel meaning "no real negotiate session backs
+     * this candidate" — used by the native save-picker's explicit adoption flow
+     * ([com.romm.androidtv.romm.save.SaveSyncCoordinator.adoptChosenSave]), which downloads a
+     * user-chosen save directly rather than via a negotiated sync session. Real RomM session
+     * IDs are always positive (server auto-increment starting at 1), so 0 never collides with
+     * one. Downstream `completeSession`/`finalizeAdoption` calls already treat session
+     * completion as best-effort/non-fatal, so a sentinel session id is safe there too.
+     */
     val rommSessionId: Long,
     /** RomM's save ID for the downloaded content. */
     val rommSaveId: Long,
@@ -37,7 +46,7 @@ data class CandidateSaveMetadata(
     val coreBuildRevision: String,
 ) {
     init {
-        require(rommSessionId > 0) { "rommSessionId must be positive" }
+        require(rommSessionId >= 0) { "rommSessionId must be non-negative" }
         require(rommSaveId > 0) { "rommSaveId must be positive" }
         require(downloadedSizeBytes > 0) { "downloadedSizeBytes must be positive" }
         require(candidatePath.isNotBlank()) { "candidatePath must not be blank" }
@@ -82,8 +91,11 @@ object CandidateExtras {
      * extras are present (normal launch without a pending download).
      */
     fun extractFromIntent(intent: android.content.Intent): CandidateSaveMetadata? {
+        // -1L (the getLongExtra default) means the extra is absent; `0L` is a valid,
+        // deliberately-passed sentinel meaning "no real negotiate session backs this
+        // candidate" (see rommSessionId's KDoc) and must NOT be treated as absent here.
         val rommSessionId = intent.getLongExtra(ROMM_SESSION_ID, -1L)
-        if (rommSessionId <= 0) return null
+        if (rommSessionId < 0) return null
         val rommSaveId = intent.getLongExtra(ROMM_SAVE_ID, -1L)
         val candidatePath = intent.getStringExtra(CANDIDATE_PATH) ?: return null
         val downloadedSizeBytes = intent.getLongExtra(DOWNLOADED_SIZE_BYTES, -1L)

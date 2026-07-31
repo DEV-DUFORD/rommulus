@@ -618,6 +618,14 @@ class EmulationResultHandlerAwaitedTest {
             throw NotImplementedError()
         }
 
+        override suspend fun adoptChosenSave(request: com.romm.androidtv.romm.save.AdoptSaveRequest): SaveSyncOutcome {
+            throw NotImplementedError()
+        }
+
+        override suspend fun listSavesForRom(romId: Long): com.romm.androidtv.romm.SaveListResult {
+            throw NotImplementedError()
+        }
+
         override suspend fun syncPostPlay(request: PostPlayCheckpointRequest): PostPlayCheckpointResult {
             syncPostPlayCalled = true
             syncPostPlayRequest = request
