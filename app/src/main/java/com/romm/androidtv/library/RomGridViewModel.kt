@@ -27,6 +27,7 @@ data class RomGridUiState(
 class RomGridViewModel(
     private val repository: LibraryRepository,
     private val query: RomQuery,
+    private val hideUnsupportedSystems: () -> Boolean = { false },
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RomGridUiState())
@@ -41,7 +42,7 @@ class RomGridViewModel(
         viewModelScope.launch {
             val state = when (val result = repository.fetchRomsPage(query, PAGE_SIZE, offset = 0)) {
                 is LibraryResult.Success -> RomGridUiState(
-                    section = SectionState.Loaded(result.data.roms),
+                    section = SectionState.Loaded(result.data.roms.filterUnsupportedIfHidden(hideUnsupportedSystems())),
                     total = result.data.total,
                 )
                 is LibraryResult.Failure -> RomGridUiState(section = SectionState.Error(result.error))
@@ -61,7 +62,7 @@ class RomGridViewModel(
             when (val result = repository.fetchRomsPage(query, PAGE_SIZE, offset = loadedRoms.size)) {
                 is LibraryResult.Success -> {
                     _uiState.value = _uiState.value.copy(
-                        section = SectionState.Loaded(loadedRoms + result.data.roms),
+                        section = SectionState.Loaded(loadedRoms + result.data.roms.filterUnsupportedIfHidden(hideUnsupportedSystems())),
                         total = result.data.total,
                         isLoadingMore = false,
                     )
@@ -78,10 +79,11 @@ class RomGridViewModel(
     class Factory(
         private val repository: LibraryRepository,
         private val query: RomQuery,
+        private val hideUnsupportedSystems: () -> Boolean = { false },
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return RomGridViewModel(repository, query) as T
+            return RomGridViewModel(repository, query, hideUnsupportedSystems) as T
         }
     }
 }

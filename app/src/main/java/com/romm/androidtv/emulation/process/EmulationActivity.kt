@@ -3,6 +3,7 @@ package com.romm.androidtv.emulation.process
 import android.content.Intent
 import android.hardware.input.InputManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -12,20 +13,33 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +47,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -151,6 +167,31 @@ class EmulationActivity : ComponentActivity() {
      * instantly with no animation" bug (the whole `:emulation` process crashed on Back press).
      */
     private val backKeyHeld = MutableStateFlow(false)
+
+    /** Elapsed-realtime timestamp of the most recent Back ACTION_DOWN, used to distinguish a quick tap from a hold. */
+    private var backKeyDownAtMs: Long = 0L
+
+    /**
+     * Emits on a Back press that is released *before* [BACK_HOLD_DURATION_MS] elapses — a
+     * "quick tap" — which opens/closes the pause menu (LIBRETRO_REFACTOR.md section 13, Phase
+     * 6). This is entirely separate from [backKeyHeld]/[BACK_HOLD_DURATION_MS]'s hold-to-exit
+     * gesture, which remains the sole direct-quit path and is unchanged by this feature.
+     */
+    private val quickBackTapEvents = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Whether the native pause-menu overlay is currently shown; drives [NativeLibretroHost.nativeSetPaused]. */
+    private val pauseMenuVisible = MutableStateFlow(false)
+
+    /**
+     * Set when [finishAndDeliverResult] is called on an active session but [checkpointIfRunning]
+     * fails — blocks the quit until the user explicitly retries or chooses to quit without
+     * saving, rather than silently discarding the failed checkpoint (previously silently
+     * swallowed). See [finishAndDeliverResult].
+     */
+    private val saveFailureVisible = MutableStateFlow(false)
 
     companion object {
         private const val TAG = "EmulationActivity"
@@ -282,6 +323,7 @@ class EmulationActivity : ComponentActivity() {
         }
         if (!sessionStarted) {
             Log.e(TAG, "core load failed: ${host.nativeGetLastError()}")
+            Log.i(TAG, "telemetry: native session failed coreId=${coreId ?: "test_core"} romId=$stageRomId sessionId=$appSessionId category=${classifyLaunchFailure(host.nativeGetLastError())}")
             try { journal.advance(this.sessionIdForJournal!!, DescriptorState.CRASHED, SessionDescriptorPatch(errorDetail = host.nativeGetLastError())) } catch (_: Exception) {}
         } else {
             // Phase B: advance journal to CORE_LOADED with canonical path and candidate size.
@@ -300,6 +342,11 @@ class EmulationActivity : ComponentActivity() {
             } catch (e: Exception) {
                 Log.w(TAG, "onCreate: journal advance to CORE_LOADED failed", e)
             }
+
+            // Telemetry (LIBRETRO_REFACTOR.md section 13, Phase 6 exit criterion: "telemetry
+            // identifies which native core/system ran"). No PII/credentials involved — just the
+            // resolved core/rom identity, correlated with the launch session ID.
+            Log.i(TAG, "telemetry: native session started coreId=${coreId ?: "test_core"} romId=$stageRomId sessionId=$appSessionId")
 
             // Phase B: candidate validation — delegates to interface-driven CandidateAdoptionHelper
             // for backup-before-restore ordering (LIBRETRO_REFACTOR.md Phase B).
@@ -417,9 +464,16 @@ class EmulationActivity : ComponentActivity() {
                         host = host,
                         sessionStarted = sessionStarted,
                         lastError = host.nativeGetLastError(),
+                        failureCategory = if (!sessionStarted) classifyLaunchFailure(host.nativeGetLastError()) else LaunchFailureCategory.NONE,
                         keyActivityEvents = keyActivityEvents,
                         backKeyHeld = backKeyHeld,
-                        onStop = { finishAndDeliverResult() }
+                        quickBackTapEvents = quickBackTapEvents,
+                        pauseMenuVisible = pauseMenuVisible,
+                        saveFailureVisible = saveFailureVisible,
+                        onStop = { finishAndDeliverResult() },
+                        onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
+                        onSetNativePaused = { paused -> host.nativeSetPaused(paused) },
+                        onOpenPauseMenuCheckpoint = { checkpointForPauseMenu() },
                     )
                 }
             }
@@ -478,6 +532,18 @@ class EmulationActivity : ComponentActivity() {
         return checkpointed
     }
 
+    /**
+     * Silent local-only checkpoint taken when the pause menu opens — not shown to the user (no
+     * "save status" UI) and, importantly, not uploaded to the RomM server: server sync only
+     * happens after this activity finishes (see [finishAndDeliverResult]/[deliverResult]), which
+     * is deliberate — the server's save-slot autoclean only keeps 5 prior slots, and those slots
+     * are reserved for meaningful on-exit saves rather than being churned by every pause. This is
+     * purely a local safety net (e.g. against a later improper app kill).
+     */
+    private fun checkpointForPauseMenu() {
+        checkpointIfRunning()
+    }
+
     override fun onPause() {
         // Checkpoint on pause, not just on destroy: LIBRETRO_REFACTOR.md section
         // 11.1 requires checkpointing "on pause or quit", so a task switch or
@@ -499,8 +565,17 @@ class EmulationActivity : ComponentActivity() {
      * caller's callback fired was NOT sufficient — finish() must be called after
      * setResult(), from the same call site.
      */
-    private fun finishAndDeliverResult() {
+    private fun finishAndDeliverResult(forceQuitOnSaveFailure: Boolean = false) {
         val checkpointed = checkpointIfRunning()
+        if (!checkpointed && sessionStarted && !forceQuitOnSaveFailure) {
+            // Do not silently discard a failed checkpoint at quit time — block with a native
+            // "save failed" screen so the user can retry or make an informed choice to quit
+            // anyway (LIBRETRO_REFACTOR.md section 13, Phase 6 error screens).
+            Log.w(TAG, "finishAndDeliverResult: checkpoint failed at quit, blocking for user decision")
+            saveFailureVisible.value = true
+            return
+        }
+        saveFailureVisible.value = false
         deliverResult(checkpointed)
         finish()
     }
@@ -636,14 +711,26 @@ class EmulationActivity : ComponentActivity() {
                 // Exiting gameplay is a deliberate hold-to-confirm gesture, never a single tap, so
                 // an errant Back press from the TV remote can never discard an in-progress
                 // session. The paired visual countdown lives in EmulationScreen's back-hint icon.
+                // A quick tap (released before BACK_HOLD_DURATION_MS) instead toggles the native
+                // pause menu (LIBRETRO_REFACTOR.md section 13, Phase 6) — the hold gesture below
+                // remains the sole direct-quit path, unchanged.
                 when (event.action) {
-                    KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) backKeyHeld.value = true
-                    KeyEvent.ACTION_UP -> backKeyHeld.value = false
+                    KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) {
+                        backKeyHeld.value = true
+                        backKeyDownAtMs = SystemClock.elapsedRealtime()
+                    }
+                    KeyEvent.ACTION_UP -> {
+                        backKeyHeld.value = false
+                        val heldMs = SystemClock.elapsedRealtime() - backKeyDownAtMs
+                        if (heldMs < BACK_HOLD_DURATION_MS && sessionStarted) {
+                            quickBackTapEvents.tryEmit(Unit)
+                        }
+                    }
                 }
                 return true
             }
         }
-        if (sessionStarted) {
+        if (sessionStarted && !pauseMenuVisible.value) {
             val consumed = controllerRouter.onKeyEvent(event)
             if (consumed) return true
         }
@@ -656,7 +743,7 @@ class EmulationActivity : ComponentActivity() {
         ) {
             return super.dispatchGenericMotionEvent(event)
         }
-        if (sessionStarted) {
+        if (sessionStarted && !pauseMenuVisible.value) {
             val consumed = controllerRouter.onMotionEvent(event)
             if (consumed) return true
         }
@@ -669,9 +756,16 @@ private fun EmulationScreen(
     host: NativeLibretroHost,
     sessionStarted: Boolean,
     lastError: String,
+    failureCategory: LaunchFailureCategory,
     keyActivityEvents: Flow<Unit>,
     backKeyHeld: Flow<Boolean>,
-    onStop: () -> Unit
+    quickBackTapEvents: Flow<Unit>,
+    pauseMenuVisible: MutableStateFlow<Boolean>,
+    saveFailureVisible: Flow<Boolean>,
+    onStop: () -> Unit,
+    onQuitAnywayAfterSaveFailure: () -> Unit,
+    onSetNativePaused: (Boolean) -> Unit,
+    onOpenPauseMenuCheckpoint: () -> Unit,
 ) {
     // Diagnostics are polled silently to drive the core-requested-shutdown auto-stop below; none
     // of it is rendered on screen — gameplay should show only the game itself.
@@ -684,6 +778,8 @@ private fun EmulationScreen(
     // :emulation process — that was the earlier "back exits instantly, no animation" bug.
     val backHoldProgress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
+    val pauseMenuOpen by pauseMenuVisible.collectAsState()
+    val saveFailureShown by saveFailureVisible.collectAsState(initial = false)
 
     LaunchedEffect(sessionStarted) {
         if (!sessionStarted) return@LaunchedEffect
@@ -717,6 +813,23 @@ private fun EmulationScreen(
         }
     }
 
+    // A quick Back tap (released before the hold-to-exit threshold) toggles the pause menu.
+    LaunchedEffect(Unit) {
+        quickBackTapEvents.collectLatest {
+            pauseMenuVisible.value = !pauseMenuVisible.value
+        }
+    }
+
+    // Freeze/unfreeze the native session whenever the pause menu opens/closes, and take a silent
+    // local-only checkpoint on open as a safety net (not shown to the user, not uploaded to the
+    // server until this session actually ends — see [EmulationActivity.checkpointForPauseMenu]).
+    LaunchedEffect(pauseMenuOpen) {
+        onSetNativePaused(pauseMenuOpen)
+        if (pauseMenuOpen) {
+            onOpenPauseMenuCheckpoint()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         if (sessionStarted) {
             // The video surface is the only visible content during normal play.
@@ -727,17 +840,27 @@ private fun EmulationScreen(
                 modifier = Modifier.fillMaxSize()
             )
         } else {
-            Text(
-                text = "Session failed to start: $lastError",
-                color = Color(0xFFf44336),
-                modifier = Modifier.padding(32.dp)
-            )
+            NativeErrorScreen(category = failureCategory, lastError = lastError, onBackToLibrary = onStop)
         }
 
         if (showBackHint || backHoldProgress.value > 0f) {
             BackHintIcon(
                 progress = backHoldProgress.value,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)
+            )
+        }
+
+        if (pauseMenuOpen && sessionStarted) {
+            PauseMenuOverlay(
+                onResume = { pauseMenuVisible.value = false },
+                onQuit = onStop,
+            )
+        }
+
+        if (saveFailureShown) {
+            SaveFailureOverlay(
+                onRetry = onStop,
+                onQuitAnyway = onQuitAnywayAfterSaveFailure,
             )
         }
     }
@@ -754,6 +877,134 @@ private const val BACK_HINT_IDLE_HIDE_MS = 2500L
 
 /** How long the remote's Back key must be held to confirm exiting gameplay. */
 private const val BACK_HOLD_DURATION_MS = 1200
+
+/** Coarse category used to select which native error screen to show. */
+enum class LaunchFailureCategory { NONE, CORE_LOAD, CONTENT_LOAD, UNKNOWN }
+
+/**
+ * Classifies [NativeLibretroHost.nativeGetLastError]'s message into a [LaunchFailureCategory] so
+ * distinct native error screens (LIBRETRO_REFACTOR.md section 13, Phase 6) can be shown for a
+ * core-load failure (bad/missing core binary, ABI mismatch) versus a content-load failure (core
+ * loaded fine but rejected this specific ROM file). Coupled to the exact prefixes emulation_session.cpp
+ * and core_library.cpp assign to `lastError_` — if those native strings change, update this too.
+ */
+private fun classifyLaunchFailure(lastError: String): LaunchFailureCategory = when {
+    lastError.startsWith("dlopen failed:") ||
+        lastError.startsWith("core API version mismatch:") ||
+        lastError.startsWith("CoreLibrary already loaded") ||
+        lastError.startsWith("session already started") -> LaunchFailureCategory.CORE_LOAD
+    lastError.startsWith("failed to read content file:") ||
+        lastError.startsWith("retro_load_game failed") -> LaunchFailureCategory.CONTENT_LOAD
+    else -> LaunchFailureCategory.UNKNOWN
+}
+
+/**
+ * Full-screen native error state for an in-session launch failure — always offers a way back to
+ * the library, never a WebView hand-off (LIBRETRO_REFACTOR.md section 1 amendment: WebView is
+ * deprecated, not a maintained fallback).
+ */
+@Composable
+private fun NativeErrorScreen(category: LaunchFailureCategory, lastError: String, onBackToLibrary: () -> Unit) {
+    val (title, message) = when (category) {
+        LaunchFailureCategory.CORE_LOAD -> "Emulator core failed to load" to
+            "The native emulator core for this system could not be started. This usually means the app build is missing or has a broken core binary."
+        LaunchFailureCategory.CONTENT_LOAD -> "This game could not be loaded" to
+            "The emulator core started, but rejected this specific game file. It may be corrupt or in an unsupported format for this core."
+        LaunchFailureCategory.UNKNOWN, LaunchFailureCategory.NONE -> "Something went wrong starting this game" to
+            "An unexpected error prevented this session from starting."
+    }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(text = title, color = Color.White, style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(text = message, color = Color(0xFFbdbdbd), style = MaterialTheme.typography.bodyMedium)
+        if (lastError.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = lastError, color = Color(0xFFf44336), style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(onClick = onBackToLibrary) { Text("Back to Library") }
+    }
+}
+
+/**
+ * Blocking screen shown when a checkpoint fails at quit time, so a failed save is never silently
+ * discarded (LIBRETRO_REFACTOR.md section 13, Phase 6 error screens).
+ */
+@Composable
+private fun SaveFailureOverlay(onRetry: () -> Unit, onQuitAnyway: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)), contentAlignment = Alignment.Center) {
+        Column(modifier = Modifier.padding(32.dp)) {
+            Text(text = "Save failed", color = Color.White, style = MaterialTheme.typography.headlineSmall)
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "The game's save data could not be checkpointed. Quitting now may lose recent progress. " +
+                    "You can retry, or quit anyway and keep the last successful save.",
+                color = Color(0xFFbdbdbd),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Row {
+                Button(onClick = onRetry) { Text("Retry") }
+                Spacer(modifier = Modifier.width(16.dp))
+                OutlinedButton(onClick = onQuitAnyway) { Text("Quit anyway") }
+            }
+        }
+    }
+}
+
+/**
+ * Native pause-menu overlay (LIBRETRO_REFACTOR.md section 13, Phase 6): Resume and Quit (with
+ * confirm) — the sole in-session menu, opened by a quick Back tap. Emulation is frozen (native
+ * `paused_` flag) for the whole time this is visible; see [EmulationScreen]'s
+ * `LaunchedEffect(pauseMenuOpen)`, which also takes a silent local-only save checkpoint on open
+ * (not surfaced here — see [EmulationActivity.checkpointForPauseMenu]).
+ */
+@Composable
+private fun PauseMenuOverlay(
+    onResume: () -> Unit,
+    onQuit: () -> Unit,
+) {
+    var showQuitConfirm by remember { mutableStateOf(false) }
+    val resumeFocusRequester = remember { FocusRequester() }
+
+    // Grab initial D-pad focus on the Resume button — with the emulation core's controller
+    // routing suppressed while paused (see EmulationActivity.dispatchKeyEvent), Compose's own
+    // focus system needs a starting focused node to move D-pad events between the menu buttons.
+    LaunchedEffect(Unit) {
+        resumeFocusRequester.requestFocus()
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
+        Column(modifier = Modifier.padding(32.dp).width(420.dp)) {
+            Text(text = "Paused", color = Color.White, style = MaterialTheme.typography.headlineSmall)
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Button(
+                onClick = onResume,
+                modifier = Modifier.fillMaxWidth().focusRequester(resumeFocusRequester),
+            ) { Text("Resume") }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = { showQuitConfirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Quit") }
+        }
+    }
+
+    if (showQuitConfirm) {
+        AlertDialog(
+            onDismissRequest = { showQuitConfirm = false },
+            title = { Text("Quit game?") },
+            text = { Text("Your save will be checkpointed before quitting.") },
+            confirmButton = {
+                TextButton(onClick = { showQuitConfirm = false; onQuit() }) { Text("Yes") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQuitConfirm = false }) { Text("No") }
+            },
+        )
+    }
+}
 
 /**
  * Hold-to-exit affordance: a back arrow ringed by a determinate progress indicator that fills as

@@ -58,6 +58,21 @@ class NativeLibretroHost {
     external fun nativeIsRunning(): Boolean
 
     /**
+     * Freezes (true) or resumes (false) the emulation thread's `retro_run()`
+     * calls in place (LIBRETRO_REFACTOR.md section 13, Phase 6 pause/quit
+     * UI). While paused, video freezes on the last presented frame and audio
+     * mutes through the existing underrun-fills-silence path in
+     * `AudioOutput` — no separate freeze/mute mechanism exists. The loaded
+     * core, its SRAM, and controller input routing are all left untouched;
+     * this never stops or tears down the session. Safe to call even if no
+     * session is active (no-op).
+     */
+    external fun nativeSetPaused(paused: Boolean)
+
+    /** True if the emulation thread is currently frozen via [nativeSetPaused]. */
+    external fun nativeIsPaused(): Boolean
+
+    /**
      * `[frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown,
      * audioUnderrunFrames, audioOverrunFrames, port0ButtonMask, port1ButtonMask, port2ButtonMask, port3ButtonMask,
      * port0LeftX, port0LeftY, port1LeftX, port1LeftY, port2LeftX, port2LeftY, port3LeftX, port3LeftY]`.

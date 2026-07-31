@@ -28,7 +28,10 @@ data class HomeUiState(
  * independently so a slow or failed section (e.g. Favorites on a server with
  * none configured) never blocks the others from rendering.
  */
-class HomeViewModel(private val repository: LibraryRepository) : ViewModel() {
+class HomeViewModel(
+    private val repository: LibraryRepository,
+    private val hideUnsupportedSystems: () -> Boolean = { false },
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -57,7 +60,7 @@ class HomeViewModel(private val repository: LibraryRepository) : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(continuePlaying = SectionState.Loading) }
             val state = when (val result = repository.fetchContinuePlaying()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data)
+                is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideUnsupportedSystems()))
                 is LibraryResult.Failure -> SectionState.Error(result.error)
             }
             _uiState.update { it.copy(continuePlaying = state) }
@@ -68,7 +71,7 @@ class HomeViewModel(private val repository: LibraryRepository) : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(recentlyAdded = SectionState.Loading) }
             val state = when (val result = repository.fetchRecentlyAdded()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data)
+                is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideUnsupportedSystems()))
                 is LibraryResult.Failure -> SectionState.Error(result.error)
             }
             _uiState.update { it.copy(recentlyAdded = state) }
@@ -79,7 +82,7 @@ class HomeViewModel(private val repository: LibraryRepository) : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(favorites = SectionState.Loading) }
             val state = when (val result = repository.fetchFavorites()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data)
+                is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideUnsupportedSystems()))
                 is LibraryResult.Failure -> SectionState.Error(result.error)
             }
             _uiState.update { it.copy(favorites = state) }
@@ -113,10 +116,13 @@ class HomeViewModel(private val repository: LibraryRepository) : ViewModel() {
     }
 
     /** Simple factory since this app doesn't yet use a DI framework. */
-    class Factory(private val repository: LibraryRepository) : androidx.lifecycle.ViewModelProvider.Factory {
+    class Factory(
+        private val repository: LibraryRepository,
+        private val hideUnsupportedSystems: () -> Boolean = { false },
+    ) : androidx.lifecycle.ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return HomeViewModel(repository) as T
+            return HomeViewModel(repository, hideUnsupportedSystems) as T
         }
     }
 }

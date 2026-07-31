@@ -21,6 +21,8 @@ data class LibraryRom(
     val id: Long,
     val title: String,
     val platformDisplayName: String,
+    /** RomM's canonical platform slug (e.g. "gb", "genesis") — used to check native core support (LIBRETRO_REFACTOR.md section 13). */
+    val platformSlug: String = "",
     /** Absolute cover-art URL, already resolved against the RomM origin. Null if RomM has no cover on file. */
     val coverUrl: String?,
     /** ISO 8601 last-played timestamp for the current user, or null if never played. */
@@ -45,6 +47,8 @@ data class RomDetail(
     val id: Long,
     val title: String,
     val platformDisplayName: String,
+    /** RomM's canonical platform slug (e.g. "gb", "genesis") — used to check native core support (LIBRETRO_REFACTOR.md section 13). */
+    val platformSlug: String = "",
     val summary: String?,
     val coverUrl: String?,
     /** Absolute screenshot URLs, already resolved against the RomM origin. */

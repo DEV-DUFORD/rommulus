@@ -555,7 +555,10 @@ class MainActivity : ComponentActivity() {
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
                         Screen.NATIVE_SAVE_PICKER -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-                                factory = com.romm.androidtv.library.HomeViewModel.Factory(libraryRepository)
+                                factory = com.romm.androidtv.library.HomeViewModel.Factory(
+                                    libraryRepository,
+                                    hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
+                                )
                             )
                             // Re-fetch Continue Playing right after exiting a game (continuePlayingRefreshTick's
                             // doc comment) instead of waiting for the next cold app start. Skips the initial
@@ -575,6 +578,7 @@ class MainActivity : ComponentActivity() {
                                                 factory = com.romm.androidtv.library.RomGridViewModel.Factory(
                                                     libraryRepository,
                                                     com.romm.androidtv.library.RomQuery.ByPlatform(platformId),
+                                                    hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                                 ),
                                             )
                                             com.romm.androidtv.library.ui.RomGridScreen(
@@ -596,6 +600,7 @@ class MainActivity : ComponentActivity() {
                                                 factory = com.romm.androidtv.library.RomGridViewModel.Factory(
                                                     libraryRepository,
                                                     com.romm.androidtv.library.RomQuery.ByCollection(collectionId),
+                                                    hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                                 ),
                                             )
                                             com.romm.androidtv.library.ui.RomGridScreen(

@@ -139,6 +139,26 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeIsRunning(
     return (g_session != nullptr && g_session->isRunning()) ? JNI_TRUE : JNI_FALSE;
 }
 
+// Phase 6 pause/resume (LIBRETRO_REFACTOR.md section 13): freezes/resumes
+// the emulation thread's retro_run() calls in place, without stopping or
+// tearing down the session. See EmulationSession::setPaused for exactly
+// what "paused" freezes (video/audio) and what it leaves untouched (input
+// routing, the loaded core, SRAM).
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeSetPaused(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean paused) {
+    if (g_session == nullptr) return;
+    g_session->setPaused(paused == JNI_TRUE);
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeIsPaused(
+        JNIEnv* /*env*/, jobject /*thiz*/) {
+    return (g_session != nullptr && g_session->isPaused()) ? JNI_TRUE : JNI_FALSE;
+}
+
 // Returns [frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown,
 //          audioUnderrunFrames, audioOverrunFrames, port0ButtonMask, port1ButtonMask, port2ButtonMask, port3ButtonMask,
 //          port0LeftX, port0LeftY, port1LeftX, port1LeftY, port2LeftX, port2LeftY, port3LeftX, port3LeftY]

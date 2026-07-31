@@ -58,6 +58,12 @@ data class SettingsUiState(
     val passwordText: String = "",
     /** State of the in-progress/last login attempt from this screen. */
     val loginState: SettingsLoginState = SettingsLoginState.Idle,
+    /**
+     * Opt-in library filter (LIBRETRO_REFACTOR.md section 13, Phase 6): when
+     * true, the library grid/shelves hide games on platforms with no
+     * approved native core. Off by default.
+     */
+    val hideUnsupportedSystems: Boolean = false,
 )
 
 /**
@@ -86,6 +92,8 @@ class SettingsViewModel(
     private val onLoginSuccess: () -> Unit,
     private val buildDefaultOrigin: String,
     private val onSessionInvalidated: () -> Unit,
+    private val getHideUnsupportedSystems: () -> Boolean = { false },
+    private val setHideUnsupportedSystemsFn: (Boolean) -> Unit = {},
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -103,7 +111,14 @@ class SettingsViewModel(
             originText = profile.origin,
             currentOrigin = profile.origin,
             currentUsername = session?.username,
+            hideUnsupportedSystems = getHideUnsupportedSystems(),
         )
+    }
+
+    /** Toggles the opt-in "hide unsupported-system games" library filter and persists it immediately. */
+    fun onHideUnsupportedSystemsChanged(hide: Boolean) {
+        setHideUnsupportedSystemsFn(hide)
+        _uiState.value = _uiState.value.copy(hideUnsupportedSystems = hide)
     }
 
     /** Called on every TextField [onValueChange]. Validates and tracks dirty state. */
@@ -354,6 +369,8 @@ class SettingsViewModel(
                 onLoginSuccess = onLoginSuccess,
                 buildDefaultOrigin = buildDefaultOrigin,
                 onSessionInvalidated = onSessionInvalidated,
+                getHideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
+                setHideUnsupportedSystemsFn = { hide -> settingsRepository.setHideUnsupportedSystems(hide) },
             ) as T
         }
     }

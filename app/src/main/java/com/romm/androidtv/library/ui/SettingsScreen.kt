@@ -339,6 +339,34 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // ---- Library section ----
+        Text(
+            text = "Library",
+            style = MaterialTheme.typography.titleLarge,
+            color = RommTvColors.Romm300,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Hide unsupported-system games", color = RommTvColors.TextPrimary)
+                Text(
+                    text = "Hide games on platforms with no native emulator core yet, instead of showing them as unsupported",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RommTvColors.TextSecondary,
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = uiState.hideUnsupportedSystems,
+                onCheckedChange = viewModel::onHideUnsupportedSystemsChanged,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         // ---- App info section (read-only) ----
         Text(
             text = "App",

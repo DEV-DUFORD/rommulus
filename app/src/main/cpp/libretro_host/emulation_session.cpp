@@ -132,6 +132,17 @@ void EmulationSession::runLoop() {
     FrameScheduler scheduler(avFps_);
 
     while (threadShouldRun_.load()) {
+        if (paused_.load()) {
+            // Skip retro_run() entirely: the core never advances, so the last
+            // presented video frame stays on screen and no new audio samples
+            // reach AudioOutput's ring buffer (which mutes via its existing
+            // underrun-fills-silence path). Still pace this loop with the
+            // scheduler rather than busy-spinning so an immediate resume
+            // doesn't have to fight a saturated CPU core.
+            scheduler.waitForNextFrame();
+            continue;
+        }
+
         core_.functions().retro_run();
 
         if (environment_.shutdownRequested()) {

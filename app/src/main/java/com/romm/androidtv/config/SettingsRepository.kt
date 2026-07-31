@@ -32,8 +32,21 @@ class SettingsRepository(
         prefs.edit().remove(KEY_ORIGIN).apply()
     }
 
+    /**
+     * Opt-in library filter (off by default; LIBRETRO_REFACTOR.md section 13,
+     * Phase 6): when true, the library grid/shelves hide games on platforms
+     * with no approved native core instead of showing a disabled "not
+     * supported yet" state for each one.
+     */
+    fun hideUnsupportedSystems(): Boolean = prefs.getBoolean(KEY_HIDE_UNSUPPORTED, false)
+
+    fun setHideUnsupportedSystems(hide: Boolean) {
+        prefs.edit().putBoolean(KEY_HIDE_UNSUPPORTED, hide).apply()
+    }
+
     companion object {
         const val PREFS_NAME = "romm_settings"
         private const val KEY_ORIGIN = "romm_origin"
+        private const val KEY_HIDE_UNSUPPORTED = "hide_unsupported_systems"
     }
 }

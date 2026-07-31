@@ -142,6 +142,17 @@ public:
     int16_t debugInputAnalogLeftX(int port) const;
     int16_t debugInputAnalogLeftY(int port) const;
 
+    // Phase 6 pause/resume (LIBRETRO_REFACTOR.md section 13): while paused,
+    // runLoop() skips retro_run() entirely — video freezes on the last
+    // presented frame (videoRefreshTrampoline is never called), and audio
+    // mutes naturally through AudioOutput's existing underrun-fills-silence
+    // path (no new samples are pushed to the ring buffer, so Oboe's callback
+    // reads silence and counts it as underrun, same as any other stall). No
+    // separate mute/freeze mechanism was needed. Safe to call from any
+    // thread; does not touch the core or any callback state.
+    void setPaused(bool paused) { paused_.store(paused); }
+    bool isPaused() const { return paused_.load(); }
+
 private:
     void runLoop();
 
@@ -174,6 +185,7 @@ private:
 
     std::thread thread_;
     std::atomic<bool> threadShouldRun_{false};
+    std::atomic<bool> paused_{false};
 };
 
 }  // namespace romm

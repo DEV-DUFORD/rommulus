@@ -38,6 +38,7 @@ import coil.compose.AsyncImage
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.library.RomDetailViewModel
 import com.romm.androidtv.library.SectionState
+import com.romm.androidtv.library.isPlatformNativelySupported
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -157,6 +158,11 @@ private fun GameDetailContent(
                     Spacer(modifier = Modifier.height(20.dp))
                     if (isAuthExpired) {
                         AuthExpiredState(onLogin = onLogin, onDismiss = onDismissError)
+                    } else if (!isPlatformNativelySupported(rom.platformSlug)) {
+                        // Proactive native "not supported yet" state (LIBRETRO_REFACTOR.md
+                        // section 13, Phase 6): checked up front from CoreManifest, not
+                        // discovered reactively only after a failed Play attempt.
+                        UnsupportedSystemState(platformDisplayName = rom.platformDisplayName)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging)
@@ -212,6 +218,44 @@ private fun GameDetailContent(
                 }
             }
         }
+    }
+}
+
+/**
+ * Proactive native "not supported yet" state (LIBRETRO_REFACTOR.md section
+ * 13, Phase 6): shown instead of the Play/Choose Save row whenever
+ * [isPlatformNativelySupported] is false for this ROM's platform, so the
+ * user never has to press Play to discover a launch will fail. The Play
+ * button itself is rendered disabled for a consistent, expected shape on
+ * screen; there is no WebView hand-off (LIBRETRO_REFACTOR.md section 1
+ * amendment — WebView is deprecated, not a maintained fallback).
+ */
+@Composable
+private fun UnsupportedSystemState(platformDisplayName: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        DisabledPlayButton()
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Not supported yet — no native emulator core for $platformDisplayName",
+            style = MaterialTheme.typography.bodySmall,
+            color = RommTvColors.TextSecondary,
+        )
+    }
+}
+
+@Composable
+private fun DisabledPlayButton() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(RommTvColors.NightLo)
+            .padding(horizontal = 28.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = "▶  Play",
+            style = MaterialTheme.typography.titleMedium,
+            color = RommTvColors.TextSecondary,
+        )
     }
 }
 
