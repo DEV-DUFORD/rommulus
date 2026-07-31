@@ -888,7 +888,7 @@ enum class LaunchFailureCategory { NONE, CORE_LOAD, CONTENT_LOAD, UNKNOWN }
  * loaded fine but rejected this specific ROM file). Coupled to the exact prefixes emulation_session.cpp
  * and core_library.cpp assign to `lastError_` — if those native strings change, update this too.
  */
-private fun classifyLaunchFailure(lastError: String): LaunchFailureCategory = when {
+internal fun classifyLaunchFailure(lastError: String): LaunchFailureCategory = when {
     lastError.startsWith("dlopen failed:") ||
         lastError.startsWith("core API version mismatch:") ||
         lastError.startsWith("CoreLibrary already loaded") ||

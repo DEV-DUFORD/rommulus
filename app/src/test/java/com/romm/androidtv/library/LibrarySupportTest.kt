@@ -1,0 +1,121 @@
+package com.romm.androidtv.library
+
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+
+class LibrarySupportTest {
+
+    // ---- isPlatformNativelySupported ----
+
+    @Test
+    fun `isPlatformNativelySupported returns true for SameBoy supported systems`() {
+        assertThat(isPlatformNativelySupported("gb")).isTrue()
+        assertThat(isPlatformNativelySupported("gbc")).isTrue()
+    }
+
+    @Test
+    fun `isPlatformNativelySupported returns false for unsupported platforms`() {
+        // Genesis Plus GX, PicoDrive, Snes9x, Mupen64Plus are all unapproved
+        assertThat(isPlatformNativelySupported("genesis")).isFalse()
+        assertThat(isPlatformNativelySupported("megadrive")).isFalse()
+        assertThat(isPlatformNativelySupported("sms")).isFalse()
+        assertThat(isPlatformNativelySupported("gamegear")).isFalse()
+        assertThat(isPlatformNativelySupported("snes")).isFalse()
+        assertThat(isPlatformNativelySupported("sfc")).isFalse()
+        assertThat(isPlatformNativelySupported("n64")).isFalse()
+        assertThat(isPlatformNativelySupported("32x")).isFalse()
+        assertThat(isPlatformNativelySupported("segacd")).isFalse()
+    }
+
+    @Test
+    fun `isPlatformNativelySupported returns false for blank and empty slugs`() {
+        assertThat(isPlatformNativelySupported("")).isFalse()
+        assertThat(isPlatformNativelySupported("  ")).isFalse()
+    }
+
+    @Test
+    fun `isPlatformNativelySupported returns false for unknown slug not in any manifest entry`() {
+        assertThat(isPlatformNativelySupported("psx")).isFalse()
+        assertThat(isPlatformNativelySupported("arcade")).isFalse()
+        assertThat(isPlatformNativelySupported("nonexistent")).isFalse()
+    }
+
+    // ---- filterUnsupportedIfHidden ----
+
+    @Test
+    fun `filterUnsupportedIfHidden with hide false returns all items unchanged`() {
+        val roms = listOf(
+            LibraryRom(id = 1, title = "Pokemon", platformDisplayName = "Game Boy", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 2, title = "Sonic", platformDisplayName = "Genesis", platformSlug = "genesis", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+        )
+
+        assertThat(roms.filterUnsupportedIfHidden(hide = false))
+            .containsExactlyElementsOf(roms)
+    }
+
+    @Test
+    fun `filterUnsupportedIfHidden with hide false preserves reference identity`() {
+        val roms = listOf(
+            LibraryRom(id = 1, title = "Pokemon", platformDisplayName = "Game Boy", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+        )
+
+        assertThat(roms.filterUnsupportedIfHidden(hide = false)).isSameAs(roms)
+    }
+
+    @Test
+    fun `filterUnsupportedIfHidden with hide true keeps only supported platforms`() {
+        val roms = listOf(
+            LibraryRom(id = 1, title = "Pokemon Red", platformDisplayName = "Game Boy", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "Genesis", platformSlug = "genesis", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 3, title = "Link's Awakening", platformDisplayName = "Game Boy Color", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 4, title = "Chrono Trigger", platformDisplayName = "SNES", platformSlug = "snes", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+        )
+
+        val filtered = roms.filterUnsupportedIfHidden(hide = true)
+
+        assertThat(filtered).hasSize(2)
+        assertThat(filtered.map { it.title }).containsExactly("Pokemon Red", "Link's Awakening")
+    }
+
+    @Test
+    fun `filterUnsupportedIfHidden with hide true preserves original order`() {
+        val roms = listOf(
+            LibraryRom(id = 3, title = "Link's Awakening", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 1, title = "Pokemon Red", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 5, title = "Sonic 2", platformDisplayName = "Genesis", platformSlug = "genesis", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 2, title = "Yoshi Island", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+        )
+
+        val filtered = roms.filterUnsupportedIfHidden(hide = true)
+
+        assertThat(filtered.map { it.id }).containsExactly(3, 1, 2)
+    }
+
+    @Test
+    fun `filterUnsupportedIfHidden with hide true returns empty list when no supported platforms`() {
+        val roms = listOf(
+            LibraryRom(id = 1, title = "Sonic", platformDisplayName = "Genesis", platformSlug = "genesis", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 2, title = "Zelda OoT", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+        )
+
+        assertThat(roms.filterUnsupportedIfHidden(hide = true)).isEmpty()
+    }
+
+    @Test
+    fun `filterUnsupportedIfHidden with hide true on empty list returns empty list`() {
+        assertThat(emptyList<LibraryRom>().filterUnsupportedIfHidden(hide = true)).isEmpty()
+    }
+
+    @Test
+    fun `filterUnsupportedIfHidden treats blank platformSlug as unsupported when hiding`() {
+        val roms = listOf(
+            LibraryRom(id = 1, title = "Unknown Game", platformDisplayName = "Mystery", platformSlug = "", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 2, title = "Pokemon", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+        )
+
+        val filtered = roms.filterUnsupportedIfHidden(hide = true)
+
+        assertThat(filtered).hasSize(1)
+        assertThat(filtered[0].title).isEqualTo("Pokemon")
+    }
+}
