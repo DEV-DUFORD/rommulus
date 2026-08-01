@@ -257,6 +257,15 @@ class NativeLibretroHost {
             resolveBundledCoreSharedLibrary(context, "libbeetle_pce_fast_core.so")
 
         /**
+          * Resolves an absolute, dlopen-able path to the bundled, approved
+          * Beetle NeoPop core (Neo Geo Pocket / Neo Geo Pocket Color) — approved under its own
+          * GPL-2.0-or-later license (PERMISSIVE_OR_COPYLEFT_OK, no owner risk acceptance needed).
+          * Same run-from-apk extraction rationale as [resolveBundledTestCorePath].
+          */
+        fun resolveBundledMednafenNgpCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libmednafen_ngp_core.so")
+
+        /**
           * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
          * to its bundled shared-library path, or null if [coreId] has no
          * bundled core in this build. Deliberately does not fall back to any
@@ -272,6 +281,7 @@ class NativeLibretroHost {
             "stella" -> resolveBundledStellaCorePath(context)
             "gambatte" -> resolveBundledGambatteCorePath(context)
             "beetle_pce_fast" -> resolveBundledBeetlePceFastCorePath(context)
+            "mednafen_ngp" -> resolveBundledMednafenNgpCorePath(context)
             else -> null
         }
 

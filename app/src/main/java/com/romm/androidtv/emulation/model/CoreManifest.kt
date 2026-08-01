@@ -421,6 +421,35 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "Beetle NeoPop",
+            coreId = "mednafen_ngp",
+            upstreamRepository = "https://github.com/libretro/beetle-ngp-libretro",
+            commitSha = "a50d5ac288a81f2104ddf43195a4efdd15c72227",
+            releaseTag = "", // Upstream carries no release tags; commitSha is the exact pin.
+            licenseSummary = "GPL-2.0-or-later (root COPYING and source headers carry the 'or later' clause, making this core GPL-3-compatible). No non-commercial/no-sale restriction anywhere in the core. Original Neopop emulator code Copyright (c) 2001-2002 by neopop_uk. Vendored subcomponents: Blip_Buffer.cpp (LGPL-2.1-or-later, Shay Green), Stereo_Buffer.cpp (GPL-2.0-or-later), z80-fuse CPU emulator (GPL-2.0-or-later, Philip Kendall), libretro-common subtree (MIT). Only the files this core's Android libretro build actually compiles are vendored (no desktop GUI, no network code, no CI/docs). Scope is cartridge-only: neo-geo-pocket and neo-geo-pocket-color; content launches without external BIOS via built-in HLE implementation. See third_party/cores/mednafen_ngp/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("neo-geo-pocket", "neo-geo-pocket-color"),
+            supportedExtensions = listOf(".ngp", ".ngc", ".ngpc", ".npc"),
+            requiredFirmware = emptyList(),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `mednafen_ngp_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mednafen_ngp/{libretro.c," +
+                "mednafen,libretro-common}/* with upstream's own libretro/jni/Android.mk COREFLAGS " +
+                "(FRONTEND_SUPPORTS_RGB565, MEDNAFEN_VERSION_NUMERIC, WANT_16BPP, __LIBRETRO__, " +
+                "WANT_NGP_EMU, LOAD_FROM_MEMORY, INLINE=inline, GIT_VERSION=\"a50d5ac\"), -fexceptions, " +
+                "and upstream's own link.T version script; see third_party/cores/mednafen_ngp/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "9cdd4f0bd6fc74de04e4e293dfb595c420e63f7479cc29473242cdc7918aa6f6",
+                "arm64-v8a" to "2b7dd03031850e447decb3772f0e30df4b8d24651331a3813b3ffaef16fbc512",
+            ),
+            reviewedBy = "PROJECT-OWNER",
+            reviewedOn = "2026-08-01",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",

@@ -237,6 +237,40 @@ class RomRepositoryImplTest {
         }
 
         @Test
+        fun `the real, default resolver now approves neo-geo-pocket for mednafen_ngp since its Phase 7 review`() {
+            val ngpRomJson = """
+                {"id": 57, "fs_name": "game.ngp", "fs_size_bytes": 4, "platform_slug": "neo-geo-pocket", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.ngp", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(ngpRomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(57)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("mednafen_ngp")
+        }
+
+        @Test
+        fun `the real, default resolver now approves neo-geo-pocket-color for mednafen_ngp since its Phase 7 review`() {
+            val ngcRomJson = """
+                {"id": 58, "fs_name": "game.ngc", "fs_size_bytes": 4, "platform_slug": "neo-geo-pocket-color", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.ngc", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(ngcRomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(58)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("mednafen_ngp")
+        }
+
+        @Test
         fun `the real, default resolver still rejects a platform with no approved core`() {
             val n64RomJson = """
                 {"id": 51, "fs_name": "game.n64", "fs_size_bytes": 4, "platform_slug": "n64", "has_multiple_files": false,

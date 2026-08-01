@@ -12,7 +12,7 @@ class CoreManifestTest {
         // (LIBRETRO_REFACTOR.md section 4.1) — approving these six cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp")
     }
 
     @Test
@@ -165,6 +165,28 @@ class CoreManifestTest {
         assertThat(beetle.supportedSystems).containsExactly("tg16")
         assertThat(beetle.supportedExtensions).containsExactly(".pce")
         assertThat(beetle.requiredFirmware).isEmpty()
+    }
+
+    @Test
+    fun `mednafen_ngp's approval records a named reviewer, commit, and permissive finding`() {
+        val ngp = CoreManifest.findById("mednafen_ngp")
+
+        assertThat(ngp).isNotNull
+        assertThat(ngp!!.approved).isTrue()
+        assertThat(ngp.reviewedBy).isEqualTo("PROJECT-OWNER")
+        assertThat(ngp.reviewedOn).isNotBlank()
+        assertThat(ngp.commitSha).isNotBlank()
+        assertThat(ngp.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(ngp.ownerRiskAcceptedBy).isBlank()
+        assertThat(ngp.ownerRiskAcceptedOn).isBlank()
+        assertThat(ngp.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(ngp.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(ngp.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+        assertThat(ngp.supportedSystems).containsExactly("neo-geo-pocket", "neo-geo-pocket-color")
+        assertThat(ngp.supportedExtensions).containsExactly(".ngp", ".ngc", ".ngpc", ".npc")
+        assertThat(ngp.requiredFirmware).isEmpty()
     }
 
     @Test
