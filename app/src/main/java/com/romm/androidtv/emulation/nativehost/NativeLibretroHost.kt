@@ -248,7 +248,16 @@ class NativeLibretroHost {
             resolveBundledCoreSharedLibrary(context, "libgambatte_core.so")
 
         /**
-         * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
+          * Resolves an absolute, dlopen-able path to the bundled, approved
+          * Beetle PCE Fast core (PC Engine) — approved under its own GPL-2.0-only license
+          * (PERMISSIVE_OR_COPYLEFT_OK, no owner risk acceptance needed).
+          * Same run-from-apk extraction rationale as [resolveBundledTestCorePath].
+          */
+        fun resolveBundledBeetlePceFastCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libbeetle_pce_fast_core.so")
+
+        /**
+          * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
          * to its bundled shared-library path, or null if [coreId] has no
          * bundled core in this build. Deliberately does not fall back to any
          * default — an unrecognized coreId must fail the launch explicitly,
@@ -262,6 +271,7 @@ class NativeLibretroHost {
             "mgba" -> resolveBundledMgbaCorePath(context)
             "stella" -> resolveBundledStellaCorePath(context)
             "gambatte" -> resolveBundledGambatteCorePath(context)
+            "beetle_pce_fast" -> resolveBundledBeetlePceFastCorePath(context)
             else -> null
         }
 

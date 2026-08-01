@@ -12,7 +12,7 @@ class CoreManifestTest {
         // (LIBRETRO_REFACTOR.md section 4.1) — approving these six cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast")
     }
 
     @Test
@@ -143,6 +143,28 @@ class CoreManifestTest {
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
         }
         assertThat(gambatte.supportedSystems).containsExactly("gb", "gbc")
+    }
+
+    @Test
+    fun `beetle_pce_fast's approval records a named reviewer, commit, and permissive finding`() {
+        val beetle = CoreManifest.findById("beetle_pce_fast")
+
+        assertThat(beetle).isNotNull
+        assertThat(beetle!!.approved).isTrue()
+        assertThat(beetle.reviewedBy).isEqualTo("PROJECT-OWNER")
+        assertThat(beetle.reviewedOn).isNotBlank()
+        assertThat(beetle.commitSha).isNotBlank()
+        assertThat(beetle.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(beetle.ownerRiskAcceptedBy).isBlank()
+        assertThat(beetle.ownerRiskAcceptedOn).isBlank()
+        assertThat(beetle.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(beetle.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(beetle.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+        assertThat(beetle.supportedSystems).containsExactly("tg16")
+        assertThat(beetle.supportedExtensions).containsExactly(".pce")
+        assertThat(beetle.requiredFirmware).isEmpty()
     }
 
     @Test

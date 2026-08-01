@@ -392,6 +392,35 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "Beetle PCE Fast",
+            coreId = "beetle_pce_fast",
+            upstreamRepository = "https://github.com/libretro/beetle-pce-fast-libretro",
+            commitSha = "b211204c7026dff6e86e79b00185512e2421fff8",
+            releaseTag = "", // Upstream carries no release tags; commitSha is the exact pin.
+            licenseSummary = "GPL-2.0-or-later (root COPYING). No non-commercial/no-sale restriction anywhere in the core. Vendored subcomponents: libretro-common subtree (MIT). Only the files this core's Android libretro build actually compiles are vendored (no desktop GUI, no network code, no CI/docs). Scope is cartridge-only: tg16 .pce; Super System Card (.sgx) and CD-ROM (.ccd/.cue) excluded. See third_party/cores/beetle_pce_fast/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("tg16"),
+            supportedExtensions = listOf(".pce"),
+            requiredFirmware = emptyList(),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `beetle_pce_fast_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/beetle_pce_fast/{libretro.c," +
+                "mednafen,libretro-common}/* with upstream's own libretro/jni/Android.mk COREFLAGS " +
+                "(FRONTEND_SUPPORTS_RGB565, MEDNAFEN_VERSION, __LIBRETRO__, _LOW_ACCURACY_, INLINE=inline, " +
+                "WANT_PCE_FAST_EMU, NEED_CD, NEED_TREMOR) and upstream's own link.T version script; " +
+                "see third_party/cores/beetle_pce_fast/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "b9e8e6d4675fb90fde61cd7c807de7f5cf3111d722da017e41ca07858d9415c0",
+                "arm64-v8a" to "d53bfbb0ddbdc62b08fa4e9afa3dc685877fe663c76615e07e231cf6bc8db9dd",
+            ),
+            reviewedBy = "PROJECT-OWNER",
+            reviewedOn = "2026-07-31",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",

@@ -220,6 +220,23 @@ class RomRepositoryImplTest {
         }
 
         @Test
+        fun `the real, default resolver now approves tg16 for beetle_pce_fast since its Phase 7 review`() {
+            val tg16RomJson = """
+                {"id": 56, "fs_name": "game.pce", "fs_size_bytes": 4, "platform_slug": "tg16", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.pce", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(tg16RomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(56)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("beetle_pce_fast")
+        }
+
+        @Test
         fun `the real, default resolver still rejects a platform with no approved core`() {
             val n64RomJson = """
                 {"id": 51, "fs_name": "game.n64", "fs_size_bytes": 4, "platform_slug": "n64", "has_multiple_files": false,
