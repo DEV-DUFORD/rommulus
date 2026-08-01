@@ -6,26 +6,25 @@ import org.junit.jupiter.api.Test
 class CoreManifestTest {
 
     @Test
-    fun `SameBoy, Genesis Plus GX, Snes9x, fceumm, mgba, and stella are approved, following their individual license reviews`() {
+    fun `gambatte, Genesis Plus GX, Snes9x, fceumm, mgba, and stella are approved, following their individual license reviews`() {
+        // SameBoy was replaced by gambatte on 2026-08-01 (unapproved, retained pending retire-vs-retain).
         // PicoDrive and Mupen64Plus remain unreviewed/restricted starting facts from Phase 0
         // (LIBRETRO_REFACTOR.md section 4.1) — approving these six cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("sameboy", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella")
     }
 
     @Test
-    fun `SameBoy's approval records a named reviewer, date, commit, and permissive finding`() {
+    fun `SameBoy is unapproved after being replaced by gambatte on 2026-08-01`() {
         val sameboy = CoreManifest.findById("sameboy")
 
         assertThat(sameboy).isNotNull
-        assertThat(sameboy!!.approved).isTrue()
+        assertThat(sameboy!!.approved).isFalse()
         assertThat(sameboy.reviewedBy).isEqualTo("DEV-DUFORD")
         assertThat(sameboy.reviewedOn).isNotBlank()
         assertThat(sameboy.commitSha).isNotBlank()
         assertThat(sameboy.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
-        assertThat(sameboy.ownerRiskAcceptedBy).isBlank()
-        assertThat(sameboy.ownerRiskAcceptedOn).isBlank()
     }
 
     @Test
@@ -124,6 +123,26 @@ class CoreManifestTest {
         }
         assertThat(stella.supportedSystems).containsExactly("atari2600")
         assertThat(stella.releaseTag).isEqualTo("7.0")
+    }
+
+    @Test
+    fun `gambatte's approval records a named reviewer, commit, and permissive finding`() {
+        val gambatte = CoreManifest.findById("gambatte")
+
+        assertThat(gambatte).isNotNull
+        assertThat(gambatte!!.approved).isTrue()
+        assertThat(gambatte.reviewedBy).isEqualTo("DEV-DUFORD")
+        assertThat(gambatte.reviewedOn).isNotBlank()
+        assertThat(gambatte.commitSha).isNotBlank()
+        assertThat(gambatte.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(gambatte.ownerRiskAcceptedBy).isBlank()
+        assertThat(gambatte.ownerRiskAcceptedOn).isBlank()
+        assertThat(gambatte.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(gambatte.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(gambatte.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+        assertThat(gambatte.supportedSystems).containsExactly("gb", "gbc")
     }
 
     @Test

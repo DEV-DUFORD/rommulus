@@ -160,7 +160,9 @@ object CoreManifest {
             ),
             reviewedBy = "DEV-DUFORD",
             reviewedOn = "2026-07-28",
-            approved = true,
+            // Replaced by gambatte on 2026-08-01; retained unapproved pending owner
+            // confirmation of retire-vs-retain (app enforces one approved core per system).
+            approved = false,
         ),
         CoreLicenseFinding(
             coreName = "Genesis Plus GX",
@@ -356,6 +358,34 @@ object CoreManifest {
             binaryChecksums = mapOf(
                 "armeabi-v7a" to "29a5d2bdff2f532b0948b83f9e295ae9de74c263bcebd85ff1113991b47acc94",
                 "arm64-v8a" to "54c37d1015a47741da7048ac69a33548566691a94712ff5a7214bcde9c31bab6",
+            ),
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-08-01",
+            approved = true,
+        ),
+        CoreLicenseFinding(
+            coreName = "gambatte",
+            coreId = "gambatte",
+            upstreamRepository = "https://github.com/libretro/gambatte-libretro",
+            commitSha = "96174369b3c30d9fc57c926fa3379c273dc6a9a5",
+            releaseTag = "", // Upstream carries no release tags; commitSha is the exact pin.
+            licenseSummary = "GPL-2.0-only (root COPYING, Sindre Aamås, 'either version 2 of the License'). No non-commercial/no-sale restriction anywhere in the core. Mixed licensing with GPLv3 cc_resampler.c compiled unconditionally per Makefile.common SOURCES_C; FSF v2/v3 incompatibility noted but resolved under the project's separately-.so dynamically-loaded posture (each core loaded as an independently licensed shared object). Owner legal clearance recorded 2026-08-01 in third_party/cores/gambatte/VENDORING.md. Vendored subcomponents: blipper.c (MIT), libretro-common subtree (MIT). Only the files this core's Android libretro build actually compiles are vendored (no network code, no intl scripts, no CI/docs). Scope is cartridge-only: gb/gbc .gb/.gbc; .dmg advertised by upstream but not used by this app. See third_party/cores/gambatte/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("gb", "gbc"),
+            supportedExtensions = listOf(".gb", ".gbc"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `gambatte_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/gambatte/{libretro," +
+                "src,libretro-common}/* with upstream's own libretro/jni/Android.mk COREFLAGS " +
+                "(INLINE=inline, HAVE_STDINT_H, HAVE_INTTYPES_H, __LIBRETRO__, VIDEO_RGB565, " +
+                "CC_RESAMPLER_NO_HIGHPASS), -Wno-c++11-narrowing, -O2 -DNDEBUG, -std=c++11, " +
+                "and upstream's own link.T version script; see third_party/cores/gambatte/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "c9f9b61b8522fbf73a2121ac8768f4d1f4241333bef1c4eab090f6e8253ddcf4",
+                "arm64-v8a" to "b1bc8d892f12c3adccf7c01c8552ed13bbd4de2624b796b14453cd894fb4159e",
             ),
             reviewedBy = "DEV-DUFORD",
             reviewedOn = "2026-08-01",

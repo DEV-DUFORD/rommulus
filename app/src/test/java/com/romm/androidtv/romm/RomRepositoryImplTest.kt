@@ -121,7 +121,7 @@ class RomRepositoryImplTest {
         }
 
         @Test
-        fun `the real, default resolver (backed by the actual CoreManifest) approves gb for SameBoy since its Phase 4 review`() {
+        fun `the real, default resolver (backed by the actual CoreManifest) approves gb for gambatte since its Phase 7 review`() {
             server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson()))
             server.enqueue(MockResponse().setResponseCode(200).setBody("hello world!"))
 
@@ -131,7 +131,7 @@ class RomRepositoryImplTest {
             }
 
             assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
-            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("sameboy")
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("gambatte")
         }
 
         @Test
