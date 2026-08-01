@@ -230,6 +230,15 @@ class NativeLibretroHost {
             resolveBundledCoreSharedLibrary(context, "libmgba_core.so")
 
         /**
+         * Resolves an absolute, dlopen-able path to the bundled, approved
+         * Stella core (Atari 2600) — approved under its own GPL-2.0-only license
+         * (PERMISSIVE_OR_COPYLEFT_OK, no owner risk acceptance needed).
+         * Same run-from-apk extraction rationale as [resolveBundledTestCorePath].
+         */
+        fun resolveBundledStellaCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libstella_core.so")
+
+        /**
          * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
          * to its bundled shared-library path, or null if [coreId] has no
          * bundled core in this build. Deliberately does not fall back to any
@@ -242,14 +251,15 @@ class NativeLibretroHost {
             "snes9x" -> resolveBundledSnes9xCorePath(context)
             "fceumm" -> resolveBundledFceummCorePath(context)
             "mgba" -> resolveBundledMgbaCorePath(context)
+            "stella" -> resolveBundledStellaCorePath(context)
             else -> null
         }
 
         /**
          * Shared extraction logic for [resolveBundledTestCorePath],
          * [resolveBundledSameBoyCorePath], [resolveBundledGenesisPlusGxCorePath],
-         * [resolveBundledSnes9xCorePath], [resolveBundledFceummCorePath], and
-         * [resolveBundledMgbaCorePath]:
+         * [resolveBundledSnes9xCorePath], [resolveBundledFceummCorePath],
+         * [resolveBundledMgbaCorePath], and [resolveBundledStellaCorePath]:
          * every bundled core is a normal JNI
          * library shipped in the APK, extracted to app-private storage under
          * a name derived from [soFileName] so multiple cores never collide.

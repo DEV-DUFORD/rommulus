@@ -334,6 +334,34 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "Stella",
+            coreId = "stella",
+            upstreamRepository = "https://github.com/stella-emu/stella",
+            commitSha = "d55b1aec0d067a4c901a6dcdf81cb8f579685659",
+            releaseTag = "7.0",
+            licenseSummary = "GPL-2.0-only (root License.txt, version 2 without 'or later' clause). No non-commercial/no-sale restriction anywhere in the core. Vendored subcomponents: nlohmann/json (MIT), NanoJPEG (MIT). GPL-2.0-only is NOT GPL-3-compatible; this core ships as a separately-licensed dynamically-loaded .so behind the plugin-boundary model.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("atari2600"),
+            supportedExtensions = listOf(".a26", ".bin"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `stella_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/stella/**/* " +
+                "with upstream's own libretro build defines (ANDROID, __LIB_RETRO__, " +
+                "HAVE_STRINGS_H, SOUND_SUPPORT, GIT_VERSION=\"d55b1ae\"), -std=c++20, " +
+                "-fexceptions, and upstream's own link.T version script; see " +
+                "third_party/cores/stella/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "29a5d2bdff2f532b0948b83f9e295ae9de74c263bcebd85ff1113991b47acc94",
+                "arm64-v8a" to "54c37d1015a47741da7048ac69a33548566691a94712ff5a7214bcde9c31bab6",
+            ),
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-08-01",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",

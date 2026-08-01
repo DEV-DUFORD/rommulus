@@ -6,12 +6,12 @@ import org.junit.jupiter.api.Test
 class CoreManifestTest {
 
     @Test
-    fun `SameBoy, Genesis Plus GX, Snes9x, and fceumm are approved, following their individual license reviews`() {
+    fun `SameBoy, Genesis Plus GX, Snes9x, fceumm, mgba, and stella are approved, following their individual license reviews`() {
         // PicoDrive and Mupen64Plus remain unreviewed/restricted starting facts from Phase 0
-        // (LIBRETRO_REFACTOR.md section 4.1) — approving these four cores must not silently
+        // (LIBRETRO_REFACTOR.md section 4.1) — approving these six cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("sameboy", "genesis_plus_gx", "snes9x", "fceumm", "mgba")
+            .containsExactlyInAnyOrder("sameboy", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella")
     }
 
     @Test
@@ -103,6 +103,27 @@ class CoreManifestTest {
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
         }
         assertThat(mgba.supportedSystems).containsExactly("gba")
+    }
+
+    @Test
+    fun `stella's approval records a named reviewer, commit, and permissive finding`() {
+        val stella = CoreManifest.findById("stella")
+
+        assertThat(stella).isNotNull
+        assertThat(stella!!.approved).isTrue()
+        assertThat(stella.reviewedBy).isEqualTo("DEV-DUFORD")
+        assertThat(stella.reviewedOn).isNotBlank()
+        assertThat(stella.commitSha).isNotBlank()
+        assertThat(stella.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(stella.ownerRiskAcceptedBy).isBlank()
+        assertThat(stella.ownerRiskAcceptedOn).isBlank()
+        assertThat(stella.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(stella.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(stella.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+        assertThat(stella.supportedSystems).containsExactly("atari2600")
+        assertThat(stella.releaseTag).isEqualTo("7.0")
     }
 
     @Test
