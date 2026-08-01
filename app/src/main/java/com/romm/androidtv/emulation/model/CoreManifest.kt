@@ -266,6 +266,49 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "FCEUmm",
+            coreId = "fceumm",
+            upstreamRepository = "https://github.com/libretro/libretro-fceumm",
+            commitSha = "b5e3566515c27dc66c9c20572171673126532e06",
+            releaseTag = "", // Upstream carries no release tags; commitSha is the exact pin.
+            licenseSummary = "GPL-2.0-or-later (root Copying file, and every source header: " +
+                "'either version 2 of the License, or (at your option) any later version'). " +
+                "No non-commercial/no-sale/'personal use only' restriction anywhere in the " +
+                "core. Vendored subcomponents carry their own separate, permissive/copyleft- " +
+                "compatible licenses that add no further restriction: the vendored " +
+                "libretro-common subtree (src/drivers/libretro/libretro-common/) is MIT; " +
+                "Blargg's NTSC filter (src/ntsc/nes_ntsc.c, src/ntsc/license.txt) is " +
+                "LGPL-2.1-or-later; the YM2413 emulator (src/boards/emu2413.c) is covered by " +
+                "the core's own GPL-2.0-or-later. Upstream's bundled zlib is deliberately " +
+                "NOT compiled (HAVE_ZLIB is undefined; the build uses libretro-common's " +
+                "clean-room DEFLATE codec instead). Only the files this core's Android " +
+                "libretro build actually compiles are vendored (no top-level Makefiles, no " +
+                ".github/ CI, no intl/ scripts, no docs). Scope is cartridge-only: " +
+                "nes/famicom .nes and .unf; FDS (.fds, disksys.rom firmware) is excluded. " +
+                "See third_party/cores/fceumm/VENDORING.md for the complete file-by-file " +
+                "vendoring rationale and exclusions.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("nes"),
+            supportedExtensions = listOf(".nes", ".unf"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `fceumm_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/fceumm/src/**/* " +
+                "with upstream's own libretro build defines (__LIBRETRO__, HAVE_NTSC_FILTER, " +
+                "HAVE_HDPACK, FRONTEND_SUPPORTS_RGB565, PSS_STYLE=1, GIT_VERSION=\"b5e3566\") " +
+                "and upstream's own src/drivers/libretro/link.T version script; see " +
+                "third_party/cores/fceumm/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "ef64ee0e5ad2ab7550d853b6f1e286ad83c48c0f2e5762b338a706ec1b4f884a",
+                "arm64-v8a" to "3a89042bd09d51d0ae5bf21e8dca4f442a1cc2c1ba0def63d07b47fd451b5a5f",
+            ),
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-07-31",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",

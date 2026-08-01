@@ -6,12 +6,12 @@ import org.junit.jupiter.api.Test
 class CoreManifestTest {
 
     @Test
-    fun `SameBoy, Genesis Plus GX, and Snes9x are approved, following their individual license reviews`() {
+    fun `SameBoy, Genesis Plus GX, Snes9x, and fceumm are approved, following their individual license reviews`() {
         // PicoDrive and Mupen64Plus remain unreviewed/restricted starting facts from Phase 0
-        // (LIBRETRO_REFACTOR.md section 4.1) — approving these three cores must not silently
+        // (LIBRETRO_REFACTOR.md section 4.1) — approving these four cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("sameboy", "genesis_plus_gx", "snes9x")
+            .containsExactlyInAnyOrder("sameboy", "genesis_plus_gx", "snes9x", "fceumm")
     }
 
     @Test
