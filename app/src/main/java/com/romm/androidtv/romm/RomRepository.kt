@@ -111,7 +111,18 @@ class RomRepositoryImpl(
     private val resolveApprovedCoreId: (platformSlug: String) -> String? = { platformSlug ->
         CoreManifest.approvedEntries().find { it.supportedSystems.contains(platformSlug) }?.coreId
     },
+    /**
+     * Advanced, opt-in setting (`SettingsRepository.verifySha1OnLaunch`, off by
+     * default): whether to verify a ROM's declared `sha1_hash` before letting
+     * it launch. Read fresh on every [stageForLaunch] call (not captured at
+     * construction time) so toggling it in Settings takes effect immediately,
+     * without requiring an app restart.
+     */
+    private val verifySha1OnLaunch: () -> Boolean = { false },
 ) : RomRepository {
+
+    /** Returns [sha1] when the integrity check is enabled, or blank to skip it (see below). */
+    private fun effectiveDeclaredSha1(sha1: String): String = if (verifySha1OnLaunch()) sha1 else ""
 
     override suspend fun fetchRomMetadata(romId: Long): RomMetadataResult = withContext(Dispatchers.IO) {
         val origin = requireOrigin() ?: return@withContext RomMetadataResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
@@ -158,7 +169,7 @@ class RomRepositoryImpl(
         val cached = contentCache.findValidEntry(cacheKey)
         if (cached != null) {
             return@withContext when (
-                val resolution = resolveLaunchContentPath(File(cached.absolutePath), file.fileName, cached.contentHash, file.sha1Hash)
+                val resolution = resolveLaunchContentPath(File(cached.absolutePath), file.fileName, cached.contentHash, effectiveDeclaredSha1(file.sha1Hash))
             ) {
                 is ContentPathResolution.Success ->
                     StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId, file.fileName))
@@ -174,10 +185,12 @@ class RomRepositoryImpl(
 
         // RomM's declared sha1_hash describes the actual ROM content, not a compressed container —
         // for a zip/7z single file, that hash applies to the *extracted* bytes (verified after
-        // extraction below), never to the archive's own compressed bytes on the wire.
+        // extraction below), never to the archive's own compressed bytes on the wire. This whole
+        // check is gated behind the opt-in "verify SHA-1 on launch" advanced setting (off by
+        // default) via effectiveDeclaredSha1 — most users trust their library and don't need it.
         val isArchive = declaredExtension in EXTRACTABLE_ARCHIVE_EXTENSIONS
         val url = RommApi.romContentUrl(origin, romId, rom.fsName, fileIds = listOf(file.fileId))
-        val expectedDigests = if (!isArchive && file.sha1Hash.isNotBlank()) {
+        val expectedDigests = if (!isArchive && effectiveDeclaredSha1(file.sha1Hash).isNotBlank()) {
             mapOf(AtomicFileStore.SHA1 to file.sha1Hash)
         } else {
             emptyMap()
@@ -205,7 +218,7 @@ class RomRepositoryImpl(
                     contentHash = contentHash,
                     file = outcome.file,
                 )
-                when (val resolution = resolveLaunchContentPath(outcome.file, file.fileName, contentHash, file.sha1Hash)) {
+                when (val resolution = resolveLaunchContentPath(outcome.file, file.fileName, contentHash, effectiveDeclaredSha1(file.sha1Hash))) {
                     is ContentPathResolution.Success ->
                         StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId, file.fileName))
                     is ContentPathResolution.Failure -> resolution.outcome

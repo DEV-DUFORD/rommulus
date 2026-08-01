@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -98,7 +97,7 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 8.dp),
         )
 
-        TextField(
+        ControllerFriendlyTextField(
             value = uiState.originText,
             onValueChange = viewModel::onOriginTextChanged,
             label = { Text("Server address", color = RommTvColors.TextSecondary) },
@@ -256,7 +255,7 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        TextField(
+        ControllerFriendlyTextField(
             value = uiState.usernameText,
             onValueChange = viewModel::onUsernameTextChanged,
             label = { Text("Username", color = RommTvColors.TextSecondary) },
@@ -278,7 +277,7 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        TextField(
+        ControllerFriendlyTextField(
             value = uiState.passwordText,
             onValueChange = viewModel::onPasswordTextChanged,
             label = { Text("Password", color = RommTvColors.TextSecondary) },
@@ -362,6 +361,35 @@ fun SettingsScreen(
             androidx.compose.material3.Switch(
                 checked = uiState.hideUnsupportedSystems,
                 onCheckedChange = viewModel::onHideUnsupportedSystemsChanged,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ---- Advanced section ----
+        Text(
+            text = "Advanced",
+            style = MaterialTheme.typography.titleLarge,
+            color = RommTvColors.Romm300,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Verify ROM integrity (SHA-1) on launch", color = RommTvColors.TextPrimary)
+                Text(
+                    text = "Re-check each ROM's SHA-1 hash before playing and refuse to launch on a mismatch. " +
+                        "Off by default — most libraries never need this.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RommTvColors.TextSecondary,
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = uiState.verifySha1OnLaunch,
+                onCheckedChange = viewModel::onVerifySha1OnLaunchChanged,
             )
         }
 

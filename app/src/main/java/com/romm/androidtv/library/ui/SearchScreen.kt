@@ -23,7 +23,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -73,7 +72,7 @@ fun SearchScreen(
             .padding(24.dp),
     ) {
         // ---- Search input ----
-        TextField(
+        ControllerFriendlyTextField(
             value = uiState.query,
             onValueChange = viewModel::onQueryChanged,
             placeholder = {

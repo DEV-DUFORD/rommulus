@@ -206,7 +206,12 @@ class MainActivity : ComponentActivity() {
         ContentCache(filesDir.resolve("content_cache"), CacheDatabase(filesDir.resolve("content_cache/index.json")))
     }
     private val romRepository: RomRepositoryImpl by lazy {
-        RomRepositoryImpl(okHttpClient, sessionStore, contentCache)
+        RomRepositoryImpl(
+            okHttpClient,
+            sessionStore,
+            contentCache,
+            verifySha1OnLaunch = { settingsRepository.verifySha1OnLaunch() },
+        )
     }
 
     // Native browsing UI (UI_REFACTOR.md) — independent of romRepository, which is

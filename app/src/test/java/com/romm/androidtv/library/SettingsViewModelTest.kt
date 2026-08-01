@@ -52,6 +52,7 @@ class SettingsViewModelTest {
         var heartbeatCalls: Int = 0,
         var loginCalls: Int = 0,
         var loginSuccessInvoked: Boolean = false,
+        var verifySha1OnLaunch: Boolean = false,
     )
 
     private fun makeViewModel(
@@ -81,6 +82,8 @@ class SettingsViewModelTest {
             onLoginSuccess = { mocks.loginSuccessInvoked = true },
             buildDefaultOrigin = buildDefault,
             onSessionInvalidated = { mocks.invalidated = true },
+            getVerifySha1OnLaunch = { mocks.verifySha1OnLaunch },
+            setVerifySha1OnLaunchFn = { verify -> mocks.verifySha1OnLaunch = verify },
         )
 
         return vm to mocks
@@ -437,5 +440,25 @@ class SettingsViewModelTest {
 
         assertThat(mocks.loginCalls).isEqualTo(0)
         assertThat(vm.uiState.value.loginState).isInstanceOf(SettingsLoginState.Error::class.java)
+    }
+
+    @Test
+    fun `initial state loads verifySha1OnLaunch as false when nothing is persisted`() = runBlocking {
+        val (vm, _) = makeViewModel()
+
+        assertThat(vm.uiState.value.verifySha1OnLaunch).isFalse()
+    }
+
+    @Test
+    fun `onVerifySha1OnLaunchChanged persists the toggle and updates state immediately`() = runBlocking {
+        val (vm, mocks) = makeViewModel()
+
+        vm.onVerifySha1OnLaunchChanged(true)
+        assertThat(vm.uiState.value.verifySha1OnLaunch).isTrue()
+        assertThat(mocks.verifySha1OnLaunch).isTrue()
+
+        vm.onVerifySha1OnLaunchChanged(false)
+        assertThat(vm.uiState.value.verifySha1OnLaunch).isFalse()
+        assertThat(mocks.verifySha1OnLaunch).isFalse()
     }
 }

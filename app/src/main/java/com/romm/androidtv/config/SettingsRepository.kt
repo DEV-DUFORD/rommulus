@@ -59,9 +59,26 @@ class SettingsRepository(
         _hideUnsupportedSystemsFlow.value = hide
     }
 
+    /**
+     * Advanced, opt-in integrity check (off by default): when true,
+     * [com.romm.androidtv.romm.RomRepositoryImpl.stageForLaunch] verifies a
+     * ROM's declared `sha1_hash` (pre-download for a raw file, post-extraction
+     * for an archive) before letting it launch, and rejects a mismatch as
+     * [com.romm.androidtv.romm.StagingOutcome.CorruptedDownload]. This exists
+     * to catch real content corruption (e.g. a bad server-side re-scan/repack)
+     * but is unnecessary overhead for most users who already trust their
+     * library — hence off by default rather than mandatory.
+     */
+    fun verifySha1OnLaunch(): Boolean = prefs.getBoolean(KEY_VERIFY_SHA1, false)
+
+    fun setVerifySha1OnLaunch(verify: Boolean) {
+        prefs.edit().putBoolean(KEY_VERIFY_SHA1, verify).apply()
+    }
+
     companion object {
         const val PREFS_NAME = "romm_settings"
         private const val KEY_ORIGIN = "romm_origin"
         private const val KEY_HIDE_UNSUPPORTED = "hide_unsupported_systems"
+        private const val KEY_VERIFY_SHA1 = "verify_sha1_on_launch"
     }
 }

@@ -58,8 +58,8 @@ class RomRepositoryImplTest {
     /** A resolver that always approves "gb" for a fake "test-core", overriding the real (now partly-approved) CoreManifest for tests that need a stable, test-local core id. */
     private val alwaysApproveGb: (String) -> String? = { slug -> if (slug == "gb") "test-core" else null }
 
-    private fun repo(cache: ContentCache = newCache(), resolver: (String) -> String? = alwaysApproveGb) =
-        RomRepositoryImpl(client, sessionStore, cache, resolveApprovedCoreId = resolver)
+    private fun repo(cache: ContentCache = newCache(), resolver: (String) -> String? = alwaysApproveGb, verifySha1: Boolean = true) =
+        RomRepositoryImpl(client, sessionStore, cache, resolveApprovedCoreId = resolver, verifySha1OnLaunch = { verifySha1 })
 
     private fun singleFileRomJson(sha1: String = "") = """
         {
@@ -169,6 +169,23 @@ class RomRepositoryImplTest {
         }
 
         @Test
+        fun `the real, default resolver now approves nes for fceumm since its Phase 7 review`() {
+            val nesRomJson = """
+                {"id": 53, "fs_name": "game.nes", "fs_size_bytes": 4, "platform_slug": "nes", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.nes", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(nesRomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(53)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("fceumm")
+        }
+
+        @Test
         fun `the real, default resolver still rejects a platform with no approved core`() {
             val n64RomJson = """
                 {"id": 51, "fs_name": "game.n64", "fs_size_bytes": 4, "platform_slug": "n64", "has_multiple_files": false,
@@ -238,6 +255,19 @@ class RomRepositoryImplTest {
 
             assertThat(outcome).isInstanceOf(StagingOutcome.CorruptedDownload::class.java)
             assertThat(cacheRoot.walkTopDown().filter { it.isFile && it.name.endsWith(".gb") }.toList()).isEmpty()
+        }
+
+        @Test
+        fun `with the advanced SHA-1 check off (the real, off-by-default setting), a server sha1 mismatch is ignored and staging still succeeds`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson(sha1 = "0000wrong0000")))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("hello world!"))
+
+            // No verifySha1OnLaunch override: exercises RomRepositoryImpl's real default ({ false }).
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache(), resolveApprovedCoreId = alwaysApproveGb).stageForLaunch(42)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
         }
 
         @Test
@@ -317,6 +347,21 @@ class RomRepositoryImplTest {
 
             assertThat(outcome).isInstanceOf(StagingOutcome.CorruptedDownload::class.java)
             assertThat((outcome as StagingOutcome.CorruptedDownload).reason).contains("extracted content SHA-1 mismatch")
+        }
+
+        @Test
+        fun `with the advanced SHA-1 check off, a zip's extracted content mismatch is ignored and staging still succeeds`() {
+            val entryBytes = "GBROM-BYTES".toByteArray()
+            val zip = zipBytes("game.gb" to entryBytes)
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson("game.zip", zip.size.toLong(), "0000wrong0000")))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(zip)))
+
+            // No verifySha1OnLaunch override: exercises RomRepositoryImpl's real default ({ false }).
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache(), resolveApprovedCoreId = alwaysApproveGb).stageForLaunch(60)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
         }
 
         @Test

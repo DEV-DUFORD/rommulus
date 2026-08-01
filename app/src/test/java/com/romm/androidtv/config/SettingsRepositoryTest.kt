@@ -46,4 +46,22 @@ class SettingsRepositoryTest {
 
         assertThat(repo.currentProfile()).isEqualTo(ServerProfile.UNCONFIGURED)
     }
+
+    @Test
+    fun `verifySha1OnLaunch defaults to false`() {
+        val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "https://example.com")
+
+        assertThat(repo.verifySha1OnLaunch()).isFalse()
+    }
+
+    @Test
+    fun `setVerifySha1OnLaunch persists the toggle`() {
+        val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "https://example.com")
+
+        repo.setVerifySha1OnLaunch(true)
+        assertThat(repo.verifySha1OnLaunch()).isTrue()
+
+        repo.setVerifySha1OnLaunch(false)
+        assertThat(repo.verifySha1OnLaunch()).isFalse()
+    }
 }

@@ -64,6 +64,13 @@ data class SettingsUiState(
      * approved native core. Off by default.
      */
     val hideUnsupportedSystems: Boolean = false,
+    /**
+     * Advanced, opt-in setting (LIBRETRO_REFACTOR.md section 10): when true,
+     * [com.romm.androidtv.romm.RomRepositoryImpl.stageForLaunch] verifies a
+     * ROM's declared SHA-1 hash before launch and rejects a mismatch. Off by
+     * default — most users trust their library and don't need this overhead.
+     */
+    val verifySha1OnLaunch: Boolean = false,
 )
 
 /**
@@ -94,6 +101,8 @@ class SettingsViewModel(
     private val onSessionInvalidated: () -> Unit,
     private val getHideUnsupportedSystems: () -> Boolean = { false },
     private val setHideUnsupportedSystemsFn: (Boolean) -> Unit = {},
+    private val getVerifySha1OnLaunch: () -> Boolean = { false },
+    private val setVerifySha1OnLaunchFn: (Boolean) -> Unit = {},
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -112,6 +121,7 @@ class SettingsViewModel(
             currentOrigin = profile.origin,
             currentUsername = session?.username,
             hideUnsupportedSystems = getHideUnsupportedSystems(),
+            verifySha1OnLaunch = getVerifySha1OnLaunch(),
         )
     }
 
@@ -119,6 +129,12 @@ class SettingsViewModel(
     fun onHideUnsupportedSystemsChanged(hide: Boolean) {
         setHideUnsupportedSystemsFn(hide)
         _uiState.value = _uiState.value.copy(hideUnsupportedSystems = hide)
+    }
+
+    /** Toggles the opt-in "verify SHA-1 on launch" advanced setting and persists it immediately. */
+    fun onVerifySha1OnLaunchChanged(verify: Boolean) {
+        setVerifySha1OnLaunchFn(verify)
+        _uiState.value = _uiState.value.copy(verifySha1OnLaunch = verify)
     }
 
     /** Called on every TextField [onValueChange]. Validates and tracks dirty state. */
@@ -371,6 +387,8 @@ class SettingsViewModel(
                 onSessionInvalidated = onSessionInvalidated,
                 getHideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                 setHideUnsupportedSystemsFn = { hide -> settingsRepository.setHideUnsupportedSystems(hide) },
+                getVerifySha1OnLaunch = { settingsRepository.verifySha1OnLaunch() },
+                setVerifySha1OnLaunchFn = { verify -> settingsRepository.setVerifySha1OnLaunch(verify) },
             ) as T
         }
     }
