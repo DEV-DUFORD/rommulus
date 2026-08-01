@@ -221,6 +221,15 @@ class NativeLibretroHost {
             resolveBundledCoreSharedLibrary(context, "libfceumm_core.so")
 
         /**
+         * Resolves an absolute, dlopen-able path to the bundled, approved
+         * mGBA core (GBA) — approved under its own MPL-2.0 license
+         * (PERMISSIVE_OR_COPYLEFT_OK, no owner risk acceptance needed).
+         * Same run-from-apk extraction rationale as [resolveBundledTestCorePath].
+         */
+        fun resolveBundledMgbaCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libmgba_core.so")
+
+        /**
          * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
          * to its bundled shared-library path, or null if [coreId] has no
          * bundled core in this build. Deliberately does not fall back to any
@@ -232,13 +241,15 @@ class NativeLibretroHost {
             "genesis_plus_gx" -> resolveBundledGenesisPlusGxCorePath(context)
             "snes9x" -> resolveBundledSnes9xCorePath(context)
             "fceumm" -> resolveBundledFceummCorePath(context)
+            "mgba" -> resolveBundledMgbaCorePath(context)
             else -> null
         }
 
         /**
          * Shared extraction logic for [resolveBundledTestCorePath],
          * [resolveBundledSameBoyCorePath], [resolveBundledGenesisPlusGxCorePath],
-         * [resolveBundledSnes9xCorePath], and [resolveBundledFceummCorePath]:
+         * [resolveBundledSnes9xCorePath], [resolveBundledFceummCorePath], and
+         * [resolveBundledMgbaCorePath]:
          * every bundled core is a normal JNI
          * library shipped in the APK, extracted to app-private storage under
          * a name derived from [soFileName] so multiple cores never collide.

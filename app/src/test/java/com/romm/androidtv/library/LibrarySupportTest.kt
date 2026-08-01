@@ -33,6 +33,11 @@ class LibrarySupportTest {
     }
 
     @Test
+    fun `isPlatformNativelySupported returns true for mgba supported systems`() {
+        assertThat(isPlatformNativelySupported("gba")).isTrue()
+    }
+
+    @Test
     fun `isPlatformNativelySupported returns false for unsupported platforms`() {
         // PicoDrive and Mupen64Plus are still unapproved. Sega CD ("segacd")
         // is out of Genesis Plus GX's current CoreManifest scope (see

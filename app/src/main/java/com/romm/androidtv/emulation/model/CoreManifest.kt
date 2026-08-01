@@ -309,6 +309,31 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "mGBA",
+            coreId = "mgba",
+            upstreamRepository = "https://github.com/libretro/mgba",
+            commitSha = "32de792178a3662cd0402c8568fccfaad4a764a1",
+            releaseTag = "", // Upstream carries no usable release tags (only ancient 0.1.0/0.1.1 pre-releases).
+            licenseSummary = "The core is licensed under MPL-2.0 (file-level weak copyleft, no non-commercial restriction). Vendored subcomponents in the compiled subset: inih (BSD-3-Clause), crc32 by Gary S. Brown (Public Domain), MurmurHash3 by Austin Appleby (Public Domain). Two data-only files (hle-bios.c, gbk-table.c) carry no per-file license header and are covered by the project-level MPL-2.0 LICENSE. No GPL-incompatible or non-commercial-restricted components found in the compiled subset. GBA content launches without external BIOS via built-in HLE implementation; GB/GBC boot without BIOS (no hardware BIOS exists for those platforms).",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            supportedSystems = listOf("gba"),
+            supportedExtensions = listOf(".gba", ".agb"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `mgba_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mgba/*.{c,h} with " +
+                "upstream's own libretro preprocessor flags (-DLIBRETRO, _GNU_SOURCE, " +
+                "LIBRETRO_MGBA, HAS_MGBA=1) and upstream's own linker version script; see " +
+                "third_party/cores/mgba/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "bf9a821990caf8a1ca51b5a6912947eb2f4b2bd35a49f10b9ac84f5c11febb9d",
+                "arm64-v8a" to "945b570253d26ed16b997d56fda94ce7aa43794b6cabbf25b5225e11b18f7d88",
+            ),
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-07-31",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",

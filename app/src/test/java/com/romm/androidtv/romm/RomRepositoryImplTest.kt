@@ -186,6 +186,23 @@ class RomRepositoryImplTest {
         }
 
         @Test
+        fun `the real, default resolver now approves gba for mgba since its Phase 7 review`() {
+            val gbaRomJson = """
+                {"id": 54, "fs_name": "game.gba", "fs_size_bytes": 4, "platform_slug": "gba", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.gba", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(gbaRomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(54)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("mgba")
+        }
+
+        @Test
         fun `the real, default resolver still rejects a platform with no approved core`() {
             val n64RomJson = """
                 {"id": 51, "fs_name": "game.n64", "fs_size_bytes": 4, "platform_slug": "n64", "has_multiple_files": false,

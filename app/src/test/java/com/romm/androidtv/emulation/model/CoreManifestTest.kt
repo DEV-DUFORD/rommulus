@@ -11,7 +11,7 @@ class CoreManifestTest {
         // (LIBRETRO_REFACTOR.md section 4.1) — approving these four cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("sameboy", "genesis_plus_gx", "snes9x", "fceumm")
+            .containsExactlyInAnyOrder("sameboy", "genesis_plus_gx", "snes9x", "fceumm", "mgba")
     }
 
     @Test
@@ -64,6 +64,45 @@ class CoreManifestTest {
         assertThat(snes9x.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
         }
+    }
+
+    @Test
+    fun `fceumm's approval records a named reviewer, commit, and permissive finding`() {
+        val fceumm = CoreManifest.findById("fceumm")
+
+        assertThat(fceumm).isNotNull
+        assertThat(fceumm!!.approved).isTrue()
+        assertThat(fceumm.reviewedBy).isEqualTo("DEV-DUFORD")
+        assertThat(fceumm.reviewedOn).isNotBlank()
+        assertThat(fceumm.commitSha).isNotBlank()
+        assertThat(fceumm.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(fceumm.ownerRiskAcceptedBy).isBlank()
+        assertThat(fceumm.ownerRiskAcceptedOn).isBlank()
+        assertThat(fceumm.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(fceumm.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(fceumm.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+    }
+
+    @Test
+    fun `mgba's approval records a named reviewer, commit, and permissive finding`() {
+        val mgba = CoreManifest.findById("mgba")
+
+        assertThat(mgba).isNotNull
+        assertThat(mgba!!.approved).isTrue()
+        assertThat(mgba.reviewedBy).isEqualTo("DEV-DUFORD")
+        assertThat(mgba.reviewedOn).isNotBlank()
+        assertThat(mgba.commitSha).isNotBlank()
+        assertThat(mgba.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(mgba.ownerRiskAcceptedBy).isBlank()
+        assertThat(mgba.ownerRiskAcceptedOn).isBlank()
+        assertThat(mgba.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(mgba.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(mgba.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+        assertThat(mgba.supportedSystems).containsExactly("gba")
     }
 
     @Test
