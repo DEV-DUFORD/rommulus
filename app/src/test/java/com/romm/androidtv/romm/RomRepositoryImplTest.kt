@@ -322,6 +322,23 @@ class RomRepositoryImplTest {
         }
 
         @Test
+        fun `the real, default resolver now approves atari7800 for prosystem since its Phase 7 review`() {
+            val a78RomJson = """
+                {"id": 62, "fs_name": "game.a78", "fs_size_bytes": 4, "platform_slug": "atari7800", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.a78", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(a78RomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(62)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("prosystem")
+        }
+
+        @Test
         fun `the real, default resolver still rejects a platform with no approved core`() {
             val n64RomJson = """
                 {"id": 51, "fs_name": "game.n64", "fs_size_bytes": 4, "platform_slug": "n64", "has_multiple_files": false,

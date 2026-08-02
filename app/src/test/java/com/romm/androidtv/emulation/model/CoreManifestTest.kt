@@ -12,7 +12,7 @@ class CoreManifestTest {
         // (LIBRETRO_REFACTOR.md section 4.1) — approving these six cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem")
     }
 
     @Test
@@ -231,6 +231,28 @@ class CoreManifestTest {
         assertThat(handy.supportedSystems).containsExactly("lynx")
         assertThat(handy.supportedExtensions).containsExactly(".lnx", ".lyx", ".o")
         assertThat(handy.requiredFirmware).isEmpty()
+    }
+
+    @Test
+    fun `prosystem's approval records a named reviewer, commit, and permissive finding`() {
+        val prosystem = CoreManifest.findById("prosystem")
+
+        assertThat(prosystem).isNotNull
+        assertThat(prosystem!!.approved).isTrue()
+        assertThat(prosystem.reviewedBy).isEqualTo("PROJECT-OWNER")
+        assertThat(prosystem.reviewedOn).isNotBlank()
+        assertThat(prosystem.commitSha).isNotBlank()
+        assertThat(prosystem.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(prosystem.ownerRiskAcceptedBy).isBlank()
+        assertThat(prosystem.ownerRiskAcceptedOn).isBlank()
+        assertThat(prosystem.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(prosystem.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(prosystem.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+        assertThat(prosystem.supportedSystems).containsExactly("atari7800")
+        assertThat(prosystem.supportedExtensions).containsExactly(".a78", ".bin", ".cdf")
+        assertThat(prosystem.requiredFirmware).isEmpty()
     }
 
     @Test

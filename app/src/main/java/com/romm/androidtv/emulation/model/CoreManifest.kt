@@ -508,6 +508,34 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "ProSystem",
+            coreId = "prosystem",
+            upstreamRepository = "https://github.com/libretro/prosystem-libretro",
+            commitSha = "363b6dfbd3e240762e022c2b4897b4fe55722be3",
+            releaseTag = "", // Upstream has no release tags; commitSha is the exact pin.
+            licenseSummary = "GPL-2.0-or-later effective (core emulator code), bupboop audio library zlib, libretro-common subtree MIT; effective license GPL-2.0-or-later (GPL-3-compatible); no non-commercial/no-sale restriction anywhere; BIOS-free — optional HLE fallback; scope is Atari 7800 only; extensions .a78/.bin/.cdf; only the files this core's Android libretro build compiles are vendored (Makefiles and link.T preserved as build record; CI, docs, and desktop-only files excluded)",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("atari7800"),
+            supportedExtensions = listOf(".a78", ".bin", ".cdf"),
+            requiredFirmware = emptyList(),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `prosystem_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/prosystem/{core,bupboop," +
+                "libretro-common}/* C sources with defines ANDROID __LIBRETRO__ " +
+                "GIT_VERSION=\\\"363b6df\\\", -fsigned-char, " +
+                "and upstream's own libretro/link.T version script; see third_party/cores/prosystem/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "718a17cfbcf96f923eb2e03cd6cb12ad61b426a6dfeb87f1305900508cc3baf5",
+                "arm64-v8a" to "894cdbd1f779d5e764db88065a6fe2c40c379ca5294fbabae13bac61d4d1bb1b",
+            ),
+            reviewedBy = "PROJECT-OWNER",
+            reviewedOn = "2026-08-02",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",

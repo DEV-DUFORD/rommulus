@@ -1,0 +1,51 @@
+LIBRETRO_COMM_DIR := $(CORE_DIR)/../libretro-common
+BUPBOOP_DIR := $(CORE_DIR)/../bupboop
+
+INCFLAGS := -I$(CORE_DIR) \
+	    -I$(LIBRETRO_COMM_DIR)/include
+
+ifneq (,$(findstring msvc2003,$(platform)))
+INCFLAGS += -I$(LIBRETRO_COMM_DIR)/include/compat/msvc
+endif
+
+ifeq ($(platform),unix)
+LIBS += -lm
+endif
+
+SOURCES_C := \
+	$(CORE_DIR)/libretro.c \
+	$(CORE_DIR)/Bios.c \
+	$(CORE_DIR)/BupChip.c \
+	$(CORE_DIR)/Cartridge.c \
+	$(CORE_DIR)/Database.c \
+	$(CORE_DIR)/Hash.c \
+	$(CORE_DIR)/Maria.c \
+	$(CORE_DIR)/Memory.c \
+	$(CORE_DIR)/Palette.c \
+	$(CORE_DIR)/Pokey.c \
+	$(CORE_DIR)/ProSystem.c \
+	$(CORE_DIR)/Region.c \
+	$(CORE_DIR)/Riot.c \
+	$(CORE_DIR)/Sally.c \
+	$(CORE_DIR)/Tia.c
+
+SOURCES_C += \
+	$(BUPBOOP_DIR)/coretone/channel.c \
+	$(BUPBOOP_DIR)/coretone/coretone.c \
+	$(BUPBOOP_DIR)/coretone/music.c \
+	$(BUPBOOP_DIR)/coretone/sample.c
+
+SOURCES_C += \
+	$(LIBRETRO_COMM_DIR)/compat/compat_posix_string.c \
+	$(LIBRETRO_COMM_DIR)/compat/compat_strcasestr.c \
+	$(LIBRETRO_COMM_DIR)/compat/compat_snprintf.c \
+	$(LIBRETRO_COMM_DIR)/compat/compat_strl.c \
+	$(LIBRETRO_COMM_DIR)/compat/fopen_utf8.c \
+	$(LIBRETRO_COMM_DIR)/encodings/encoding_utf.c \
+	$(LIBRETRO_COMM_DIR)/file/file_path.c \
+	$(LIBRETRO_COMM_DIR)/file/file_path_io.c \
+	$(LIBRETRO_COMM_DIR)/streams/file_stream.c \
+	$(LIBRETRO_COMM_DIR)/streams/file_stream_transforms.c \
+	$(LIBRETRO_COMM_DIR)/string/stdstring.c \
+	$(LIBRETRO_COMM_DIR)/time/rtime.c \
+	$(LIBRETRO_COMM_DIR)/vfs/vfs_implementation.c

@@ -284,6 +284,15 @@ class NativeLibretroHost {
             resolveBundledCoreSharedLibrary(context, "libhandy_core.so")
 
         /**
+          * Resolves an absolute, dlopen-able path to the bundled, approved
+          * ProSystem core (Atari 7800) — approved under its own GPL-2.0-or-later license
+          * (PERMISSIVE_OR_COPYLEFT_OK, no owner risk acceptance needed).
+          * Same run-from-apk extraction rationale as [resolveBundledTestCorePath].
+          */
+        fun resolveBundledProsystemCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libprosystem_core.so")
+
+        /**
           * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
          * to its bundled shared-library path, or null if [coreId] has no
          * bundled core in this build. Deliberately does not fall back to any
@@ -302,6 +311,7 @@ class NativeLibretroHost {
             "mednafen_ngp" -> resolveBundledMednafenNgpCorePath(context)
             "mednafen_wswan" -> resolveBundledMednafenWswanCorePath(context)
             "handy" -> resolveBundledHandyCorePath(context)
+            "prosystem" -> resolveBundledProsystemCorePath(context)
             else -> null
         }
 
