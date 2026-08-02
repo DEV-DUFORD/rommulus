@@ -611,9 +611,9 @@ class SearchViewModelTest {
             // 4 supported (gb) + 4 unsupported (snes) = 8 total
             val mixedRoms = listOf(
                 LibraryRom(id = 1, title = "Pokemon", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 3, title = "Zelda LOR", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 4, title = "Streets of Rage", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 4, title = "Streets of Rage", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(mixedRoms, 8)))
 
@@ -633,9 +633,9 @@ class SearchViewModelTest {
             val repo = MockRepository()
             val mixedRoms = listOf(
                 LibraryRom(id = 1, title = "Pokemon", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 3, title = "Zelda LOR", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 4, title = "Streets of Rage", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 4, title = "Streets of Rage", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(mixedRoms, 8)))
 
@@ -656,14 +656,14 @@ class SearchViewModelTest {
             // Page 1: 2 supported + 2 unsupported
             val page1 = listOf(
                 LibraryRom(id = 1, title = "Pokemon", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 3, title = "Zelda LOR", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 4, title = "Phantasy Star", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 4, title = "Phantasy Star", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             // Page 2: 1 supported + 1 unsupported
             val page2 = listOf(
                 LibraryRom(id = 5, title = "Kirby Dream", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 6, title = "NBA Jam", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 6, title = "NBA Jam", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(page1, 6)))
             repo.enqueue(LibraryResult.Success(RomPage(page2, 6)))
@@ -691,7 +691,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepository()
             val unsupportedOnly = listOf(
-                LibraryRom(id = 1, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 1, title = "Sonic 2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 2, title = "Arcade Game", platformDisplayName = "Arcade", platformSlug = "arcade", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(unsupportedOnly, 2)))
@@ -712,7 +712,7 @@ class SearchViewModelTest {
             val repo = MockRepository()
             val mixedRoms = listOf(
                 LibraryRom(id = 1, title = "Pokemon", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
 
             // First search: toggle OFF — all results preserved
@@ -768,16 +768,16 @@ class SearchViewModelTest {
             // Page 1: 4 items, 2 supported (gb) + 2 unsupported (snes), total=8
             val page1 = listOf(
                 LibraryRom(id = 1, title = "GB1", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 3, title = "GB2", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 4, title = "Gen2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 4, title = "Gen2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             // Page 2: next 4 items at raw offset 4
             val page2 = listOf(
                 LibraryRom(id = 5, title = "GB3", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 6, title = "Gen3", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 6, title = "Gen3", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 7, title = "GB4", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 8, title = "Gen4", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 8, title = "Gen4", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(page1, 8)))
             repo.enqueue(LibraryResult.Success(RomPage(page2, 8)))
@@ -810,13 +810,13 @@ class SearchViewModelTest {
             val repo = MockRepositoryWithOffsets()
             // Page 1: all unsupported, total=4
             val page1 = listOf(
-                LibraryRom(id = 1, title = "Gen1", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Gen2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 1, title = "Gen1", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Gen2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             // Page 2: all unsupported
             val page2 = listOf(
-                LibraryRom(id = 3, title = "Gen3", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 4, title = "Gen4", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 3, title = "Gen3", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 4, title = "Gen4", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(page1, 4)))
             repo.enqueue(LibraryResult.Success(RomPage(page2, 4)))
@@ -854,7 +854,7 @@ class SearchViewModelTest {
             // Single page: 3 supported + 1 unsupported, total=4
             val page1 = listOf(
                 LibraryRom(id = 1, title = "GB1", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 3, title = "GB2", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 4, title = "GB3", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
@@ -879,7 +879,7 @@ class SearchViewModelTest {
             repo.enqueue(LibraryResult.Success(RomPage(
                 listOf(
                     LibraryRom(id = 1, title = "A1", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                    LibraryRom(id = 2, title = "G1", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                    LibraryRom(id = 2, title = "G1", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 ),
                 total = 4,
             )))
@@ -948,12 +948,12 @@ class SearchViewModelTest {
             // Page 1: mixed
             val page1 = listOf(
                 LibraryRom(id = 1, title = "GB1", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             // Page 2: mixed
             val page2 = listOf(
                 LibraryRom(id = 3, title = "GB2", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 4, title = "Gen2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 4, title = "Gen2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(page1, 4)))
             repo.enqueue(LibraryResult.Success(RomPage(page2, 4)))
@@ -996,9 +996,9 @@ class SearchViewModelTest {
             // Server returns 4 items, total=77; only 2 are supported (gb/gbc)
             val page1 = listOf(
                 LibraryRom(id = 1, title = "Pokemon", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 3, title = "Zelda LOR", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 4, title = "Streets of Rage", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 4, title = "Streets of Rage", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(page1, 77)))
 
@@ -1023,14 +1023,14 @@ class SearchViewModelTest {
             // Page 1: 2 supported + 2 unsupported, server total=8
             val page1 = listOf(
                 LibraryRom(id = 1, title = "GB1", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 3, title = "GB2", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 4, title = "Gen2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 4, title = "Gen2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             // Page 2: 3 supported + 1 unsupported
             val page2 = listOf(
                 LibraryRom(id = 5, title = "GB3", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 6, title = "Gen3", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 6, title = "Gen3", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 7, title = "GB4", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 8, title = "GB5", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
@@ -1065,7 +1065,7 @@ class SearchViewModelTest {
             val repo = MockRepository()
             val page1 = listOf(
                 LibraryRom(id = 1, title = "GB1", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Gen1", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(page1, 77)))
 
@@ -1087,7 +1087,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepository()
             val page1 = listOf(
-                LibraryRom(id = 1, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 1, title = "Sonic 2", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
                 LibraryRom(id = 2, title = "Arcade Game", platformDisplayName = "Arcade", platformSlug = "arcade", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(page1, 10)))

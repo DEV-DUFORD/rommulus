@@ -1,5 +1,7 @@
 #include "environment.h"
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <android/log.h>
 #include <cstring>
 #include <cstdarg>
@@ -12,6 +14,21 @@
 namespace romm {
 
 namespace {
+
+// Free functions used as callback implementations for the HW render callback.
+// Lambdas cannot be assigned to C function-pointer types, so these must be
+// plain functions with the correct signature.
+
+uintptr_t hwGetCurrentFramebuffer(void) {
+    // Default framebuffer (0) is what libretro-droid returns.
+    return 0;
+}
+
+retro_proc_address_t hwGetProcAddress(const char* sym) {
+    // eglGetProcAddress returns __eglMustCastToProperFunctionPointerType
+    // (aka void(*)()), which is the same as retro_proc_address_t.
+    return reinterpret_cast<retro_proc_address_t>(eglGetProcAddress(sym));
+}
 
 void retro_log_printf(enum retro_log_level level, const char* fmt, ...) {
     va_list args;
@@ -284,6 +301,90 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY: {
             // Defaults are registered, but this frontend has no core-options
             // UI whose per-option visibility can be changed.
+            return false;
+        }
+
+        // -------------------------------------------------------------------
+        // Hardware rendering (RETRO_ENVIRONMENT_SET_HW_RENDER) — required by
+        // GLideN64 (Mupen64Plus-Next). The glsm library in the core calls
+        // SET_HW_RENDER with a retro_hw_render_callback; we store it by value
+        // and wire in get_current_framebuffer / get_proc_address.
+        // -------------------------------------------------------------------
+
+        case RETRO_ENVIRONMENT_SET_HW_RENDER: {
+            auto* cb = static_cast<struct retro_hw_render_callback*>(data);
+            if (cb == nullptr) return false;
+
+            // Only accept OpenGL ES contexts.
+            switch (cb->context_type) {
+                case RETRO_HW_CONTEXT_OPENGLES2:
+                case RETRO_HW_CONTEXT_OPENGLES3:
+                case RETRO_HW_CONTEXT_OPENGLES_VERSION:
+                    break;
+                default:
+                    LOGW("SET_HW_RENDER: unsupported context type %u", cb->context_type);
+                    return false;
+            }
+
+            // Store the callback by value, then wire in our implementations
+            // for the fields the core expects the frontend to provide.
+            hwRenderCallback_ = *cb;
+            hwRenderCallback_.get_current_framebuffer = hwGetCurrentFramebuffer;
+            hwRenderCallback_.get_proc_address = hwGetProcAddress;
+            hwRenderActive_ = true;
+
+            LOGI("SET_HW_RENDER accepted: context_type=%u, version=%u.%u",
+                 hwRenderCallback_.context_type,
+                 hwRenderCallback_.version_major,
+                 hwRenderCallback_.version_minor);
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
+            // GLideN64/glsm may query this after SET_HW_RENDER to obtain the
+            // EGL context and proc-address function. The core casts the base
+            // struct to the GL-specific OpenGlEsHwRenderInterface layout.
+            auto** interface = static_cast<struct retro_hw_render_interface**>(data);
+            if (interface == nullptr) return false;
+
+            // Only meaningful for an OpenGL ES context that we actually host.
+            if (!hwRenderActive_) return false;
+            if (hwRenderCallback_.context_type != RETRO_HW_CONTEXT_OPENGLES3 &&
+                hwRenderCallback_.context_type != RETRO_HW_CONTEXT_OPENGLES_VERSION &&
+                hwRenderCallback_.context_type != RETRO_HW_CONTEXT_OPENGLES2) {
+                LOGW("GET_HW_RENDER_INTERFACE: unsupported context type %u",
+                     hwRenderCallback_.context_type);
+                return false;
+            }
+
+            // The EGL context is created lazily after SET_HW_RENDER; fetch it
+            // now (returns EGL_NO_CONTEXT until GlContextManager is ready).
+            if (!glContextProvider_) return false;
+            EGLContext eglContext = glContextProvider_();
+            if (eglContext == EGL_NO_CONTEXT) return false;
+
+            hwRenderInterface_.interface_type =
+                static_cast<enum retro_hw_render_interface_type>(RETRO_HW_RENDER_INTERFACE_OPENGLES);
+            hwRenderInterface_.interface_version = 1;
+            hwRenderInterface_.context = eglContext;
+            hwRenderInterface_.get_proc_address = hwGetProcAddress;
+
+            *interface = reinterpret_cast<struct retro_hw_render_interface*>(&hwRenderInterface_);
+            LOGI("GET_HW_RENDER_INTERFACE: returning OPENGLES interface (version 1)");
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
+            auto* type = static_cast<unsigned*>(data);
+            if (type == nullptr) return false;
+            *type = RETRO_HW_CONTEXT_OPENGLES3;
+            LOGI("GET_PREFERRED_HW_RENDER: returning OPENGLES3");
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE: {
+            // GLideN64 does not use context negotiation; Vulkan cores may.
+            // Log and reject so the core knows we don't support it.
             return false;
         }
 

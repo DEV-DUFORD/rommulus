@@ -585,13 +585,39 @@ object CoreManifest {
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",
-            commitSha = "",
-            licenseSummary = "GPL and component-specific licensing; requires component-by-component " +
-                "review. GPL components are naturally compatible with a GPLv3 application.",
-            commercialUseFinding = CommercialUseFinding.UNREVIEWED,
+            commitSha = "98c1b0d877542b01314b3b04272282ba223b65b3",
+            releaseTag = "", // Upstream carries no release tags; commitSha is the exact pin.
+            licenseSummary = "GPL-2.0-or-later effective: mupen64plus-core, GLideN64, rsp-hle, and " +
+                "the Angrylion renderer are GPL-2.0; the rsp-cxd4 plugin is CC0 1.0, the paraLLEl " +
+                "RSP is dual MIT/LGPL-3.0 (built under the MIT option), parallel-rdp is MIT, " +
+                "libretro-common is MIT, xxHash is CC0, and the bundled libpng/zlib carry their " +
+                "own permissive licenses — all add no further restriction on top of the effective " +
+                "GPL-2.0-or-later, which is compatible with a GPLv3 application. No " +
+                "non-commercial/no-sale restriction found anywhere in the compiled closure. The " +
+                "core runs PIF HLE, so no external firmware/BIOS is required. Only the files this " +
+                "core's Android libretro build compiles are vendored; see " +
+                "third_party/cores/mupen64plus_next/VENDORING.md.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
             supportedSystems = listOf("n64"),
-            supportedExtensions = listOf(".n64", ".z64", ".v64"),
-            approved = false,
+            supportedExtensions = listOf(".n64", ".z64", ".v64", ".bin", ".u1"),
+            requiredFirmware = emptyList(), // No BIOS required — mupen64plus_next runs PIF HLE; IPL3 is read from the ROM at offset 0x40
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds `mupen64plus_next_core` with upstream's " +
+                "Android.mk/Makefile.common source closure and flags: ARM/ARM64 dynarec " +
+                "(NEW_DYNAREC=3/4), paraLLEl RSP/RDP, LLE, Angrylion renderer, NEON on " +
+                "armeabi-v7a, GLES3 override, C++17, libretro VFS, upstream link.T version " +
+                "script, and 16 KiB maximum ELF page size; see " +
+                "third_party/cores/mupen64plus_next/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "c00c2cd1f2eafc2d950ebaf273f2c962f4fd3daf8becaf4736efa8c2549a2de7",
+                "arm64-v8a" to "de7395a403e38ad37cd066ac22fc2eb08c9d1a11e6566bbe30c88de3d971b519",
+            ),
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-08-02",
+            approved = true,
         ),
     )
 

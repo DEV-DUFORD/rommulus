@@ -152,8 +152,8 @@ class HomeViewModelToggleRefreshTest {
             platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false,
         )
         val unsupportedRom = LibraryRom(
-            id = 2, title = "Chrono Trigger", platformDisplayName = "N64",
-            platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false,
+            id = 2, title = "God of War", platformDisplayName = "PSP",
+            platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false,
         )
 
         val mockRepo = object : LibraryRepository {

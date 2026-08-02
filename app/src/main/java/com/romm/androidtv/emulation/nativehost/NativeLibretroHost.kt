@@ -296,6 +296,16 @@ class NativeLibretroHost {
             resolveBundledCoreSharedLibrary(context, "libprosystem_core.so")
 
         /**
+          * Resolves an absolute, dlopen-able path to the bundled, approved
+          * Mupen64Plus-Next core (Nintendo 64) — approved under its own
+          * GPL-2.0-or-later effective license (PERMISSIVE_OR_COPYLEFT_OK, no owner
+          * risk acceptance needed). Same run-from-apk extraction rationale as
+          * [resolveBundledTestCorePath].
+          */
+        fun resolveBundledMupen64PlusNextCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libmupen64plus_next_core.so")
+
+        /**
           * Resolves [coreId] (a [com.romm.androidtv.emulation.model.CoreLicenseFinding.coreId])
          * to its bundled shared-library path, or null if [coreId] has no
          * bundled core in this build. Deliberately does not fall back to any
@@ -316,6 +326,7 @@ class NativeLibretroHost {
             "mednafen_wswan" -> resolveBundledMednafenWswanCorePath(context)
             "handy" -> resolveBundledHandyCorePath(context)
             "prosystem" -> resolveBundledProsystemCorePath(context)
+            "mupen64plus_next" -> resolveBundledMupen64PlusNextCorePath(context)
             else -> null
         }
 

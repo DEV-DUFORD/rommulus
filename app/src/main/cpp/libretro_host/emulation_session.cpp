@@ -2,7 +2,9 @@
 #include "atomic_file_store.h"
 
 #include <android/log.h>
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 #define LOG_TAG "romm_emulation_session"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -81,6 +83,15 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         environment_.setCoreOptionOverride("pcsx_rearmed_memcard2", "none");
     }
 
+    if (systemInfo.library_name != nullptr &&
+        std::strcmp(systemInfo.library_name, "Mupen64Plus-Next") == 0) {
+        // GLideN64's threaded renderer spawns its own rendering thread,
+        // which conflicts with the libretro single-threaded model (the host
+        // owns the emulation thread and the EGL context). Disable it so
+        // GLideN64 draws on the host's thread where the context is current.
+        environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "False");
+    }
+
     fns.retro_set_environment(&EmulationSession::environmentTrampoline);
     fns.retro_set_video_refresh(&EmulationSession::videoRefreshTrampoline);
     fns.retro_set_audio_sample(&EmulationSession::audioSampleTrampoline);
@@ -137,6 +148,36 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
 void EmulationSession::runLoop() {
     FrameScheduler scheduler(avFps_);
 
+    // For hardware-rendering cores (GLideN64), we need an EGL context
+    // current on this thread. Create it now and make it current before
+    // entering the loop. The SurfaceView may attach its ANativeWindow
+    // slightly after the thread starts, so spin-wait briefly.
+    bool hwRender = environment_.isHardwareRendering();
+    if (hwRender) {
+        if (!glContext_.createDisplay()) {
+            LOGE("HW render: failed to create EGL display");
+            return;
+        }
+
+        // Make the negotiated EGL context available to the environment handler
+        // for RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE queries.
+        environment_.setGlContextProvider(
+                [this]() { return glContext_.eglContext(); });
+
+        // Wait up to ~5 seconds for the UI thread to attach the window
+        // via nativeSetSurface -> attachVideoWindow -> glContext_.attachWindow.
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!glContext_.hasSurface() && threadShouldRun_.load()) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                LOGE("HW render: timed out waiting for surface attachment");
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        glContext_.makeCurrent();
+    }
+
     while (threadShouldRun_.load()) {
         if (paused_.load()) {
             // Skip retro_run() entirely: the core never advances, so the last
@@ -158,6 +199,10 @@ void EmulationSession::runLoop() {
         }
 
         scheduler.waitForNextFrame();
+    }
+
+    if (hwRender) {
+        glContext_.unmakeCurrent();
     }
 }
 
@@ -196,6 +241,16 @@ void EmulationSession::stop() {
     }
 
     if (core_.isLoaded()) {
+        // For hardware-rendering cores, destroy the GL context before
+        // retro_deinit so the core's cleanup code can still use GL.
+        if (environment_.isHardwareRendering()) {
+            auto& cb = environment_.hwRenderCallbackMutable();
+            if (cb.context_destroy) {
+                cb.context_destroy();
+            }
+            glContext_.destroyDisplay();
+        }
+
         core_.functions().retro_unload_game();
         core_.functions().retro_deinit();
     }
@@ -252,11 +307,26 @@ size_t EmulationSession::serializeSize() {
 }
 
 void EmulationSession::attachVideoWindow(ANativeWindow* window) {
-    videoOutput_.attachWindow(window);
+    if (environment_.isHardwareRendering()) {
+        if (glContext_.attachWindow(window)) {
+            // Signal the core that the GL context is ready. The core's
+            // context_reset callback recreates all GL resources.
+            auto& cb = environment_.hwRenderCallbackMutable();
+            if (cb.context_reset) {
+                cb.context_reset();
+            }
+        }
+    } else {
+        videoOutput_.attachWindow(window);
+    }
 }
 
 void EmulationSession::detachVideoWindow() {
-    videoOutput_.detachWindow();
+    if (environment_.isHardwareRendering()) {
+        glContext_.detachWindow();
+    } else {
+        videoOutput_.detachWindow();
+    }
 }
 
 void EmulationSession::updateInputState(int port, int32_t buttonsMask, int16_t leftX,
@@ -310,8 +380,20 @@ void EmulationSession::videoRefreshTrampoline(const void* data, unsigned width, 
     self->diagnostics_.lastWidth.store(width, std::memory_order_relaxed);
     self->diagnostics_.lastHeight.store(height, std::memory_order_relaxed);
     self->diagnostics_.pixelFormat.store(static_cast<int>(self->environment_.pixelFormat()),
-                                          std::memory_order_relaxed);
-    self->videoOutput_.submitFrame(data, width, height, pitch, self->environment_.pixelFormat());
+                                           std::memory_order_relaxed);
+
+    if (self->environment_.isHardwareRendering()) {
+        // Hardware-rendering core (GLideN64): the core drew directly to the
+        // GL backbuffer. data is nullptr for HW rendering (the core doesn't
+        // pass pixel data — it's already in the GL framebuffer). We just
+        // swap the EGL front/back buffers to present the frame.
+        if (!self->glContext_.swapBuffers()) {
+            LOGE("HW render: swapBuffers failed — context may be lost");
+        }
+    } else {
+        // Software-rendering core: convert pixels and blit to ANativeWindow.
+        self->videoOutput_.submitFrame(data, width, height, pitch, self->environment_.pixelFormat());
+    }
     self->inFlightCallbacks_.fetch_sub(1, std::memory_order_relaxed);
 }
 

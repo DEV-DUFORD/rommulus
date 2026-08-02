@@ -16,6 +16,7 @@
 #include "core_library.h"
 #include "environment.h"
 #include "frame_scheduler.h"
+#include "gl_context.h"
 #include "input_state.h"
 #include "video_output.h"
 
@@ -179,6 +180,7 @@ private:
 
     VideoOutput videoOutput_;
     AudioOutput audioOutput_;
+    GlContextManager glContext_;
     InputState inputState_;
     double avFps_ = 60.0;
     double avSampleRate_ = 44100.0;

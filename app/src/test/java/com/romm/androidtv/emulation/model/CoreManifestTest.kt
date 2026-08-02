@@ -8,11 +8,11 @@ class CoreManifestTest {
     @Test
     fun `reviewed production cores including PCSX-ReARMed are approved`() {
         // SameBoy was replaced by gambatte on 2026-08-01 (unapproved, retained pending retire-vs-retain).
-        // PicoDrive and Mupen64Plus remain unreviewed/restricted starting facts from Phase 0
-        // (LIBRETRO_REFACTOR.md section 4.1) — approving these cores must not silently
+        // PicoDrive remains unreviewed/restricted starting facts from Phase 0
+        // (LIBRETRO_REFACTOR.md section 4.1) — approving this core must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem", "pcsx_rearmed")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem", "pcsx_rearmed", "mupen64plus_next")
     }
 
     @Test
@@ -273,6 +273,23 @@ class CoreManifestTest {
         assertThat(prosystem.supportedSystems).containsExactly("atari7800")
         assertThat(prosystem.supportedExtensions).containsExactly(".a78", ".bin", ".cdf")
         assertThat(prosystem.requiredFirmware).isEmpty()
+    }
+
+    @Test
+    fun `mupen64plus_next is approved for N64 with permissive finding and no required firmware`() {
+        val mupen64 = CoreManifest.findById("mupen64plus_next")
+
+        assertThat(mupen64).isNotNull
+        assertThat(mupen64!!.approved).isTrue()
+        assertThat(mupen64.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(mupen64.supportedSystems).contains("n64")
+        assertThat(mupen64.supportedExtensions).contains(".n64", ".bin")
+        assertThat(mupen64.requiredFirmware).isEmpty()
+        assertThat(mupen64.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(mupen64.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(mupen64.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
     }
 
     @Test

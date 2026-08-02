@@ -72,8 +72,8 @@ class LibrarySupportTest {
 
     @Test
     fun `isPlatformNativelySupported returns false for unsupported platforms`() {
-        // PicoDrive and Mupen64Plus are still unapproved.
-        assertThat(isPlatformNativelySupported("n64")).isFalse()
+        // PicoDrive and PPSSPP are still unapproved.
+        assertThat(isPlatformNativelySupported("psp")).isFalse()
         assertThat(isPlatformNativelySupported("32x")).isFalse()
     }
 
@@ -117,13 +117,13 @@ class LibrarySupportTest {
             LibraryRom(id = 1, title = "Pokemon Red", platformDisplayName = "Game Boy", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             LibraryRom(id = 2, title = "Sonic 2", platformDisplayName = "Genesis", platformSlug = "genesis", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             LibraryRom(id = 3, title = "Link's Awakening", platformDisplayName = "Game Boy Color", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-            LibraryRom(id = 4, title = "Chrono Trigger", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 4, title = "God of War", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
         )
 
         val filtered = roms.filterUnsupportedIfHidden(hide = true)
 
         // Genesis Plus GX is now approved, so "genesis" is supported alongside "gb"/"gbc";
-        // "n64" (Snes9x, still unapproved) remains filtered out.
+        // "psp" (PPSSPP, still unapproved) remains filtered out.
         assertThat(filtered).hasSize(3)
         assertThat(filtered.map { it.title }).containsExactly("Pokemon Red", "Sonic 2", "Link's Awakening")
     }
@@ -133,7 +133,7 @@ class LibrarySupportTest {
         val roms = listOf(
             LibraryRom(id = 3, title = "Link's Awakening", platformDisplayName = "GBC", platformSlug = "gbc", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             LibraryRom(id = 1, title = "Pokemon Red", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-            LibraryRom(id = 5, title = "Chrono Trigger", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 5, title = "God of War", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             LibraryRom(id = 2, title = "Yoshi Island", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
         )
 
@@ -145,8 +145,8 @@ class LibrarySupportTest {
     @Test
     fun `filterUnsupportedIfHidden with hide true returns empty list when no supported platforms`() {
         val roms = listOf(
-            LibraryRom(id = 1, title = "Chrono Trigger", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-            LibraryRom(id = 2, title = "Zelda OoT", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 1, title = "God of War", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+            LibraryRom(id = 2, title = "Motorcycle", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
         )
 
         assertThat(roms.filterUnsupportedIfHidden(hide = true)).isEmpty()
@@ -198,13 +198,13 @@ class LibrarySupportTest {
             PlatformSummary(id = 1, displayName = "Game Boy", romCount = 50, logoUrl = null, slug = "gb"),
             PlatformSummary(id = 2, displayName = "Genesis", romCount = 30, logoUrl = null, slug = "genesis"),
             PlatformSummary(id = 3, displayName = "GB Color", romCount = 40, logoUrl = null, slug = "gbc"),
-            PlatformSummary(id = 4, displayName = "N64", romCount = 20, logoUrl = null, slug = "n64"),
+            PlatformSummary(id = 4, displayName = "PSP", romCount = 20, logoUrl = null, slug = "psp"),
         )
 
         val filtered = platforms.filterUnsupportedPlatformsIfHidden(hide = true)
 
         // Genesis Plus GX is now approved, so "genesis" is supported alongside "gb"/"gbc";
-        // "n64" (Snes9x, still unapproved) remains filtered out.
+        // "psp" (PPSSPP, still unapproved) remains filtered out.
         assertThat(filtered).hasSize(3)
         assertThat(filtered.map { it.displayName }).containsExactly("Game Boy", "Genesis", "GB Color")
     }
@@ -239,7 +239,7 @@ class LibrarySupportTest {
     fun `PlatformSummary filterUnsupportedPlatformsIfHidden retains supported platform with zero games`() {
         val platforms = listOf(
             PlatformSummary(id = 1, displayName = "Game Boy", romCount = 0, logoUrl = null, slug = "gb"),
-            PlatformSummary(id = 2, displayName = "N64", romCount = 30, logoUrl = null, slug = "n64"),
+            PlatformSummary(id = 2, displayName = "PSP", romCount = 30, logoUrl = null, slug = "psp"),
         )
 
         val filtered = platforms.filterUnsupportedPlatformsIfHidden(hide = true)

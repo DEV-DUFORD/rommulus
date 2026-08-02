@@ -65,7 +65,7 @@ class RomGridViewModelToggleRefreshTest {
         LibraryRom(id = id, title = "Game $id", platformDisplayName = "GB", platformSlug = "gb", coverUrl = null, lastPlayedIso = null, nowPlaying = false)
 
     private fun makeUnsupportedRom(id: Long): LibraryRom =
-        LibraryRom(id = id, title = "Game $id", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false)
+        LibraryRom(id = id, title = "Game $id", platformDisplayName = "PSP", platformSlug = "psp", coverUrl = null, lastPlayedIso = null, nowPlaying = false)
 
     @Test
     fun `OFF to ON toggle triggers grid refresh`() {

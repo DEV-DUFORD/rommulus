@@ -340,17 +340,17 @@ class RomRepositoryImplTest {
 
         @Test
         fun `the real, default resolver still rejects a platform with no approved core`() {
-            val n64RomJson = """
-                {"id": 51, "fs_name": "game.n64", "fs_size_bytes": 4, "platform_slug": "n64", "has_multiple_files": false,
-                 "files": [{"id": 1, "file_name": "game.n64", "file_size_bytes": 4, "is_top_level": true}]}
+            val pspRomJson = """
+                {"id": 51, "fs_name": "game.iso", "fs_size_bytes": 4, "platform_slug": "psp", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.iso", "file_size_bytes": 4, "is_top_level": true}]}
             """.trimIndent()
-            server.enqueue(MockResponse().setResponseCode(200).setBody(n64RomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(pspRomJson))
 
             val outcome = runBlocking {
                 RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(51)
             }
 
-            assertThat(outcome).isEqualTo(StagingOutcome.NoApprovedCore("n64"))
+            assertThat(outcome).isEqualTo(StagingOutcome.NoApprovedCore("psp"))
         }
     }
 
