@@ -33,9 +33,66 @@ void retro_log_printf(enum retro_log_level level, const char* fmt, ...) {
     }
 }
 
+void registerLegacyOptions(
+        std::unordered_map<std::string, std::string>& values,
+        const struct retro_variable* variables) {
+    if (variables == nullptr) return;
+
+    for (const struct retro_variable* variable = variables;
+         variable->key != nullptr;
+         ++variable) {
+        if (variable->value == nullptr) continue;
+
+        const char* separator = std::strchr(variable->value, ';');
+        if (separator == nullptr) continue;
+
+        const char* defaultValue = separator + 1;
+        while (*defaultValue == ' ') ++defaultValue;
+        const char* end = std::strchr(defaultValue, '|');
+        values[variable->key] =
+                end == nullptr ? defaultValue : std::string(defaultValue, end);
+    }
+}
+
+void registerV1Options(
+        std::unordered_map<std::string, std::string>& values,
+        const struct retro_core_option_definition* definitions) {
+    if (definitions == nullptr) return;
+
+    for (const struct retro_core_option_definition* definition = definitions;
+         definition->key != nullptr;
+         ++definition) {
+        const char* defaultValue = definition->default_value != nullptr
+                ? definition->default_value
+                : definition->values[0].value;
+        if (defaultValue != nullptr) values[definition->key] = defaultValue;
+    }
+}
+
+void registerV2Options(
+        std::unordered_map<std::string, std::string>& values,
+        const struct retro_core_option_v2_definition* definitions) {
+    if (definitions == nullptr) return;
+
+    for (const struct retro_core_option_v2_definition* definition = definitions;
+         definition->key != nullptr;
+         ++definition) {
+        const char* defaultValue = definition->default_value != nullptr
+                ? definition->default_value
+                : definition->values[0].value;
+        if (defaultValue != nullptr) values[definition->key] = defaultValue;
+    }
+}
+
 }  // namespace
 
 EnvironmentHandler::EnvironmentHandler() = default;
+
+void EnvironmentHandler::setCoreOptionOverride(
+        const std::string& key, const std::string& value) {
+    coreOptionOverrides_[key] = value;
+    coreOptionValues_[key] = value;
+}
 
 bool EnvironmentHandler::handle(unsigned cmd, void* data) {
     switch (cmd) {
@@ -69,19 +126,79 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
         }
 
         case RETRO_ENVIRONMENT_SET_VARIABLES: {
-            // No configurable core options in Phase 2; acknowledge so the core
-            // doesn't treat this as a hard failure.
+            registerLegacyOptions(
+                    coreOptionValues_,
+                    static_cast<const struct retro_variable*>(data));
+            for (const auto& overrideValue : coreOptionOverrides_) {
+                coreOptionValues_[overrideValue.first] = overrideValue.second;
+            }
             return true;
         }
 
         case RETRO_ENVIRONMENT_GET_VARIABLE: {
+            if (data == nullptr) return true;
+
             auto* var = static_cast<struct retro_variable*>(data);
             var->value = nullptr;
-            return false;  // no variables defined yet
+            if (var->key != nullptr) {
+                const auto value = coreOptionValues_.find(var->key);
+                if (value != coreOptionValues_.end()) {
+                    var->value = value->second.c_str();
+                }
+            }
+            return true;
         }
 
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE: {
             *static_cast<bool*>(data) = false;
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION: {
+            if (data == nullptr) return false;
+            *static_cast<unsigned*>(data) = 2;
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS: {
+            registerV1Options(
+                    coreOptionValues_,
+                    static_cast<const struct retro_core_option_definition*>(data));
+            for (const auto& overrideValue : coreOptionOverrides_) {
+                coreOptionValues_[overrideValue.first] = overrideValue.second;
+            }
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL: {
+            if (data == nullptr) return true;
+            const auto* options = static_cast<const struct retro_core_options_intl*>(data);
+            registerV1Options(coreOptionValues_, options->us);
+            for (const auto& overrideValue : coreOptionOverrides_) {
+                coreOptionValues_[overrideValue.first] = overrideValue.second;
+            }
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2: {
+            if (data == nullptr) return true;
+            const auto* options = static_cast<const struct retro_core_options_v2*>(data);
+            registerV2Options(coreOptionValues_, options->definitions);
+            for (const auto& overrideValue : coreOptionOverrides_) {
+                coreOptionValues_[overrideValue.first] = overrideValue.second;
+            }
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL: {
+            if (data == nullptr) return true;
+            const auto* options = static_cast<const struct retro_core_options_v2_intl*>(data);
+            if (options->us != nullptr) {
+                registerV2Options(coreOptionValues_, options->us->definitions);
+            }
+            for (const auto& overrideValue : coreOptionOverrides_) {
+                coreOptionValues_[overrideValue.first] = overrideValue.second;
+            }
             return true;
         }
 
@@ -164,24 +281,9 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
             return false;
         }
 
-        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS:
-        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL:
-        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2:
-        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL: {
-            // No configurable core options UI exists yet; returning false
-            // here is safe and expected — SameBoy's own
-            // libretro_set_core_options() helper falls back to the already-
-            // handled RETRO_ENVIRONMENT_SET_VARIABLES path when every one of
-            // these newer commands is unsupported, and simply runs with its
-            // compiled-in option defaults.
-            return false;
-        }
-
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY: {
-            // Dynamically show/hide a previously-registered option; since no
-            // options were ever registered (above), there is nothing to
-            // display or hide. SameBoy's own call site ignores this
-            // command's return value, so returning false is safe.
+            // Defaults are registered, but this frontend has no core-options
+            // UI whose per-option visibility can be changed.
             return false;
         }
 

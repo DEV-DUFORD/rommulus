@@ -692,7 +692,7 @@ class SearchViewModelTest {
             val repo = MockRepository()
             val unsupportedOnly = listOf(
                 LibraryRom(id = 1, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Crash Bandicoot", platformDisplayName = "PSX", platformSlug = "psx", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Arcade Game", platformDisplayName = "Arcade", platformSlug = "arcade", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(unsupportedOnly, 2)))
 
@@ -1088,7 +1088,7 @@ class SearchViewModelTest {
             val repo = MockRepository()
             val page1 = listOf(
                 LibraryRom(id = 1, title = "Sonic 2", platformDisplayName = "N64", platformSlug = "n64", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
-                LibraryRom(id = 2, title = "Crash", platformDisplayName = "PSX", platformSlug = "psx", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
+                LibraryRom(id = 2, title = "Arcade Game", platformDisplayName = "Arcade", platformSlug = "arcade", coverUrl = null, lastPlayedIso = null, nowPlaying = false),
             )
             repo.enqueue(LibraryResult.Success(RomPage(page1, 10)))
 

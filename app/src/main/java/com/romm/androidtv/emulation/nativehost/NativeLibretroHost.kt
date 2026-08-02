@@ -200,6 +200,9 @@ class NativeLibretroHost {
         fun resolveBundledGenesisPlusGxCorePath(context: Context): String =
             resolveBundledCoreSharedLibrary(context, "libgenesis_plus_gx_core.so")
 
+        fun resolveBundledPcsxRearmedCorePath(context: Context): String =
+            resolveBundledCoreSharedLibrary(context, "libpcsx_rearmed_core.so")
+
         /**
          * Resolves an absolute, dlopen-able path to the bundled, approved
          * Snes9x core (LIBRETRO_REFACTOR.md section 13, Phase 7) — approved
@@ -302,6 +305,7 @@ class NativeLibretroHost {
         fun resolveBundledCorePathForCoreId(context: Context, coreId: String): String? = when (coreId) {
             "sameboy" -> resolveBundledSameBoyCorePath(context)
             "genesis_plus_gx" -> resolveBundledGenesisPlusGxCorePath(context)
+            "pcsx_rearmed" -> resolveBundledPcsxRearmedCorePath(context)
             "snes9x" -> resolveBundledSnes9xCorePath(context)
             "fceumm" -> resolveBundledFceummCorePath(context)
             "mgba" -> resolveBundledMgbaCorePath(context)

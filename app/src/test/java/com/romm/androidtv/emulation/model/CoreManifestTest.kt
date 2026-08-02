@@ -6,13 +6,13 @@ import org.junit.jupiter.api.Test
 class CoreManifestTest {
 
     @Test
-    fun `gambatte, Genesis Plus GX, Snes9x, fceumm, mgba, and stella are approved, following their individual license reviews`() {
+    fun `reviewed production cores including PCSX-ReARMed are approved`() {
         // SameBoy was replaced by gambatte on 2026-08-01 (unapproved, retained pending retire-vs-retain).
         // PicoDrive and Mupen64Plus remain unreviewed/restricted starting facts from Phase 0
-        // (LIBRETRO_REFACTOR.md section 4.1) — approving these six cores must not silently
+        // (LIBRETRO_REFACTOR.md section 4.1) — approving these cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem", "pcsx_rearmed")
     }
 
     @Test
@@ -249,6 +249,26 @@ class CoreManifestTest {
         assertThat(prosystem.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(prosystem.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+
+        @Test
+        fun `PCSX-ReARMed resolves the RomM PSX platform with the compiled media and BIOS contract`() {
+            val pcsx = CoreManifest.findById("pcsx_rearmed")
+
+            assertThat(pcsx).isNotNull
+            assertThat(pcsx!!.approved).isTrue()
+            assertThat(pcsx.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+            assertThat(pcsx.supportedSystems).containsExactly("psx")
+            assertThat(pcsx.supportedExtensions).contains(".chd", ".pbp", ".cue", ".bin")
+            assertThat(pcsx.requiredFirmware).containsExactly(
+                "scph5500.bin", "scph5501.bin", "scph5502.bin",
+                "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
+            )
+            assertThat(pcsx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+            assertThat(pcsx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+            assertThat(pcsx.binaryChecksums.values).allSatisfy { checksum ->
+                assertThat(checksum).hasSize(64)
+            }
         }
         assertThat(prosystem.supportedSystems).containsExactly("atari7800")
         assertThat(prosystem.supportedExtensions).containsExactly(".a78", ".bin", ".cdf")

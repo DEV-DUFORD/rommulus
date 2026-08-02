@@ -19,6 +19,7 @@ class LibrarySupportTest {
         assertThat(isPlatformNativelySupported("megadrive")).isTrue()
         assertThat(isPlatformNativelySupported("sms")).isTrue()
         assertThat(isPlatformNativelySupported("gamegear")).isTrue()
+        assertThat(isPlatformNativelySupported("segacd")).isTrue()
     }
 
     @Test
@@ -71,12 +72,9 @@ class LibrarySupportTest {
 
     @Test
     fun `isPlatformNativelySupported returns false for unsupported platforms`() {
-        // PicoDrive and Mupen64Plus are still unapproved. Sega CD ("segacd")
-        // is out of Genesis Plus GX's current CoreManifest scope (see
-        // third_party/cores/genesis_plus_gx/VENDORING.md, "Deliberately excluded").
+        // PicoDrive and Mupen64Plus are still unapproved.
         assertThat(isPlatformNativelySupported("n64")).isFalse()
         assertThat(isPlatformNativelySupported("32x")).isFalse()
-        assertThat(isPlatformNativelySupported("segacd")).isFalse()
     }
 
     @Test
@@ -87,7 +85,6 @@ class LibrarySupportTest {
 
     @Test
     fun `isPlatformNativelySupported returns false for unknown slug not in any manifest entry`() {
-        assertThat(isPlatformNativelySupported("psx")).isFalse()
         assertThat(isPlatformNativelySupported("arcade")).isFalse()
         assertThat(isPlatformNativelySupported("nonexistent")).isFalse()
     }

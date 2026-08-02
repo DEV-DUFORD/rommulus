@@ -55,6 +55,8 @@ data class FirmwareInfo(
     val sha1Hash: String,
     val md5Hash: String,
     val crcHash: String,
+    val isVerified: Boolean,
+    val missingFromFs: Boolean = false,
 )
 
 sealed interface RomInfoResult {
@@ -65,6 +67,11 @@ sealed interface RomInfoResult {
 sealed interface FirmwareListResult {
     data class Success(val firmware: List<FirmwareInfo>) : FirmwareListResult
     data class Failure(val error: RommApiError, val httpCode: Int? = null) : FirmwareListResult
+}
+
+sealed interface PlatformIdResult {
+    data class Success(val platformId: Long?) : PlatformIdResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : PlatformIdResult
 }
 
 /** Error classification shared by every RommApi network call. */
@@ -108,6 +115,15 @@ internal data class FirmwareJson(
     val sha1_hash: String? = null,
     val md5_hash: String? = null,
     val crc_hash: String? = null,
+    val is_verified: Boolean = false,
+    val missing_from_fs: Boolean = false,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class PlatformIdentityJson(
+    val id: Long = 0,
+    val slug: String = "",
+    val fs_slug: String = "",
 )
 
 object RommApi {
@@ -117,6 +133,7 @@ object RommApi {
         .build()
     private val romAdapter = moshi.adapter<RomJson>()
     private val firmwareListAdapter = moshi.adapter<List<FirmwareJson>>()
+    private val platformListAdapter = moshi.adapter<List<PlatformIdentityJson>>()
 
     /** Parses the JSON body of `GET /api/roms/{id}`. Returns null on any malformed input. */
     fun parseRomInfo(body: String): RomInfo? {
@@ -150,7 +167,7 @@ object RommApi {
     fun parseFirmwareList(body: String): List<FirmwareInfo>? {
         return try {
             val json = firmwareListAdapter.fromJson(body.trim()) ?: return null
-            json.map {
+            json.filterNot { it.missing_from_fs }.map {
                 FirmwareInfo(
                     firmwareId = it.id,
                     fileName = it.file_name,
@@ -158,8 +175,21 @@ object RommApi {
                     sha1Hash = it.sha1_hash.orEmpty(),
                     md5Hash = it.md5_hash.orEmpty(),
                     crcHash = it.crc_hash.orEmpty(),
+                    isVerified = it.is_verified,
+                    missingFromFs = it.missing_from_fs,
                 )
             }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun parsePlatformId(body: String, platformSlug: String): Long? {
+        return try {
+            platformListAdapter.fromJson(body.trim())
+                ?.firstOrNull { it.slug == platformSlug || it.fs_slug == platformSlug }
+                ?.id
+                ?.takeIf { it > 0 }
         } catch (_: Exception) {
             null
         }
@@ -199,6 +229,7 @@ object RommApi {
             append("$normalizedOrigin/api/firmware")
             if (platformId != null) append("?platform_id=$platformId")
         }
+
         val request = okhttp3.Request.Builder().url(url).get().build()
 
         return try {
@@ -211,6 +242,20 @@ object RommApi {
             }
         } catch (e: IOException) {
             FirmwareListResult.Failure(classifyIOException(e))
+        }
+    }
+
+    fun fetchPlatformId(client: okhttp3.OkHttpClient, origin: String, platformSlug: String): PlatformIdResult {
+        if (origin.isBlank()) return PlatformIdResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val normalizedOrigin = RommOrigin.parse(origin)?.toUrl() ?: origin.removeSuffix("/")
+        val request = okhttp3.Request.Builder().url("$normalizedOrigin/api/platforms").get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                classifyResponse(response)?.let { return PlatformIdResult.Failure(it, response.code) }
+                PlatformIdResult.Success(response.body?.string()?.let { parsePlatformId(it, platformSlug) })
+            }
+        } catch (e: IOException) {
+            PlatformIdResult.Failure(classifyIOException(e))
         }
     }
 

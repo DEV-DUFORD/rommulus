@@ -43,21 +43,22 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         return false;
     }
 
-    // Content is read into memory *before* touching the core at all, so a
-    // missing/unreadable file fails cleanly without ever calling retro_init()
-    // on a core we'd then have to tear down again.
-    std::vector<uint8_t> contentBuffer;
-    if (!contentPath.empty()) {
-        if (!readWholeFile(contentPath, contentBuffer)) {
-            lastError_ = "failed to read content file: " + contentPath;
-            LOGE("%s", lastError_.c_str());
-            return false;
-        }
-    }
-
     if (!core_.load(corePath)) {
         lastError_ = core_.lastError();
         LOGE("core load failed: %s", lastError_.c_str());
+        return false;
+    }
+
+    const CoreFunctions& fns = core_.functions();
+    struct retro_system_info systemInfo {};
+    fns.retro_get_system_info(&systemInfo);
+
+    std::vector<uint8_t> contentBuffer;
+    if (!contentPath.empty() && !systemInfo.need_fullpath &&
+        !readWholeFile(contentPath, contentBuffer)) {
+        lastError_ = "failed to read content file: " + contentPath;
+        LOGE("%s", lastError_.c_str());
+        core_.unload();
         return false;
     }
 
@@ -70,7 +71,16 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     environment_.setContentDirectory(
         contentPath.empty() ? saveDir : contentPath.substr(0, contentPath.find_last_of('/')));
 
-    const CoreFunctions& fns = core_.functions();
+    if (systemInfo.library_name != nullptr &&
+        std::strcmp(systemInfo.library_name, "PCSX-ReARMed") == 0) {
+        // Slot 1 remains Libretro-managed and therefore participates in the
+        // existing per-ROM SRAM restore/checkpoint/sync lifecycle. Upstream
+        // exposes no Libretro-backed slot-2 mode, so disable its shared-file
+        // default rather than leaking an unsynchronized card across ROMs.
+        environment_.setCoreOptionOverride("pcsx_rearmed_memcard1", "libretro");
+        environment_.setCoreOptionOverride("pcsx_rearmed_memcard2", "none");
+    }
+
     fns.retro_set_environment(&EmulationSession::environmentTrampoline);
     fns.retro_set_video_refresh(&EmulationSession::videoRefreshTrampoline);
     fns.retro_set_audio_sample(&EmulationSession::audioSampleTrampoline);
@@ -87,14 +97,10 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // No-content core (the Phase 2/3 synthetic test_core).
         loadedOk = fns.retro_load_game(nullptr);
     } else {
-        // Real core, real content (LIBRETRO_REFACTOR.md section 6, step 9):
-        // the core copies whatever it needs out of `data` during this call
-        // (verified for SameBoy's GB_load_rom_from_buffer), so contentBuffer
-        // only needs to outlive this one call, not the whole session.
         struct retro_game_info info {};
         info.path = contentPath.c_str();
-        info.data = contentBuffer.data();
-        info.size = contentBuffer.size();
+        info.data = systemInfo.need_fullpath ? nullptr : contentBuffer.data();
+        info.size = systemInfo.need_fullpath ? 0 : contentBuffer.size();
         info.meta = nullptr;
         loadedOk = fns.retro_load_game(&info);
     }

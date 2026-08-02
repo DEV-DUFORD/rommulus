@@ -116,6 +116,20 @@ class RommApiTest {
         }
 
         @Test
+        fun `excludes firmware missing from server storage`() {
+            val list = RommApi.parseFirmwareList(
+                """
+                [
+                  {"id": 5, "file_name": "present.bin", "missing_from_fs": false},
+                  {"id": 6, "file_name": "missing.bin", "missing_from_fs": true}
+                ]
+                """.trimIndent(),
+            )
+
+            assertThat(list!!.map { it.fileName }).containsExactly("present.bin")
+        }
+
+        @Test
         fun `returns null for a malformed firmware list`() {
             assertThat(RommApi.parseFirmwareList("{not a list}")).isNull()
         }

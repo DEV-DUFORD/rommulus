@@ -129,6 +129,32 @@ class FirmwareRepositoryImplTest {
         }
 
         @Test
+        fun `firmware cache is isolated by account and server identity`() {
+            val cache = newCache()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(firmwareListJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("bios"))
+            assertThat(runBlocking { repo(cache).ensureStaged(1, listOf("bios.bin")) })
+                .isInstanceOf(FirmwareStagingOutcome.Success::class.java)
+
+            sessionStore.save(server.url("/").toString().removeSuffix("/"), "bob")
+            server.enqueue(MockResponse().setResponseCode(200).setBody(firmwareListJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("bios"))
+            assertThat(runBlocking { repo(cache).ensureStaged(1, listOf("bios.bin")) })
+                .isInstanceOf(FirmwareStagingOutcome.Success::class.java)
+
+            val alternateHostOrigin = server.url("/").toString()
+                .replace("localhost", "127.0.0.1")
+                .removeSuffix("/")
+            sessionStore.save(alternateHostOrigin, "alice")
+            server.enqueue(MockResponse().setResponseCode(200).setBody(firmwareListJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("bios"))
+            assertThat(runBlocking { repo(cache).ensureStaged(1, listOf("bios.bin")) })
+                .isInstanceOf(FirmwareStagingOutcome.Success::class.java)
+
+            assertThat(server.requestCount).isEqualTo(6)
+        }
+
+        @Test
         fun `a required file RomM does not have is reported as Missing`() {
             server.enqueue(MockResponse().setResponseCode(200).setBody("[]"))
 

@@ -20,6 +20,14 @@ import okhttp3.OkHttpClient
  * a BIOS identity based only on file extension.
  */
 interface FirmwareRepository {
+    suspend fun findPlatformId(platformSlug: String): PlatformIdOutcome
+
+    suspend fun listAvailable(platformId: Long? = null): FirmwareCatalogOutcome
+
+    suspend fun findCachedPath(firmwareId: Long): String?
+
+    suspend fun ensureStaged(firmware: FirmwareInfo): FirmwareStagingOutcome
+
     /**
      * Returns which of [requiredFileNames] (for [platformId]) are present and
      * hash-verified in local storage, without downloading anything.
@@ -31,6 +39,18 @@ interface FirmwareRepository {
      * reusing verified cached copies for the rest.
      */
     suspend fun ensureStaged(platformId: Long, requiredFileNames: List<String>): FirmwareStagingOutcome
+}
+
+sealed interface PlatformIdOutcome {
+    data class Success(val platformId: Long?) : PlatformIdOutcome
+    object AuthExpired : PlatformIdOutcome
+    data class Error(val message: String) : PlatformIdOutcome
+}
+
+sealed interface FirmwareCatalogOutcome {
+    data class Success(val firmware: List<FirmwareInfo>) : FirmwareCatalogOutcome
+    object AuthExpired : FirmwareCatalogOutcome
+    data class Error(val message: String) : FirmwareCatalogOutcome
 }
 
 data class FirmwareAvailability(
@@ -56,6 +76,98 @@ class FirmwareRepositoryImpl(
     private val sessionStore: SessionStore,
     private val contentCache: ContentCache,
 ) : FirmwareRepository {
+
+    override suspend fun findPlatformId(platformSlug: String): PlatformIdOutcome = withContext(Dispatchers.IO) {
+        val session = sessionStore.current() ?: return@withContext PlatformIdOutcome.AuthExpired
+        when (val result = RommApi.fetchPlatformId(client, session.origin, platformSlug)) {
+            is PlatformIdResult.Success -> PlatformIdOutcome.Success(result.platformId)
+            is PlatformIdResult.Failure -> when (result.error) {
+                RommApiError.AUTH_EXPIRED -> PlatformIdOutcome.AuthExpired
+                else -> PlatformIdOutcome.Error(result.error.name)
+            }
+        }
+    }
+
+    override suspend fun listAvailable(platformId: Long?): FirmwareCatalogOutcome = withContext(Dispatchers.IO) {
+        val session = sessionStore.current() ?: return@withContext FirmwareCatalogOutcome.AuthExpired
+        when (val result = RommApi.fetchFirmwareList(client, session.origin, platformId)) {
+            is FirmwareListResult.Success -> FirmwareCatalogOutcome.Success(result.firmware)
+            is FirmwareListResult.Failure -> when (result.error) {
+                RommApiError.AUTH_EXPIRED -> FirmwareCatalogOutcome.AuthExpired
+                else -> FirmwareCatalogOutcome.Error(result.error.name)
+            }
+        }
+    }
+
+    override suspend fun findCachedPath(firmwareId: Long): String? = withContext(Dispatchers.IO) {
+        val session = sessionStore.current() ?: return@withContext null
+        val userKey = session.username ?: return@withContext null
+        val key = contentCache.key(
+            CacheEntryKind.FIRMWARE,
+            extractServerKey(session.origin),
+            userKey,
+            firmwareId,
+        )
+        contentCache.findValidEntry(key)?.absolutePath
+    }
+
+    override suspend fun ensureStaged(firmware: FirmwareInfo): FirmwareStagingOutcome = withContext(Dispatchers.IO) {
+        val session = sessionStore.current() ?: return@withContext FirmwareStagingOutcome.AuthExpired
+        val userKey = session.username ?: return@withContext FirmwareStagingOutcome.AuthExpired
+        val serverKey = extractServerKey(session.origin)
+        val key = contentCache.key(CacheEntryKind.FIRMWARE, serverKey, userKey, firmware.firmwareId)
+        contentCache.findValidEntry(key)?.let {
+            return@withContext FirmwareStagingOutcome.Success(mapOf(firmware.fileName to it.absolutePath))
+        }
+
+        val destinationDir = contentCache.contentDir(CacheEntryKind.FIRMWARE)
+        if (firmware.sizeBytes > 0 && !AtomicFileStore.hasSufficientSpace(destinationDir, firmware.sizeBytes)) {
+            return@withContext FirmwareStagingOutcome.InsufficientSpace(firmware.sizeBytes, destinationDir.usableSpace)
+        }
+
+        val request = AtomicFileStore.DownloadRequest(
+            client = client,
+            url = RommApi.firmwareContentUrl(session.origin, firmware.firmwareId, firmware.fileName),
+            destinationDir = destinationDir,
+            finalFileName = sanitizedCacheFileName(firmware.firmwareId, firmware.firmwareId, firmware.fileName),
+            expectedSizeBytes = firmware.sizeBytes.takeIf { it > 0 },
+            expectedDigests = if (firmware.sha1Hash.isNotBlank()) {
+                mapOf(AtomicFileStore.SHA1 to firmware.sha1Hash)
+            } else {
+                emptyMap()
+            },
+            digestsToCompute = setOf(AtomicFileStore.SHA256),
+        )
+        when (val outcome = AtomicFileStore.download(request)) {
+            is AtomicFileStore.DownloadOutcome.Success -> {
+                contentCache.record(
+                    key = key,
+                    kind = CacheEntryKind.FIRMWARE,
+                    serverKey = serverKey,
+                    userKey = userKey,
+                    remoteId = firmware.firmwareId,
+                    fileIdsKey = "",
+                    contentHash = outcome.digests.getValue(AtomicFileStore.SHA256),
+                    file = outcome.file,
+                )
+                FirmwareStagingOutcome.Success(mapOf(firmware.fileName to outcome.file.absolutePath))
+            }
+            is AtomicFileStore.DownloadOutcome.InsufficientSpace ->
+                FirmwareStagingOutcome.InsufficientSpace(outcome.requiredBytes, outcome.availableBytes)
+            is AtomicFileStore.DownloadOutcome.SizeMismatch ->
+                FirmwareStagingOutcome.CorruptedDownload(firmware.fileName, "size mismatch")
+            is AtomicFileStore.DownloadOutcome.HashMismatch ->
+                FirmwareStagingOutcome.CorruptedDownload(firmware.fileName, "${outcome.algorithm} mismatch")
+            is AtomicFileStore.DownloadOutcome.HttpError ->
+                if (outcome.code == 401 || outcome.code == 403) {
+                    FirmwareStagingOutcome.AuthExpired
+                } else {
+                    FirmwareStagingOutcome.NetworkError("HTTP ${outcome.code}")
+                }
+            is AtomicFileStore.DownloadOutcome.NetworkError ->
+                FirmwareStagingOutcome.NetworkError(outcome.message)
+        }
+    }
 
     override suspend fun checkAvailability(
         platformId: Long,
@@ -97,13 +209,12 @@ class FirmwareRepositoryImpl(
         platformId: Long,
         requiredFileNames: List<String>,
     ): FirmwareStagingOutcome = withContext(Dispatchers.IO) {
-        val session = sessionStore.current() ?: return@withContext FirmwareStagingOutcome.AuthExpired
-        val userKey = session.username ?: return@withContext FirmwareStagingOutcome.AuthExpired
-        val serverKey = extractServerKey(session.origin)
+        sessionStore.current()?.username ?: return@withContext FirmwareStagingOutcome.AuthExpired
 
-        val firmwareList = when (val result = RommApi.fetchFirmwareList(client, session.origin, platformId)) {
-            is FirmwareListResult.Success -> result.firmware
-            is FirmwareListResult.Failure -> return@withContext result.error.toStagingOutcome()
+        val firmwareList = when (val result = listAvailable(platformId)) {
+            is FirmwareCatalogOutcome.Success -> result.firmware
+            FirmwareCatalogOutcome.AuthExpired -> return@withContext FirmwareStagingOutcome.AuthExpired
+            is FirmwareCatalogOutcome.Error -> return@withContext FirmwareStagingOutcome.NetworkError(result.message)
         }
 
         val missing = requiredFileNames.filter { name -> firmwareList.none { it.fileName == name } }
@@ -112,55 +223,9 @@ class FirmwareRepositoryImpl(
         val stagedPaths = mutableMapOf<String, String>()
         for (fileName in requiredFileNames) {
             val remote = firmwareList.first { it.fileName == fileName }
-            val key = contentCache.key(CacheEntryKind.FIRMWARE, serverKey, userKey, remote.firmwareId)
-            val cached = contentCache.findValidEntry(key)
-            if (cached != null) {
-                stagedPaths[fileName] = cached.absolutePath
-                continue
-            }
-
-            val destinationDir = contentCache.contentDir(CacheEntryKind.FIRMWARE)
-            if (remote.sizeBytes > 0 && !AtomicFileStore.hasSufficientSpace(destinationDir, remote.sizeBytes)) {
-                return@withContext FirmwareStagingOutcome.InsufficientSpace(remote.sizeBytes, destinationDir.usableSpace)
-            }
-
-            val request = AtomicFileStore.DownloadRequest(
-                client = client,
-                url = RommApi.firmwareContentUrl(session.origin, remote.firmwareId, remote.fileName),
-                destinationDir = destinationDir,
-                finalFileName = sanitizedCacheFileName(remote.firmwareId, remote.firmwareId, remote.fileName),
-                expectedSizeBytes = remote.sizeBytes.takeIf { it > 0 },
-                expectedDigests = if (remote.sha1Hash.isNotBlank()) mapOf(AtomicFileStore.SHA1 to remote.sha1Hash) else emptyMap(),
-                digestsToCompute = setOf(AtomicFileStore.SHA256),
-            )
-            when (val outcome = AtomicFileStore.download(request)) {
-                is AtomicFileStore.DownloadOutcome.Success -> {
-                    contentCache.record(
-                        key = key,
-                        kind = CacheEntryKind.FIRMWARE,
-                        serverKey = serverKey,
-                        userKey = userKey,
-                        remoteId = remote.firmwareId,
-                        fileIdsKey = "",
-                        contentHash = outcome.digests.getValue(AtomicFileStore.SHA256),
-                        file = outcome.file,
-                    )
-                    stagedPaths[fileName] = outcome.file.absolutePath
-                }
-                is AtomicFileStore.DownloadOutcome.InsufficientSpace ->
-                    return@withContext FirmwareStagingOutcome.InsufficientSpace(outcome.requiredBytes, outcome.availableBytes)
-                is AtomicFileStore.DownloadOutcome.SizeMismatch ->
-                    return@withContext FirmwareStagingOutcome.CorruptedDownload(fileName, "size mismatch")
-                is AtomicFileStore.DownloadOutcome.HashMismatch ->
-                    return@withContext FirmwareStagingOutcome.CorruptedDownload(fileName, "${outcome.algorithm} mismatch")
-                is AtomicFileStore.DownloadOutcome.HttpError ->
-                    return@withContext if (outcome.code == 401 || outcome.code == 403) {
-                        FirmwareStagingOutcome.AuthExpired
-                    } else {
-                        FirmwareStagingOutcome.NetworkError("HTTP ${outcome.code}")
-                    }
-                is AtomicFileStore.DownloadOutcome.NetworkError ->
-                    return@withContext FirmwareStagingOutcome.NetworkError(outcome.message)
+            when (val outcome = ensureStaged(remote)) {
+                is FirmwareStagingOutcome.Success -> stagedPaths.putAll(outcome.stagedPaths)
+                else -> return@withContext outcome
             }
         }
         FirmwareStagingOutcome.Success(stagedPaths)

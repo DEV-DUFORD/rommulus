@@ -7,6 +7,7 @@
 
 #include "libretro.h"
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace romm {
@@ -34,6 +35,7 @@ public:
     void setSystemDirectory(const std::string& dir) { systemDirectory_ = dir; }
     void setSaveDirectory(const std::string& dir) { saveDirectory_ = dir; }
     void setContentDirectory(const std::string& dir) { contentDirectory_ = dir; }
+    void setCoreOptionOverride(const std::string& key, const std::string& value);
 
 private:
     enum retro_pixel_format pixelFormat_ = RETRO_PIXEL_FORMAT_0RGB1555;
@@ -42,6 +44,8 @@ private:
     std::string systemDirectory_;
     std::string saveDirectory_;
     std::string contentDirectory_;
+    std::unordered_map<std::string, std::string> coreOptionValues_;
+    std::unordered_map<std::string, std::string> coreOptionOverrides_;
 
     // Commands we've already logged as unsupported, so a core hammering an
     // unsupported query every frame doesn't spam the log.

@@ -181,28 +181,29 @@ object CoreManifest {
                 "licenses that add no further restriction: Nuked OPN2 (ym3438.c, LGPL-2.1-or-later), " +
                 "Tremor (core/sound/tremor, BSD-style/Xiph), minimp3 (core/sound/minimp3, CC0 1.0), " +
                 "zlib 1.2.11 (zlib license), and the vendored libretro-common helper sources (each " +
-                "individually MIT-licensed per its own file header). Only the files this core's " +
-                "Android build actually compiles are vendored (no Gamecube/Wii/PSP2/UWP build " +
-                "files, no CHD/libchdr/lzma/zstd Sega CD compressed-disc-image support — this " +
-                "core's CoreManifest scope is cartridge-only: genesis, megadrive, sms, gamegear). " +
+                "individually MIT-licensed per its own file header). Sega CD CHD support reuses the " +
+                "core's own pinned dependency stack: libchdr (zlib license), LZMA SDK (public " +
+                "domain), and zstd (BSD-2-Clause). Only files used by the " +
+                "Android build are compiled; Gamecube/Wii/PSP2/UWP build files remain excluded. " +
                 "See third_party/cores/genesis_plus_gx/VENDORING.md for the complete file-by-file " +
                 "vendoring rationale and exclusions.",
             commercialUseFinding = CommercialUseFinding.NON_COMMERCIAL_RESTRICTED,
             sourceOfferSatisfied = true,
             attributionSatisfied = false,
-            supportedSystems = listOf("genesis", "megadrive", "sms", "gamegear"),
-            supportedExtensions = listOf(".md", ".gen", ".bin", ".sms", ".gg"),
+            supportedSystems = listOf("genesis", "megadrive", "sms", "gamegear", "segacd"),
+            supportedExtensions = listOf(".md", ".gen", ".bin", ".sms", ".gg", ".cue", ".iso", ".chd"),
             supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `genesis_plus_gx_core` CMake target " +
                 "in app/src/main/cpp/CMakeLists.txt, compiling " +
                 "third_party/cores/genesis_plus_gx/{core,libretro}/* with upstream's own " +
-                "libretro/jni/Android.mk COREFLAGS minus HAVE_CHD/USE_LIBCHDR, upstream's own " +
+                "libretro/jni/Android.mk COREFLAGS including USE_LIBCHDR, upstream's own " +
+                "pinned libchdr/LZMA/zstd dependency sources from the same upstream commit, " +
                 "libretro/link.T version script, and -D_ARM_ASSEM_ only for armeabi-v7a; see " +
                 "third_party/cores/genesis_plus_gx/VENDORING.md)",
             binaryChecksums = mapOf(
-                "armeabi-v7a" to "351a9b87e6aaccb67b8c6d6b8c2299373046b478f1852b0ee3ee3ae54e16d26d",
-                "arm64-v8a" to "b187d807bd4730374303cf43247d268000dbe2bef635e8b704e168b6b3973931",
+                "armeabi-v7a" to "cae8ad226dcb8d89953fa8ae0e12c26632fff6edd286072a83f5b2eb77445ac6",
+                "arm64-v8a" to "c12fed0455c94f57b5d5370d72e41add6bda6063fcd2d783cfa449f2f7a3433b",
             ),
             reviewedBy = "DEV-DUFORD",
             reviewedOn = "2026-07-31",
@@ -532,6 +533,51 @@ object CoreManifest {
                 "arm64-v8a" to "894cdbd1f779d5e764db88065a6fe2c40c379ca5294fbabae13bac61d4d1bb1b",
             ),
             reviewedBy = "PROJECT-OWNER",
+            reviewedOn = "2026-08-02",
+            approved = true,
+        ),
+        CoreLicenseFinding(
+            coreName = "PCSX-ReARMed",
+            coreId = "pcsx_rearmed",
+            upstreamRepository = "https://github.com/libretro/pcsx_rearmed",
+            commitSha = "da2cb8ecd17fd0932ab6d94774c0522beebce6e3",
+            releaseTag = "",
+            licenseSummary = "GPL-2.0-or-later effective: the PCSX engine, libretro frontend, " +
+                "ari64 dynarec, and NEON renderer compiled here all grant GPL version 2 or later; " +
+                "commercial redistribution is permitted subject to GPL corresponding-source and " +
+                "notice obligations. Dual GPL-2.0-or-later/LGPL-2.1-or-later glue files are used " +
+                "under GPL. Compiled dependencies are libretro-common (MIT), libchdr " +
+                "(BSD-3-Clause), LZMA SDK 25.01 (public domain), and the zstd 1.5.7 decoder " +
+                "(BSD-style option selected). No non-commercial/no-sale restriction was found. " +
+                "Only the ARM/ARM64 Android libretro source/dependency closure is vendored; see " +
+                "third_party/cores/pcsx_rearmed/VENDORING.md. Memory-card slot 1 is forced to " +
+                "Libretro's 128 KiB RETRO_MEMORY_SAVE_RAM and therefore uses per-ROM save sync; " +
+                "slot 2 is disabled because upstream exposes only unsynchronized serial/shared " +
+                "file modes for it.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("psx"),
+            supportedExtensions = listOf(
+                ".bin", ".cue", ".img", ".mdf", ".pbp", ".toc",
+                ".cbn", ".m3u", ".chd", ".iso", ".exe",
+            ),
+            requiredFirmware = listOf(
+                "scph5500.bin", "scph5501.bin", "scph5502.bin",
+                "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
+            ),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds `pcsx_rearmed_core` with upstream's " +
+                "Android.mk source closure and flags: ARM/ARM64 ari64 dynarec, NEON GPU, " +
+                "NDRC_THREAD, async CD/GPU/SPU, libretro VFS, libchdr/LZMA/zstd CHD support, " +
+                "upstream export/linker scripts, and 16 KiB maximum ELF page size; see " +
+                "third_party/cores/pcsx_rearmed/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "26002854a47547d4c638d8ca0a63ced9a71c3e1c9acf724f98d8fa77bcd18051",
+                "arm64-v8a" to "2004b2c61a04e3c2be97ba056750b45cd5aa7d4094e63d1d2f8fc5bc3fb8a144",
+            ),
+            reviewedBy = "DEV-DUFORD",
             reviewedOn = "2026-08-02",
             approved = true,
         ),

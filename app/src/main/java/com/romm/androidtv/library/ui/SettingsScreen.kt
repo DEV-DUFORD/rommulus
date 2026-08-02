@@ -55,6 +55,8 @@ import com.romm.androidtv.library.SettingsViewModel
 fun SettingsScreen(
     modifier: Modifier = Modifier,
     viewModelFactory: SettingsViewModel.Factory,
+    onOpenSegaCdBios: () -> Unit = {},
+    onOpenPlayStationBios: () -> Unit = {},
 ) {
     val viewModel: SettingsViewModel = viewModel(factory = viewModelFactory)
 
@@ -362,6 +364,28 @@ fun SettingsScreen(
                 checked = uiState.hideUnsupportedSystems,
                 onCheckedChange = viewModel::onHideUnsupportedSystemsChanged,
             )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "BIOS Configuration",
+            style = MaterialTheme.typography.titleLarge,
+            color = RommTvColors.Romm300,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Text(
+            text = "Select BIOS files for systems that require them. Files are downloaded securely from your RomM server.",
+            style = MaterialTheme.typography.bodySmall,
+            color = RommTvColors.TextSecondary,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+        OutlinedButton(onClick = onOpenSegaCdBios) {
+            Text("Sega CD")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onOpenPlayStationBios) {
+            Text("PlayStation")
         }
 
         Spacer(modifier = Modifier.height(24.dp))

@@ -172,7 +172,7 @@ class RomRepositoryImpl(
                 val resolution = resolveLaunchContentPath(File(cached.absolutePath), file.fileName, cached.contentHash, effectiveDeclaredSha1(file.sha1Hash))
             ) {
                 is ContentPathResolution.Success ->
-                    StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId, file.fileName))
+                    StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId, rom.platformSlug, file.fileName))
                 is ContentPathResolution.Failure -> resolution.outcome
             }
         }
@@ -220,7 +220,7 @@ class RomRepositoryImpl(
                 )
                 when (val resolution = resolveLaunchContentPath(outcome.file, file.fileName, contentHash, effectiveDeclaredSha1(file.sha1Hash))) {
                     is ContentPathResolution.Success ->
-                        StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId, file.fileName))
+                        StagingOutcome.Success(buildLaunchSpec(romId, resolution.romHash, resolution.path, coreId, rom.platformSlug, file.fileName))
                     is ContentPathResolution.Failure -> resolution.outcome
                 }
             }
@@ -361,11 +361,19 @@ class RomRepositoryImpl(
         data class Failure(val outcome: StagingOutcome) : ContentPathResolution
     }
 
-    private fun buildLaunchSpec(romId: Long, romHash: String, contentPath: String, coreId: String, serverSaveFileName: String) = LaunchSpec(
+    private fun buildLaunchSpec(
+        romId: Long,
+        romHash: String,
+        contentPath: String,
+        coreId: String,
+        platformSlug: String,
+        serverSaveFileName: String,
+    ) = LaunchSpec(
         romId = romId,
         romHash = romHash,
         contentPath = contentPath,
         coreId = coreId,
+        platformSlug = platformSlug,
         // Deliberately routed through the existing policy gate rather than a hardcoded
         // NATIVE_LIBRETRO value: PlaybackBackendPolicy.resolve() still always returns
         // WEBVIEW on this build (see config/PlaybackBackend.kt), and must keep doing so

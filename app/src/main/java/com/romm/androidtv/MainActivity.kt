@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
         HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS,
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
         NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
-        NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER
+        NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_BIOS_CONFIGURATION
     }
 
     private var currentScreen by mutableStateOf(Screen.HOME)
@@ -141,6 +141,11 @@ class MainActivity : ComponentActivity() {
     private var selectedCollectionId by mutableStateOf<Long?>(null)
     private var selectedRomId by mutableStateOf<Long?>(null)
     private var gameDetailParent by mutableStateOf(Screen.NATIVE_HOME)
+    private var requiredBiosState by mutableStateOf<com.romm.androidtv.library.ui.RequiredBiosState>(
+        com.romm.androidtv.library.ui.RequiredBiosState.Checking,
+    )
+    private enum class BiosSystem { SEGA_CD, PLAYSTATION }
+    private var selectedBiosSystem by mutableStateOf(BiosSystem.SEGA_CD)
 
     /**
      * Bumped once per successfully-processed EmulationActivity result so the Native Library
@@ -212,6 +217,15 @@ class MainActivity : ComponentActivity() {
             contentCache,
             verifySha1OnLaunch = { settingsRepository.verifySha1OnLaunch() },
         )
+    }
+    private val firmwareRepository by lazy {
+        com.romm.androidtv.romm.FirmwareRepositoryImpl(okHttpClient, sessionStore, contentCache)
+    }
+    private val segaCdBiosManager by lazy {
+        com.romm.androidtv.romm.SegaCdBiosManager(firmwareRepository, settingsRepository)
+    }
+    private val psxBiosManager by lazy {
+        com.romm.androidtv.romm.PsxBiosManager(firmwareRepository, settingsRepository)
     }
 
     // Native browsing UI (UI_REFACTOR.md) — independent of romRepository, which is
@@ -360,6 +374,7 @@ class MainActivity : ComponentActivity() {
                     Screen.HOME -> finish()
                     Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH, Screen.NATIVE_SETTINGS ->
                         currentScreen = Screen.NATIVE_HOME
+                    Screen.NATIVE_BIOS_CONFIGURATION -> currentScreen = Screen.NATIVE_SETTINGS
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
                     Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
@@ -558,7 +573,7 @@ class MainActivity : ComponentActivity() {
                         Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
                         Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL,
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
-                        Screen.NATIVE_SAVE_PICKER -> {
+                        Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_BIOS_CONFIGURATION -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(
                                     libraryRepository,
@@ -662,6 +677,8 @@ class MainActivity : ComponentActivity() {
                                                              preLaunchState = null
                                                              currentScreen = Screen.LOGIN
                                                          },
+                                                         biosState = requiredBiosState,
+                                                         onCheckBios = ::checkRequiredBiosAvailability,
                                                     )
                                             }
                                         }
@@ -772,8 +789,33 @@ class MainActivity : ComponentActivity() {
                                                         currentScreen = Screen.NATIVE_HOME
                                                     },
                                                 ),
+                                                onOpenSegaCdBios = {
+                                                    selectedBiosSystem = BiosSystem.SEGA_CD
+                                                    currentScreen = Screen.NATIVE_BIOS_CONFIGURATION
+                                                },
+                                                onOpenPlayStationBios = {
+                                                    selectedBiosSystem = BiosSystem.PLAYSTATION
+                                                    currentScreen = Screen.NATIVE_BIOS_CONFIGURATION
+                                                },
                                             )
                                         }
+                                    }
+                                    Screen.NATIVE_BIOS_CONFIGURATION -> {
+                                       val biosFactory = when (selectedBiosSystem) {
+                                           BiosSystem.SEGA_CD ->
+                                               com.romm.androidtv.library.BiosConfigurationViewModel.Factory(segaCdBiosManager)
+                                           BiosSystem.PLAYSTATION ->
+                                               com.romm.androidtv.library.BiosConfigurationViewModel.Factory(psxBiosManager)
+                                       }
+                                       val biosViewModel: com.romm.androidtv.library.BiosConfigurationViewModel =
+                                           androidx.lifecycle.viewmodel.compose.viewModel(
+                                               key = "${selectedBiosSystem.name.lowercase()}-bios-configuration",
+                                               factory = biosFactory,
+                                           )
+                                       com.romm.androidtv.library.ui.BiosConfigurationScreen(
+                                           viewModel = biosViewModel,
+                                           onBack = { currentScreen = Screen.NATIVE_SETTINGS },
+                                       )
                                     }
                                     else -> com.romm.androidtv.library.ui.LibraryScaffold(
                                         current = com.romm.androidtv.library.ui.NavDestination.HOME,
@@ -1063,8 +1105,7 @@ class MainActivity : ComponentActivity() {
             try {
                 val outcome = romRepository.stageForLaunch(romId)
                 if (outcome is com.romm.androidtv.romm.StagingOutcome.Success) {
-                    // Success: clear staging before launching so UI doesn't show stale "Preparing…".
-                    state.isStaging = false
+                    // Keep the guard active through BIOS staging and save negotiation.
                     launchStagedRomNativeLibrary(outcome)
                 } else {
                     withContext(Dispatchers.Main) {
@@ -1075,11 +1116,53 @@ class MainActivity : ComponentActivity() {
                         state.errorMessage = StagingOutcomeMessage.toUserMessage(outcome)
                     }
                 }
+
             } catch (t: Throwable) {
                 withContext(Dispatchers.Main) {
                     state.isStaging = false
                     state.errorMessage = "Launch preparation failed: ${t.message}"
                 }
+            }
+        }
+    }
+
+    private fun checkRequiredBiosAvailability(platformSlug: String) {
+        requiredBiosState = com.romm.androidtv.library.ui.RequiredBiosState.Checking
+        lifecycleScope.launch {
+            requiredBiosState = when (platformSlug) {
+                "segacd" -> when (val availability = segaCdBiosManager.checkAvailability()) {
+                com.romm.androidtv.romm.SegaCdBiosManager.Availability.Ready ->
+                    com.romm.androidtv.library.ui.RequiredBiosState.Ready
+                com.romm.androidtv.romm.SegaCdBiosManager.Availability.Missing ->
+                    com.romm.androidtv.library.ui.RequiredBiosState.Missing
+                com.romm.androidtv.romm.SegaCdBiosManager.Availability.NeedsManualSelection ->
+                    com.romm.androidtv.library.ui.RequiredBiosState.UnverifiedAvailable
+                com.romm.androidtv.romm.SegaCdBiosManager.Availability.AuthExpired ->
+                    com.romm.androidtv.library.ui.RequiredBiosState.Error(
+                        "Session expired. Log in again to check for BIOS files.",
+                    )
+                is com.romm.androidtv.romm.SegaCdBiosManager.Availability.Error ->
+                    com.romm.androidtv.library.ui.RequiredBiosState.Error(
+                        "Couldn't check BIOS files (${availability.message.lowercase().replace('_', ' ')}).",
+                    )
+                }
+                "psx" -> when (val availability = psxBiosManager.checkAvailability()) {
+                    com.romm.androidtv.romm.PsxBiosManager.Availability.Ready ->
+                        com.romm.androidtv.library.ui.RequiredBiosState.Ready
+                    com.romm.androidtv.romm.PsxBiosManager.Availability.Missing ->
+                        com.romm.androidtv.library.ui.RequiredBiosState.Missing
+                    com.romm.androidtv.romm.PsxBiosManager.Availability.NeedsManualSelection ->
+                        com.romm.androidtv.library.ui.RequiredBiosState.UnverifiedAvailable
+                    com.romm.androidtv.romm.PsxBiosManager.Availability.AuthExpired ->
+                        com.romm.androidtv.library.ui.RequiredBiosState.Error(
+                            "Session expired. Log in again to check for BIOS files.",
+                        )
+                    is com.romm.androidtv.romm.PsxBiosManager.Availability.Error ->
+                        com.romm.androidtv.library.ui.RequiredBiosState.Error(
+                            "Couldn't check BIOS files (${availability.message.lowercase().replace('_', ' ')}).",
+                        )
+                }
+                else -> com.romm.androidtv.library.ui.RequiredBiosState.Ready
             }
         }
     }
@@ -1204,6 +1287,26 @@ class MainActivity : ComponentActivity() {
             .apply { isStaging = true }
 
         lifecycleScope.launch {
+            val requiredBios = when (spec.platformSlug) {
+                "segacd" -> segaCdBiosManager.prepareForLaunch(filesDir.resolve("system")) to "Sega CD"
+                "psx" -> psxBiosManager.prepareForLaunch(filesDir.resolve("system")) to "PlayStation"
+                else -> null
+            }
+            if (requiredBios != null && requiredBios.first !is
+                com.romm.androidtv.romm.FirmwareStagingOutcome.Success
+            ) {
+                withContext(Dispatchers.Main) {
+                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
+                        romId = spec.romId,
+                        romHash = spec.romHash,
+                    ).apply {
+                        isStaging = false
+                        errorMessage = biosStagingError(requiredBios.first, requiredBios.second)
+                    }
+                }
+                return@launch
+            }
+
             val knownSramSize = session?.let { sess ->
                 saveSyncCoordinator.findSaveReplicaByScope(
                     serverKey = extractServerKey(sess.origin),
@@ -1224,6 +1327,23 @@ class MainActivity : ComponentActivity() {
             )
             dispatchPreparationResult(preparation, spec, savePath)
         }
+    }
+
+    private fun biosStagingError(
+        outcome: com.romm.androidtv.romm.FirmwareStagingOutcome,
+        systemName: String,
+    ): String = when (outcome) {
+        com.romm.androidtv.romm.FirmwareStagingOutcome.AuthExpired ->
+            "Session expired while downloading the $systemName BIOS."
+        is com.romm.androidtv.romm.FirmwareStagingOutcome.InsufficientSpace ->
+            "Not enough storage to download the $systemName BIOS."
+        is com.romm.androidtv.romm.FirmwareStagingOutcome.CorruptedDownload ->
+            "The $systemName BIOS download failed verification."
+        is com.romm.androidtv.romm.FirmwareStagingOutcome.Missing ->
+            "Missing BIOS files on server. Please contact your RomM administrator."
+        is com.romm.androidtv.romm.FirmwareStagingOutcome.NetworkError ->
+            "Couldn't download the $systemName BIOS (${outcome.message})."
+        is com.romm.androidtv.romm.FirmwareStagingOutcome.Success -> ""
     }
 
     /**
@@ -1341,6 +1461,26 @@ class MainActivity : ComponentActivity() {
         )
 
         lifecycleScope.launch {
+            val requiredBios = when (spec.platformSlug) {
+                "segacd" -> segaCdBiosManager.prepareForLaunch(filesDir.resolve("system")) to "Sega CD"
+                "psx" -> psxBiosManager.prepareForLaunch(filesDir.resolve("system")) to "PlayStation"
+                else -> null
+            }
+            if (requiredBios != null) {
+                val (firmwareOutcome, biosSystemName) = requiredBios
+                if (firmwareOutcome !is com.romm.androidtv.romm.FirmwareStagingOutcome.Success) {
+                    withContext(Dispatchers.Main) {
+                        preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
+                            romId = spec.romId,
+                            romHash = spec.romHash,
+                        ).apply {
+                            errorMessage = biosStagingError(firmwareOutcome, biosSystemName)
+                        }
+                    }
+                    return@launch
+                }
+            }
+
             // Reuse trusted existing replica's expectedSramSizeBytes when available.
             val knownSramSize = session?.let { sess ->
                 saveSyncCoordinator.findSaveReplicaByScope(
@@ -1565,9 +1705,13 @@ class MainActivity : ComponentActivity() {
             )
 
             if (result is com.romm.androidtv.romm.save.ConflictResolutionResult.Success) {
+                val relaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
+                    romId = state.romId,
+                    romHash = state.romHash,
+                ).apply { isStaging = true }
                 withContext(Dispatchers.Main) {
                     state.clear()
-                    preLaunchState = null
+                    preLaunchState = relaunchState
                     currentScreen = Screen.NATIVE_GAME_DETAIL
                 }
                 lifecycleScope.launch {
@@ -1576,8 +1720,9 @@ class MainActivity : ComponentActivity() {
                         launchStagedRomNativeLibrary(relaunchOutcome)
                     } else {
                         withContext(Dispatchers.Main) {
-                            preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = state.romId, romHash = state.romHash)
-                                .apply { errorMessage = "Relaunch failed: ${StagingOutcomeMessage.toUserMessage(relaunchOutcome)}" }
+                            relaunchState.isStaging = false
+                            relaunchState.errorMessage =
+                                "Relaunch failed: ${StagingOutcomeMessage.toUserMessage(relaunchOutcome)}"
                         }
                     }
                 }

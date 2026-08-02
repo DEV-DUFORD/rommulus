@@ -18,10 +18,9 @@ recorded owner risk-acceptance this core relies on — see
 Unlike SameBoy (vendored as a complete 1:1 mirror of two small subtrees),
 Genesis Plus GX's upstream repository is large and includes several build
 configurations (Gamecube/Wii, PSP2, UWP, MAME-derived debug tooling, Sega
-CD CHD-compressed disc image support) this project does not use. Only the
-files this core's Android build actually compiles are vendored, matching
-upstream's own `libretro/Makefile.common` `SOURCES_C` list with two
-deliberate exclusions (see "Deliberately excluded" below):
+CD CHD-compressed disc image support) this project does not use. Only the files this core's Android build actually compiles are vendored,
+matching upstream's own `libretro/Makefile.common` `SOURCES_C` list, including
+the CHD dependency sources (see "CHD dependencies" below):
 
 - `core/*.c`, `core/*.h` — the shared engine: bus/memory management
   (`genesis.c`, `io_ctrl.c`, `loadrom.c`, `mem68k.c`, `membnk.c`, `memz80.c`,
@@ -69,23 +68,20 @@ deliberate exclusions (see "Deliberately excluded" below):
   `inflate.c`, `inftrees.c`, `zutil.c`), used for ROM/state (de)compression,
   plus the headers they need and zlib's own `README`.
 
+## CHD dependencies
+
+Sega CD `.chd` support vendors and compiles the `libchdr`, LZMA SDK, and zstd
+trees from Genesis Plus GX's own `libretro/deps/` directory at the same pinned
+commit as the core. Their controlling licenses are libchdr's zlib license, LZMA
+SDK's public-domain dedication, and zstd's BSD-2-Clause license. The copied
+`LICENSE.txt`, `LICENSE`, and `LICENSE`/`COPYING` files preserve those notices.
+`core/cd_hw/cdd.h` uses the dependency's installed-style
+`<libchdr/chd.h>`/`<libchdr/cdrom.h>` include paths because this pinned
+libchdr tree stores public headers under `include/libchdr/`, not the older
+`src/` paths still named by the core header.
+
 ## Deliberately excluded
 
-- **`HAVE_CHD` / `libchdr`, `lzma-19.00`, `zstd`** — upstream's own Android
-  build (`jni/Android.mk`) sets `HAVE_CHD := 1` to read compressed
-  (`.chd`) Sega CD disc images via the vendored `libchdr` (which itself
-  vendors LZMA and zstd). This project's `CoreManifest` scope for this
-  core is cartridge-only (`genesis`, `megadrive`, `sms`, `gamegear` — no
-  `segacd`), so `HAVE_CHD`/`USE_LIBCHDR` is never defined in this build.
-  Every CHD code path in `core/cd_hw/cdd.c` is compiled out behind
-  `#if defined(USE_LIBCHDR)` (verified by inspection), so omitting these
-  three dependency trees removes real license/build surface (three more
-  upstream projects with their own licenses to review, and the largest
-  chunk of upstream's `libretro/deps/`) without breaking anything this
-  core is actually approved to run. If Sega CD support is added in a
-  future phase, `libchdr`/`lzma`/`zstd` must be vendored and reviewed at
-  that time, `HAVE_CHD` defined, and `CoreManifest.supportedSystems`
-  extended accordingly — not the other way around.
 - **`libretro/libretro-common/cdrom/`** — only used when `HAVE_CDROM` is
   set (reading from a physical/host CD-ROM drive). Not applicable to an
   Android TV app; never set here.
@@ -124,6 +120,8 @@ actually vendored:
 - **zlib** (`libretro/deps/zlib-1.2.11/`): the zlib license, permissive.
 - **libretro-common** vendored files: MIT, per each file's own header
   ("The following license statement only applies to this file").
+- **CHD dependencies**: libchdr (zlib license), LZMA SDK (public domain), and
+  zstd (BSD-2-Clause), copied from the same pinned Genesis Plus GX commit.
 
 None of the permissive/copyleft subcomponents relax the core's own
 non-commercial restriction; the core-code finding is controlling. See
@@ -144,8 +142,8 @@ interacts with GPLv3 section 10, and the 2026-07-31 Phase 7 entry in
   `-marm` selects classic 32-bit ARM encoding for this compilation unit
   instead of modifying vendored upstream assembly.
 - `WANT_CRC32`/`USE_PER_SOUND_CHANNELS_CONFIG`/core flags mirror upstream's
-  `libretro/jni/Android.mk` `COREFLAGS` exactly, minus the `HAVE_CHD`/
-  `USE_LIBCHDR` bits covered above.
+  `libretro/jni/Android.mk` `COREFLAGS`, including `USE_LIBCHDR`, `_7ZIP_ST`,
+  and `ZSTD_DISABLE_ASM`.
 - Same version-script (`libretro/link.T`) and vendored-code warning
   exemption convention as `sameboy_core`: not held to this project's own
   `-Wall -Wextra`.

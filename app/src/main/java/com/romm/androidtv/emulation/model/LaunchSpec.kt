@@ -21,6 +21,7 @@ data class LaunchSpec(
     /** Absolute app-private path to the staged, validated ROM content. Null until staged. */
     val contentPath: String?,
     val coreId: String,
+    val platformSlug: String = "",
     val backend: PlaybackBackend,
     /** Stable save slot name; only "autosave" is supported in the first release. */
     val saveSlot: String = "autosave",

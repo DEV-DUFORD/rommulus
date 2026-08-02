@@ -75,10 +75,57 @@ class SettingsRepository(
         prefs.edit().putBoolean(KEY_VERIFY_SHA1, verify).apply()
     }
 
+    data class BiosSelection(
+        val firmwareId: Long,
+        val fileName: String,
+    )
+
+    fun segaCdBiosSelection(): BiosSelection? {
+        val firmwareId = prefs.getLong(KEY_SEGACD_BIOS_ID, -1L)
+        val fileName = prefs.getString(KEY_SEGACD_BIOS_FILE_NAME, null)
+        return if (firmwareId > 0 && !fileName.isNullOrBlank()) {
+            BiosSelection(firmwareId, fileName)
+        } else {
+            null
+        }
+    }
+
+    fun setSegaCdBiosSelection(firmwareId: Long, fileName: String) {
+        require(firmwareId > 0) { "firmwareId must be positive" }
+        require(fileName.isNotBlank()) { "fileName must not be blank" }
+        prefs.edit()
+            .putLong(KEY_SEGACD_BIOS_ID, firmwareId)
+            .putString(KEY_SEGACD_BIOS_FILE_NAME, fileName)
+            .apply()
+    }
+
+    fun psxBiosSelection(): BiosSelection? {
+        val firmwareId = prefs.getLong(KEY_PSX_BIOS_ID, -1L)
+        val fileName = prefs.getString(KEY_PSX_BIOS_FILE_NAME, null)
+        return if (firmwareId > 0 && !fileName.isNullOrBlank()) {
+            BiosSelection(firmwareId, fileName)
+        } else {
+            null
+        }
+    }
+
+    fun setPsxBiosSelection(firmwareId: Long, fileName: String) {
+        require(firmwareId > 0) { "firmwareId must be positive" }
+        require(fileName.isNotBlank()) { "fileName must not be blank" }
+        prefs.edit()
+            .putLong(KEY_PSX_BIOS_ID, firmwareId)
+            .putString(KEY_PSX_BIOS_FILE_NAME, fileName)
+            .apply()
+    }
+
     companion object {
         const val PREFS_NAME = "romm_settings"
         private const val KEY_ORIGIN = "romm_origin"
         private const val KEY_HIDE_UNSUPPORTED = "hide_unsupported_systems"
         private const val KEY_VERIFY_SHA1 = "verify_sha1_on_launch"
+        private const val KEY_SEGACD_BIOS_ID = "segacd_bios_id"
+        private const val KEY_SEGACD_BIOS_FILE_NAME = "segacd_bios_file_name"
+        private const val KEY_PSX_BIOS_ID = "psx_bios_id"
+        private const val KEY_PSX_BIOS_FILE_NAME = "psx_bios_file_name"
     }
 }

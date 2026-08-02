@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -42,6 +43,14 @@ import com.romm.androidtv.library.isPlatformNativelySupported
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.roundToInt
+
+sealed interface RequiredBiosState {
+    data object Checking : RequiredBiosState
+    data object Ready : RequiredBiosState
+    data object Missing : RequiredBiosState
+    data object UnverifiedAvailable : RequiredBiosState
+    data class Error(val message: String) : RequiredBiosState
+}
 
 /**
  * Native game detail screen (UI_REFACTOR.md section 7.2): hero cover, title
@@ -71,6 +80,8 @@ fun GameDetailScreen(
     isAuthExpired: Boolean = false,
     onLogin: () -> Unit = {},
     onChooseSave: (Long) -> Unit = {},
+    biosState: RequiredBiosState = RequiredBiosState.Ready,
+    onCheckBios: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -103,6 +114,8 @@ fun GameDetailScreen(
                 isAuthExpired = isAuthExpired,
                 onLogin = onLogin,
                 onChooseSave = onChooseSave,
+                biosState = biosState,
+                onCheckBios = onCheckBios,
             )
         }
     }
@@ -118,7 +131,14 @@ private fun GameDetailContent(
     isAuthExpired: Boolean,
     onLogin: () -> Unit,
     onChooseSave: (Long) -> Unit,
+    biosState: RequiredBiosState,
+    onCheckBios: (String) -> Unit,
 ) {
+    LaunchedEffect(rom.id, rom.platformSlug) {
+        if (rom.platformSlug == "segacd" || rom.platformSlug == "psx") {
+            onCheckBios(rom.platformSlug)
+        }
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -163,12 +183,15 @@ private fun GameDetailContent(
                         // section 13, Phase 6): checked up front from CoreManifest, not
                         // discovered reactively only after a failed Play attempt.
                         UnsupportedSystemState(platformDisplayName = rom.platformDisplayName)
+                    } else if (rom.platformSlug == "segacd" && biosState !is RequiredBiosState.Ready) {
+                        RequiredBiosUnavailableState(biosState)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging)
                             Spacer(modifier = Modifier.width(12.dp))
                             ChooseSaveButton(onClick = { onChooseSave(rom.id) }, enabled = !isStaging)
                         }
+
                         if (errorMessage != null) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(
@@ -218,6 +241,27 @@ private fun GameDetailContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RequiredBiosUnavailableState(state: RequiredBiosState) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        DisabledPlayButton()
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = when (state) {
+                RequiredBiosState.Checking -> "Checking for required BIOS files…"
+                RequiredBiosState.Missing ->
+                    "Missing BIOS files on server. Please contact your RomM administrator."
+                RequiredBiosState.UnverifiedAvailable ->
+                    "No verified BIOS file found. Please choose one in Settings."
+                is RequiredBiosState.Error -> state.message
+                RequiredBiosState.Ready -> ""
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = RommTvColors.TextSecondary,
+        )
     }
 }
 
