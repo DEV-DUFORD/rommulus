@@ -64,6 +64,12 @@ public:
         return toRead;
     }
 
+    size_t availableFrames() const {
+        const size_t r = readIndex_.load(std::memory_order_acquire);
+        const size_t w = writeIndex_.load(std::memory_order_acquire);
+        return w - r;
+    }
+
     // Producer-only. Discards all buffered frames (used when restarting a
     // stream after an error) — must only be called while the consumer is
     // not running.

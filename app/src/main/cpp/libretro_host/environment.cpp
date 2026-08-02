@@ -326,11 +326,12 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
                     return false;
             }
 
-            // Store the callback by value, then wire in our implementations
-            // for the fields the core expects the frontend to provide.
+            // Libretro requires the frontend to populate these fields in the
+            // core-owned callback struct. Keeping only a patched host copy
+            // leaves the core's own function pointers null.
+            cb->get_current_framebuffer = hwGetCurrentFramebuffer;
+            cb->get_proc_address = hwGetProcAddress;
             hwRenderCallback_ = *cb;
-            hwRenderCallback_.get_current_framebuffer = hwGetCurrentFramebuffer;
-            hwRenderCallback_.get_proc_address = hwGetProcAddress;
             hwRenderActive_ = true;
 
             LOGI("SET_HW_RENDER accepted: context_type=%u, version=%u.%u",

@@ -19,23 +19,25 @@ public:
     void setFps(double fps) {
         fps_ = fps;
         frameDuration_ = std::chrono::duration<double>(1.0 / fps);
-        nextFrameTime_ = std::chrono::steady_clock::now();
+        nextFrameTime_ = std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDuration_);
     }
 
     // Blocks (if needed) until the next frame's scheduled time, then advances
     // the schedule by exactly one frame duration. Never sleeps backwards: if
-    // the caller is already behind schedule, returns immediately and resets
-    // the schedule from now to avoid unbounded catch-up bursts.
+    // the caller is slightly behind schedule, returns immediately so a slow
+    // core is not penalized with another full-frame delay. A long stall
+    // resets the schedule to avoid unbounded catch-up bursts.
     void waitForNextFrame() {
         auto now = std::chrono::steady_clock::now();
+        const auto duration =
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDuration_);
         if (now < nextFrameTime_) {
             std::this_thread::sleep_until(nextFrameTime_);
-            nextFrameTime_ += std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDuration_);
-        } else {
-            // Behind schedule (e.g. after a pause or a slow frame) — resync
-            // instead of accumulating an ever-growing backlog of frames.
-            nextFrameTime_ = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDuration_);
+        } else if (now - nextFrameTime_ > duration) {
+            nextFrameTime_ = now;
         }
+        nextFrameTime_ += duration;
     }
 
     double fps() const { return fps_; }

@@ -83,13 +83,16 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         environment_.setCoreOptionOverride("pcsx_rearmed_memcard2", "none");
     }
 
-    if (systemInfo.library_name != nullptr &&
-        std::strcmp(systemInfo.library_name, "Mupen64Plus-Next") == 0) {
+    const bool isMupen64PlusNext = systemInfo.library_name != nullptr &&
+        std::strcmp(systemInfo.library_name, "Mupen64Plus-Next") == 0;
+    if (isMupen64PlusNext) {
         // GLideN64's threaded renderer spawns its own rendering thread,
         // which conflicts with the libretro single-threaded model (the host
         // owns the emulation thread and the EGL context). Disable it so
         // GLideN64 draws on the host's thread where the context is current.
         environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "False");
+        environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
+        environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");
     }
 
     fns.retro_set_environment(&EmulationSession::environmentTrampoline);
@@ -132,8 +135,9 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     fns.retro_get_system_av_info(&av);
     avFps_ = av.timing.fps > 0.0 ? av.timing.fps : 60.0;
     avSampleRate_ = av.timing.sample_rate > 0.0 ? av.timing.sample_rate : 44100.0;
+    glContext_.setBufferGeometry(av.geometry.base_width, av.geometry.base_height);
 
-    if (!audioOutput_.start(avSampleRate_)) {
+    if (!audioOutput_.start(avSampleRate_, isMupen64PlusNext ? 0.1 : 0.0)) {
         // Audio failing to open is not fatal to the session — video and
         // input still work, and diagnostics/logs make the failure visible.
         LOGE("audio output failed to start; continuing without audio");
@@ -164,10 +168,11 @@ void EmulationSession::runLoop() {
         environment_.setGlContextProvider(
                 [this]() { return glContext_.eglContext(); });
 
-        // Wait up to ~5 seconds for the UI thread to attach the window
-        // via nativeSetSurface -> attachVideoWindow -> glContext_.attachWindow.
+        // Wait up to ~5 seconds for the UI thread to queue the window. The
+        // emulation thread must perform the actual EGL attach and invoke the
+        // core callback because EGL contexts cannot be current on two threads.
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (!glContext_.hasSurface() && threadShouldRun_.load()) {
+        while (!glContext_.hasPendingWindowUpdate() && threadShouldRun_.load()) {
             if (std::chrono::steady_clock::now() >= deadline) {
                 LOGE("HW render: timed out waiting for surface attachment");
                 break;
@@ -175,10 +180,30 @@ void EmulationSession::runLoop() {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
-        glContext_.makeCurrent();
+        if (glContext_.applyPendingWindowUpdate() ==
+            GlContextManager::WindowUpdateResult::kAttached) {
+            auto& cb = environment_.hwRenderCallbackMutable();
+            if (cb.context_reset) {
+                cb.context_reset();
+            }
+        }
     }
 
     while (threadShouldRun_.load()) {
+        if (hwRender) {
+            const auto update = glContext_.applyPendingWindowUpdate();
+            if (update == GlContextManager::WindowUpdateResult::kAttached) {
+                auto& cb = environment_.hwRenderCallbackMutable();
+                if (cb.context_reset) {
+                    cb.context_reset();
+                }
+            }
+            if (!glContext_.hasSurface()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+        }
+
         if (paused_.load()) {
             // Skip retro_run() entirely: the core never advances, so the last
             // presented video frame stays on screen and no new audio samples
@@ -202,6 +227,10 @@ void EmulationSession::runLoop() {
     }
 
     if (hwRender) {
+        auto& cb = environment_.hwRenderCallbackMutable();
+        if (cb.context_destroy) {
+            cb.context_destroy();
+        }
         glContext_.unmakeCurrent();
     }
 }
@@ -241,13 +270,9 @@ void EmulationSession::stop() {
     }
 
     if (core_.isLoaded()) {
-        // For hardware-rendering cores, destroy the GL context before
-        // retro_deinit so the core's cleanup code can still use GL.
+        // The emulation thread already invoked the core's context_destroy
+        // callback while its GL context was current.
         if (environment_.isHardwareRendering()) {
-            auto& cb = environment_.hwRenderCallbackMutable();
-            if (cb.context_destroy) {
-                cb.context_destroy();
-            }
             glContext_.destroyDisplay();
         }
 
@@ -308,14 +333,7 @@ size_t EmulationSession::serializeSize() {
 
 void EmulationSession::attachVideoWindow(ANativeWindow* window) {
     if (environment_.isHardwareRendering()) {
-        if (glContext_.attachWindow(window)) {
-            // Signal the core that the GL context is ready. The core's
-            // context_reset callback recreates all GL resources.
-            auto& cb = environment_.hwRenderCallbackMutable();
-            if (cb.context_reset) {
-                cb.context_reset();
-            }
-        }
+        glContext_.attachWindow(window);
     } else {
         videoOutput_.attachWindow(window);
     }

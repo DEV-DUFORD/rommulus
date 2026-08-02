@@ -26,13 +26,16 @@ AudioOutput::~AudioOutput() {
     stop();
 }
 
-bool AudioOutput::start(double coreSampleRate) {
+bool AudioOutput::start(double coreSampleRate, double prebufferSeconds) {
     sampleRate_ = coreSampleRate > 0.0 ? coreSampleRate : 44100.0;
+    prebufferSeconds_ = std::max(prebufferSeconds, 0.0);
+    prebufferFrames_ = static_cast<size_t>(sampleRate_ * prebufferSeconds_);
     const auto capacityFrames = std::max<size_t>(
         static_cast<size_t>(sampleRate_ * kRingBufferSeconds), kMinRingFrames);
     ring_ = std::make_unique<AudioRingBuffer>(capacityFrames);
     underrunFrames_.store(0, std::memory_order_relaxed);
     overrunFrames_.store(0, std::memory_order_relaxed);
+    streamStartRequested_.store(false, std::memory_order_relaxed);
 
     oboe::AudioStreamBuilder builder;
     builder.setDirection(oboe::Direction::Output)
@@ -58,17 +61,20 @@ bool AudioOutput::start(double coreSampleRate) {
         return false;
     }
 
-    result = stream_->requestStart();
-    if (result != oboe::Result::OK) {
-        LOGE("requestStart failed: %s", oboe::convertToText(result));
-        stream_->close();
-        stream_.reset();
-        ring_.reset();
-        return false;
+    if (prebufferFrames_ == 0) {
+        result = stream_->requestStart();
+        if (result != oboe::Result::OK) {
+            LOGE("requestStart failed: %s", oboe::convertToText(result));
+            stream_->close();
+            stream_.reset();
+            ring_.reset();
+            return false;
+        }
+        streamStartRequested_.store(true, std::memory_order_relaxed);
     }
 
-    LOGI("audio stream started: requested=%.1fHz actual=%dHz capacityFrames=%zu",
-         sampleRate_, stream_->getSampleRate(), capacityFrames);
+    LOGI("audio stream opened: requested=%.1fHz actual=%dHz capacityFrames=%zu prebufferFrames=%zu",
+         sampleRate_, stream_->getSampleRate(), capacityFrames, prebufferFrames_);
     return true;
 }
 
@@ -93,6 +99,17 @@ void AudioOutput::pushSamples(const int16_t* interleaved, size_t frames) {
     const size_t written = ring_->write(interleaved, frames);
     if (written < frames) {
         overrunFrames_.fetch_add(frames - written, std::memory_order_relaxed);
+    }
+
+    if (!streamStartRequested_.load(std::memory_order_relaxed) &&
+        ring_->availableFrames() >= prebufferFrames_ &&
+        !streamStartRequested_.exchange(true, std::memory_order_relaxed)) {
+        const oboe::Result result = stream_->requestStart();
+        if (result != oboe::Result::OK) {
+            LOGE("deferred requestStart failed: %s", oboe::convertToText(result));
+        } else {
+            LOGI("audio stream started after prebuffering %zu frames", ring_->availableFrames());
+        }
     }
 }
 
@@ -127,7 +144,7 @@ void AudioOutput::onErrorAfterClose(oboe::AudioStream* /*stream*/, oboe::Result 
     const double rate = sampleRate_;
     stream_.reset();
     ring_.reset();
-    if (!start(rate)) {
+    if (!start(rate, prebufferSeconds_)) {
         LOGE("one-shot audio stream restart failed");
     }
 }

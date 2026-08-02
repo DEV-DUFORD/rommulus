@@ -91,55 +91,102 @@ bool GlContextManager::createDisplay() {
     return true;
 }
 
-bool GlContextManager::attachWindow(ANativeWindow* window) {
+void GlContextManager::setBufferGeometry(unsigned width, unsigned height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    bufferWidth_ = static_cast<int32_t>(width);
+    bufferHeight_ = static_cast<int32_t>(height);
+}
+
+void GlContextManager::attachWindow(ANativeWindow* window) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (display_ == EGL_NO_DISPLAY || context_ == EGL_NO_CONTEXT) {
-        LOGE("attachWindow called before createDisplay");
-        return false;
+    if (pendingWindow_ != nullptr) {
+        ANativeWindow_release(pendingWindow_);
     }
-
-    // Destroy old surface if any.
-    if (surface_ != EGL_NO_SURFACE) {
-        eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        eglDestroySurface(display_, surface_);
-        surface_ = EGL_NO_SURFACE;
-    }
-
-    surface_ = eglCreateWindowSurface(display_, config_, window, nullptr);
-    if (surface_ == EGL_NO_SURFACE) {
-        eglError("eglCreateWindowSurface");
-        return false;
-    }
-
-    if (!eglMakeCurrent(display_, surface_, surface_, context_)) {
-        eglError("eglMakeCurrent (attach)");
-        eglDestroySurface(display_, surface_);
-        surface_ = EGL_NO_SURFACE;
-        return false;
-    }
-
-    LOGI("window surface attached");
-    return true;
+    pendingWindow_ = window;
+    windowUpdatePending_ = true;
 }
 
 void GlContextManager::detachWindow() {
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    if (pendingWindow_ != nullptr) {
+        ANativeWindow_release(pendingWindow_);
+        pendingWindow_ = nullptr;
+    }
+    windowUpdatePending_ = true;
+    if (display_ != EGL_NO_DISPLAY) {
+        windowUpdateApplied_.wait(lock, [this]() {
+            return !windowUpdatePending_ || display_ == EGL_NO_DISPLAY;
+        });
+    }
+}
+
+GlContextManager::WindowUpdateResult GlContextManager::applyPendingWindowUpdate() {
     std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!windowUpdatePending_) {
+        return WindowUpdateResult::kNone;
+    }
+    windowUpdatePending_ = false;
+    windowUpdateApplied_.notify_all();
+
+    if (display_ == EGL_NO_DISPLAY || context_ == EGL_NO_CONTEXT) {
+        LOGE("window update applied before createDisplay");
+        if (pendingWindow_ != nullptr) {
+            ANativeWindow_release(pendingWindow_);
+            pendingWindow_ = nullptr;
+        }
+        return WindowUpdateResult::kFailed;
+    }
 
     if (surface_ != EGL_NO_SURFACE) {
         eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         eglDestroySurface(display_, surface_);
         surface_ = EGL_NO_SURFACE;
-        LOGI("window surface detached");
     }
+
+    if (pendingWindow_ == nullptr) {
+        LOGI("window surface detached");
+        return WindowUpdateResult::kDetached;
+    }
+
+    if (bufferWidth_ > 0 && bufferHeight_ > 0 &&
+        ANativeWindow_setBuffersGeometry(
+            pendingWindow_, bufferWidth_, bufferHeight_, WINDOW_FORMAT_RGBA_8888) != 0) {
+        LOGE("ANativeWindow_setBuffersGeometry failed for %dx%d", bufferWidth_, bufferHeight_);
+        ANativeWindow_release(pendingWindow_);
+        pendingWindow_ = nullptr;
+        return WindowUpdateResult::kFailed;
+    }
+
+    surface_ = eglCreateWindowSurface(display_, config_, pendingWindow_, nullptr);
+    ANativeWindow_release(pendingWindow_);
+    pendingWindow_ = nullptr;
+    if (surface_ == EGL_NO_SURFACE) {
+        eglError("eglCreateWindowSurface");
+        return WindowUpdateResult::kFailed;
+    }
+
+    if (!eglMakeCurrent(display_, surface_, surface_, context_)) {
+        eglError("eglMakeCurrent (window update)");
+        eglDestroySurface(display_, surface_);
+        surface_ = EGL_NO_SURFACE;
+        return WindowUpdateResult::kFailed;
+    }
+
+    LOGI("window surface attached at %dx%d", bufferWidth_, bufferHeight_);
+    return WindowUpdateResult::kAttached;
 }
 
-void GlContextManager::makeCurrent() {
-    if (display_ == EGL_NO_DISPLAY || context_ == EGL_NO_CONTEXT) return;
-    EGLSurface s = surface_;  // Read under mutex protection (already set by attachWindow).
-    if (!eglMakeCurrent(display_, s, s, context_)) {
-        eglError("eglMakeCurrent (makeCurrent)");
-    }
+bool GlContextManager::hasPendingWindowUpdate() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return windowUpdatePending_;
+}
+
+bool GlContextManager::hasSurface() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return surface_ != EGL_NO_SURFACE;
 }
 
 void GlContextManager::unmakeCurrent() {
@@ -162,6 +209,13 @@ bool GlContextManager::swapBuffers() {
 
 void GlContextManager::destroyDisplay() {
     std::lock_guard<std::mutex> lock(mutex_);
+
+    if (pendingWindow_ != nullptr) {
+        ANativeWindow_release(pendingWindow_);
+        pendingWindow_ = nullptr;
+    }
+    windowUpdatePending_ = false;
+    windowUpdateApplied_.notify_all();
 
     if (surface_ != EGL_NO_SURFACE) {
         eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);

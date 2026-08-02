@@ -33,11 +33,10 @@ public:
     AudioOutput(const AudioOutput&) = delete;
     AudioOutput& operator=(const AudioOutput&) = delete;
 
-    // Opens and starts a low-latency Oboe output stream at (or converted
-    // from) coreSampleRate. Returns false on failure; the session continues
-    // running without audio in that case rather than failing the whole
-    // launch over it.
-    bool start(double coreSampleRate);
+    // Opens a low-latency Oboe output stream at (or converted from)
+    // coreSampleRate. With a non-zero prebuffer, playback starts after that
+    // much audio has accumulated; otherwise it starts immediately.
+    bool start(double coreSampleRate, double prebufferSeconds = 0.0);
 
     // Stops and closes the stream. Safe to call even if start() was never
     // called or already failed.
@@ -60,9 +59,12 @@ private:
     std::shared_ptr<oboe::AudioStream> stream_;
     std::unique_ptr<AudioRingBuffer> ring_;
     double sampleRate_ = 0.0;
+    double prebufferSeconds_ = 0.0;
+    size_t prebufferFrames_ = 0;
     std::atomic<uint64_t> underrunFrames_{0};
     std::atomic<uint64_t> overrunFrames_{0};
     std::atomic<bool> restarting_{false};
+    std::atomic<bool> streamStartRequested_{false};
 };
 
 }  // namespace romm

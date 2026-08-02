@@ -8,12 +8,20 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <android/native_window.h>
+#include <condition_variable>
 #include <mutex>
 
 namespace romm {
 
 class GlContextManager {
 public:
+    enum class WindowUpdateResult {
+        kNone,
+        kAttached,
+        kDetached,
+        kFailed,
+    };
+
     GlContextManager() = default;
     ~GlContextManager();
 
@@ -25,17 +33,20 @@ public:
     // Must be called from the emulation thread before retro_run begins.
     bool createDisplay();
 
-    // Attaches an ANativeWindow as the EGL window surface and makes the
-    // context current. Destroys any previously attached surface first.
-    // Safe to call from the UI thread (serialized via mutex).
-    bool attachWindow(ANativeWindow* window);
+    void setBufferGeometry(unsigned width, unsigned height);
 
-    // Detaches the current window surface. Safe from any thread.
+    // Queues an ANativeWindow owned by this manager. The emulation thread
+    // consumes it through applyPendingWindowUpdate(), keeping every EGL call
+    // and core context callback on the same thread.
+    void attachWindow(ANativeWindow* window);
+
+    // Queues removal of the current window surface. Safe from any thread.
     void detachWindow();
 
-    // Makes the context current on the calling thread (uses the last
-    // attached surface, or EGL_NO_SURFACE if nothing is attached).
-    void makeCurrent();
+    // Applies a queued attach/detach on the calling emulation thread.
+    WindowUpdateResult applyPendingWindowUpdate();
+
+    bool hasPendingWindowUpdate();
 
     // Releases the context from the calling thread.
     void unmakeCurrent();
@@ -52,14 +63,19 @@ public:
     EGLContext eglContext() const { return context_; }
     EGLDisplay eglDisplay() const { return display_; }
     bool isValid() const { return context_ != EGL_NO_CONTEXT; }
-    bool hasSurface() const { return surface_ != EGL_NO_SURFACE; }
+    bool hasSurface();
 
 private:
     std::mutex mutex_;
+    std::condition_variable windowUpdateApplied_;
     EGLDisplay display_ = EGL_NO_DISPLAY;
     EGLConfig  config_  = EGL_NO_CONFIG_KHR;
     EGLContext context_ = EGL_NO_CONTEXT;
     EGLSurface surface_ = EGL_NO_SURFACE;
+    ANativeWindow* pendingWindow_ = nullptr;
+    bool windowUpdatePending_ = false;
+    int32_t bufferWidth_ = 0;
+    int32_t bufferHeight_ = 0;
 };
 
 }  // namespace romm
