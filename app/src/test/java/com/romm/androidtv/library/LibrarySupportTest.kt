@@ -54,6 +54,12 @@ class LibrarySupportTest {
     }
 
     @Test
+    fun `isPlatformNativelySupported returns true for mednafen_wswan supported systems`() {
+        assertThat(isPlatformNativelySupported("wonderswan")).isTrue()
+        assertThat(isPlatformNativelySupported("wonderswan-color")).isTrue()
+    }
+
+    @Test
     fun `isPlatformNativelySupported returns false for unsupported platforms`() {
         // PicoDrive and Mupen64Plus are still unapproved. Sega CD ("segacd")
         // is out of Genesis Plus GX's current CoreManifest scope (see

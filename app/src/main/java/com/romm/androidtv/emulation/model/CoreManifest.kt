@@ -450,6 +450,35 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "Beetle WonderSwan",
+            coreId = "mednafen_wswan",
+            upstreamRepository = "https://github.com/libretro/beetle-wswan-libretro",
+            commitSha = "4b01295838ea89e3f1355bbe4cb5cf98aa6108cd",
+            releaseTag = "", // Upstream carries no release tags; commitSha is the exact pin.
+            licenseSummary = "GPL-2.0-or-later (root COPYING and source headers carry the 'or later' clause, making this core GPL-3-compatible). No non-commercial/no-sale restriction anywhere in the core. Vendored subcomponents: mednafen/wswan/v30mz.c (permissive custom license — Cygne project, Bryan McPhail; commercial use allowed with attribution), mednafen/sound/Blip_Buffer.c (LGPL-2.1-or-later, Shay Green), libretro-common subtree (MIT). Only the files this core's Android libretro build actually compiles are vendored (no desktop GUI, no network code, no CI/docs). Scope is BIOS-free cartridge-only: wonderswan and wonderswan-color; content launches directly from frontend memory buffer without external boot ROM. See third_party/cores/mednafen_wswan/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("wonderswan", "wonderswan-color"),
+            supportedExtensions = listOf(".ws", ".wsc", ".pc2"),
+            requiredFirmware = emptyList(),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `mednafen_wswan_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mednafen_wswan/{libretro.c," +
+                "mednafen,libretro-common}/* with upstream's own libretro/jni/Android.mk COREFLAGS " +
+                "(FRONTEND_SUPPORTS_RGB565, MEDNAFEN_VERSION_NUMERIC, WANT_16BPP, __LIBRETRO__, " +
+                "WANT_WSWAN_EMU, LOAD_FROM_MEMORY, INLINE=inline), -fexceptions, " +
+                "and upstream's own link.T version script; see third_party/cores/mednafen_wswan/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "3a009628d9f21896442f214d6489c0e5ea620b85a23368a5b11094001718745c",
+                "arm64-v8a" to "995233d8d0b9354a01dbc9e37b5121659bfb7e06f9e1a66e5607ef0314d6452f",
+            ),
+            reviewedBy = "PROJECT-OWNER",
+            reviewedOn = "2026-08-01",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",

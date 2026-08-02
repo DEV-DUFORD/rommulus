@@ -12,7 +12,7 @@ class CoreManifestTest {
         // (LIBRETRO_REFACTOR.md section 4.1) — approving these six cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan")
     }
 
     @Test
@@ -187,6 +187,28 @@ class CoreManifestTest {
         assertThat(ngp.supportedSystems).containsExactly("neo-geo-pocket", "neo-geo-pocket-color")
         assertThat(ngp.supportedExtensions).containsExactly(".ngp", ".ngc", ".ngpc", ".npc")
         assertThat(ngp.requiredFirmware).isEmpty()
+    }
+
+    @Test
+    fun `mednafen_wswan's approval records a named reviewer, commit, and permissive finding`() {
+        val wswan = CoreManifest.findById("mednafen_wswan")
+
+        assertThat(wswan).isNotNull
+        assertThat(wswan!!.approved).isTrue()
+        assertThat(wswan.reviewedBy).isEqualTo("PROJECT-OWNER")
+        assertThat(wswan.reviewedOn).isNotBlank()
+        assertThat(wswan.commitSha).isNotBlank()
+        assertThat(wswan.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(wswan.ownerRiskAcceptedBy).isBlank()
+        assertThat(wswan.ownerRiskAcceptedOn).isBlank()
+        assertThat(wswan.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(wswan.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(wswan.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+        assertThat(wswan.supportedSystems).containsExactly("wonderswan", "wonderswan-color")
+        assertThat(wswan.supportedExtensions).containsExactly(".ws", ".wsc", ".pc2")
+        assertThat(wswan.requiredFirmware).isEmpty()
     }
 
     @Test

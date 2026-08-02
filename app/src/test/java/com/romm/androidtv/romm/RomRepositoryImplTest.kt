@@ -271,6 +271,40 @@ class RomRepositoryImplTest {
         }
 
         @Test
+        fun `the real, default resolver now approves wonderswan for mednafen_wswan since its Phase 7 review`() {
+            val wsRomJson = """
+                {"id": 59, "fs_name": "game.ws", "fs_size_bytes": 4, "platform_slug": "wonderswan", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.ws", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(wsRomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(59)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("mednafen_wswan")
+        }
+
+        @Test
+        fun `the real, default resolver now approves wonderswan-color for mednafen_wswan since its Phase 7 review`() {
+            val wscRomJson = """
+                {"id": 60, "fs_name": "game.wsc", "fs_size_bytes": 4, "platform_slug": "wonderswan-color", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.wsc", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(wscRomJson))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("game"))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(60)
+            }
+
+            assertThat(outcome).isInstanceOf(StagingOutcome.Success::class.java)
+            assertThat((outcome as StagingOutcome.Success).launchSpec.coreId).isEqualTo("mednafen_wswan")
+        }
+
+        @Test
         fun `the real, default resolver still rejects a platform with no approved core`() {
             val n64RomJson = """
                 {"id": 51, "fs_name": "game.n64", "fs_size_bytes": 4, "platform_slug": "n64", "has_multiple_files": false,
