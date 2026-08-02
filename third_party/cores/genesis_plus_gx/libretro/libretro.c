@@ -144,6 +144,13 @@ static uint8_t brm_format[0x40] =
 };
 uint8_t cart_size;
 
+#define ROMM_SCD_SAVE_HEADER_SIZE 16
+#define ROMM_SCD_INTERNAL_BRAM_SIZE 0x2000
+#define ROMM_SCD_MAX_CART_BRAM_SIZE 0x80000
+static uint8_t romm_scd_save_image[
+   ROMM_SCD_SAVE_HEADER_SIZE + ROMM_SCD_INTERNAL_BRAM_SIZE + ROMM_SCD_MAX_CART_BRAM_SIZE];
+static const uint8_t romm_scd_save_magic[8] = {'R','O','M','M','S','C','D','1'};
+
 static bool is_running = 0;
 static bool restart_eq = false;
 static uint8_t temp[0x10000];
@@ -3805,6 +3812,86 @@ size_t retro_get_memory_size(unsigned id)
       default:
         return 0;
    }
+}
+
+static void romm_write_u32_le(uint8_t *target, uint32_t value)
+{
+   target[0] = (uint8_t)value;
+   target[1] = (uint8_t)(value >> 8);
+   target[2] = (uint8_t)(value >> 16);
+   target[3] = (uint8_t)(value >> 24);
+}
+
+static uint32_t romm_read_u32_le(const uint8_t *source)
+{
+   return ((uint32_t)source[0]) |
+      ((uint32_t)source[1] << 8) |
+      ((uint32_t)source[2] << 16) |
+      ((uint32_t)source[3] << 24);
+}
+
+size_t romm_get_save_memory_size(void)
+{
+   size_t cart_bram_size;
+   if (system_hw != SYSTEM_MCD)
+      return 0;
+
+   cart_bram_size = scd.cartridge.id ? (size_t)scd.cartridge.mask + 1 : 0;
+   if (cart_bram_size > ROMM_SCD_MAX_CART_BRAM_SIZE)
+      return 0;
+
+   return ROMM_SCD_SAVE_HEADER_SIZE + ROMM_SCD_INTERNAL_BRAM_SIZE + cart_bram_size;
+}
+
+void *romm_get_save_memory_data(void)
+{
+   size_t image_size = romm_get_save_memory_size();
+   size_t cart_bram_size;
+   if (!image_size)
+      return NULL;
+
+   cart_bram_size = image_size - ROMM_SCD_SAVE_HEADER_SIZE - ROMM_SCD_INTERNAL_BRAM_SIZE;
+   memcpy(romm_scd_save_image, romm_scd_save_magic, sizeof(romm_scd_save_magic));
+   romm_write_u32_le(romm_scd_save_image + 8, ROMM_SCD_INTERNAL_BRAM_SIZE);
+   romm_write_u32_le(romm_scd_save_image + 12, (uint32_t)cart_bram_size);
+   memcpy(romm_scd_save_image + ROMM_SCD_SAVE_HEADER_SIZE,
+      scd.bram, ROMM_SCD_INTERNAL_BRAM_SIZE);
+   if (cart_bram_size)
+   {
+      memcpy(romm_scd_save_image + ROMM_SCD_SAVE_HEADER_SIZE + ROMM_SCD_INTERNAL_BRAM_SIZE,
+         scd.cartridge.area, cart_bram_size);
+   }
+   return romm_scd_save_image;
+}
+
+bool romm_apply_save_memory(void)
+{
+   size_t expected_size = romm_get_save_memory_size();
+   uint32_t internal_bram_size;
+   uint32_t cart_bram_size;
+   if (!expected_size ||
+       memcmp(romm_scd_save_image, romm_scd_save_magic, sizeof(romm_scd_save_magic)))
+      return false;
+
+   internal_bram_size = romm_read_u32_le(romm_scd_save_image + 8);
+   cart_bram_size = romm_read_u32_le(romm_scd_save_image + 12);
+   if (internal_bram_size != ROMM_SCD_INTERNAL_BRAM_SIZE ||
+       expected_size != ROMM_SCD_SAVE_HEADER_SIZE + internal_bram_size + cart_bram_size)
+      return false;
+
+   memcpy(scd.bram, romm_scd_save_image + ROMM_SCD_SAVE_HEADER_SIZE, internal_bram_size);
+   if (cart_bram_size)
+   {
+      memcpy(scd.cartridge.area,
+         romm_scd_save_image + ROMM_SCD_SAVE_HEADER_SIZE + internal_bram_size,
+         cart_bram_size);
+   }
+   /* Force the core's normal unload path to mirror restored data back to its
+    * native .brm files as a local fallback. */
+   brm_crc[0] = ~crc32(0, scd.bram, ROMM_SCD_INTERNAL_BRAM_SIZE);
+   if (cart_bram_size)
+      brm_crc[1] = ~crc32(0, scd.cartridge.area, cart_bram_size);
+   return true;
 }
 
 static void check_system_specs(void)

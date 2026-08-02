@@ -147,3 +147,9 @@ interacts with GPLv3 section 10, and the 2026-07-31 Phase 7 entry in
 - Same version-script (`libretro/link.T`) and vendored-code warning
   exemption convention as `sameboy_core`: not held to this project's own
   `-Wall -Wextra`.
+- `libretro/libretro.c` and `libretro/link.T` carry a small ROMM integration
+  extension (`romm_get_save_memory_*` / `romm_apply_save_memory`) that exposes
+  Sega CD's non-contiguous 8 KiB internal BRAM and optional backup-cartridge
+  BRAM as one versioned save image. Upstream persists these as separate `.brm`
+  files and reports no `RETRO_MEMORY_SAVE_RAM` for Sega CD, which otherwise
+  makes the app's atomic checkpoint and RomM sync pipeline reject valid saves.

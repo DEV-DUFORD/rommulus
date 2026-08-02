@@ -45,6 +45,13 @@ struct CoreFunctions {
 
     void* (*retro_get_memory_data)(unsigned) = nullptr;
     size_t (*retro_get_memory_size)(unsigned) = nullptr;
+
+    // Optional app-owned extension for cores whose durable save is composed
+    // of multiple non-contiguous memory regions (for example Sega CD internal
+    // BRAM plus backup cartridge BRAM).
+    void* (*romm_get_save_memory_data)() = nullptr;
+    size_t (*romm_get_save_memory_size)() = nullptr;
+    bool (*romm_apply_save_memory)() = nullptr;
 };
 
 // Loads one core .so, resolves all required symbols, and verifies the API

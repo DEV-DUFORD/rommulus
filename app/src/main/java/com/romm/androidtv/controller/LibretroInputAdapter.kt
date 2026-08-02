@@ -181,18 +181,39 @@ class LibretroInputAdapter(
     private val onPortUpdated: (ports: List<LibretroPadState>) -> Unit
 ) {
     private var job: Job? = null
+    private var lastPorts: List<LibretroPadState>? = null
 
     /** Starts observing [ControllerEventRouter.slotsFlow] in [scope]. Safe to call once. */
     fun start(scope: CoroutineScope) {
         if (job != null) return
         job = router.slotsFlow
-            .onEach { slots -> onPortUpdated(mapControllerSlotsToLibretroPorts(slots)) }
+            .onEach(::pushSlots)
             .launchIn(scope)
+    }
+
+    /**
+     * Pushes the router's current state immediately on the calling thread.
+     *
+     * Gameplay dispatch calls this directly after a consumed Android input
+     * event so the native atomics are updated before dispatch returns, rather
+     * than depending on the StateFlow collector to run before the core's next
+     * input poll.
+     */
+    fun pushCurrentState() {
+        pushSlots(router.slotsFlow.value)
     }
 
     /** Stops observing. Safe to call even if [start] was never called. */
     fun stop() {
         job?.cancel()
         job = null
+        lastPorts = null
+    }
+
+    private fun pushSlots(slots: List<ControllerSlot>) {
+        val ports = mapControllerSlotsToLibretroPorts(slots)
+        if (ports == lastPorts) return
+        lastPorts = ports
+        onPortUpdated(ports)
     }
 }

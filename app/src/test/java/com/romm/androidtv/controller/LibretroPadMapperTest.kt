@@ -230,4 +230,38 @@ class LibretroPadMapperTest {
             assertThat(ports[1].buttonsMask).isEqualTo(1 shl 0)
         }
     }
+
+    @Nested
+    @DisplayName("LibretroInputAdapter")
+    inner class InputAdapter {
+        @Test
+        fun `current router state can be pushed synchronously without a coroutine turn`() {
+            val router = com.romm.androidtv.controller.router.ControllerEventRouter()
+            router.setActive(true)
+            val updates = mutableListOf<List<LibretroPadState>>()
+            val adapter = LibretroInputAdapter(router, updates::add)
+
+            router.routeTvRemoteKey(
+                android.view.KeyEvent.ACTION_DOWN,
+                android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+            )
+            adapter.pushCurrentState()
+
+            assertThat(updates).hasSize(1)
+            assertThat(updates.single()[0].buttonsMask).isEqualTo(1 shl 8)
+        }
+
+        @Test
+        fun `duplicate immediate pushes do not repeat native updates`() {
+            val router = com.romm.androidtv.controller.router.ControllerEventRouter()
+            router.setActive(true)
+            val updates = mutableListOf<List<LibretroPadState>>()
+            val adapter = LibretroInputAdapter(router, updates::add)
+
+            adapter.pushCurrentState()
+            adapter.pushCurrentState()
+
+            assertThat(updates).hasSize(1)
+        }
+    }
 }

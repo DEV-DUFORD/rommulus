@@ -733,7 +733,9 @@ class EmulationActivity : ComponentActivity() {
                     KeyEvent.ACTION_UP -> {
                         backKeyHeld.value = false
                         val heldMs = SystemClock.elapsedRealtime() - backKeyDownAtMs
-                        if (heldMs < BACK_HOLD_DURATION_MS && sessionStarted) {
+                        if (heldMs < BACK_HOLD_DURATION_MS && sessionStarted &&
+                            !saveFailureVisible.value
+                        ) {
                             quickBackTapEvents.tryEmit(Unit)
                         }
                     }
@@ -741,9 +743,17 @@ class EmulationActivity : ComponentActivity() {
                 return true
             }
         }
-        if (sessionStarted && !pauseMenuVisible.value) {
+        if (shouldRouteGameplayInput(
+                sessionStarted = sessionStarted,
+                pauseMenuVisible = pauseMenuVisible.value,
+                saveFailureVisible = saveFailureVisible.value,
+            )
+        ) {
             val consumed = controllerRouter.onKeyEvent(event)
-            if (consumed) return true
+            if (consumed) {
+                inputAdapter.pushCurrentState()
+                return true
+            }
         }
         return super.dispatchKeyEvent(event)
     }
@@ -754,13 +764,27 @@ class EmulationActivity : ComponentActivity() {
         ) {
             return super.dispatchGenericMotionEvent(event)
         }
-        if (sessionStarted && !pauseMenuVisible.value) {
+        if (shouldRouteGameplayInput(
+                sessionStarted = sessionStarted,
+                pauseMenuVisible = pauseMenuVisible.value,
+                saveFailureVisible = saveFailureVisible.value,
+            )
+        ) {
             val consumed = controllerRouter.onMotionEvent(event)
-            if (consumed) return true
+            if (consumed) {
+                inputAdapter.pushCurrentState()
+                return true
+            }
         }
         return super.dispatchGenericMotionEvent(event)
     }
 }
+
+internal fun shouldRouteGameplayInput(
+    sessionStarted: Boolean,
+    pauseMenuVisible: Boolean,
+    saveFailureVisible: Boolean,
+): Boolean = sessionStarted && !pauseMenuVisible && !saveFailureVisible
 
 @Composable
 private fun EmulationScreen(
@@ -926,6 +950,7 @@ internal fun classifyLaunchFailure(lastError: String): LaunchFailureCategory = w
  */
 @Composable
 private fun NativeErrorScreen(category: LaunchFailureCategory, lastError: String, onBackToLibrary: () -> Unit) {
+    val backFocusRequester = remember { FocusRequester() }
     val (title, message) = when (category) {
         LaunchFailureCategory.CORE_LOAD -> "Emulator core failed to load" to
             "The native emulator core for this system could not be started. This usually means the app build is missing or has a broken core binary."
@@ -933,6 +958,9 @@ private fun NativeErrorScreen(category: LaunchFailureCategory, lastError: String
             "The emulator core started, but rejected this specific game file. It may be corrupt or in an unsupported format for this core."
         LaunchFailureCategory.UNKNOWN, LaunchFailureCategory.NONE -> "Something went wrong starting this game" to
             "An unexpected error prevented this session from starting."
+    }
+    LaunchedEffect(Unit) {
+        backFocusRequester.requestFocus()
     }
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
@@ -946,7 +974,10 @@ private fun NativeErrorScreen(category: LaunchFailureCategory, lastError: String
             Text(text = lastError, color = Color(0xFFf44336), style = MaterialTheme.typography.bodySmall)
         }
         Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onBackToLibrary) { Text("Back to Library") }
+        Button(
+            onClick = onBackToLibrary,
+            modifier = Modifier.focusRequester(backFocusRequester),
+        ) { Text("Back to Library") }
     }
 }
 
@@ -956,6 +987,10 @@ private fun NativeErrorScreen(category: LaunchFailureCategory, lastError: String
  */
 @Composable
 private fun SaveFailureOverlay(onRetry: () -> Unit, onQuitAnyway: () -> Unit) {
+    val retryFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        retryFocusRequester.requestFocus()
+    }
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)), contentAlignment = Alignment.Center) {
         Column(modifier = Modifier.padding(32.dp)) {
             Text(text = "Save failed", color = Color.White, style = MaterialTheme.typography.headlineSmall)
@@ -968,7 +1003,10 @@ private fun SaveFailureOverlay(onRetry: () -> Unit, onQuitAnyway: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(24.dp))
             Row {
-                Button(onClick = onRetry) { Text("Retry") }
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier.focusRequester(retryFocusRequester),
+                ) { Text("Retry") }
                 Spacer(modifier = Modifier.width(16.dp))
                 OutlinedButton(onClick = onQuitAnyway) { Text("Quit anyway") }
             }
@@ -1132,4 +1170,3 @@ private class EmulationSaveBackupStore(private val filesDir: java.io.File) : Sav
         }
     }
 }
-

@@ -24,6 +24,15 @@ bool resolve(void* handle, const char* name, Fn& out, std::string& error_out) {
     return true;
 }
 
+template <typename Fn>
+void resolveOptional(void* handle, const char* name, Fn& out) {
+    dlerror();
+    void* sym = dlsym(handle, name);
+    if (dlerror() == nullptr && sym != nullptr) {
+        out = reinterpret_cast<Fn>(sym);
+    }
+}
+
 }  // namespace
 
 CoreLibrary::~CoreLibrary() { unload(); }
@@ -67,6 +76,9 @@ bool CoreLibrary::load(const std::string& path) {
     ok &= resolve(handle, "retro_get_region", fns.retro_get_region, lastError_);
     ok &= resolve(handle, "retro_get_memory_data", fns.retro_get_memory_data, lastError_);
     ok &= resolve(handle, "retro_get_memory_size", fns.retro_get_memory_size, lastError_);
+    resolveOptional(handle, "romm_get_save_memory_data", fns.romm_get_save_memory_data);
+    resolveOptional(handle, "romm_get_save_memory_size", fns.romm_get_save_memory_size);
+    resolveOptional(handle, "romm_apply_save_memory", fns.romm_apply_save_memory);
 
     if (!ok) {
         LOGE("rejecting incomplete core library: %s", lastError_.c_str());

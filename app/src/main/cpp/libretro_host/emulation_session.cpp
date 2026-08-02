@@ -215,15 +215,16 @@ void EmulationSession::runLoop() {
             continue;
         }
 
+        scheduler.waitForNextFrame();
+        const auto frameWorkStarted = std::chrono::steady_clock::now();
         core_.functions().retro_run();
+        scheduler.reportFrameWorkDuration(std::chrono::steady_clock::now() - frameWorkStarted);
 
         if (environment_.shutdownRequested()) {
             diagnostics_.coreRequestedShutdown = true;
             threadShouldRun_ = false;
             break;
         }
-
-        scheduler.waitForNextFrame();
     }
 
     if (hwRender) {
@@ -288,12 +289,22 @@ void EmulationSession::stop() {
 
 void* EmulationSession::memoryData(unsigned id) {
     if (!core_.isLoaded()) return nullptr;
-    return core_.functions().retro_get_memory_data(id);
+    const CoreFunctions& fns = core_.functions();
+    if (id == RETRO_MEMORY_SAVE_RAM && fns.romm_get_save_memory_data != nullptr &&
+        fns.romm_get_save_memory_size != nullptr && fns.romm_get_save_memory_size() > 0) {
+        return fns.romm_get_save_memory_data();
+    }
+    return fns.retro_get_memory_data(id);
 }
 
 size_t EmulationSession::memorySize(unsigned id) {
     if (!core_.isLoaded()) return 0;
-    return core_.functions().retro_get_memory_size(id);
+    const CoreFunctions& fns = core_.functions();
+    if (id == RETRO_MEMORY_SAVE_RAM && fns.romm_get_save_memory_size != nullptr) {
+        const size_t extendedSize = fns.romm_get_save_memory_size();
+        if (extendedSize > 0) return extendedSize;
+    }
+    return fns.retro_get_memory_size(id);
 }
 
 bool EmulationSession::checkpointSaveRam(const std::string& savePath) {
@@ -313,7 +324,17 @@ bool EmulationSession::restoreSaveRam(const std::string& savePath) {
         LOGE("restoreSaveRam: core exposes no RETRO_MEMORY_SAVE_RAM region");
         return false;
     }
-    return readFileExact(savePath, data, size);
+    if (!readFileExact(savePath, data, size)) return false;
+
+    const CoreFunctions& fns = core_.functions();
+    if (fns.romm_get_save_memory_size != nullptr &&
+        fns.romm_get_save_memory_size() > 0) {
+        if (fns.romm_apply_save_memory == nullptr || !fns.romm_apply_save_memory()) {
+            LOGE("restoreSaveRam: core rejected extended save memory image");
+            return false;
+        }
+    }
+    return true;
 }
 
 bool EmulationSession::serialize(void* buffer, size_t size) {
