@@ -479,6 +479,35 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "Handy",
+            coreId = "handy",
+            upstreamRepository = "https://github.com/libretro/libretro-handy",
+            commitSha = "bc55d462f0b2d6b073ea93dc552ebd73cec60fd1",
+            releaseTag = "", // Upstream has no release tags; commitSha is the exact pin.
+            licenseSummary = "GPL-2.0-or-later effective (core emulator code is zlib/libpng-style permissive per lynx/license.txt — commercial use explicitly permitted), blip/Blip_Buffer.cpp LGPL-2.1-or-later (Shay Green), blip/Stereo_Buffer.cpp/.h GPL-2.0-or-later, libretro-common subtree MIT; effective license GPL-2.0-or-later (GPL-3-compatible); no non-commercial/no-sale restriction anywhere; BIOS-free — lynxboot.img is optional (HLE fallback, used only if found with CRC 0xD973C9D); scope is Atari Lynx cartridge only (lynx); extensions .lnx/.lyx/.o; only the files this core's Android libretro build compiles are vendored (no desktop code, no Makefiles/CI/docs); see third_party/cores/handy/VENDORING.md for the complete file-by-file vendoring rationale.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = false,
+            supportedSystems = listOf("lynx"),
+            supportedExtensions = listOf(".lnx", ".lyx", ".o"),
+            requiredFirmware = emptyList(),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
+                "(NDK r27.2.12479018, CMake 3.22.1; builds the `handy_core` CMake target in " +
+                "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/handy/{libretro," +
+                "lynx,blip,libretro-common}/* with upstream's own libretro/jni/Android.mk COREFLAGS " +
+                "(ANDROID, __LIBRETRO__, HAVE_STRINGS_H, HAVE_STDINT_H, WANT_CRC32, " +
+                "GIT_VERSION=\"bc55d46\"), -std=gnu++11, " +
+                "and upstream's own libretro/link.T version script; see third_party/cores/handy/VENDORING.md)",
+            binaryChecksums = mapOf(
+                "armeabi-v7a" to "5382a30ef80671b5b949b8c0e36699966b92d4c29e1c4351760a897ddd9f70cc",
+                "arm64-v8a" to "ab7a28fbed62be8483af91aa92bd1207e99b1ba95cb2d53716644bdbea460cd9",
+            ),
+            reviewedBy = "PROJECT-OWNER",
+            reviewedOn = "2026-08-01",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "Mupen64Plus",
             coreId = "mupen64plus_next",
             upstreamRepository = "https://github.com/libretro/mupen64plus-libretro-nx",

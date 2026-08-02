@@ -12,7 +12,7 @@ class CoreManifestTest {
         // (LIBRETRO_REFACTOR.md section 4.1) — approving these six cores must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy")
     }
 
     @Test
@@ -209,6 +209,28 @@ class CoreManifestTest {
         assertThat(wswan.supportedSystems).containsExactly("wonderswan", "wonderswan-color")
         assertThat(wswan.supportedExtensions).containsExactly(".ws", ".wsc", ".pc2")
         assertThat(wswan.requiredFirmware).isEmpty()
+    }
+
+    @Test
+    fun `handy's approval records a named reviewer, commit, and permissive finding`() {
+        val handy = CoreManifest.findById("handy")
+
+        assertThat(handy).isNotNull
+        assertThat(handy!!.approved).isTrue()
+        assertThat(handy.reviewedBy).isEqualTo("PROJECT-OWNER")
+        assertThat(handy.reviewedOn).isNotBlank()
+        assertThat(handy.commitSha).isNotBlank()
+        assertThat(handy.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(handy.ownerRiskAcceptedBy).isBlank()
+        assertThat(handy.ownerRiskAcceptedOn).isBlank()
+        assertThat(handy.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(handy.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(handy.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+        assertThat(handy.supportedSystems).containsExactly("lynx")
+        assertThat(handy.supportedExtensions).containsExactly(".lnx", ".lyx", ".o")
+        assertThat(handy.requiredFirmware).isEmpty()
     }
 
     @Test
