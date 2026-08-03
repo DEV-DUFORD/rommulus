@@ -85,6 +85,25 @@ data class ConnectedControllerInfo(
     val name: String?,
 )
 
+internal fun playerControllerLabels(
+    devices: List<ConnectedControllerInfo>,
+    playerCount: Int,
+): List<String?> {
+    val names = devices.map { it.name?.takeIf(String::isNotBlank) ?: "Game controller" }
+    val totals = names.groupingBy { it }.eachCount()
+    val seen = mutableMapOf<String, Int>()
+    return List(playerCount) { playerIndex ->
+        val name = names.getOrNull(playerIndex) ?: return@List null
+        if (totals.getValue(name) == 1) {
+            name
+        } else {
+            val number = (seen[name] ?: 0) + 1
+            seen[name] = number
+            "$name #$number"
+        }
+    }
+}
+
 /** Live info for the open capture dialog overlay. */
 data class CaptureDialogInfo(
     val controlLabel: String,
@@ -107,6 +126,8 @@ data class ControllerConfigUiState(
     val artworkResourceId: Int,
     val selectedPlayerIndex: Int = 0,
     val playerCount: Int = 1,
+    val playerControllerLabels: List<String?> = emptyList(),
+    val activePlayerIndex: Int? = null,
     val rows: List<ControllerBindingRow> = emptyList(),
     /** Control row currently focused (drives the artwork highlight). */
     val focusedControlId: CoreControlId? = null,
@@ -159,6 +180,7 @@ class ControllerSettingsViewModel(
     private var pendingConflictBinding: PhysicalBinding? = null
 
     private var messageJob: Job? = null
+    private var controllerActivityJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -171,6 +193,37 @@ class ControllerSettingsViewModel(
             captureCoordinator.state.collect { captureState ->
                 _uiState.update { it.copy(capture = it.capture?.copy(captureState = captureState)) }
                 handleTerminalCaptureState(captureState)
+            }
+        }
+        refreshConnectedDevices()
+    }
+
+    fun refreshConnectedDevices() {
+        _uiState.update {
+            it.copy(
+                playerControllerLabels = playerControllerLabels(
+                    devices = connectedDevicesProvider(),
+                    playerCount = profile.playerCount,
+                ),
+            )
+        }
+    }
+
+    fun onControllerActivity(deviceId: Int) {
+        val playerIndex = connectedDevicesProvider().indexOfFirst { it.deviceId == deviceId }
+        if (playerIndex !in 0 until profile.playerCount) return
+
+        refreshConnectedDevices()
+        controllerActivityJob?.cancel()
+        _uiState.update { it.copy(activePlayerIndex = playerIndex) }
+        controllerActivityJob = viewModelScope.launch {
+            delay(CONTROLLER_ACTIVITY_MILLIS)
+            _uiState.update { state ->
+                if (state.activePlayerIndex == playerIndex) {
+                    state.copy(activePlayerIndex = null)
+                } else {
+                    state
+                }
             }
         }
     }
@@ -407,6 +460,7 @@ class ControllerSettingsViewModel(
     }
 
     private companion object {
+        const val CONTROLLER_ACTIVITY_MILLIS = 1000L
         const val MESSAGE_DISMISS_MILLIS = 3000L
     }
 }

@@ -15,7 +15,10 @@ import com.romm.androidtv.controller.policy.SlotAssignmentPolicy
 import com.romm.androidtv.controller.policy.SourceFilterPolicy
 import com.romm.androidtv.controller.util.AxisNormalizer
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
@@ -36,6 +39,9 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     /** Current four-slot browser contract, exposed as StateFlow. */
     private val _slotsFlow = MutableStateFlow(ControllerSlot.createAllSlots())
     val slotsFlow: StateFlow<List<ControllerSlot>> = _slotsFlow.asStateFlow()
+
+    private val _physicalInputActivity = MutableSharedFlow<Int>(extraBufferCapacity = 8)
+    val physicalInputActivity: SharedFlow<Int> = _physicalInputActivity.asSharedFlow()
 
     /** Whether the router is actively capturing events. */
     private var isActive = false
@@ -79,6 +85,15 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         deviceSignatures = deviceIdToSignature,
         virtualRemoteDeviceId = virtualRemoteDeviceId,
     )
+
+    /** Notify settings UI which assigned physical controller produced an input event. */
+    fun recordPhysicalInputActivity(deviceId: Int) {
+        if (deviceIdToSlotIndex.containsKey(deviceId) &&
+            !deviceIdToSignature[deviceId].isAndroidTvVirtualController()
+        ) {
+            _physicalInputActivity.tryEmit(deviceId)
+        }
+    }
 
     /**
      * Enumerate already-connected input devices and assign controllers.

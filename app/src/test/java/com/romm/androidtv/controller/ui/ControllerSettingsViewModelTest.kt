@@ -53,4 +53,38 @@ class ControllerSettingsViewModelTest {
         val decision = decideApply(target, buttonX, withMany)
         assertThat(decision).isEqualTo(BindingApplyDecision.Conflict(CoreControlId.BUTTON_Y))
     }
+
+    @Test
+    fun `duplicate controller names are numbered in player order`() {
+        val labels = playerControllerLabels(
+            devices = listOf(
+                ConnectedControllerInfo(18, "Xbox Wireless Controller"),
+                ConnectedControllerInfo(19, "Xbox Wireless Controller"),
+            ),
+            playerCount = 4,
+        )
+
+        assertThat(labels).containsExactly(
+            "Xbox Wireless Controller #1",
+            "Xbox Wireless Controller #2",
+            null,
+            null,
+        )
+    }
+
+    @Test
+    fun `different controller names remain unchanged`() {
+        val labels = playerControllerLabels(
+            devices = listOf(
+                ConnectedControllerInfo(18, "Xbox Wireless Controller"),
+                ConnectedControllerInfo(19, "DualSense Wireless Controller"),
+            ),
+            playerCount = 2,
+        )
+
+        assertThat(labels).containsExactly(
+            "Xbox Wireless Controller",
+            "DualSense Wireless Controller",
+        )
+    }
 }

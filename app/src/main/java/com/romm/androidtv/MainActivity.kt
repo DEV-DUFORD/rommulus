@@ -891,6 +891,15 @@ class MainActivity : ComponentActivity() {
                                                     key = "controller-settings-${selectedControllerCoreId}",
                                                     factory = controllerFactory,
                                                 )
+                                            val controllerSlots by controllerRouter.slotsFlow.collectAsState()
+                                            LaunchedEffect(controllerSlots) {
+                                                controllerViewModel.refreshConnectedDevices()
+                                            }
+                                            LaunchedEffect(controllerViewModel) {
+                                                controllerRouter.physicalInputActivity.collect {
+                                                    controllerViewModel.onControllerActivity(it)
+                                                }
+                                            }
                                             val uiState by controllerViewModel.uiState.collectAsState()
                                             com.romm.androidtv.controller.ui.ControllerConfigScreen(
                                                 state = uiState,
@@ -1922,6 +1931,9 @@ class MainActivity : ComponentActivity() {
         // Android Back is always reserved for native handling
         if (event.keyCode == KeyEvent.KEYCODE_BACK) {
             return super.dispatchKeyEvent(event)
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            controllerRouter.recordPhysicalInputActivity(event.deviceId)
         }
 
         // Phase 4: capture raw input before all normal routing. Returns non-null

@@ -776,6 +776,9 @@ class EmulationActivity : ComponentActivity() {
      */
     @Suppress("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            controllerRouter.recordPhysicalInputActivity(event.deviceId)
+        }
         // Phase 4: capture raw input before all normal routing. Returns non-null
         // (consume) only while a capture is active; null when Idle lets the
         // existing gameplay/UI routing below run completely unchanged.
@@ -1247,6 +1250,15 @@ private fun ControllerSettingsSubpage(
         key = "pause-menu-controller-settings",
         factory = factory,
     )
+    val controllerSlots by controllerRouter.slotsFlow.collectAsState()
+    LaunchedEffect(controllerSlots) {
+        viewModel.refreshConnectedDevices()
+    }
+    LaunchedEffect(viewModel) {
+        controllerRouter.physicalInputActivity.collect {
+            viewModel.onControllerActivity(it)
+        }
+    }
     val uiState by viewModel.uiState.collectAsState()
     ControllerConfigScreen(
         state = uiState,

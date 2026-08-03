@@ -155,6 +155,8 @@ fun ControllerConfigScreen(
 
         PlayerTabRow(
             playerCount = state.playerCount,
+            controllerLabels = state.playerControllerLabels,
+            activePlayerIndex = state.activePlayerIndex,
             selectedIndex = currentPlayer,
             tabFocusRequesters = tabFocusRequesters,
             onFocused = { playerIndex -> focusedTabIndex.value = playerIndex },
@@ -288,6 +290,8 @@ private fun ControllerHeader(
 @androidx.compose.material3.ExperimentalMaterial3Api
 private fun PlayerTabRow(
     playerCount: Int,
+    controllerLabels: List<String?>,
+    activePlayerIndex: Int?,
     selectedIndex: Int,
     tabFocusRequesters: Array<FocusRequester>,
     onFocused: (playerIndex: Int) -> Unit,
@@ -310,12 +314,34 @@ private fun PlayerTabRow(
                 onClick = { onSelectTab(playerIndex) },
                 interactionSource = interactionSource,
                 text = {
-                    Text(
-                        text = stringResource(R.string.controller_config_player_tab_label, playerNumber),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = if (isFocused) RommTvColors.Romm300 else RommTvColors.TextSecondary,
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = stringResource(R.string.controller_config_player_tab_label, playerNumber),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = if (isFocused) RommTvColors.Romm300 else RommTvColors.TextSecondary,
+                        )
+                        Text(
+                            text = when {
+                                activePlayerIndex == playerIndex ->
+                                    stringResource(
+                                        R.string.controller_config_player_device_active,
+                                        controllerLabels.getOrNull(playerIndex)
+                                            ?: stringResource(R.string.controller_config_player_device_disconnected),
+                                    )
+                                else -> controllerLabels.getOrNull(playerIndex)
+                                    ?: stringResource(R.string.controller_config_player_device_disconnected)
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (activePlayerIndex == playerIndex) {
+                                RommTvColors.Romm300
+                            } else {
+                                RommTvColors.TextSecondary
+                            },
+                        )
+                    }
                 },
                 modifier = Modifier
                     .focusRequester(tabFocusRequesters[playerIndex])
