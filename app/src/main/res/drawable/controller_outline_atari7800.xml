@@ -1,0 +1,23 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct Atari 7800 silhouette hint: joystick-style outline (ball top + vertical
+  stick + base) with two buttons on the base. Viewport 360x360.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+  <!-- Ball top -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 160,90 A 20,20 0 1 0 200,90 A 20,20 0 1 0 160,90 Z"/>
+  <!-- Vertical stick -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 180,105 L 180,180"/>
+  <!-- Base -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="12"
+      android:pathData="M 90,180 L 270,180 A 30,30 0 0 1 300,210 L 300,230 A 15,15 0 0 1 285,245 L 75,245 A 15,15 0 0 1 60,230 L 60,210 A 30,30 0 0 1 90,180 Z"/>
+  <!-- Two buttons -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 126,215 A 14,14 0 1 0 154,215 A 14,14 0 1 0 126,215 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 186,215 A 14,14 0 1 0 214,215 A 14,14 0 1 0 186,215 Z"/>
+</vector>

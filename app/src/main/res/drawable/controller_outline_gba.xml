@@ -1,0 +1,31 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct Game Boy Advance silhouette hint: horizontal handheld with a small screen
+  rect center, D-pad left, 2 face buttons right, shoulder marks on top.
+  Viewport 360x360.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+  <!-- Shoulder marks -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 40,118 L 90,118"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 270,118 L 320,118"/>
+  <!-- Body: horizontal rounded rectangle -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="12"
+      android:pathData="M 30,120 L 330,120 A 30,30 0 0 1 360,150 L 360,210 A 30,30 0 0 1 330,240 L 30,240 A 30,30 0 0 1 0,210 L 0,150 A 30,30 0 0 1 30,120 Z"/>
+  <!-- Screen window -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="8"
+      android:pathData="M 120,130 L 240,130 A 12,12 0 0 1 252,142 L 252,218 A 12,12 0 0 1 240,230 L 120,230 A 12,12 0 0 1 108,218 L 108,142 A 12,12 0 0 1 120,130 Z"/>
+  <!-- D-pad cross -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 55,150 L 55,210"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 25,180 L 85,180"/>
+  <!-- Two face buttons -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 283,180 A 12,12 0 1 0 307,180 A 12,12 0 1 0 283,180 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 313,180 A 12,12 0 1 0 337,180 A 12,12 0 1 0 313,180 Z"/>
+</vector>

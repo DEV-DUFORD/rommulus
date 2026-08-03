@@ -1,0 +1,33 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct Nintendo 64 silhouette hint: three-prong "trident" body with a single
+  center analog stick nub. Viewport 64x64.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+  <!-- Center analog stick nub -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 30,30 A 2,2 0 1 0 34,30 A 2,2 0 1 0 30,30 Z"/>
+  <!-- Body: rounded rectangle -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 8,16 L 56,16 A 6,6 0 0 1 62,22 L 62,38 A 6,6 0 0 1 56,44 L 8,44 A 6,6 0 0 1 2,38 L 2,22 A 6,6 0 0 1 8,16 Z"/>
+  <!-- Left prong -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 12,40 L 20,40 A 4,4 0 0 1 24,44 L 24,50 A 2,2 0 0 1 22,52 L 14,52 A 2,2 0 0 1 12,50 L 12,44 A 4,4 0 0 1 16,40 Z"/>
+  <!-- Center prong -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 28,40 L 36,40 A 4,4 0 0 1 40,44 L 40,50 A 2,2 0 0 1 38,52 L 30,52 A 2,2 0 0 1 28,50 L 28,44 A 4,4 0 0 1 32,40 Z"/>
+  <!-- Right prong -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 44,40 L 52,40 A 4,4 0 0 1 56,44 L 56,50 A 2,2 0 0 1 54,52 L 46,52 A 2,2 0 0 1 44,50 L 44,44 A 4,4 0 0 1 48,40 Z"/>
+</vector>

@@ -1,0 +1,29 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct Neo Geo Pocket silhouette hint: small vertical handheld, screen + D-pad
+  + 2 face buttons, Option mark near bottom. Viewport 360x360.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+  <!-- Body: small vertical rounded rectangle -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="12"
+      android:pathData="M 135,40 L 225,40 A 20,20 0 0 1 245,60 L 245,300 A 20,20 0 0 1 225,320 L 135,320 A 20,20 0 0 1 115,300 L 115,60 A 20,20 0 0 1 135,40 Z"/>
+  <!-- Screen window -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="8"
+      android:pathData="M 145,70 L 215,70 A 10,10 0 0 1 225,80 L 225,150 A 10,10 0 0 1 215,160 L 145,160 A 10,10 0 0 1 135,150 L 135,80 A 10,10 0 0 1 145,70 Z"/>
+  <!-- D-pad cross -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 150,195 L 150,245"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 125,220 L 175,220"/>
+  <!-- Two face buttons -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 185,220 A 10,10 0 1 0 205,220 A 10,10 0 1 0 185,220 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 215,220 A 10,10 0 1 0 235,220 A 10,10 0 1 0 215,220 Z"/>
+  <!-- Option mark -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 160,275 L 200,275"/>
+</vector>

@@ -1,0 +1,22 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct NES silhouette hint: simple flat rectangular body, D-pad left,
+  2 face buttons right, no shoulder buttons. Viewport 64x64.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+  <!-- Body: flat rectangle (less rounded than SNES) -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 10,26 L 54,26 A 4,4 0 0 1 58,30 L 58,40 A 4,4 0 0 1 54,44 L 10,44 A 4,4 0 0 1 6,40 L 6,30 A 4,4 0 0 1 10,26 Z"/>
+  <!-- D-pad cross -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 15,31 L 15,40"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 11,35.5 L 19,35.5"/>
+  <!-- Two face buttons -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 37.5,36 A 2.5,2.5 0 1 0 42.5,36 A 2.5,2.5 0 1 0 37.5,36 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 47.5,36 A 2.5,2.5 0 1 0 52.5,36 A 2.5,2.5 0 1 0 47.5,36 Z"/>
+</vector>

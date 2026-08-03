@@ -1,0 +1,22 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct TurboGrafx-16 silhouette hint: compact small gamepad (no screen),
+  D-pad left, 2 round face buttons right. Viewport 360x360.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+  <!-- Body: compact rounded rectangle (small gamepad) -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="12"
+      android:pathData="M 90,120 L 270,120 A 30,30 0 0 1 300,150 L 300,210 A 30,30 0 0 1 270,240 L 90,240 A 30,30 0 0 1 60,210 L 60,150 A 30,30 0 0 1 90,120 Z"/>
+  <!-- D-pad cross -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 130,150 L 130,210"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 100,180 L 160,180"/>
+  <!-- Two face buttons -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 195,180 A 15,15 0 1 0 225,180 A 15,15 0 1 0 195,180 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 235,180 A 15,15 0 1 0 265,180 A 15,15 0 1 0 235,180 Z"/>
+</vector>

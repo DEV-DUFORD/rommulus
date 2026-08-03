@@ -1,0 +1,31 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct Game Boy / Game Boy Color silhouette hint: vertical/portrait handheld
+  with screen on top, D-pad + 2 face buttons below, Select/Start marks.
+  Viewport 360x360 matches the pineapple-graphics profiles' declared viewBox.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+  <!-- Body: vertical rounded rectangle -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="12"
+      android:pathData="M 130,30 L 230,30 A 25,25 0 0 1 255,55 L 255,305 A 25,25 0 0 1 230,330 L 130,330 A 25,25 0 0 1 105,305 L 105,55 A 25,25 0 0 1 130,30 Z"/>
+  <!-- Screen window -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="8"
+      android:pathData="M 140,60 L 220,60 A 12,12 0 0 1 232,72 L 232,150 A 12,12 0 0 1 220,162 L 140,162 A 12,12 0 0 1 128,150 L 128,72 A 12,12 0 0 1 140,60 Z"/>
+  <!-- D-pad cross -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 145,200 L 145,250"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 120,225 L 170,225"/>
+  <!-- Two face buttons -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 203,225 A 12,12 0 1 0 227,225 A 12,12 0 1 0 203,225 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 233,225 A 12,12 0 1 0 257,225 A 12,12 0 1 0 233,225 Z"/>
+  <!-- Select/Start marks -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 160,280 L 190,280"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="12" android:pathData="M 205,280 L 235,280"/>
+</vector>

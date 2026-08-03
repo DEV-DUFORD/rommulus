@@ -1,0 +1,23 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct Atari 2600 silhouette hint: single-stick joystick (ball top + vertical
+  stick + base with a fire button), very different from any gamepad.
+  Viewport 64x64.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+  <!-- Ball top -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 28,18 A 4,4 0 1 0 36,18 A 4,4 0 1 0 28,18 Z"/>
+  <!-- Vertical stick -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 32,22 L 32,40"/>
+  <!-- Base -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 20,40 L 44,40 A 6,6 0 0 1 50,46 L 50,50 A 2,2 0 0 1 48,52 L 16,52 A 2,2 0 0 1 14,50 L 14,46 A 6,6 0 0 1 20,40 Z"/>
+  <!-- Fire button -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 24,48 A 2,2 0 1 0 28,48 A 2,2 0 1 0 24,48 Z"/>
+</vector>

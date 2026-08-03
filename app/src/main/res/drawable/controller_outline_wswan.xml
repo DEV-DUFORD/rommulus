@@ -1,0 +1,28 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct WonderSwan silhouette hint: landscape/portrait-swappable handheld with
+  the screen on the right, D-pad left, A/B buttons below the D-pad.
+  Viewport 360x360.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+  <!-- Body: horizontal rounded rectangle -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="12"
+      android:pathData="M 40,120 L 320,120 A 28,28 0 0 1 348,148 L 348,212 A 28,28 0 0 1 320,240 L 40,240 A 28,28 0 0 1 12,212 L 12,148 A 28,28 0 0 1 40,120 Z"/>
+  <!-- Screen window (right side) -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="8"
+      android:pathData="M 190,135 L 315,135 A 10,10 0 0 1 325,145 L 325,215 A 10,10 0 0 1 315,225 L 190,225 A 10,10 0 0 1 180,215 L 180,145 A 10,10 0 0 1 190,135 Z"/>
+  <!-- D-pad cross -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 80,150 L 80,200"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 55,175 L 105,175"/>
+  <!-- A/B buttons below the D-pad -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 50,215 A 10,10 0 1 0 70,215 A 10,10 0 1 0 50,215 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="10" android:pathData="M 90,215 A 10,10 0 1 0 110,215 A 10,10 0 1 0 90,215 Z"/>
+</vector>

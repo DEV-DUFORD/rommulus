@@ -1,0 +1,28 @@
+<!--
+  ORIGINAL placeholder artwork for the "Required asset spike" (follow-up).
+  Distinct Super Nintendo silhouette hint: rounded-rect body, D-pad left,
+  4 face buttons in a diamond right, two shoulder buttons on top, no analog stick.
+  Viewport 64x64 matches the controllercons profiles' declared viewBox.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+  <!-- Body: rounded rectangle -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 8,20 L 56,20 A 6,6 0 0 1 62,26 L 62,40 A 6,6 0 0 1 56,46 L 8,46 A 6,6 0 0 1 2,40 L 2,26 A 6,6 0 0 1 8,20 Z"/>
+  <!-- Shoulder buttons -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 14,17 L 24,17"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 40,17 L 50,17"/>
+  <!-- D-pad cross -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 12,28 L 12,40"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 7,34 L 17,34"/>
+  <!-- Face buttons in a diamond -->
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 42,26 A 2,2 0 1 0 46,26 A 2,2 0 1 0 42,26 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 42,40 A 2,2 0 1 0 46,40 A 2,2 0 1 0 42,40 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 36,33 A 2,2 0 1 0 40,33 A 2,2 0 1 0 36,33 Z"/>
+  <path android:strokeColor="#B0B4C0" android:strokeWidth="2.5" android:pathData="M 48,33 A 2,2 0 1 0 52,33 A 2,2 0 1 0 48,33 Z"/>
+</vector>
