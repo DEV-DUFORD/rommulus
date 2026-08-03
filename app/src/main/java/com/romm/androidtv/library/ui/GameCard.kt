@@ -54,7 +54,18 @@ fun GameCard(
     val elevation by animateFloatAsState(if (isFocused) 12f else 0f, label = "gameCardElevation")
 
     Column(
-        modifier = modifier.width(136.dp),
+        modifier = modifier
+            .width(136.dp)
+            // `clickable` (and thus the focus target Compose uses for "bring focused item
+            // into view" when scrolling) lives on the whole Column, not just the image Box
+            // below — otherwise bring-into-view only guarantees the poster is on-screen,
+            // leaving the title/subtitle Text (a sibling outside that Box) clipped at the
+            // bottom edge for the last shelf/grid row.
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
     ) {
         Box(
             modifier = Modifier
@@ -68,11 +79,6 @@ fun GameCard(
                     width = if (isFocused) 3.dp else 0.dp,
                     color = if (isFocused) RommTvColors.Romm500 else Color.Transparent,
                     shape = RoundedCornerShape(8.dp),
-                )
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onClick,
                 ),
             contentAlignment = Alignment.Center,
         ) {

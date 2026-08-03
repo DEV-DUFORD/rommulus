@@ -65,7 +65,10 @@ class LibraryRepositoryImpl(
 
     override suspend fun fetchPlatforms(): LibraryResult<List<PlatformSummary>> = withContext(Dispatchers.IO) {
         when (val result = LibraryApi.fetchPlatforms(client, originProvider())) {
-            is PlatformListResult.Success -> LibraryResult.Success(result.platforms)
+            // Empty platforms (romCount == 0) are typically stale/duplicate entries left
+            // behind on the server (e.g. a platform created before its slug was corrected
+            // by a rescan) and have nothing for the user to browse, so they're hidden here.
+            is PlatformListResult.Success -> LibraryResult.Success(result.platforms.filter { it.romCount > 0 })
             is PlatformListResult.Failure -> LibraryResult.Failure(result.error)
         }
     }

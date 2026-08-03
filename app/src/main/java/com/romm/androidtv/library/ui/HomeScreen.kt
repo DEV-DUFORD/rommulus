@@ -30,13 +30,17 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.foundation.lazy.list.TvLazyRow
 import androidx.tv.foundation.lazy.list.items
@@ -74,6 +78,10 @@ fun NativeHomeScreen(
                 ),
             )
             .padding(top = 32.dp, start = 8.dp),
+        // Bottom breathing room so the last shelf's title/subtitle isn't flush against
+        // the screen edge once scrolled all the way down (matches the Platforms/Collections
+        // grid fix — TV displays leave little/no margin for content sitting right at the edge).
+        contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item {
             RomShelf(
@@ -188,7 +196,12 @@ fun PlatformsScreen(
             TileCard(
                 title = platform.displayName,
                 subtitle = "${platform.romCount} games",
-                imageUrl = platform.logoUrl,
+                // Prefer RomM's own bundled platform glyphs (matches the webapp's
+                // Platforms grid), trying SVG then ICO since not every platform has
+                // both on file; fall back to the metadata-provider logo (e.g. an
+                // IGDB photo/wordmark) only if the server has neither.
+                imageUrls = platform.iconUrlCandidates + listOfNotNull(platform.logoUrl),
+                imagePadding = 20.dp,
                 onClick = { onOpenPlatform(platform.id) },
             )
         },
@@ -213,7 +226,7 @@ fun CollectionsScreen(
             TileCard(
                 title = collection.name,
                 subtitle = "${collection.romCount} games",
-                imageUrl = collection.coverUrl,
+                imageUrls = listOfNotNull(collection.coverUrl),
                 onClick = { onOpenCollection(collection.id) },
             )
         },
@@ -252,10 +265,16 @@ private fun <T> TileGridScreen(
                 } else {
                     // Fixed-size cells (not chunked Rows) so a single item never stretches to
                     // claim the whole row's width (UI_REFACTOR.md section 7.1, bug 1).
+                    // Bounded to the remaining Column height via weight(1f) so the grid owns
+                    // its own internal scrolling — without it, the grid wasn't constrained and
+                    // the last row could render partially or fully off-screen with no way to
+                    // scroll it into view.
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 160.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 24.dp),
+                        modifier = Modifier.fillMaxWidth().weight(1f),
                     ) {
                         items(state.data, key = key) { item -> tileContent(item) }
                     }
@@ -266,11 +285,28 @@ private fun <T> TileGridScreen(
 }
 
 @Composable
-private fun TileCard(title: String, subtitle: String, imageUrl: String?, onClick: () -> Unit = {}) {
+private fun TileCard(title: String, subtitle: String, imageUrls: List<String>, imagePadding: Dp = 0.dp, onClick: () -> Unit = {}) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    // Cascades through [imageUrls] on load failure (e.g. RomM's platform icon set
+    // only has a `.ico` on file for some systems, not `.svg`; see LibraryApi.platformIconUrls),
+    // falling back to the generic glyph once every candidate has failed.
+    var candidateIndex by remember(imageUrls) { mutableStateOf(0) }
+    val currentUrl = imageUrls.getOrNull(candidateIndex)
 
-    Column(modifier = Modifier.padding(4.dp)) {
+    // `clickable` (and thus the focus target used by Compose's "scroll focused item into
+    // view" behavior) lives on the whole Column, not just the image Box below — otherwise
+    // bring-into-view only guarantees the image is on-screen, leaving the title/subtitle
+    // Text (a sibling outside that Box) clipped at the bottom edge for the last grid row.
+    Column(
+        modifier = Modifier
+            .padding(4.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -281,19 +317,16 @@ private fun TileCard(title: String, subtitle: String, imageUrl: String?, onClick
                     width = if (isFocused) 3.dp else 0.dp,
                     color = if (isFocused) RommTvColors.Romm500 else Color.Transparent,
                     shape = RoundedCornerShape(8.dp),
-                )
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onClick,
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            if (imageUrl != null) {
+            if (currentUrl != null) {
                 AsyncImage(
-                    model = imageUrl,
+                    model = currentUrl,
                     contentDescription = title,
-                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                    onError = { candidateIndex++ },
+                    modifier = Modifier.fillMaxSize().padding(imagePadding),
                 )
             } else {
                 androidx.compose.material3.Icon(

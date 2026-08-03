@@ -14,6 +14,22 @@ data class PlatformSummary(
     val romCount: Int,
     /** Absolute external logo URL (e.g. IGDB CDN), or null if RomM has none on file. */
     val logoUrl: String?,
+    /**
+     * Absolute URL for RomM's own bundled platform glyph, served at
+     * `{origin}/assets/platforms/{slug}.svg` — the same icon set the webapp
+     * shows in its Platforms grid. Preferred over [logoUrl] (an IGDB/etc.
+     * metadata-provider image, which is often a photo or brand wordmark
+     * rather than a small icon) since it's what users expect to see. Null
+     * if [slug] is blank.
+     */
+    val iconUrl: String? = null,
+    /**
+     * Ordered fallback chain for RomM's bundled platform icon (SVG, then
+     * ICO), mirroring the webapp's own resolution order — not every platform
+     * has an SVG on file (e.g. Sega CD/Saturn/Master System serve only
+     * `.ico`). [iconUrl] is always this list's first element when non-empty.
+     */
+    val iconUrlCandidates: List<String> = listOfNotNull(iconUrl),
     /** RomM's canonical platform slug (e.g. "gb", "genesis") — used to check native core support. Blank if the server did not return one. */
     val slug: String = "",
 )

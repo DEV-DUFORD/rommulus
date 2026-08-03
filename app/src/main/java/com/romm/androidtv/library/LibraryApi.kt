@@ -159,11 +159,17 @@ object LibraryApi {
 
     // ---- Pure JSON parsing (unit-testable without a live server) ----
 
-    /** Parses the JSON body of `GET /api/platforms`. Returns null on any malformed input. */
-    fun parsePlatformList(body: String): List<PlatformSummary>? {
+    /**
+     * Parses the JSON body of `GET /api/platforms`. Icon paths are resolved
+     * against [origin] since RomM serves its bundled platform glyphs
+     * origin-relative (e.g. `/assets/platforms/gb.svg`). Returns null on any
+     * malformed input.
+     */
+    fun parsePlatformList(body: String, origin: String): List<PlatformSummary>? {
         return try {
             val json = platformListAdapter.fromJson(body.trim()) ?: return null
             json.map {
+                val iconCandidates = platformIconUrls(origin, it.slug)
                 PlatformSummary(
                     id = it.id,
                     displayName = it.display_name?.takeIf { name -> name.isNotBlank() }
@@ -171,6 +177,8 @@ object LibraryApi {
                         ?: it.name,
                     romCount = it.rom_count,
                     logoUrl = it.url_logo,
+                    iconUrl = iconCandidates.firstOrNull(),
+                    iconUrlCandidates = iconCandidates,
                     slug = it.slug,
                 )
             }
@@ -178,6 +186,26 @@ object LibraryApi {
             null
         }
     }
+
+    /**
+     * Builds the ordered fallback chain of RomM's bundled platform icon URLs,
+     * mirroring the webapp's own resolution order (`CachedPlatformIcon.vue`):
+     * SVG first, then ICO, since not every platform has an SVG on file (e.g.
+     * Sega CD/Saturn/Master System serve only `.ico`). Empty if [slug] is
+     * blank or [origin] can't be parsed.
+     */
+    internal fun platformIconUrls(origin: String, slug: String): List<String> {
+        if (slug.isBlank()) return emptyList()
+        val normalizedOrigin = RommOrigin.parse(origin)?.toUrl() ?: origin.removeSuffix("/").takeIf { it.isNotBlank() } ?: return emptyList()
+        return listOf("svg", "ico").map { ext -> "$normalizedOrigin/assets/platforms/$slug.$ext" }
+    }
+
+    /**
+     * Builds the absolute URL for RomM's bundled platform SVG glyph (the same
+     * icon set rendered by the webapp's Platforms grid), or null if [slug] is
+     * blank or [origin] can't be parsed.
+     */
+    internal fun platformIconUrl(origin: String, slug: String): String? = platformIconUrls(origin, slug).firstOrNull()
 
     /**
      * Parses the JSON body of `GET /api/roms` (a `CustomLimitOffsetPage`). Cover
@@ -291,7 +319,7 @@ object LibraryApi {
             client.newCall(request).execute().use { response ->
                 classifyResponse(response)?.let { return PlatformListResult.Failure(it, response.code) }
                 val body = response.body?.string()
-                val platforms = body?.let { parsePlatformList(it) }
+                val platforms = body?.let { parsePlatformList(it, origin) }
                 if (platforms == null) PlatformListResult.Failure(RommApiError.PARSE_ERROR, response.code)
                 else PlatformListResult.Success(platforms)
             }

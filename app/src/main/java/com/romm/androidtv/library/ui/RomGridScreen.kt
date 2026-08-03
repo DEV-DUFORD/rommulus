@@ -87,7 +87,10 @@ fun RomGridScreen(
                         contentPadding = PaddingValues(bottom = 24.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.fillMaxWidth(),
+                        // weight(1f) bounds the grid to the remaining Column height so it owns
+                        // its own scrolling — without it the grid isn't height-constrained and
+                        // the last row can end up partially or fully unreachable by scrolling.
+                        modifier = Modifier.fillMaxWidth().weight(1f),
                     ) {
                         items(section.data, key = { it.id }) { rom: LibraryRom ->
                             GameCard(

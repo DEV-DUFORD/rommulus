@@ -172,6 +172,8 @@ dependencies {
 
     // Coil for Compose image loading (cover art) — UI_REFACTOR.md section 5
     implementation("io.coil-kt:coil-compose:2.6.0")
+    // Decodes RomM's bundled platform icons, which are SVGs (/assets/platforms/{slug}.svg).
+    implementation("io.coil-kt:coil-svg:2.6.0")
 
     // Jetpack Compose for TV: focus-aware lazy lists/rows and D-pad focus restoration,
     // used by the native browsing UI (UI_REFACTOR.md) instead of hand-rolled focus plumbing.

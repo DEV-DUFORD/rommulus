@@ -27,12 +27,23 @@ class LibraryApiTest {
                   "display_name": "Dreamcast", "rom_count": 343, "url_logo": "https://cdn.example/dc.jpg"}]
             """.trimIndent()
 
-            val result = LibraryApi.parsePlatformList(body)
+            val result = LibraryApi.parsePlatformList(body, origin)
 
             assertThat(result).isNotNull
             assertThat(result).hasSize(1)
             assertThat(result!![0]).isEqualTo(
-                PlatformSummary(id = 34, displayName = "Dreamcast", romCount = 343, logoUrl = "https://cdn.example/dc.jpg", slug = "dc")
+                PlatformSummary(
+                    id = 34,
+                    displayName = "Dreamcast",
+                    romCount = 343,
+                    logoUrl = "https://cdn.example/dc.jpg",
+                    iconUrl = "https://example.test/assets/platforms/dc.svg",
+                    iconUrlCandidates = listOf(
+                        "https://example.test/assets/platforms/dc.svg",
+                        "https://example.test/assets/platforms/dc.ico",
+                    ),
+                    slug = "dc",
+                )
             )
         }
 
@@ -43,24 +54,56 @@ class LibraryApiTest {
                   "rom_count": 609, "url_logo": null}]
             """.trimIndent()
 
-            val result = LibraryApi.parsePlatformList(body)
+            val result = LibraryApi.parsePlatformList(body, origin)
 
             assertThat(result).isNotNull
             assertThat(result!![0].displayName).isEqualTo("Game Boy")
             assertThat(result[0].slug).isEqualTo("gb")
             assertThat(result[0].logoUrl).isNull()
+            assertThat(result[0].iconUrl).isEqualTo("https://example.test/assets/platforms/gb.svg")
         }
 
         @Test
         fun `parses empty array`() {
-            val result = LibraryApi.parsePlatformList("[]")
+            val result = LibraryApi.parsePlatformList("[]", origin)
             assertThat(result).isNotNull
             assertThat(result).isEmpty()
         }
 
         @Test
         fun `returns null for malformed json`() {
-            assertThat(LibraryApi.parsePlatformList("not json")).isNull()
+            assertThat(LibraryApi.parsePlatformList("not json", origin)).isNull()
+        }
+
+        @Test
+        fun `iconUrl is null and candidates empty when slug is blank`() {
+            val body = """
+                [{"id": 2, "slug": "", "name": "Gameboy", "custom_name": "",
+                  "rom_count": 0, "url_logo": null}]
+            """.trimIndent()
+
+            val result = LibraryApi.parsePlatformList(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!![0].iconUrl).isNull()
+            assertThat(result[0].iconUrlCandidates).isEmpty()
+        }
+
+        @Test
+        fun `icon candidates fall back from svg to ico, matching the webapp's own resolution order`() {
+            val body = """
+                [{"id": 31, "slug": "segacd", "name": "Sega CD", "custom_name": "",
+                  "rom_count": 225, "url_logo": null}]
+            """.trimIndent()
+
+            val result = LibraryApi.parsePlatformList(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!![0].iconUrl).isEqualTo("https://example.test/assets/platforms/segacd.svg")
+            assertThat(result[0].iconUrlCandidates).containsExactly(
+                "https://example.test/assets/platforms/segacd.svg",
+                "https://example.test/assets/platforms/segacd.ico",
+            )
         }
     }
 
