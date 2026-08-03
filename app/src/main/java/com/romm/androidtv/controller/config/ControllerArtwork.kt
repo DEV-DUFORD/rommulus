@@ -4,7 +4,7 @@ package com.romm.androidtv.controller.config
  * Metadata contract for a controller illustration asset.
  *
  * Example: resourceName = "controller_outline_snes", source = "Controllercons 2.1 outline",
- * license = "SIL Open Font License 1.1". Actual vector assets are imported in a later phase.
+ * license = "SIL Open Font License 1.1".
  */
 data class ControllerArtwork(
     val resourceName: String,

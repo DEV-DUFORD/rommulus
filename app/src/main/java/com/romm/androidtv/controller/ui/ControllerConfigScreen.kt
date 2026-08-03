@@ -4,7 +4,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -38,10 +37,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -54,9 +56,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.R
-import com.romm.androidtv.controller.config.ControllerArtworkResolver
 import com.romm.androidtv.controller.config.ControllerHighlightRegion
-import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.controller.config.CoreControlId
 import com.romm.androidtv.controller.config.HighlightShape
 import com.romm.androidtv.library.ui.RommTvColors
@@ -75,6 +75,7 @@ fun ControllerConfigScreen(
     state: ControllerConfigUiState,
     onBack: () -> Unit,
     onSelectTab: (playerIndex: Int) -> Unit,
+    onRowFocused: (controlId: CoreControlId) -> Unit,
     onRowSelected: (controlId: CoreControlId) -> Unit,
     onCaptureDialogDismiss: () -> Unit,
     onConflictResolution: (resolution: ConflictResolution) -> Unit,
@@ -99,13 +100,11 @@ fun ControllerConfigScreen(
     val listState = rememberLazyListState()
 
     // Initial focus goes to the first binding row.
-    LaunchedEffect(currentPlayer) {
-        focusManager.clearFocus()
-        val firstRequester = rowFocusRequesters.value[0]
-        if (firstRequester != null) {
-            firstRequester.requestFocus()
-        } else {
-            tabFocusRequesters[currentPlayer].requestFocus()
+    LaunchedEffect(currentPlayer, rowFocusRequesters.value.size) {
+        val requester = rowFocusRequesters.value[lastFocusedRowByPlayer[currentPlayer]]
+        if (requester != null) {
+            focusManager.clearFocus()
+            requester.requestFocus()
         }
     }
 
@@ -162,31 +161,31 @@ fun ControllerConfigScreen(
             onSelectTab = currentOnSelectTab,
         )
 
-        Row(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+        ) {
             // Left 40%: artwork panel (base vector + focused highlight overlay).
             val focusedRegion = state.rows.firstOrNull { it.controlId == state.focusedControlId }?.highlightRegion
-            val artworkResourceId = CoreControllerProfiles.all
-                .firstOrNull { it.consoleName == state.consoleName }
-                ?.artwork
-                ?.let { ControllerArtworkResolver.resourceIdFor(it) }
-                ?: ControllerArtworkResolver.fallbackResourceId
             ArtworkPlaceholder(
                 consoleName = state.consoleName,
-                artworkResourceId = artworkResourceId,
+                artworkResourceId = state.artworkResourceId,
                 focusedRegion = focusedRegion,
-                modifier = Modifier.weight(0.4f).padding(end = 12.dp),
+                modifier = Modifier.weight(0.4f).padding(end = 20.dp),
             )
 
             // Right 60%: scrollable binding rows + Reset All Controllers.
             BindingList(
                 rows = state.rows,
-                playerCount = state.playerCount,
                 listState = listState,
                 rowFocusRequesters = rowFocusRequesters,
                 onFocusChanged = { index, isFocused ->
                     if (isFocused) {
                         focusedRowIndex.value = index
                         lastFocusedRowByPlayer[currentPlayer] = index
+                        state.rows.getOrNull(index)?.controlId?.let(onRowFocused)
                     }
                 },
                 onRowSelected = { controlId -> currentOnRowSelected(controlId) },
@@ -201,7 +200,7 @@ fun ControllerConfigScreen(
             style = MaterialTheme.typography.labelSmall,
             color = RommTvColors.TextSecondary,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
         )
     }
 
@@ -309,6 +308,7 @@ private fun PlayerTabRow(
             Tab(
                 selected = playerIndex == selectedIndex,
                 onClick = { onSelectTab(playerIndex) },
+                interactionSource = interactionSource,
                 text = {
                     Text(
                         text = stringResource(R.string.controller_config_player_tab_label, playerNumber),
@@ -319,7 +319,6 @@ private fun PlayerTabRow(
                 },
                 modifier = Modifier
                     .focusRequester(tabFocusRequesters[playerIndex])
-                    .focusable(interactionSource = interactionSource)
                     .then(
                         if (isFocused) Modifier.border(3.dp, RommTvColors.Romm500, RoundedCornerShape(8.dp))
                         else Modifier,
@@ -334,7 +333,6 @@ private fun PlayerTabRow(
 @Composable
 private fun BindingList(
     rows: List<ControllerBindingRow>,
-    playerCount: Int,
     listState: androidx.compose.foundation.lazy.LazyListState,
     rowFocusRequesters: androidx.compose.runtime.MutableState<Map<Int, FocusRequester>>,
     onFocusChanged: (index: Int, isFocused: Boolean) -> Unit,
@@ -399,14 +397,13 @@ private fun BindingRow(
                 else Modifier,
             )
             .focusRequester(focusRequester)
-            .focusable(interactionSource = interactionSource)
             .onFocusChanged { onFocusChanged(it.isFocused) }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick,
             )
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .padding(horizontal = 18.dp, vertical = 16.dp)
             .semantics { contentDescription = rowContentDescription },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -440,7 +437,6 @@ private fun ResetAllRow(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 if (isFocused) Modifier.border(3.dp, RommTvColors.Romm500, RoundedCornerShape(8.dp))
                 else Modifier,
             )
-            .focusable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -460,12 +456,8 @@ private fun ResetAllRow(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 /**
- * Artwork panel. Renders the base controller/handheld vector drawable (resolved via
- * [ControllerArtworkResolver] from the profile's [com.romm.androidtv.controller.config.ControllerArtwork])
- * beneath the focused highlight overlay. The base illustration is dimmed slightly; the
- * focused [ControllerHighlightRegion] is drawn at full RomM purple accent on top, so a
- * wrong hotspot is visually obvious. Swapping the real licensed drawables in later
- * requires zero changes here — only the drawable resource files / resolver mapping change.
+ * Artwork panel. The focused region clips a second, tinted rendering of the same vector,
+ * so highlights can only appear on actual artwork pixels and never as detached geometry.
  */
 @Composable
 private fun ArtworkPlaceholder(
@@ -474,57 +466,61 @@ private fun ArtworkPlaceholder(
     focusedRegion: ControllerHighlightRegion?,
     modifier: Modifier = Modifier,
 ) {
+    val artworkPainter = painterResource(id = artworkResourceId)
     Box(
         modifier = modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(12.dp))
             .background(RommTvColors.NightLo),
     ) {
-        // Base illustration, dimmed to make the active region stand out.
+        Text(
+            text = consoleName,
+            style = MaterialTheme.typography.titleMedium,
+            color = RommTvColors.TextPrimary,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(20.dp),
+        )
         Image(
-            painter = painterResource(id = artworkResourceId),
+            painter = artworkPainter,
             contentDescription = null,
             modifier = Modifier
                 .fillMaxSize()
-                .alpha(0.65f),
+                .padding(36.dp)
+                .alpha(if (focusedRegion == null) 0.72f else 0.45f),
         )
-        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-            // Dim the base drawing slightly.
-            drawRect(color = Color.Black.copy(alpha = 0.35f))
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(36.dp),
+        ) {
             focusedRegion?.let { region ->
-                val width = size.width * region.width
-                val height = size.height * region.height
-                val left = size.width * region.x
-                val top = size.height * region.y
-                val highlight = RommTvColors.Romm500.copy(alpha = 0.85f)
-                rotate(region.rotationDegrees, pivot = Offset(left + width / 2f, top + height / 2f)) {
+                val artworkSide = minOf(size.width, size.height)
+                val artworkLeft = (size.width - artworkSide) / 2f
+                val artworkTop = (size.height - artworkSide) / 2f
+                val width = artworkSide * region.width
+                val height = artworkSide * region.height
+                val left = artworkLeft + artworkSide * region.x
+                val top = artworkTop + artworkSide * region.y
+                val bounds = Rect(left, top, left + width, top + height)
+                val clip = Path().apply {
                     when (region.shape) {
-                        HighlightShape.CIRCLE -> {
-                            val radius = minOf(width, height) / 2f
-                            drawCircle(
-                                color = highlight,
-                                radius = radius,
-                                center = Offset(left + width / 2f, top + height / 2f),
-                            )
-                        }
-                        HighlightShape.RECT, HighlightShape.OVAL -> {
-                            drawRect(
-                                color = highlight,
-                                topLeft = Offset(left, top),
-                                size = Size(width, height),
+                        HighlightShape.CIRCLE, HighlightShape.OVAL -> addOval(bounds)
+                        HighlightShape.RECT -> addRect(bounds)
+                    }
+                }
+                clipPath(clip) {
+                    translate(left = artworkLeft, top = artworkTop) {
+                        with(artworkPainter) {
+                            draw(
+                                size = Size(artworkSide, artworkSide),
+                                colorFilter = ColorFilter.tint(RommTvColors.Romm300),
                             )
                         }
                     }
                 }
             }
         }
-        Text(
-            text = consoleName,
-            style = MaterialTheme.typography.titleMedium,
-            color = RommTvColors.TextSecondary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.align(Alignment.Center),
-        )
     }
 }
 

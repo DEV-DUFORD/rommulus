@@ -34,12 +34,8 @@ import com.romm.androidtv.emulation.model.CoreManifest
  *   C-Right->R; Z Trigger->L2(trigger), L Shoulder->Select, R Shoulder->R2; Start->Start;
  *   Control Stick -> AXIS_LX/LY.
  *
- * **Artwork attribution** — The seven handheld profiles (mgba, gambatte, beetle_pce_fast,
- * mednafen_ngp, mednafen_wswan, handy, prosystem) use silhouette illustrations from the
- * "1 Color Controllers and Handhelds" collection by Pineapple Graphics on Etsy
- * (https://www.etsy.com/shop/PineappleGraphicsShp). The author provides no license;
- * attribution is required. The actual vector SVG assets are imported in a later phase;
- * `resourceName` values remain as placeholders until that migration completes.
+ * Three profiles use authoritative Controllercons 2.1 vectors. The other ten use
+ * artist-provided "1 Color Controllers and Handhelds" silhouettes.
  */
 object CoreControllerProfiles {
 
@@ -79,16 +75,16 @@ object CoreControllerProfiles {
         consoleName = "Sega Systems",
         consoleSubtitle = "Genesis, Master System, Game Gear, and Sega CD",
         playerCount = 2,
-        artwork = controllerconsArt("controller_outline_genesis"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_a", 0.62f, 0.55f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.72f, 0.55f, 0.05f)),
-            desc(CoreControlId.BUTTON_C, "C", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_c", 0.82f, 0.55f, 0.05f)),
-            desc(CoreControlId.BUTTON_X, "X", LogicalControl.BUTTON_LB, InputKind.BUTTON, circle("button_x", 0.62f, 0.42f, 0.05f)),
-            desc(CoreControlId.BUTTON_Y, "Y", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_y", 0.72f, 0.42f, 0.05f)),
-            desc(CoreControlId.BUTTON_Z, "Z", LogicalControl.BUTTON_RB, InputKind.BUTTON, circle("button_z", 0.82f, 0.42f, 0.05f)),
-            desc(CoreControlId.MODE, "Mode", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("mode", 0.52f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.52f, 0.42f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_genesis"),
+        controls = dpad(0.314f, 0.478f, 0.085f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_a", 0.596f, 0.507f, 0.061f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.664f, 0.468f, 0.061f)),
+            desc(CoreControlId.BUTTON_C, "C", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_c", 0.737f, 0.447f, 0.061f)),
+            desc(CoreControlId.BUTTON_X, "X", LogicalControl.BUTTON_LB, InputKind.BUTTON, circle("button_x", 0.581f, 0.439f, 0.042f)),
+            desc(CoreControlId.BUTTON_Y, "Y", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_y", 0.637f, 0.410f, 0.042f)),
+            desc(CoreControlId.BUTTON_Z, "Z", LogicalControl.BUTTON_RB, InputKind.BUTTON, circle("button_z", 0.700f, 0.395f, 0.042f)),
+            desc(CoreControlId.MODE, "Mode", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, oval("mode", 0.468f, 0.438f, 0.068f, 0.035f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, oval("start", 0.468f, 0.438f, 0.068f, 0.035f)),
         ),
     )
 
@@ -98,15 +94,15 @@ object CoreControllerProfiles {
         consoleSubtitle = null,
         playerCount = 2,
         artwork = controllerconsArt("controller_outline_snes"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.72f, 0.58f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.80f, 0.50f, 0.05f)),
-            desc(CoreControlId.BUTTON_X, "X", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_x", 0.64f, 0.50f, 0.05f)),
-            desc(CoreControlId.BUTTON_Y, "Y", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_y", 0.72f, 0.42f, 0.05f)),
-            desc(CoreControlId.L1, "L", LogicalControl.BUTTON_LB, InputKind.BUTTON, rect("l1", 0.16f, 0.05f, 0.18f, 0.07f)),
-            desc(CoreControlId.R1, "R", LogicalControl.BUTTON_RB, InputKind.BUTTON, rect("r1", 0.66f, 0.05f, 0.18f, 0.07f)),
-            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.46f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.56f, 0.55f, 0.07f, 0.05f)),
+        controls = dpad(0.214f, 0.509f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.85f, 0.47f, 0.075f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.755f, 0.545f, 0.075f)),
+            desc(CoreControlId.BUTTON_X, "X", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_x", 0.755f, 0.393f, 0.075f)),
+            desc(CoreControlId.BUTTON_Y, "Y", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_y", 0.655f, 0.47f, 0.075f)),
+            desc(CoreControlId.L1, "L", LogicalControl.BUTTON_LB, InputKind.BUTTON, rect("l1", 0.10f, 0.28f, 0.22f, 0.05f)),
+            desc(CoreControlId.R1, "R", LogicalControl.BUTTON_RB, InputKind.BUTTON, rect("r1", 0.68f, 0.28f, 0.22f, 0.05f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, oval("select", 0.365f, 0.495f, 0.085f, 0.095f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, oval("start", 0.475f, 0.495f, 0.085f, 0.095f)),
         ),
     )
 
@@ -116,11 +112,11 @@ object CoreControllerProfiles {
         consoleSubtitle = null,
         playerCount = 2,
         artwork = controllerconsArt("controller_outline_nes"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.70f, 0.49f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.80f, 0.49f, 0.05f)),
-            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.46f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.56f, 0.55f, 0.07f, 0.05f)),
+        controls = dpad(0.195f, 0.538f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.750f, 0.494f, 0.148f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.594f, 0.494f, 0.148f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, oval("select", 0.350f, 0.545f, 0.120f, 0.075f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, oval("start", 0.470f, 0.545f, 0.120f, 0.075f)),
         ),
     )
 
@@ -129,14 +125,14 @@ object CoreControllerProfiles {
         consoleName = "Game Boy Advance",
         consoleSubtitle = null,
         playerCount = 1,
-        artwork = pineappleGraphicsArt("controller_outline_gba"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.70f, 0.49f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.80f, 0.49f, 0.05f)),
-            desc(CoreControlId.L1, "L", LogicalControl.BUTTON_LB, InputKind.BUTTON, rect("l1", 0.16f, 0.05f, 0.18f, 0.07f)),
-            desc(CoreControlId.R1, "R", LogicalControl.BUTTON_RB, InputKind.BUTTON, rect("r1", 0.66f, 0.05f, 0.18f, 0.07f)),
-            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.46f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.56f, 0.55f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_gba"),
+        controls = dpad(0.231f, 0.464f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.770f, 0.423f, 0.065f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.704f, 0.447f, 0.065f)),
+            desc(CoreControlId.L1, "L", LogicalControl.BUTTON_LB, InputKind.BUTTON, rect("l1", 0.155f, 0.295f, 0.135f, 0.055f)),
+            desc(CoreControlId.R1, "R", LogicalControl.BUTTON_RB, InputKind.BUTTON, rect("r1", 0.715f, 0.295f, 0.135f, 0.055f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, circle("select", 0.265f, 0.552f, 0.032f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, circle("start", 0.265f, 0.592f, 0.032f)),
         ),
     )
 
@@ -145,13 +141,13 @@ object CoreControllerProfiles {
         consoleName = "Atari 2600",
         consoleSubtitle = null,
         playerCount = 2,
-        artwork = controllerconsArt("controller_outline_atari2600"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "Trigger", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.66f, 0.49f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "Fire", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.76f, 0.49f, 0.05f)),
-            desc(CoreControlId.BUTTON_Y, "Booster", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_y", 0.86f, 0.49f, 0.05f)),
-            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.46f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.56f, 0.55f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_atari2600"),
+        controls = dpad(0.50f, 0.392f, 0.09f) + listOf(
+            desc(CoreControlId.BUTTON_A, "Trigger", LogicalControl.BUTTON_A, InputKind.BUTTON, rect("button_a", 0.340f, 0.155f, 0.07f, 0.13f)),
+            desc(CoreControlId.BUTTON_B, "Fire", LogicalControl.BUTTON_B, InputKind.BUTTON, rect("button_b", 0.590f, 0.155f, 0.07f, 0.13f)),
+            desc(CoreControlId.BUTTON_Y, "Booster", LogicalControl.BUTTON_Y, InputKind.BUTTON, rect("button_y", 0.590f, 0.155f, 0.07f, 0.13f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.410f, 0.720f, 0.075f, 0.045f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.515f, 0.720f, 0.075f, 0.045f)),
         ),
     )
 
@@ -160,12 +156,12 @@ object CoreControllerProfiles {
         consoleName = "Game Boy / Game Boy Color",
         consoleSubtitle = null,
         playerCount = 1,
-        artwork = pineappleGraphicsArt("controller_outline_gb"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.70f, 0.49f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.80f, 0.49f, 0.05f)),
-            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.46f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.56f, 0.55f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_gb"),
+        controls = dpad(0.373f, 0.615f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.623f, 0.573f, 0.06f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.547f, 0.597f, 0.06f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, oval("select", 0.440f, 0.720f, 0.052f, 0.028f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, oval("start", 0.508f, 0.720f, 0.052f, 0.028f)),
         ),
     )
 
@@ -174,16 +170,16 @@ object CoreControllerProfiles {
         consoleName = "TurboGrafx-16",
         consoleSubtitle = null,
         playerCount = 2,
-        artwork = pineappleGraphicsArt("controller_outline_tg16"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_I, "I", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_i", 0.62f, 0.55f, 0.05f)),
-            desc(CoreControlId.BUTTON_II, "II", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_ii", 0.72f, 0.55f, 0.05f)),
-            desc(CoreControlId.BUTTON_III, "III", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_iii", 0.82f, 0.55f, 0.05f)),
-            desc(CoreControlId.BUTTON_IV, "IV", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_iv", 0.62f, 0.42f, 0.05f)),
-            desc(CoreControlId.BUTTON_V, "V", LogicalControl.BUTTON_LB, InputKind.BUTTON, circle("button_v", 0.72f, 0.42f, 0.05f)),
-            desc(CoreControlId.BUTTON_VI, "VI", LogicalControl.BUTTON_RB, InputKind.BUTTON, circle("button_vi", 0.82f, 0.42f, 0.05f)),
-            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.46f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.START, "Run", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.56f, 0.55f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_tg16"),
+        controls = dpad(0.281f, 0.563f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_I, "I", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_i", 0.756f, 0.524f, 0.06f)),
+            desc(CoreControlId.BUTTON_II, "II", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_ii", 0.676f, 0.529f, 0.06f)),
+            desc(CoreControlId.BUTTON_III, "III", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_iii", 0.613f, 0.569f, 0.06f)),
+            desc(CoreControlId.BUTTON_IV, "IV", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_iv", 0.584f, 0.494f, 0.06f)),
+            desc(CoreControlId.BUTTON_V, "V", LogicalControl.BUTTON_LB, InputKind.BUTTON, circle("button_v", 0.648f, 0.455f, 0.06f)),
+            desc(CoreControlId.BUTTON_VI, "VI", LogicalControl.BUTTON_RB, InputKind.BUTTON, circle("button_vi", 0.727f, 0.449f, 0.06f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, oval("select", 0.430f, 0.572f, 0.052f, 0.03f)),
+            desc(CoreControlId.START, "Run", LogicalControl.BUTTON_START, InputKind.BUTTON, oval("start", 0.505f, 0.572f, 0.052f, 0.03f)),
         ),
     )
 
@@ -192,11 +188,11 @@ object CoreControllerProfiles {
         consoleName = "Neo Geo Pocket",
         consoleSubtitle = null,
         playerCount = 1,
-        artwork = pineappleGraphicsArt("controller_outline_ngp"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_a", 0.70f, 0.49f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_b", 0.80f, 0.49f, 0.05f)),
-            desc(CoreControlId.OPTION, "Option", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("option", 0.52f, 0.55f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_ngp"),
+        controls = dpad(0.242f, 0.465f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_a", 0.692f, 0.435f, 0.06f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_b", 0.760f, 0.389f, 0.06f)),
+            desc(CoreControlId.OPTION, "Option", LogicalControl.BUTTON_START, InputKind.BUTTON, oval("option", 0.178f, 0.348f, 0.052f, 0.027f)),
         ),
     )
 
@@ -205,11 +201,11 @@ object CoreControllerProfiles {
         consoleName = "WonderSwan",
         consoleSubtitle = null,
         playerCount = 1,
-        artwork = pineappleGraphicsArt("controller_outline_wswan"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.70f, 0.49f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.80f, 0.49f, 0.05f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.52f, 0.55f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_wswan"),
+        controls = dpad(0.233f, 0.400f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.748f, 0.600f, 0.06f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.788f, 0.558f, 0.06f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, oval("start", 0.500f, 0.650f, 0.075f, 0.04f)),
         ),
     )
 
@@ -218,13 +214,13 @@ object CoreControllerProfiles {
         consoleName = "Atari Lynx",
         consoleSubtitle = null,
         playerCount = 1,
-        artwork = pineappleGraphicsArt("controller_outline_lynx"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.62f, 0.56f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.78f, 0.56f, 0.05f)),
-            desc(CoreControlId.OPTION_1, "Option 1", LogicalControl.BUTTON_LB, InputKind.BUTTON, circle("option_1", 0.62f, 0.44f, 0.05f)),
-            desc(CoreControlId.OPTION_2, "Option 2", LogicalControl.BUTTON_RB, InputKind.BUTTON, circle("option_2", 0.78f, 0.44f, 0.05f)),
-            desc(CoreControlId.PAUSE, "Pause", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("pause", 0.70f, 0.63f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_lynx"),
+        controls = dpad(0.247f, 0.50f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.805f, 0.370f, 0.06f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.750f, 0.370f, 0.06f)),
+            desc(CoreControlId.OPTION_1, "Option 1", LogicalControl.BUTTON_LB, InputKind.BUTTON, oval("option_1", 0.365f, 0.463f, 0.05f, 0.027f)),
+            desc(CoreControlId.OPTION_2, "Option 2", LogicalControl.BUTTON_RB, InputKind.BUTTON, oval("option_2", 0.365f, 0.513f, 0.05f, 0.027f)),
+            desc(CoreControlId.PAUSE, "Pause", LogicalControl.BUTTON_START, InputKind.BUTTON, oval("pause", 0.680f, 0.487f, 0.05f, 0.027f)),
         ),
     )
 
@@ -233,12 +229,12 @@ object CoreControllerProfiles {
         consoleName = "Atari 7800",
         consoleSubtitle = null,
         playerCount = 2,
-        artwork = pineappleGraphicsArt("controller_outline_atari7800"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_1, "Button 1", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_1", 0.70f, 0.49f, 0.05f)),
-            desc(CoreControlId.BUTTON_2, "Button 2", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_2", 0.80f, 0.49f, 0.05f)),
-            desc(CoreControlId.PAUSE, "Pause", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("pause", 0.56f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.46f, 0.55f, 0.07f, 0.05f)),
+        artwork = artistProvidedArt("controller_outline_atari7800"),
+        controls = dpad(0.250f, 0.414f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_1, "Button 1", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_1", 0.470f, 0.535f, 0.10f)),
+            desc(CoreControlId.BUTTON_2, "Button 2", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_2", 0.647f, 0.535f, 0.10f)),
+            desc(CoreControlId.PAUSE, "Pause", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("pause", 0.515f, 0.635f, 0.10f, 0.045f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.410f, 0.635f, 0.10f, 0.045f)),
         ),
     )
 
@@ -247,24 +243,24 @@ object CoreControllerProfiles {
         consoleName = "PlayStation",
         consoleSubtitle = null,
         playerCount = 2,
-        artwork = controllerconsArt("controller_outline_ps1"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_B, "Cross", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.80f, 0.50f, 0.05f)),
-            desc(CoreControlId.BUTTON_A, "Circle", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.72f, 0.58f, 0.05f)),
-            desc(CoreControlId.BUTTON_X, "Triangle", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_x", 0.72f, 0.42f, 0.05f)),
-            desc(CoreControlId.BUTTON_Y, "Square", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_y", 0.64f, 0.50f, 0.05f)),
-            desc(CoreControlId.L1, "L1", LogicalControl.BUTTON_LB, InputKind.BUTTON, rect("l1", 0.16f, 0.05f, 0.18f, 0.07f)),
-            desc(CoreControlId.R1, "R1", LogicalControl.BUTTON_RB, InputKind.BUTTON, rect("r1", 0.66f, 0.05f, 0.18f, 0.07f)),
-            desc(CoreControlId.L2, "L2", LogicalControl.BUTTON_LT, InputKind.TRIGGER, rect("l2", 0.16f, 0.02f, 0.18f, 0.05f)),
-            desc(CoreControlId.R2, "R2", LogicalControl.BUTTON_RT, InputKind.TRIGGER, rect("r2", 0.66f, 0.02f, 0.18f, 0.05f)),
-            desc(CoreControlId.L3, "L3", LogicalControl.BUTTON_L3, InputKind.BUTTON, circle("l3", 0.33f, 0.55f, 0.06f)),
-            desc(CoreControlId.R3, "R3", LogicalControl.BUTTON_R3, InputKind.BUTTON, circle("r3", 0.63f, 0.55f, 0.06f)),
-            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("select", 0.46f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.56f, 0.55f, 0.07f, 0.05f)),
-            desc(CoreControlId.LEFT_STICK_X, "Left Stick X", LogicalControl.AXIS_LX, InputKind.ANALOG_STICK, oval("left_stick_x", 0.30f, 0.53f, 0.09f, 0.06f)),
-            desc(CoreControlId.LEFT_STICK_Y, "Left Stick Y", LogicalControl.AXIS_LY, InputKind.ANALOG_STICK, oval("left_stick_y", 0.30f, 0.53f, 0.09f, 0.06f)),
-            desc(CoreControlId.RIGHT_STICK_X, "Right Stick X", LogicalControl.AXIS_RX, InputKind.ANALOG_STICK, oval("right_stick_x", 0.60f, 0.53f, 0.09f, 0.06f)),
-            desc(CoreControlId.RIGHT_STICK_Y, "Right Stick Y", LogicalControl.AXIS_RY, InputKind.ANALOG_STICK, oval("right_stick_y", 0.60f, 0.53f, 0.09f, 0.06f)),
+        artwork = artistProvidedArt("controller_outline_ps1"),
+        controls = dpad(0.288f, 0.454f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_B, "Cross", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.675f, 0.475f, 0.07f)),
+            desc(CoreControlId.BUTTON_A, "Circle", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.731f, 0.419f, 0.07f)),
+            desc(CoreControlId.BUTTON_X, "Triangle", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_x", 0.675f, 0.362f, 0.07f)),
+            desc(CoreControlId.BUTTON_Y, "Square", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_y", 0.620f, 0.419f, 0.07f)),
+            desc(CoreControlId.L1, "L1", LogicalControl.BUTTON_LB, InputKind.BUTTON, rect("l1", 0.235f, 0.305f, 0.155f, 0.05f)),
+            desc(CoreControlId.R1, "R1", LogicalControl.BUTTON_RB, InputKind.BUTTON, rect("r1", 0.610f, 0.305f, 0.155f, 0.05f)),
+            desc(CoreControlId.L2, "L2", LogicalControl.BUTTON_LT, InputKind.TRIGGER, rect("l2", 0.260f, 0.278f, 0.115f, 0.04f)),
+            desc(CoreControlId.R2, "R2", LogicalControl.BUTTON_RT, InputKind.TRIGGER, rect("r2", 0.625f, 0.278f, 0.115f, 0.04f)),
+            desc(CoreControlId.L3, "L3", LogicalControl.BUTTON_L3, InputKind.BUTTON, circle("l3", 0.322f, 0.487f, 0.156f)),
+            desc(CoreControlId.R3, "R3", LogicalControl.BUTTON_R3, InputKind.BUTTON, circle("r3", 0.522f, 0.487f, 0.156f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, oval("select", 0.410f, 0.430f, 0.055f, 0.045f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.535f, 0.425f, 0.060f, 0.055f)),
+            desc(CoreControlId.LEFT_STICK_X, "Left Stick X", LogicalControl.AXIS_LX, InputKind.ANALOG_STICK, circle("left_stick_x", 0.322f, 0.487f, 0.156f)),
+            desc(CoreControlId.LEFT_STICK_Y, "Left Stick Y", LogicalControl.AXIS_LY, InputKind.ANALOG_STICK, circle("left_stick_y", 0.322f, 0.487f, 0.156f)),
+            desc(CoreControlId.RIGHT_STICK_X, "Right Stick X", LogicalControl.AXIS_RX, InputKind.ANALOG_STICK, circle("right_stick_x", 0.522f, 0.487f, 0.156f)),
+            desc(CoreControlId.RIGHT_STICK_Y, "Right Stick Y", LogicalControl.AXIS_RY, InputKind.ANALOG_STICK, circle("right_stick_y", 0.522f, 0.487f, 0.156f)),
         ),
     )
 
@@ -274,19 +270,19 @@ object CoreControllerProfiles {
         consoleSubtitle = null,
         playerCount = 4,
         artwork = controllerconsArt("controller_outline_n64"),
-        controls = dpad() + listOf(
-            desc(CoreControlId.BUTTON_A, "A Button", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_a", 0.72f, 0.58f, 0.05f)),
-            desc(CoreControlId.BUTTON_B, "B Button", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_b", 0.80f, 0.50f, 0.05f)),
-            desc(CoreControlId.N64_C_UP, "C-Up", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("n64_c_up", 0.72f, 0.42f, 0.04f)),
-            desc(CoreControlId.N64_C_DOWN, "C-Down", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("n64_c_down", 0.64f, 0.50f, 0.04f)),
-            desc(CoreControlId.N64_C_LEFT, "C-Left", LogicalControl.BUTTON_LB, InputKind.BUTTON, circle("n64_c_left", 0.56f, 0.50f, 0.04f)),
-            desc(CoreControlId.N64_C_RIGHT, "C-Right", LogicalControl.BUTTON_RB, InputKind.BUTTON, circle("n64_c_right", 0.88f, 0.50f, 0.04f)),
-            desc(CoreControlId.Z, "Z Trigger", LogicalControl.BUTTON_LT, InputKind.TRIGGER, rect("z", 0.68f, 0.66f, 0.10f, 0.05f)),
-            desc(CoreControlId.L1, "L Shoulder", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("l1", 0.16f, 0.05f, 0.18f, 0.07f)),
-            desc(CoreControlId.R1, "R Shoulder", LogicalControl.BUTTON_RT, InputKind.BUTTON, rect("r1", 0.66f, 0.05f, 0.18f, 0.07f)),
-            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.52f, 0.42f, 0.07f, 0.05f)),
-            desc(CoreControlId.LEFT_STICK_X, "Control Stick X", LogicalControl.AXIS_LX, InputKind.ANALOG_STICK, oval("left_stick_x", 0.36f, 0.53f, 0.10f, 0.06f)),
-            desc(CoreControlId.LEFT_STICK_Y, "Control Stick Y", LogicalControl.AXIS_LY, InputKind.ANALOG_STICK, oval("left_stick_y", 0.36f, 0.53f, 0.10f, 0.06f)),
+        controls = dpad(0.172f, 0.327f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A Button", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_a", 0.721f, 0.378f, 0.094f)),
+            desc(CoreControlId.BUTTON_B, "B Button", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_b", 0.648f, 0.302f, 0.094f)),
+            desc(CoreControlId.N64_C_UP, "C-Up", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("n64_c_up", 0.806f, 0.187f, 0.075f)),
+            desc(CoreControlId.N64_C_DOWN, "C-Down", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("n64_c_down", 0.810f, 0.294f, 0.075f)),
+            desc(CoreControlId.N64_C_LEFT, "C-Left", LogicalControl.BUTTON_LB, InputKind.BUTTON, circle("n64_c_left", 0.745f, 0.248f, 0.075f)),
+            desc(CoreControlId.N64_C_RIGHT, "C-Right", LogicalControl.BUTTON_RB, InputKind.BUTTON, circle("n64_c_right", 0.870f, 0.248f, 0.075f)),
+            desc(CoreControlId.Z, "Z Trigger", LogicalControl.BUTTON_LT, InputKind.TRIGGER, rect("z", 0.45f, 0.58f, 0.10f, 0.055f)),
+            desc(CoreControlId.L1, "L Shoulder", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, rect("l1", 0.10f, 0.10f, 0.20f, 0.05f)),
+            desc(CoreControlId.R1, "R Shoulder", LogicalControl.BUTTON_RT, InputKind.BUTTON, rect("r1", 0.70f, 0.10f, 0.20f, 0.05f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, circle("start", 0.454f, 0.310f, 0.092f)),
+            desc(CoreControlId.LEFT_STICK_X, "Control Stick X", LogicalControl.AXIS_LX, InputKind.ANALOG_STICK, oval("left_stick_x", 0.381f, 0.448f, 0.238f, 0.238f)),
+            desc(CoreControlId.LEFT_STICK_Y, "Control Stick Y", LogicalControl.AXIS_LY, InputKind.ANALOG_STICK, oval("left_stick_y", 0.381f, 0.448f, 0.238f, 0.238f)),
         ),
     )
 
@@ -319,11 +315,11 @@ object CoreControllerProfiles {
      * Shared D-pad controls with identical geometry across every profile.
      * Region ids derive from the control ids, which are unique per profile.
      */
-    private fun dpad(): List<CoreControlDescriptor> = listOf(
-        desc(CoreControlId.D_PAD_UP, "D-Pad Up", LogicalControl.DPAD_UP, InputKind.DPAD, circle("d_pad_up", 0.075f, 0.42f, 0.06f)),
-        desc(CoreControlId.D_PAD_DOWN, "D-Pad Down", LogicalControl.DPAD_DOWN, InputKind.DPAD, circle("d_pad_down", 0.075f, 0.56f, 0.06f)),
-        desc(CoreControlId.D_PAD_LEFT, "D-Pad Left", LogicalControl.DPAD_LEFT, InputKind.DPAD, circle("d_pad_left", 0.015f, 0.49f, 0.06f)),
-        desc(CoreControlId.D_PAD_RIGHT, "D-Pad Right", LogicalControl.DPAD_RIGHT, InputKind.DPAD, circle("d_pad_right", 0.135f, 0.49f, 0.06f)),
+    private fun dpad(centerX: Float, centerY: Float, size: Float): List<CoreControlDescriptor> = listOf(
+        desc(CoreControlId.D_PAD_UP, "D-Pad Up", LogicalControl.DPAD_UP, InputKind.DPAD, circle("d_pad_up", centerX - size / 2f, centerY - size * 1.35f, size)),
+        desc(CoreControlId.D_PAD_DOWN, "D-Pad Down", LogicalControl.DPAD_DOWN, InputKind.DPAD, circle("d_pad_down", centerX - size / 2f, centerY + size * 0.35f, size)),
+        desc(CoreControlId.D_PAD_LEFT, "D-Pad Left", LogicalControl.DPAD_LEFT, InputKind.DPAD, circle("d_pad_left", centerX - size * 1.35f, centerY - size / 2f, size)),
+        desc(CoreControlId.D_PAD_RIGHT, "D-Pad Right", LogicalControl.DPAD_RIGHT, InputKind.DPAD, circle("d_pad_right", centerX + size * 0.35f, centerY - size / 2f, size)),
     )
 
     private fun desc(
@@ -371,15 +367,10 @@ object CoreControllerProfiles {
         viewBoxHeight = 64f,
     )
 
-    /**
-     * Artwork metadata for the seven handheld-profile silhouettes sourced from the
-     * Pineapple Graphics Etsy collection ("1 Color Controllers and Handhelds").
-     * No license is provided by the author; attribution is required.
-     */
-    private fun pineappleGraphicsArt(resourceName: String) = ControllerArtwork(
+    private fun artistProvidedArt(resourceName: String) = ControllerArtwork(
         resourceName = resourceName,
-        source = "Pineapple Graphics (Etsy) — 1 Color Controllers and Handhelds",
-        license = "No license — attribution required",
+        source = "1 Color Controllers and Handhelds (artist-provided)",
+        license = "Used with artist permission",
         licenseAssetPath = null,
         viewBoxWidth = 360f,
         viewBoxHeight = 360f,

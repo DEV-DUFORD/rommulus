@@ -6,20 +6,14 @@ import com.romm.androidtv.R
  * Resolves a profile's artwork [ControllerArtwork.resourceName] to a concrete Android
  * drawable resource id.
  *
- * Compile-time `when` mapping (no runtime `getIdentifier` lookup) so a typo or a missing
- * placeholder fails compilation rather than rendering a blank panel. During the
- * "Required asset spike" every real resourceName maps to one of the generic ORIGINAL
- * placeholder drawables ([GENERIC_GAMEPAD] / [GENERIC_HANDHELD]). When the real
- * licensed assets are imported, only these branches change — no call-site or architecture
- * changes are required.
+ * Compile-time `when` mapping (no runtime `getIdentifier` lookup) so missing resources
+ * fail compilation rather than rendering a blank panel.
  *
  * Mapping policy:
  * - The two generic placeholders resolve to themselves.
- * - Each of the 13 approved console families resolves to its own distinct original
- *   outline drawable (e.g. N64's trident body, Atari's joystick, GB's portrait
- *   handheld, GBA's landscape handheld, PS1's twin-stick pad), so settings pages
- *   no longer share a single silhouette. When the real licensed assets are
- *   imported, only these branches change.
+ * - The three families covered by Controllercons resolve to the authoritative 2.1
+ *   outline vectors.
+ * - The remaining seven families resolve to their artist-provided silhouette vectors.
  */
 object ControllerArtworkResolver {
 

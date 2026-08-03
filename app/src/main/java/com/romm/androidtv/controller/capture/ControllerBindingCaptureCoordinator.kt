@@ -44,7 +44,7 @@ sealed interface ControllerBindingCaptureState {
     /** No qualifying input within the timeout. Terminal; nothing saved. */
     data object TimedOut : ControllerBindingCaptureState
 
-    /** No real controller is assigned to the selected player port. Terminal. */
+    /** No real controller is connected. Terminal. */
     data object NoDeviceAssigned : ControllerBindingCaptureState
 }
 
@@ -68,7 +68,7 @@ sealed interface CaptureTarget {
  *
  * 1. Capture begins only after all buttons/axes are neutral (so the press that
  *    opened the row does not become the binding).
- * 2. The first new gamepad `ACTION_DOWN` from the assigned device is accepted
+ * 2. The first new gamepad `ACTION_DOWN` from any eligible physical device is accepted
  *    as a [PhysicalBinding.Key] for digital targets.
  * 3. Axis capture requires the axis to first be observed below
  *    [NEUTRAL_THRESHOLD], then cross [ENTER_THRESHOLD] in either direction.
@@ -98,17 +98,17 @@ class ControllerBindingCaptureCoordinator(
     )
     val state: StateFlow<ControllerBindingCaptureState> = _state.asStateFlow()
 
-    private var capturedDeviceId: Int? = null
+    private val eligibleDeviceIds = mutableSetOf<Int>()
     private var target: CaptureTarget = CaptureTarget.Digital
 
-    /** Key codes currently held down on the captured device (for neutral gating). */
-    private val pressedKeys = mutableSetOf<Int>()
+    /** Device/key pairs currently held down across eligible devices (for neutral gating). */
+    private val pressedKeys = mutableSetOf<Pair<Int, Int>>()
 
-    /** Last observed normalized value per axis constant on the captured device. */
-    private val axisValues = mutableMapOf<Int, Float>()
+    /** Last observed normalized value per device/axis pair. */
+    private val axisValues = mutableMapOf<Pair<Int, Int>, Float>()
 
     /** Axes that have been observed below [NEUTRAL_THRESHOLD] at least once. */
-    private val axisSeenNeutral = mutableSetOf<Int>()
+    private val axisSeenNeutral = mutableSetOf<Pair<Int, Int>>()
 
     private var timeoutJob: Job? = null
 
@@ -126,17 +126,34 @@ class ControllerBindingCaptureCoordinator(
      */
     @Suppress("UNUSED_PARAMETER") // slotIndex reserved for caller-facing diagnostics
     fun beginCapture(slotIndex: Int, deviceId: Int?, target: CaptureTarget) {
+        beginCapture(
+            slotIndex = slotIndex,
+            deviceIds = setOfNotNull(deviceId),
+            target = target,
+        )
+    }
+
+    /**
+     * Begin capture across every connected physical gamepad. The first qualifying
+     * input wins; TV remotes and Android virtual gamepads must be excluded by the caller.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun beginCapture(slotIndex: Int, deviceIds: Set<Int>, target: CaptureTarget) {
         cancelInternal()
-        if (deviceId == null || !isGamepadSource(sourceProvider(deviceId))) {
+        eligibleDeviceIds += deviceIds.filter { isGamepadSource(sourceProvider(it)) }
+        if (eligibleDeviceIds.isEmpty()) {
             _state.value = ControllerBindingCaptureState.NoDeviceAssigned
             return
         }
-        this.capturedDeviceId = deviceId
         this.target = target
         pressedKeys.clear()
         axisValues.clear()
         axisSeenNeutral.clear()
         _state.value = ControllerBindingCaptureState.AwaitingNeutral
+        // The row-opening ACTION_DOWN has already passed through Activity dispatch.
+        // Arm on the next coroutine turn when no eligible-device input was observed;
+        // this avoids requiring an unrelated controller to be pressed twice.
+        scope.launch { checkNeutralAndAdvance() }
         startTimeout()
     }
 
@@ -156,7 +173,11 @@ class ControllerBindingCaptureCoordinator(
      * capture for that device.
      */
     fun onDeviceRemoved(deviceId: Int) {
-        if (deviceId == capturedDeviceId && isActive) {
+        if (!eligibleDeviceIds.remove(deviceId)) return
+        pressedKeys.removeAll { (heldDeviceId, _) -> heldDeviceId == deviceId }
+        axisValues.keys.removeAll { (axisDeviceId, _) -> axisDeviceId == deviceId }
+        axisSeenNeutral.removeAll { (axisDeviceId, _) -> axisDeviceId == deviceId }
+        if (eligibleDeviceIds.isEmpty() && isActive) {
             cancel()
         }
     }
@@ -180,7 +201,7 @@ class ControllerBindingCaptureCoordinator(
      */
     fun onMotionEvent(event: MotionEvent): Boolean? {
         val deviceId = event.deviceId
-        if (deviceId != capturedDeviceId) return null
+        if (deviceId !in eligibleDeviceIds) return null
         if (!isGamepadSource(sourceProvider(deviceId))) return null
 
         val axisConstants = InputDevice.getDevice(deviceId)?.motionRanges?.map { it.axis }.orEmpty()
@@ -201,19 +222,19 @@ class ControllerBindingCaptureCoordinator(
      */
     internal fun onKeySample(deviceId: Int, action: Int, keyCode: Int, repeatCount: Int = 0): Boolean? {
         if (!isActive) return null
-        if (deviceId != capturedDeviceId) return null
+        if (deviceId !in eligibleDeviceIds) return null
         if (!isGamepadSource(sourceProvider(deviceId))) return null
         if (action != KeyEvent.ACTION_DOWN && action != KeyEvent.ACTION_UP) return null
 
         if (_state.value == ControllerBindingCaptureState.AwaitingNeutral) {
             when (action) {
                 KeyEvent.ACTION_DOWN -> {
-                    if (repeatCount == 0) pressedKeys.add(keyCode)
+                    if (repeatCount == 0) pressedKeys.add(deviceId to keyCode)
                     // A held button keeps us non-neutral; never capture it here.
                     return true
                 }
                 KeyEvent.ACTION_UP -> {
-                    pressedKeys.remove(keyCode)
+                    pressedKeys.remove(deviceId to keyCode)
                     checkNeutralAndAdvance()
                     return true
                 }
@@ -234,11 +255,12 @@ class ControllerBindingCaptureCoordinator(
      */
     internal fun onAxisSample(deviceId: Int, axis: Int, value: Float): Boolean? {
         if (!isActive) return null
-        if (deviceId != capturedDeviceId) return null
+        if (deviceId !in eligibleDeviceIds) return null
         if (!isGamepadSource(sourceProvider(deviceId))) return null
 
-        axisValues[axis] = value
-        if (abs(value) < NEUTRAL_THRESHOLD) axisSeenNeutral.add(axis)
+        val deviceAxis = deviceId to axis
+        axisValues[deviceAxis] = value
+        if (abs(value) < NEUTRAL_THRESHOLD) axisSeenNeutral.add(deviceAxis)
 
         if (_state.value == ControllerBindingCaptureState.AwaitingNeutral) {
             checkNeutralAndAdvance()
@@ -246,7 +268,7 @@ class ControllerBindingCaptureCoordinator(
         }
 
         // Capturing phase.
-        if (axis !in axisSeenNeutral) return true // noisy axis that never returned to neutral
+        if (deviceAxis !in axisSeenNeutral) return true // noisy axis that never returned to neutral
         if (abs(value) < ENTER_THRESHOLD) return true // not yet crossing the enter threshold
 
         val binding = when (target) {
@@ -286,7 +308,7 @@ class ControllerBindingCaptureCoordinator(
     private fun cancelInternal() {
         timeoutJob?.cancel()
         timeoutJob = null
-        capturedDeviceId = null
+        eligibleDeviceIds.clear()
         pressedKeys.clear()
         axisValues.clear()
         axisSeenNeutral.clear()

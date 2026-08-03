@@ -539,6 +539,7 @@ class EmulationActivity : ComponentActivity() {
                         coreIdForMapping = coreIdForMapping,
                         controllerConfigRepository = controllerConfigRepository,
                         captureCoordinator = captureCoordinator,
+                        controllerRouter = controllerRouter,
                         saveFailureVisible = saveFailureVisible,
                         onStop = { finishAndDeliverResult() },
                         onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
@@ -887,6 +888,7 @@ private fun EmulationScreen(
     coreIdForMapping: String?,
     controllerConfigRepository: ControllerConfigRepository,
     captureCoordinator: ControllerBindingCaptureCoordinator,
+    controllerRouter: ControllerEventRouter,
     saveFailureVisible: Flow<Boolean>,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
@@ -1012,6 +1014,7 @@ private fun EmulationScreen(
                     coreId = coreIdForMapping,
                     repository = controllerConfigRepository,
                     captureCoordinator = captureCoordinator,
+                    controllerRouter = controllerRouter,
                     onBack = { pauseOverlay.value = PauseOverlay.MENU },
                 )
             }
@@ -1216,6 +1219,7 @@ private fun ControllerSettingsSubpage(
     coreId: String?,
     repository: ControllerConfigRepository,
     captureCoordinator: ControllerBindingCaptureCoordinator,
+    controllerRouter: ControllerEventRouter,
     onBack: () -> Unit,
 ) {
     val profile = remember(coreId) { CoreControllerProfiles.byCoreId(coreId ?: "") }
@@ -1229,6 +1233,15 @@ private fun ControllerSettingsSubpage(
         profile = profile,
         repository = repository,
         captureCoordinator = captureCoordinator,
+        connectedDevicesProvider = {
+            controllerRouter.connectedPhysicalDeviceIds().map { deviceId ->
+                val device = InputDevice.getDevice(deviceId)
+                com.romm.androidtv.controller.ui.ConnectedControllerInfo(
+                    deviceId = deviceId,
+                    name = device?.name,
+                )
+            }
+        },
     )
     val viewModel: ControllerSettingsViewModel = viewModel(
         key = "pause-menu-controller-settings",
@@ -1239,6 +1252,7 @@ private fun ControllerSettingsSubpage(
         state = uiState,
         onBack = onBack,
         onSelectTab = viewModel::selectTab,
+        onRowFocused = viewModel::onRowFocused,
         onRowSelected = viewModel::onRowSelected,
         onCaptureDialogDismiss = viewModel::dismissCaptureDialog,
         onConflictResolution = viewModel::resolveConflict,

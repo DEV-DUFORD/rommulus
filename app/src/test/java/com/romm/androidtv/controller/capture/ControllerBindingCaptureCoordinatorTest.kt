@@ -74,6 +74,20 @@ class ControllerBindingCaptureCoordinatorTest {
         }
 
         @Test
+        @DisplayName("capture arms automatically when no assigned-device input is held")
+        fun `idleDeviceArmsWithoutSacrificialPress`() = runTest {
+            val c = coordinator()
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Digital)
+
+            runCurrent()
+
+            assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.Capturing)
+            c.onKeySample(gamepadDevice, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_B)
+            assertThat(c.state.value)
+                .isEqualTo(ControllerBindingCaptureState.Result(PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_B)))
+        }
+
+        @Test
         @DisplayName("a non-neutral stick keeps the capture waiting")
         fun `stickOutOfCenterWaits`() = runTest {
             val c = coordinator()
@@ -246,6 +260,30 @@ class ControllerBindingCaptureCoordinatorTest {
                 .isNull()
             assertThat(c.onAxisSample(otherGamepadDevice, android.view.MotionEvent.AXIS_X, 0.9f)).isNull()
             assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.AwaitingNeutral)
+        }
+
+        @Test
+        @DisplayName("capture across physical gamepads accepts the first controller pressed")
+        fun `any eligible gamepad can provide binding`() = runTest {
+            val c = coordinator(
+                sources = sourcesOf(
+                    gamepadDevice to InputDevice.SOURCE_GAMEPAD,
+                    otherGamepadDevice to InputDevice.SOURCE_GAMEPAD,
+                    remoteDevice to InputDevice.SOURCE_DPAD,
+                ),
+            )
+            c.beginCapture(
+                slotIndex = 1,
+                deviceIds = setOf(gamepadDevice, otherGamepadDevice, remoteDevice),
+                target = CaptureTarget.Digital,
+            )
+            runCurrent()
+
+            assertThat(c.onKeySample(remoteDevice, ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER)).isNull()
+            assertThat(c.onKeySample(otherGamepadDevice, ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+                .isEqualTo(true)
+            assertThat(c.state.value)
+                .isEqualTo(ControllerBindingCaptureState.Result(PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_A)))
         }
 
         @Test

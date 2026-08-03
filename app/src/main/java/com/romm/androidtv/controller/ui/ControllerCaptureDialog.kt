@@ -1,10 +1,13 @@
 package com.romm.androidtv.controller.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -12,10 +15,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -47,7 +55,7 @@ fun ControllerCaptureDialog(
     playerLabel: String,
     captureState: ControllerBindingCaptureState,
     connectedDeviceName: String?,
-    @Suppress("UNUSED_PARAMETER") onDismiss: () -> Unit,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Result and Cancelled are terminal states — the caller is expected to
@@ -109,62 +117,79 @@ fun ControllerCaptureDialog(
         return
     }
 
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(RommTvColors.NightLo)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // ---- Title ----
-        Text(
-            text = stringResource(R.string.controller_capture_dialog_title, controlLabel),
-            style = MaterialTheme.typography.headlineSmall,
-            color = RommTvColors.TextPrimary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.semantics { heading() },
-        )
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // ---- Body ----
-        Text(
-            text = bodyText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (isErrorState) Color(0xFFf44336) else RommTvColors.TextPrimary,
-            textAlign = TextAlign.Center,
-        )
-
-        // ---- Connected device name ----
-        connectedDeviceName?.let { deviceName ->
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.controller_capture_dialog_connected_label),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = RommTvColors.TextSecondary,
-                )
-                Text(
-                    text = deviceName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = RommTvColors.Romm300,
-                )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f))
+            .focusRequester(focusRequester)
+            .onPreviewKeyEvent { event ->
+                if (event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_BACK &&
+                    event.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN
+                ) {
+                    onDismiss()
+                }
+                true
             }
-        }
-
-        // ---- Secondary text ----
-        if (secondaryText.isNotBlank()) {
-            Spacer(modifier = Modifier.height(12.dp))
+            .focusable(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = modifier
+                .fillMaxWidth(0.46f)
+                .clip(RoundedCornerShape(20.dp))
+                .background(RommTvColors.NightLo)
+                .padding(horizontal = 36.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Text(
-                text = secondaryText,
-                style = MaterialTheme.typography.bodySmall,
-                color = RommTvColors.TextSecondary,
+                text = stringResource(R.string.controller_capture_dialog_title, controlLabel),
+                style = MaterialTheme.typography.headlineSmall,
+                color = RommTvColors.TextPrimary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { heading() },
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = bodyText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isErrorState) Color(0xFFF44336) else RommTvColors.TextPrimary,
                 textAlign = TextAlign.Center,
             )
+
+            connectedDeviceName?.let { deviceName ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.controller_capture_dialog_connected_label),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RommTvColors.TextSecondary,
+                    )
+                    Text(
+                        text = deviceName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RommTvColors.Romm300,
+                    )
+                }
+            }
+
+            if (secondaryText.isNotBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = secondaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RommTvColors.TextSecondary,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }

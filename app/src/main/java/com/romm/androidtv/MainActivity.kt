@@ -875,6 +875,15 @@ class MainActivity : ComponentActivity() {
                                                     profile = profile,
                                                     repository = controllerConfigRepository,
                                                     captureCoordinator = captureCoordinator,
+                                                    connectedDevicesProvider = {
+                                                        controllerRouter.connectedPhysicalDeviceIds().map { deviceId ->
+                                                            val device = InputDevice.getDevice(deviceId)
+                                                            com.romm.androidtv.controller.ui.ConnectedControllerInfo(
+                                                                deviceId = deviceId,
+                                                                name = device?.name,
+                                                            )
+                                                        }
+                                                    },
                                                 )
                                             val controllerViewModel:
                                                 com.romm.androidtv.controller.ui.ControllerSettingsViewModel =
@@ -887,6 +896,7 @@ class MainActivity : ComponentActivity() {
                                                 state = uiState,
                                                 onBack = { currentScreen = Screen.NATIVE_CONTROLLER_LIST },
                                                 onSelectTab = controllerViewModel::selectTab,
+                                                onRowFocused = controllerViewModel::onRowFocused,
                                                 onRowSelected = controllerViewModel::onRowSelected,
                                                 onCaptureDialogDismiss = controllerViewModel::dismissCaptureDialog,
                                                 onConflictResolution = controllerViewModel::resolveConflict,

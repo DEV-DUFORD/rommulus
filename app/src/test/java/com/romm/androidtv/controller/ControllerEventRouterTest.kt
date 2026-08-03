@@ -3,6 +3,8 @@ package com.romm.androidtv.controller
 import android.view.KeyEvent
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.router.ControllerEventRouter
+import com.romm.androidtv.controller.router.physicalDeviceIdForEffectiveSlot
+import com.romm.androidtv.controller.router.physicalDeviceIds
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
@@ -23,6 +25,67 @@ import org.junit.jupiter.api.Test
  */
 @DisplayName("ControllerEventRouter — production path tests")
 class ControllerEventRouterTest {
+
+    @Test
+    @DisplayName("Android TV virtual devices are identifiable before gameplay slot assignment")
+    fun `virtual controller signatures are excluded from gameplay`() {
+        assertThat(
+            DeviceSignature("virtual-search", 0x18d1, 0x0100, "virtual-search")
+                .isAndroidTvVirtualController(),
+        ).isTrue()
+        assertThat(
+            DeviceSignature("virtual-remote", 0x18d1, 0x0100, "virtual-remote")
+                .isAndroidTvVirtualController(),
+        ).isTrue()
+        assertThat(
+            DeviceSignature("Xbox Wireless Controller", 0x045e, 0x0b13, "xbox")
+                .isAndroidTvVirtualController(),
+        ).isFalse()
+    }
+
+    @Test
+    @DisplayName("Android TV virtual gamepads do not take remapping player slots")
+    fun `physical controller is first effective remapping device`() {
+        val deviceSlots = mapOf(
+            5 to 0,
+            18 to 1,
+            20 to 2,
+        )
+        val signatures = mapOf(
+            5 to DeviceSignature("virtual-search", 0x18d1, 0x0100, "virtual-search"),
+            18 to DeviceSignature("Xbox Wireless Controller", 0x045e, 0x0b13, "xbox"),
+            20 to DeviceSignature("Xbox Wireless Controller 2", 0x045e, 0x0b13, "xbox-2"),
+        )
+
+        assertThat(
+            physicalDeviceIdForEffectiveSlot(
+                slotIndex = 0,
+                deviceSlots = deviceSlots,
+                deviceSignatures = signatures,
+            ),
+        ).isEqualTo(18)
+        assertThat(
+            physicalDeviceIdForEffectiveSlot(
+                slotIndex = 1,
+                deviceSlots = deviceSlots,
+                deviceSignatures = signatures,
+            ),
+        ).isEqualTo(20)
+        assertThat(physicalDeviceIds(deviceSlots, signatures)).containsExactly(18, 20)
+    }
+
+    @Test
+    @DisplayName("TV remote reservations are never exposed as remapping devices")
+    fun `virtual remote is excluded from connected slot lookup`() {
+        val router = ControllerEventRouter()
+        router.setActive(true)
+
+        router.routeTvRemoteKey(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER)
+
+        assertThat(router.connectedDeviceIdForSlot(0)).isNull()
+        assertThat(router.connectedDeviceIdForSlot(-1)).isNull()
+        assertThat(router.connectedDeviceIdForSlot(ControllerSlot.SLOT_COUNT)).isNull()
+    }
 
     @Nested
     @DisplayName("Repeat suppression")

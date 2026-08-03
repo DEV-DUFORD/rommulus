@@ -20,6 +20,9 @@ std::atomic<EmulationSession*> g_active_session{nullptr};
 
 constexpr int kMaxDrainWaitMs = 500;
 constexpr int kDrainPollIntervalMs = 5;
+constexpr unsigned kPcsxRearmedDualShockDevice =
+    RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1);
+constexpr unsigned kPlayStationControllerPorts = 2;
 }  // namespace
 
 EmulationSession::EmulationSession() = default;
@@ -73,8 +76,9 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     environment_.setContentDirectory(
         contentPath.empty() ? saveDir : contentPath.substr(0, contentPath.find_last_of('/')));
 
-    if (systemInfo.library_name != nullptr &&
-        std::strcmp(systemInfo.library_name, "PCSX-ReARMed") == 0) {
+    const bool isPcsxRearmed = systemInfo.library_name != nullptr &&
+        std::strcmp(systemInfo.library_name, "PCSX-ReARMed") == 0;
+    if (isPcsxRearmed) {
         // Slot 1 remains Libretro-managed and therefore participates in the
         // existing per-ROM SRAM restore/checkpoint/sync lifecycle. Upstream
         // exposes no Libretro-backed slot-2 mode, so disable its shared-file
@@ -126,6 +130,16 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         core_.unload();
         state_ = SessionState::kUninitialized;
         return false;
+    }
+
+    if (isPcsxRearmed) {
+        // PCSX-ReARMed resets every port to a digital pad during retro_load_game().
+        // Select its advertised DualShock subclass afterward so the analog values
+        // already supplied by InputState are actually polled by PlayStation games.
+        for (unsigned port = 0; port < kPlayStationControllerPorts; ++port) {
+            fns.retro_set_controller_port_device(port, kPcsxRearmedDualShockDevice);
+        }
+        LOGI("configured PCSX-ReARMed ports 1-2 as DualShock");
     }
 
     threadShouldRun_ = true;

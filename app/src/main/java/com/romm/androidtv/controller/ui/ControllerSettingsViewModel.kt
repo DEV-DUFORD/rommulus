@@ -104,6 +104,7 @@ data class ConflictDialogInfo(
 /** Full UI state emitted by [ControllerSettingsViewModel]. */
 data class ControllerConfigUiState(
     val consoleName: String,
+    val artworkResourceId: Int,
     val selectedPlayerIndex: Int = 0,
     val playerCount: Int = 1,
     val rows: List<ControllerBindingRow> = emptyList(),
@@ -134,13 +135,14 @@ class ControllerSettingsViewModel(
     private val profile: CoreControllerProfile,
     private val repository: ControllerConfigRepository,
     private val captureCoordinator: ControllerBindingCaptureCoordinator,
-    private val connectedDeviceProvider: (playerIndex: Int) -> ConnectedControllerInfo? = { null },
+    private val connectedDevicesProvider: () -> List<ConnectedControllerInfo> = { emptyList() },
     private val labelFormatter: (PhysicalBinding) -> String = { BindingLabelFormatter.label(it) },
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
         ControllerConfigUiState(
             consoleName = profile.consoleName,
+            artworkResourceId = com.romm.androidtv.controller.config.ControllerArtworkResolver.resourceIdFor(profile.artwork),
             selectedPlayerIndex = 0,
             playerCount = profile.playerCount,
         ),
@@ -199,9 +201,15 @@ class ControllerSettingsViewModel(
     /** Opens a capture for [controlId] in the selected player tab. */
     fun onRowSelected(controlId: CoreControlId) {
         val state = _uiState.value
+        if (state.capture != null || state.conflict != null) return
         val descriptor = profile.controls.firstOrNull { it.id == controlId } ?: return
         val playerIndex = state.selectedPlayerIndex
-        val device = connectedDeviceProvider(playerIndex)
+        val devices = connectedDevicesProvider()
+        val deviceLabel = when (devices.size) {
+            0 -> null
+            1 -> devices.single().name
+            else -> "${devices.size} connected controllers"
+        }
 
         pendingControlId = controlId
         pendingConflictBinding = null
@@ -211,7 +219,7 @@ class ControllerSettingsViewModel(
                 capture = CaptureDialogInfo(
                     controlLabel = descriptor.label,
                     playerLabel = playerLabel(playerIndex),
-                    connectedDeviceName = device?.name,
+                    connectedDeviceName = deviceLabel,
                     captureState = ControllerBindingCaptureState.AwaitingNeutral,
                 ),
             )
@@ -219,7 +227,7 @@ class ControllerSettingsViewModel(
 
         captureCoordinator.beginCapture(
             slotIndex = playerIndex,
-            deviceId = device?.deviceId,
+            deviceIds = devices.mapTo(mutableSetOf()) { it.deviceId },
             target = when (descriptor.inputKind) {
                 InputKind.BUTTON, InputKind.DPAD -> com.romm.androidtv.controller.capture.CaptureTarget.Digital
                 InputKind.ANALOG_STICK, InputKind.TRIGGER ->
@@ -304,9 +312,10 @@ class ControllerSettingsViewModel(
             ControllerBindingCaptureState.Capturing,
             -> Unit
             ControllerBindingCaptureState.Cancelled,
+            -> _uiState.update { it.copy(capture = null) }
             ControllerBindingCaptureState.TimedOut,
             ControllerBindingCaptureState.NoDeviceAssigned,
-            -> _uiState.update { it.copy(capture = null) }
+            -> Unit
         }
     }
 
@@ -383,7 +392,7 @@ class ControllerSettingsViewModel(
         private val profile: CoreControllerProfile,
         private val repository: ControllerConfigRepository,
         private val captureCoordinator: ControllerBindingCaptureCoordinator,
-        private val connectedDeviceProvider: (playerIndex: Int) -> ConnectedControllerInfo? = { null },
+        private val connectedDevicesProvider: () -> List<ConnectedControllerInfo> = { emptyList() },
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -392,7 +401,7 @@ class ControllerSettingsViewModel(
                 profile = profile,
                 repository = repository,
                 captureCoordinator = captureCoordinator,
-                connectedDeviceProvider = connectedDeviceProvider,
+                connectedDevicesProvider = connectedDevicesProvider,
             ) as T
         }
     }

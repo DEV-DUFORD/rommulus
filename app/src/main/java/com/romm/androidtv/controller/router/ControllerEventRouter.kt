@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import com.romm.androidtv.controller.isAndroidTvVirtualController
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.policy.AxisMappingPolicy
 import com.romm.androidtv.controller.policy.EventConsumptionPolicy
@@ -60,6 +61,26 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     private val virtualRemoteDeviceId = Int.MIN_VALUE
 
     /**
+     * Returns the physical Android device assigned to an effective player slot.
+     * Virtual TV-remote reservations are intentionally excluded from remapping.
+     */
+    fun connectedDeviceIdForSlot(slotIndex: Int): Int? {
+        return physicalDeviceIdForEffectiveSlot(
+            slotIndex = slotIndex,
+            deviceSlots = deviceIdToSlotIndex,
+            deviceSignatures = deviceIdToSignature,
+            virtualRemoteDeviceId = virtualRemoteDeviceId,
+        )
+    }
+
+    /** Connected physical gamepads in effective player order, excluding TV system devices. */
+    fun connectedPhysicalDeviceIds(): List<Int> = physicalDeviceIds(
+        deviceSlots = deviceIdToSlotIndex,
+        deviceSignatures = deviceIdToSignature,
+        virtualRemoteDeviceId = virtualRemoteDeviceId,
+    )
+
+    /**
      * Enumerate already-connected input devices and assign controllers.
      * Must be called after registerInputDeviceListener() to catch devices
      * that were connected before the listener was registered, and on lifecycle
@@ -76,6 +97,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
             if (deviceIdToSignature.containsKey(deviceId)) continue
             onInputDeviceAdded(deviceId)
         }
+
     }
 
     // ---- Lifecycle management ----
@@ -141,6 +163,12 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         if (isTvRemoteByAxes(device, sources)) return
 
         val signature = DeviceSignature.from(device)
+        // Android TV exposes helpers such as "virtual-search" with GAMEPAD/JOYSTICK
+        // capabilities. They are not playable controllers and must not consume a
+        // player slot, otherwise Player 1 mappings are installed on the virtual
+        // device while the first physical controller remains on the default map.
+        if (signature.isAndroidTvVirtualController()) return
+
         deviceIdToSignature[deviceId] = signature
         pressedKeysPerDevice[deviceId] = mutableSetOf()
         hatDpadKeysPerDevice[deviceId] = mutableSetOf()
@@ -156,7 +184,12 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     override fun onInputDeviceChanged(deviceId: Int) {
         val device = InputDevice.getDevice(deviceId) ?: return
         if (!SourceFilterPolicy.isControllerSource(device.sources)) return
-        deviceIdToSignature[deviceId] = DeviceSignature.from(device)
+        val signature = DeviceSignature.from(device)
+        if (signature.isAndroidTvVirtualController()) {
+            onInputDeviceRemoved(deviceId)
+            return
+        }
+        deviceIdToSignature[deviceId] = signature
         val slotIndex = deviceIdToSlotIndex[deviceId]
         val mapping = slotIndex?.let { _slotsFlow.value[it].mapping } ?: ControllerMapping()
         resolvedAxesPerDevice[deviceId] = resolveAxes(device, mapping)
@@ -616,3 +649,28 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     }
 
 }
+
+internal fun physicalDeviceIdForEffectiveSlot(
+    slotIndex: Int,
+    deviceSlots: Map<Int, Int>,
+    deviceSignatures: Map<Int, DeviceSignature>,
+    virtualRemoteDeviceId: Int = Int.MIN_VALUE,
+): Int? = physicalDeviceIds(
+    deviceSlots = deviceSlots,
+    deviceSignatures = deviceSignatures,
+    virtualRemoteDeviceId = virtualRemoteDeviceId,
+).getOrNull(slotIndex)
+
+internal fun physicalDeviceIds(
+    deviceSlots: Map<Int, Int>,
+    deviceSignatures: Map<Int, DeviceSignature>,
+    virtualRemoteDeviceId: Int = Int.MIN_VALUE,
+): List<Int> = deviceSlots.entries
+    .asSequence()
+    .filter { (deviceId, _) ->
+        deviceId != virtualRemoteDeviceId &&
+            !deviceSignatures[deviceId].isAndroidTvVirtualController()
+    }
+    .sortedBy { (_, assignedSlot) -> assignedSlot }
+    .map { (deviceId, _) -> deviceId }
+    .toList()

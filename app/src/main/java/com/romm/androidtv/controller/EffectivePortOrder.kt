@@ -32,6 +32,6 @@ fun effectiveLibretroPortOrder(slots: List<ControllerSlot>): List<ControllerSlot
     }
 }
 
-private fun DeviceSignature?.isAndroidTvVirtualController(): Boolean =
+internal fun DeviceSignature?.isAndroidTvVirtualController(): Boolean =
     this == DeviceSignature.VIRTUAL_REMOTE ||
         this?.name?.startsWith("virtual-", ignoreCase = true) == true
