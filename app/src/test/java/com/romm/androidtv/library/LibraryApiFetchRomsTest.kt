@@ -147,9 +147,20 @@ class LibraryApiFetchRomsTest {
             assertThat(recorded.path).contains("with_char_index=false")
             assertThat(recorded.path).contains("with_filter_values=false")
             assertThat(recorded.path).contains("with_rom_id_index=false")
+            assertThat(recorded.path).contains("group_by_meta_id=true")
             assertThat(recorded.path).contains("limit=20")
             assertThat(recorded.path).contains("offset=0")
         }
+    }
+
+    @Test
+    fun `sends group_by_meta_id=true so sibling rom versions collapse to one gallery entry`() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"items": [], "total": 0}"""))
+
+        LibraryApi.fetchRoms(client, origin(), RomQuery.RecentlyAdded)
+
+        val recorded = server.takeRequest()
+        assertThat(recorded.path).contains("group_by_meta_id=true")
     }
 
     @Test

@@ -79,6 +79,9 @@ sealed interface RequiredBiosState {
  * @param onLogin Called when user taps "Log in" from the auth-expired state. Does NOT auto-submit credentials.
  * @param onChooseSave Called when the user picks the "Choose Save" affordance next to Play,
  *   to open the save-picker screen (browse all server saves for this ROM and adopt one before launch).
+ * @param onChooseVersion Called when the user picks the "Choose Version" affordance (only shown
+ *   when the ROM has one or more sibling versions — e.g. multi-disc, region, or revision variants),
+ *   to open the version-picker screen (browse sibling roms and launch a specific one).
  * @param onOpenScreenshot Called when the user selects a screenshot from the shelf, with the full
  *   list of screenshot URLs and the tapped index — the caller opens a full-screen viewer
  *   ([ScreenshotViewerScreen]) seeded at that index.
@@ -94,6 +97,7 @@ fun GameDetailScreen(
     isAuthExpired: Boolean = false,
     onLogin: () -> Unit = {},
     onChooseSave: (Long) -> Unit = {},
+    onChooseVersion: (Long) -> Unit = {},
     biosState: RequiredBiosState = RequiredBiosState.Ready,
     onCheckBios: (String) -> Unit = {},
     onOpenScreenshot: (List<String>, Int) -> Unit = { _, _ -> },
@@ -129,6 +133,7 @@ fun GameDetailScreen(
                 isAuthExpired = isAuthExpired,
                 onLogin = onLogin,
                 onChooseSave = onChooseSave,
+                onChooseVersion = onChooseVersion,
                 biosState = biosState,
                 onCheckBios = onCheckBios,
                 onOpenScreenshot = onOpenScreenshot,
@@ -147,6 +152,7 @@ private fun GameDetailContent(
     isAuthExpired: Boolean,
     onLogin: () -> Unit,
     onChooseSave: (Long) -> Unit,
+    onChooseVersion: (Long) -> Unit,
     biosState: RequiredBiosState,
     onCheckBios: (String) -> Unit,
     onOpenScreenshot: (List<String>, Int) -> Unit,
@@ -207,6 +213,10 @@ private fun GameDetailContent(
                             PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging)
                             Spacer(modifier = Modifier.width(12.dp))
                             ChooseSaveButton(onClick = { onChooseSave(rom.id) }, enabled = !isStaging)
+                            if (rom.siblingRoms.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                ChooseVersionButton(onClick = { onChooseVersion(rom.id) }, enabled = !isStaging)
+                            }
                         }
 
                         if (errorMessage != null) {
@@ -473,6 +483,51 @@ private fun ChooseSaveButton(onClick: () -> Unit, enabled: Boolean = true) {
     ) {
         Text(
             text = "Choose Save",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (enabled) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
+        )
+    }
+}
+
+/**
+ * "Choose Version" affordance next to Play/Choose Save, only rendered when
+ * [RomDetail.siblingRoms] is non-empty (e.g. multi-disc, region, or revision
+ * variants of this game). Opens [VersionPickerScreen], which mirrors the
+ * "Choose Save" flow's UX for picking one specific rom entry to launch.
+ */
+@Composable
+private fun ChooseVersionButton(onClick: () -> Unit, enabled: Boolean = true) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (!enabled) RommTvColors.NightLo
+                else if (isFocused) RommTvColors.NightHi
+                else RommTvColors.NightLo
+            )
+            .border(
+                width = if (isFocused && enabled) 2.dp else 1.dp,
+                color = if (isFocused && enabled) RommTvColors.Romm300 else RommTvColors.TextSecondary.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(8.dp),
+            )
+            .then(
+                if (enabled) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = "Choose Game File",
             style = MaterialTheme.typography.titleMedium,
             color = if (enabled) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
         )

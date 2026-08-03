@@ -128,11 +128,22 @@ internal data class RomMetadatumJson(
     val average_rating: Double? = null,
 )
 
+/** One entry in `RomDetailJson.sibling_roms` (`SiblingRomSchema` in the reference backend). */
+@JsonClass(generateAdapter = false)
+internal data class SiblingRomJson(
+    val id: Long = 0,
+    val name: String? = null,
+    val fs_name_no_ext: String = "",
+    val is_main_sibling: Boolean = false,
+)
+
 @JsonClass(generateAdapter = false)
 internal data class RomDetailJson(
     val id: Long = 0,
     val name: String? = null,
     val fs_name_no_tags: String = "",
+    /** The exact per-file name (tags like "(Disc 1)" kept, extension stripped) — distinguishes sibling versions that share the same `name`. */
+    val fs_name_no_ext: String = "",
     val platform_display_name: String = "",
     val platform_slug: String = "",
     val summary: String? = null,
@@ -145,6 +156,7 @@ internal data class RomDetailJson(
     val languages: List<String>? = null,
     val fs_size_bytes: Long = 0,
     val rom_user: RomUserJson? = null,
+    val sibling_roms: List<SiblingRomJson>? = null,
 )
 
 object LibraryApi {
@@ -297,6 +309,15 @@ object LibraryApi {
                 fileSizeBytes = json.fs_size_bytes,
                 lastPlayedIso = json.rom_user?.last_played,
                 nowPlaying = json.rom_user?.now_playing ?: false,
+                fileName = json.fs_name_no_ext,
+                siblingRoms = json.sibling_roms.orEmpty().map {
+                    SiblingRomInfo(
+                        id = it.id,
+                        title = it.name?.takeIf { name -> name.isNotBlank() } ?: it.fs_name_no_ext,
+                        fileName = it.fs_name_no_ext,
+                        isMainSibling = it.is_main_sibling,
+                    )
+                },
             )
         } catch (_: Exception) {
             null
@@ -340,6 +361,13 @@ object LibraryApi {
             .addQueryParameter("with_char_index", "false")
             .addQueryParameter("with_filter_values", "false")
             .addQueryParameter("with_rom_id_index", "false")
+            // Collapses sibling roms (multi-disc/region/revision versions of the same game,
+            // grouped server-side by shared external metadata ID) down to one representative
+            // entry per group, matching the webapp's default gallery behavior — otherwise e.g.
+            // "Game (Disc 1)" and "Game (Disc 2)" would show as two separate library entries.
+            // The representative rom still carries its own `sibling_roms` list (see
+            // RomDetail.siblingRoms), which GameDetailScreen uses to offer "Choose Version".
+            .addQueryParameter("group_by_meta_id", "true")
             .addQueryParameter("limit", limit.toString())
             .addQueryParameter("offset", offset.toString())
 

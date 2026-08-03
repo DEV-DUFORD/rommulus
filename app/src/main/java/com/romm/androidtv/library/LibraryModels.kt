@@ -58,6 +58,25 @@ data class CollectionSummary(
 )
 
 /**
+ * One other rom entry that's a "sibling" (a different version of the same game —
+ * e.g. a different disc, region, or revision — grouped server-side by shared
+ * external metadata ID). Mirrors RomM's `SiblingRomSchema`. Powers the
+ * "Choose Version" affordance on `GameDetailScreen`.
+ */
+data class SiblingRomInfo(
+    val id: Long,
+    val title: String,
+    /**
+     * The exact per-file name (tags like "(Disc 1)" kept, extension stripped). All siblings
+     * in a group usually share the same [title] (the game's metadata name), so this is what
+     * actually distinguishes one version from another in the "Choose Version" picker.
+     */
+    val fileName: String,
+    /** True if this is the version the current user has marked as their default for the group. */
+    val isMainSibling: Boolean,
+)
+
+/**
  * Full detail for a single ROM (`GET /api/roms/{id}`, the full `RomSchema` —
  * not the `SimpleRomSchema` used by list endpoints). Powers `GameDetailScreen`.
  */
@@ -84,6 +103,17 @@ data class RomDetail(
     val fileSizeBytes: Long,
     val lastPlayedIso: String?,
     val nowPlaying: Boolean,
+    /**
+     * The exact per-file name (tags like "(Disc 1)" kept, extension stripped) for this specific
+     * rom entry — distinguishes it from its [siblingRoms] in the "Choose Version" picker, since
+     * they usually all share the same [title] (the game's metadata name).
+     */
+    val fileName: String = "",
+    /**
+     * Other versions of this same game (different disc/region/revision), if RomM has
+     * grouped any siblings for it server-side. Empty for the vast majority of roms.
+     */
+    val siblingRoms: List<SiblingRomInfo> = emptyList(),
 )
 
 /** One page of a paginated `GET /api/roms` query, e.g. for a platform/collection detail grid. */

@@ -253,6 +253,7 @@ class LibraryApiTest {
             val body = """
                 {
                     "id": 38035, "name": "Live A Live", "fs_name_no_tags": "Live A Live",
+                    "fs_name_no_ext": "Live A Live (Disc 1)",
                     "platform_display_name": "Super Nintendo Entertainment System",
                     "summary": "A tale told across seven eras.",
                     "path_cover_small": null,
@@ -265,7 +266,10 @@ class LibraryApiTest {
                     },
                     "regions": ["USA"], "languages": ["English"],
                     "fs_size_bytes": 4194304,
-                    "rom_user": {"last_played": "2026-07-27T09:21:05+00:00", "now_playing": true}
+                    "rom_user": {"last_played": "2026-07-27T09:21:05+00:00", "now_playing": true},
+                    "sibling_roms": [
+                        {"id": 38036, "name": "Live A Live (Disc 2)", "fs_name_no_ext": "Live A Live (Disc 2)", "is_main_sibling": false}
+                    ]
                 }
             """.trimIndent()
 
@@ -292,6 +296,44 @@ class LibraryApiTest {
             assertThat(result.fileSizeBytes).isEqualTo(4194304)
             assertThat(result.lastPlayedIso).isEqualTo("2026-07-27T09:21:05+00:00")
             assertThat(result.nowPlaying).isTrue
+            assertThat(result.fileName).isEqualTo("Live A Live (Disc 1)")
+            assertThat(result.siblingRoms).hasSize(1)
+            assertThat(result.siblingRoms[0].id).isEqualTo(38036)
+            assertThat(result.siblingRoms[0].title).isEqualTo("Live A Live (Disc 2)")
+            assertThat(result.siblingRoms[0].fileName).isEqualTo("Live A Live (Disc 2)")
+            assertThat(result.siblingRoms[0].isMainSibling).isFalse
+        }
+
+        @Test
+        fun `falls back to fs_name_no_ext for a sibling with no name, and defaults siblingRoms to empty when absent`() {
+            val bodyWithUnnamedSibling = """
+                {
+                    "id": 1, "name": "Some Game", "fs_name_no_tags": "Some Game",
+                    "platform_display_name": "Game Boy",
+                    "fs_size_bytes": 0,
+                    "sibling_roms": [
+                        {"id": 2, "name": null, "fs_name_no_ext": "Some Game (Disc 1)", "is_main_sibling": true}
+                    ]
+                }
+            """.trimIndent()
+
+            val result = LibraryApi.parseRomDetail(bodyWithUnnamedSibling, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.siblingRoms).hasSize(1)
+            assertThat(result.siblingRoms[0].title).isEqualTo("Some Game (Disc 1)")
+            assertThat(result.siblingRoms[0].fileName).isEqualTo("Some Game (Disc 1)")
+            assertThat(result.siblingRoms[0].isMainSibling).isTrue
+
+            val bodyWithNoSiblings = """
+                {
+                    "id": 1, "name": "Some Game", "fs_name_no_tags": "Some Game",
+                    "platform_display_name": "Game Boy",
+                    "fs_size_bytes": 0
+                }
+            """.trimIndent()
+
+            assertThat(LibraryApi.parseRomDetail(bodyWithNoSiblings, origin)!!.siblingRoms).isEmpty()
         }
 
         @Test
@@ -325,6 +367,7 @@ class LibraryApiTest {
             assertThat(result.fileSizeBytes).isEqualTo(0)
             assertThat(result.lastPlayedIso).isNull()
             assertThat(result.nowPlaying).isFalse
+            assertThat(result.siblingRoms).isEmpty()
         }
 
         @Test

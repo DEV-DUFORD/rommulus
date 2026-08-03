@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity() {
         HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS,
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
         NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
-        NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_BIOS_CONFIGURATION,
+        NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_VERSION_PICKER, NATIVE_BIOS_CONFIGURATION,
         NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG, NATIVE_SCREENSHOT_VIEWER
     }
 
@@ -184,6 +184,13 @@ class MainActivity : ComponentActivity() {
     // staged while the list loads, so selecting an entry can adopt+launch without re-staging.
     private var savePickerState by mutableStateOf<com.romm.androidtv.library.ui.SavePickerState?>(null)
     private var savePickerStagedOutcome by mutableStateOf<com.romm.androidtv.romm.StagingOutcome.Success?>(null)
+
+    // Native version-picker ("Choose Version") state — lists sibling roms (multi-disc/region/
+    // revision variants of the same game) and lets the user switch the game detail screen to a
+    // specific one, mirroring the save-picker's UX. Unlike the save picker, no staging happens
+    // and there is no auto-launch: picking a version just re-scopes the detail screen to that
+    // rom ID so the user presses Play there when ready.
+    private var versionPickerState by mutableStateOf<com.romm.androidtv.library.ui.VersionPickerState?>(null)
 
     @Volatile
     private var diagnosticReport: DiagnosticReport? = null
@@ -428,6 +435,11 @@ class MainActivity : ComponentActivity() {
                         savePickerStagedOutcome = null
                         currentScreen = Screen.NATIVE_GAME_DETAIL
                     }
+                    Screen.NATIVE_VERSION_PICKER -> {
+                        // Dismiss picker; no filesystem/Room/network mutation occurred yet.
+                        versionPickerState = null
+                        currentScreen = Screen.NATIVE_GAME_DETAIL
+                    }
                     Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE -> {
                         // Dismiss overlay; return to the game detail screen for this ROM.
                         preLaunchState?.clear()
@@ -625,7 +637,7 @@ class MainActivity : ComponentActivity() {
                         Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
                         Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL,
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
-                        Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_BIOS_CONFIGURATION,
+                        Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_VERSION_PICKER, Screen.NATIVE_BIOS_CONFIGURATION,
                         Screen.NATIVE_CONTROLLER_LIST, Screen.NATIVE_CONTROLLER_CONFIG,
                         Screen.NATIVE_SCREENSHOT_VIEWER -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
@@ -719,6 +731,9 @@ class MainActivity : ComponentActivity() {
                                                         onChooseSave = { chooseRomId ->
                                                             nativeLibraryOnChooseSave(chooseRomId)
                                                         },
+                                                        onChooseVersion = { chooseRomId ->
+                                                            nativeLibraryOnChooseVersion(chooseRomId)
+                                                        },
                                                         isStaging = state?.let { s ->
                                                             s.matchesScope(romId, s.sessionId) && s.isStaging
                                                         } ?: false,
@@ -788,6 +803,25 @@ class MainActivity : ComponentActivity() {
                                                 },
                                                 onRetry = {
                                                     selectedRomId?.let { nativeLibraryOnChooseSave(it) }
+                                                },
+                                            )
+                                        } else {
+                                            // Safety fallback: return to game detail.
+                                            currentScreen = Screen.NATIVE_GAME_DETAIL
+                                        }
+                                    }
+                                    Screen.NATIVE_VERSION_PICKER -> {
+                                        val pickerState = versionPickerState
+                                        if (pickerState != null) {
+                                            com.romm.androidtv.library.ui.VersionPickerScreen(
+                                                state = pickerState,
+                                                onSelect = { entry -> nativeLibraryOnVersionSelected(entry) },
+                                                onBack = {
+                                                    versionPickerState = null
+                                                    currentScreen = Screen.NATIVE_GAME_DETAIL
+                                                },
+                                                onRetry = {
+                                                    selectedRomId?.let { nativeLibraryOnChooseVersion(it) }
                                                 },
                                             )
                                         } else {
@@ -1474,6 +1508,72 @@ class MainActivity : ComponentActivity() {
             )
             dispatchPreparationResult(preparation, spec, savePath)
         }
+    }
+
+    /**
+     * Entry point invoked by GameDetailScreen's "Choose Version" affordance. Fetches this ROM's
+     * detail (for its title + sibling list) and builds the version-picker's entries from the
+     * current rom plus each [com.romm.androidtv.library.SiblingRomInfo] — no staging happens
+     * here, unlike [nativeLibraryOnChooseSave]: picking a version just re-scopes the game detail
+     * screen to whichever rom ID the user selects (see [nativeLibraryOnVersionSelected]).
+     */
+    private fun nativeLibraryOnChooseVersion(romId: Long) {
+        Log.d(DIAG_TAG, "MainActivity.nativeLibraryOnChooseVersion: entered romId=$romId")
+        versionPickerState = com.romm.androidtv.library.ui.VersionPickerState.Loading
+        currentScreen = Screen.NATIVE_VERSION_PICKER
+
+        lifecycleScope.launch {
+            when (val result = libraryRepository.fetchRomDetail(romId)) {
+                is com.romm.androidtv.library.LibraryResult.Success -> {
+                    val rom = result.data
+                    val entries = buildList {
+                        add(
+                            com.romm.androidtv.library.ui.VersionPickerEntryUiModel(
+                                romId = rom.id,
+                                fileName = rom.fileName.ifBlank { rom.title },
+                                isCurrentVersion = true,
+                                isMainSibling = rom.siblingRoms.none { it.isMainSibling },
+                            ),
+                        )
+                        rom.siblingRoms.forEach { sibling ->
+                            add(
+                                com.romm.androidtv.library.ui.VersionPickerEntryUiModel(
+                                    romId = sibling.id,
+                                    fileName = sibling.fileName.ifBlank { sibling.title },
+                                    isCurrentVersion = false,
+                                    isMainSibling = sibling.isMainSibling,
+                                ),
+                            )
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
+                        versionPickerState = com.romm.androidtv.library.ui.VersionPickerState.Loaded(
+                            com.romm.androidtv.library.ui.VersionPickerUiModel(gameTitle = rom.title, entries = entries)
+                        )
+                    }
+                }
+                is com.romm.androidtv.library.LibraryResult.Failure -> {
+                    withContext(Dispatchers.Main) {
+                        versionPickerState = com.romm.androidtv.library.ui.VersionPickerState.Error(
+                            result.error.name.lowercase().replace('_', ' ')
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Handles the user picking one entry in the version picker: switches the game detail screen
+     * to the chosen rom (so Back behaves like an ordinary detail visit) and lets the user press
+     * Play there when ready, exactly as if they'd navigated to that version's own detail screen
+     * directly — unlike the save picker, choosing a version does NOT auto-launch.
+     */
+    private fun nativeLibraryOnVersionSelected(entry: com.romm.androidtv.library.ui.VersionPickerEntryUiModel) {
+        Log.d(DIAG_TAG, "MainActivity.nativeLibraryOnVersionSelected: romId=${entry.romId}")
+        versionPickerState = null
+        selectedRomId = entry.romId
+        currentScreen = Screen.NATIVE_GAME_DETAIL
     }
 
     private fun biosStagingError(
