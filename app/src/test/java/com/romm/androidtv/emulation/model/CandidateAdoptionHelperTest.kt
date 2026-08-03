@@ -148,6 +148,23 @@ class CandidateAdoptionHelperTest {
     }
 
     @Test
+    fun `legacy variable-length Genesis save is accepted for stable SRAM image`() {
+        assertThat(
+            isCompatibleCandidateSize(
+                coreId = "genesis_plus_gx",
+                nativeSramSizeBytes = 65536L,
+                downloadedSizeBytes = 8192L,
+            )
+        ).isTrue()
+    }
+
+    @Test
+    fun `variable-length save remains rejected for other cores and Sega CD images`() {
+        assertThat(isCompatibleCandidateSize("snes9x", 65536L, 8192L)).isFalse()
+        assertThat(isCompatibleCandidateSize("genesis_plus_gx", 8208L, 8192L)).isFalse()
+    }
+
+    @Test
     fun `no SRAM available candidate NOT restored`() {
         var restoredPath: String? = null
 

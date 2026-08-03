@@ -52,6 +52,7 @@ struct CoreFunctions {
     void* (*romm_get_save_memory_data)() = nullptr;
     size_t (*romm_get_save_memory_size)() = nullptr;
     bool (*romm_apply_save_memory)() = nullptr;
+    bool (*romm_restore_save_memory)(const void*, size_t) = nullptr;
 };
 
 // Loads one core .so, resolves all required symbols, and verifies the API

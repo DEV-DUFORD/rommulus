@@ -3834,7 +3834,7 @@ size_t romm_get_save_memory_size(void)
 {
    size_t cart_bram_size;
    if (system_hw != SYSTEM_MCD)
-      return 0;
+      return sram.on ? sizeof(sram.sram) : 0;
 
    cart_bram_size = scd.cartridge.id ? (size_t)scd.cartridge.mask + 1 : 0;
    if (cart_bram_size > ROMM_SCD_MAX_CART_BRAM_SIZE)
@@ -3849,6 +3849,9 @@ void *romm_get_save_memory_data(void)
    size_t cart_bram_size;
    if (!image_size)
       return NULL;
+
+   if (system_hw != SYSTEM_MCD)
+      return sram.sram;
 
    cart_bram_size = image_size - ROMM_SCD_SAVE_HEADER_SIZE - ROMM_SCD_INTERNAL_BRAM_SIZE;
    memcpy(romm_scd_save_image, romm_scd_save_magic, sizeof(romm_scd_save_magic));
@@ -3892,6 +3895,30 @@ bool romm_apply_save_memory(void)
    if (cart_bram_size)
       brm_crc[1] = ~crc32(0, scd.cartridge.area, cart_bram_size);
    return true;
+}
+
+bool romm_restore_save_memory(const void *data, size_t size)
+{
+   if (!data || !size)
+      return false;
+
+   if (system_hw != SYSTEM_MCD)
+   {
+      if (!sram.on || size > sizeof(sram.sram))
+         return false;
+
+      /* Older ROMM builds wrote Genesis SRAM only through the last non-0xff
+       * byte. Expand those saves to the core's stable 64 KiB image. */
+      memset(sram.sram, 0xff, sizeof(sram.sram));
+      memcpy(sram.sram, data, size);
+      return true;
+   }
+
+   if (size != romm_get_save_memory_size())
+      return false;
+
+   memcpy(romm_scd_save_image, data, size);
+   return romm_apply_save_memory();
 }
 
 static void check_system_specs(void)

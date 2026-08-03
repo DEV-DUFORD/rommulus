@@ -63,6 +63,11 @@ class EmulationResultHandler(
     /** Deferred that completes when the last recovery pass finishes (for test awaiting). */
     private var lastRecoveryDeferred: CompletableDeferred<Unit>? = null
 
+    private data class CompletedCheckpoint(
+        val path: String,
+        val hash: String,
+    )
+
     private fun getSessionLock(sessionId: String): Mutex {
         return sessionLocks.computeIfAbsent(sessionId) { Mutex() }
     }
@@ -110,21 +115,20 @@ class EmulationResultHandler(
         playSessionStartEpochMs: Long = -1L,
         playSessionEndEpochMs: Long = -1L,
     ) {
-        if (checkpointedHash == null || checkpointedPath == null) {
-            Log.w(logTag, "processSuccessfulResult: no checkpoint data for session $sessionId")
-            candidateMetadataCache.remove(sessionId)
-            cleanupJournal(sessionId)
-            return
-        }
-
         val journal = LaunchSessionJournal(filesDir.resolve("launch_sessions"))
         val descriptor = journal.read(sessionId)
         val cachedCandidate = candidateMetadataCache[sessionId]
+        val checkpoint = checkpointedPath?.let { path ->
+            checkpointedHash?.let { hash -> CompletedCheckpoint(path, hash) }
+        }
 
         var hadFailure = false
 
         // Phase B: finalize adoption if candidate was adopted. Awaits completion.
-        if (descriptor?.state == DescriptorState.ADOPTED && cachedCandidate != null) {
+        if (checkpoint != null &&
+            descriptor?.state == DescriptorState.ADOPTED &&
+            cachedCandidate != null
+        ) {
             if (resultRomId > 0L && cachedCandidate.romId == resultRomId) {
                 val session = sessionStore.current()
                 if (session != null) {
@@ -143,8 +147,8 @@ class EmulationResultHandler(
                                     slot = SavePathPolicy.AUTOSAVE_SLOT,
                                     coreId = cachedCandidate.coreId,
                                     coreBuildRevision = cachedCandidate.coreBuildRevision,
-                                    checkpointedHash = checkpointedHash,
-                                    checkpointedSizeBytes = File(checkpointedPath).length(),
+                                    checkpointedHash = checkpoint.hash,
+                                    checkpointedSizeBytes = File(checkpoint.path).length(),
                                     serverContentHash = cachedCandidate.serverContentHash,
                                 )
                             )
@@ -170,11 +174,21 @@ class EmulationResultHandler(
         // Uses the latest checkpointed hash from gameplay (not the adoption-time hash)
         // for post-play comparison/queueing.
         if (resultRomId > 0L) {
-            try {
-                syncPostPlayAwaited(sessionId, checkpointedPath, checkpointedHash, resultRomId)
-            } catch (e: Exception) {
-                Log.w(logTag, "processSuccessfulResult: syncPostPlay failed for session $sessionId", e)
-                hadFailure = true
+            if (checkpoint != null) {
+                try {
+                    syncPostPlayAwaited(
+                        sessionId,
+                        checkpoint.path,
+                        checkpoint.hash,
+                        resultRomId,
+                    )
+                } catch (e: Exception) {
+                    Log.w(logTag, "processSuccessfulResult: syncPostPlay failed for session $sessionId", e)
+                    hadFailure = true
+                }
+
+            } else {
+                Log.i(logTag, "processSuccessfulResult: no checkpoint for session $sessionId; skipping save sync")
             }
 
             // Best-effort: report the completed play session for "Continue Playing" tracking.

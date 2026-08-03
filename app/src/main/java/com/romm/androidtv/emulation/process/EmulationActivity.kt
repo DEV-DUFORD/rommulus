@@ -583,9 +583,15 @@ class EmulationActivity : ComponentActivity() {
         finish()
     }
 
-    private fun checkpointIfRunning(): Boolean {
-        if (!sessionStarted) return false
-        val path = savePath ?: return false
+    private fun checkpointIfRunning(): CheckpointOutcome {
+        if (!sessionStarted) return CheckpointOutcome.FAILED
+        val path = savePath ?: return CheckpointOutcome.FAILED
+        val saveMemorySizeBytes = host.nativeGetSramSizeBytes()
+        if (saveMemorySizeBytes <= 0L) {
+            checkpointedHash = null
+            Log.d(TAG, "checkpoint: skipped because the game exposes no save memory")
+            return CheckpointOutcome.NO_SAVE_MEMORY
+        }
         val checkpointed = host.nativeCheckpointSaveRam(path)
         Log.d(TAG, "checkpoint: success=$checkpointed path=$path")
 
@@ -604,7 +610,7 @@ class EmulationActivity : ComponentActivity() {
             checkpointedHash = null
         }
 
-        return checkpointed
+        return classifyCheckpointOutcome(saveMemorySizeBytes, checkpointed)
     }
 
     /**
@@ -643,8 +649,11 @@ class EmulationActivity : ComponentActivity() {
      * setResult(), from the same call site.
      */
     private fun finishAndDeliverResult(forceQuitOnSaveFailure: Boolean = false) {
-        val checkpointed = checkpointIfRunning()
-        if (!checkpointed && sessionStarted && !forceQuitOnSaveFailure) {
+        val checkpointOutcome = checkpointIfRunning()
+        if (checkpointOutcome == CheckpointOutcome.FAILED &&
+            sessionStarted &&
+            !forceQuitOnSaveFailure
+        ) {
             // Do not silently discard a failed checkpoint at quit time — block with a native
             // "save failed" screen so the user can retry or make an informed choice to quit
             // anyway (LIBRETRO_REFACTOR.md section 13, Phase 6 error screens).
@@ -653,7 +662,7 @@ class EmulationActivity : ComponentActivity() {
             return
         }
         saveFailureVisible.value = false
-        deliverResult(checkpointed)
+        deliverResult(checkpointOutcome == CheckpointOutcome.SAVED)
         finish()
     }
 
@@ -876,6 +885,21 @@ internal fun shouldRouteGameplayInput(
     pauseOverlay: PauseOverlay,
     saveFailureVisible: Boolean,
 ): Boolean = sessionStarted && pauseOverlay == PauseOverlay.CLOSED && !saveFailureVisible
+
+internal enum class CheckpointOutcome {
+    SAVED,
+    NO_SAVE_MEMORY,
+    FAILED,
+}
+
+internal fun classifyCheckpointOutcome(
+    saveMemorySizeBytes: Long,
+    checkpointSucceeded: Boolean,
+): CheckpointOutcome = when {
+    saveMemorySizeBytes <= 0L -> CheckpointOutcome.NO_SAVE_MEMORY
+    checkpointSucceeded -> CheckpointOutcome.SAVED
+    else -> CheckpointOutcome.FAILED
+}
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable

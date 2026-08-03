@@ -9,7 +9,8 @@ import java.io.IOException
  * so JVM unit tests can prove behavior without instrumentation.
  *
  * Contract for [adoptCandidate]:
- * 1. Validate exact size/provenance/hash/path against the native SRAM size.
+ * 1. Validate size/provenance/hash/path against the native SRAM size. Exact size is required
+ *    except for legacy variable-length Genesis Plus GX cartridge saves.
  * 2. Backup canonical local bytes durably — only if a canonical local copy exists.
  *    Never claim preservation without an actual durable backup. Idempotent: repeated
  *    calls for the same candidate do not overwrite prior backups.
@@ -145,7 +146,12 @@ class FilesystemCandidateAdoptionHelper : CandidateAdoptionHelper {
             if (nativeSramSizeBytes <= 0L) {
                 return AdoptionResult.NoSram(nativeSramSizeBytes)
             }
-            if (nativeSramSizeBytes != candidateMetadata.downloadedSizeBytes) {
+            if (!isCompatibleCandidateSize(
+                    coreId = candidateMetadata.coreId,
+                    nativeSramSizeBytes = nativeSramSizeBytes,
+                    downloadedSizeBytes = candidateMetadata.downloadedSizeBytes,
+                )
+            ) {
                 return AdoptionResult.RejectedSizeMismatch(
                     nativeSramSizeBytes,
                     candidateMetadata.downloadedSizeBytes,
@@ -225,6 +231,7 @@ class FilesystemCandidateAdoptionHelper : CandidateAdoptionHelper {
                     nowEpochMs = System.currentTimeMillis(),
                 )
             }
+
         }
 
         // Cannot derive scope from path; fall back to direct filesystem backup.
@@ -288,3 +295,17 @@ class FilesystemCandidateAdoptionHelper : CandidateAdoptionHelper {
         val romHash: String,
     )
 }
+
+internal fun isCompatibleCandidateSize(
+    coreId: String,
+    nativeSramSizeBytes: Long,
+    downloadedSizeBytes: Long,
+): Boolean {
+    if (nativeSramSizeBytes == downloadedSizeBytes) return true
+
+    return coreId == "genesis_plus_gx" &&
+        nativeSramSizeBytes == GENESIS_PLUS_GX_SRAM_SIZE_BYTES &&
+        downloadedSizeBytes in 1..nativeSramSizeBytes
+}
+
+private const val GENESIS_PLUS_GX_SRAM_SIZE_BYTES = 64L * 1024L

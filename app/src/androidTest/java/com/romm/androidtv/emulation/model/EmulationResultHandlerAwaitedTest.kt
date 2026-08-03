@@ -217,6 +217,44 @@ class EmulationResultHandlerAwaitedTest {
     }
 
     @Test
+    fun handleEmulationResultWithoutSaveMemoryStillRecordsPlaySession() {
+        runBlocking {
+            seedSession()
+            val sessionId = UUID.randomUUID().toString()
+            val journal = LaunchSessionJournal(filesDir.resolve("launch_sessions"))
+            journal.createOrGet(sessionId)
+            journal.advance(
+                sessionId,
+                DescriptorState.CORE_LOADED,
+                SessionDescriptorPatch(
+                    romId = 31754L,
+                    romHash = "romhash-no-sram",
+                    coreId = "snes9x",
+                    coreBuildRevision = "test",
+                ),
+            )
+
+            val result = handler.handleEmulationResult(
+                sessionId = sessionId,
+                resultCode = RESULT_OK,
+                checkpointedPath = null,
+                checkpointedHash = null,
+                resultRomId = 31754L,
+                playSessionStartEpochMs = 1_000L,
+                playSessionEndEpochMs = 61_000L,
+            )
+
+            assertTrue(result)
+            assertFalse(fakeCoordinator.syncPostPlayCalled)
+            assertTrue(fakeCoordinator.recordPlaySessionCalled)
+            assertEquals(31754L, fakeCoordinator.recordPlaySessionRequest?.romId)
+            assertEquals(1_000L, fakeCoordinator.recordPlaySessionRequest?.startEpochMs)
+            assertEquals(61_000L, fakeCoordinator.recordPlaySessionRequest?.endEpochMs)
+            assertFalse(journal.read(sessionId) != null)
+        }
+    }
+
+    @Test
     fun handleEmulationResultWithResultOkPreservesJournalOnFinalizeAdoptionFailure() {
         runBlocking {
         seedSession()

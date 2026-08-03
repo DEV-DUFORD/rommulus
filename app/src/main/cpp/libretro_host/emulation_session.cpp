@@ -335,6 +335,17 @@ bool EmulationSession::checkpointSaveRam(const std::string& savePath) {
 }
 
 bool EmulationSession::restoreSaveRam(const std::string& savePath) {
+    const CoreFunctions& fns = core_.functions();
+    if (fns.romm_restore_save_memory != nullptr) {
+        std::vector<uint8_t> saveImage;
+        if (!readWholeFile(savePath, saveImage) || saveImage.empty()) return false;
+        if (!fns.romm_restore_save_memory(saveImage.data(), saveImage.size())) {
+            LOGE("restoreSaveRam: core rejected app save memory image");
+            return false;
+        }
+        return true;
+    }
+
     void* data = memoryData(RETRO_MEMORY_SAVE_RAM);
     size_t size = memorySize(RETRO_MEMORY_SAVE_RAM);
     if (data == nullptr || size == 0) {
@@ -343,7 +354,6 @@ bool EmulationSession::restoreSaveRam(const std::string& savePath) {
     }
     if (!readFileExact(savePath, data, size)) return false;
 
-    const CoreFunctions& fns = core_.functions();
     if (fns.romm_get_save_memory_size != nullptr &&
         fns.romm_get_save_memory_size() > 0) {
         if (fns.romm_apply_save_memory == nullptr || !fns.romm_apply_save_memory()) {

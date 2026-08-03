@@ -79,6 +79,7 @@ bool CoreLibrary::load(const std::string& path) {
     resolveOptional(handle, "romm_get_save_memory_data", fns.romm_get_save_memory_data);
     resolveOptional(handle, "romm_get_save_memory_size", fns.romm_get_save_memory_size);
     resolveOptional(handle, "romm_apply_save_memory", fns.romm_apply_save_memory);
+    resolveOptional(handle, "romm_restore_save_memory", fns.romm_restore_save_memory);
 
     if (!ok) {
         LOGE("rejecting incomplete core library: %s", lastError_.c_str());
