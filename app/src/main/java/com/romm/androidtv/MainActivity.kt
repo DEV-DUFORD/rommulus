@@ -55,8 +55,15 @@ import com.romm.androidtv.cache.CacheDatabase
 import com.romm.androidtv.cache.ContentCache
 import com.romm.androidtv.config.SettingsRepository
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
+import com.romm.androidtv.controller.config.ControllerConfigDatabase
+import com.romm.androidtv.controller.config.ControllerConfigRepository
+import com.romm.androidtv.controller.config.CoreControllerProfiles
+import com.romm.androidtv.controller.config.RoomControllerConfigRepository
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.router.ControllerEventRouter
+import com.romm.androidtv.controller.ui.ControllerConfigScreen
+import com.romm.androidtv.controller.ui.ControllerConsoleListScreen
+import com.romm.androidtv.controller.ui.ControllerSettingsViewModel
 import com.romm.androidtv.diagnostic.DiagnosticPageHtml
 import com.romm.androidtv.emulation.model.CandidateExtras
 import com.romm.androidtv.emulation.model.CandidateSaveMetadata
@@ -123,16 +130,21 @@ fun Modifier.tvSelect(onSelect: () -> Unit): Modifier = onKeyEvent { event ->
  * 5. DIAGNOSTICS — local capability tests via data: scheme
  * 6. ROMM_ORIGIN — unauthenticated origin viewer
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
 
     private enum class Screen {
         HOME, ORIGIN_STATUS, LOGIN, AUTHENTICATED_WEBVIEW, DIAGNOSTICS, ROMM_ORIGIN, CONTROLLER_DIAGNOSTICS,
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
         NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
-        NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_BIOS_CONFIGURATION
+        NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_BIOS_CONFIGURATION,
+        NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG
     }
 
     private var currentScreen by mutableStateOf(Screen.HOME)
+
+    // Selected core for the Phase 6 controller-configuration flow (CONTROLLER_SETTINGS.md §7).
+    private var selectedControllerCoreId by mutableStateOf<String?>(null)
 
     // Selection state for the Phase 2 detail screens (UI_REFACTOR.md section 7). `gameDetailParent`
     // remembers which screen opened the game detail screen, so Back returns to the grid/shelf that
@@ -252,6 +264,13 @@ class MainActivity : ComponentActivity() {
      */
     private val captureCoordinator: ControllerBindingCaptureCoordinator by lazy {
         ControllerBindingCaptureCoordinator(lifecycleScope)
+    }
+
+    // Reads the persisted per-core controller config overrides (Phase 3). Uses the shared
+    // ControllerConfigDatabase (multi-instance invalidation) so this main process observes
+    // the same rows the :emulation process writes.
+    private val controllerConfigRepository: ControllerConfigRepository by lazy {
+        RoomControllerConfigRepository.create(ControllerConfigDatabase.database(applicationContext))
     }
 
     // Gamepad injection diagnostics — shared observable state
@@ -389,6 +408,8 @@ class MainActivity : ComponentActivity() {
                     Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH, Screen.NATIVE_SETTINGS ->
                         currentScreen = Screen.NATIVE_HOME
                     Screen.NATIVE_BIOS_CONFIGURATION -> currentScreen = Screen.NATIVE_SETTINGS
+                    Screen.NATIVE_CONTROLLER_LIST -> currentScreen = Screen.NATIVE_SETTINGS
+                    Screen.NATIVE_CONTROLLER_CONFIG -> currentScreen = Screen.NATIVE_CONTROLLER_LIST
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
                     Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
@@ -595,7 +616,8 @@ class MainActivity : ComponentActivity() {
                         Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
                         Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL,
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
-                        Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_BIOS_CONFIGURATION -> {
+                        Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_BIOS_CONFIGURATION,
+                        Screen.NATIVE_CONTROLLER_LIST, Screen.NATIVE_CONTROLLER_CONFIG -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(
                                     libraryRepository,
@@ -819,6 +841,59 @@ class MainActivity : ComponentActivity() {
                                                     selectedBiosSystem = BiosSystem.PLAYSTATION
                                                     currentScreen = Screen.NATIVE_BIOS_CONFIGURATION
                                                 },
+                                                onOpenControllerSettings = {
+                                                    currentScreen = Screen.NATIVE_CONTROLLER_LIST
+                                                },
+                                            )
+                                        }
+                                    }
+                                    Screen.NATIVE_CONTROLLER_LIST -> {
+                                        com.romm.androidtv.controller.ui.ControllerConsoleListScreen(
+                                            profiles = com.romm.androidtv.controller.config.CoreControllerProfiles.forApprovedCores(),
+                                            onSelectCore = { coreId ->
+                                                selectedControllerCoreId = coreId
+                                                currentScreen = Screen.NATIVE_CONTROLLER_CONFIG
+                                            },
+                                            onBack = { currentScreen = Screen.NATIVE_SETTINGS },
+                                        )
+                                    }
+                                    Screen.NATIVE_CONTROLLER_CONFIG -> {
+                                        val profile = selectedControllerCoreId?.let {
+                                            com.romm.androidtv.controller.config.CoreControllerProfiles.byCoreId(it)
+                                        }
+                                        if (profile == null) {
+                                            Log.w(
+                                                "MainActivity",
+                                                "Controller config opened without a valid core profile; " +
+                                                    "returning to controller list.",
+                                            )
+                                            currentScreen = Screen.NATIVE_CONTROLLER_LIST
+                                        } else {
+                                            val controllerFactory =
+                                                com.romm.androidtv.controller.ui.ControllerSettingsViewModel.Factory(
+                                                    coreId = selectedControllerCoreId!!,
+                                                    profile = profile,
+                                                    repository = controllerConfigRepository,
+                                                    captureCoordinator = captureCoordinator,
+                                                )
+                                            val controllerViewModel:
+                                                com.romm.androidtv.controller.ui.ControllerSettingsViewModel =
+                                                androidx.lifecycle.viewmodel.compose.viewModel(
+                                                    key = "controller-settings-${selectedControllerCoreId}",
+                                                    factory = controllerFactory,
+                                                )
+                                            val uiState by controllerViewModel.uiState.collectAsState()
+                                            com.romm.androidtv.controller.ui.ControllerConfigScreen(
+                                                state = uiState,
+                                                onBack = { currentScreen = Screen.NATIVE_CONTROLLER_LIST },
+                                                onSelectTab = controllerViewModel::selectTab,
+                                                onRowSelected = controllerViewModel::onRowSelected,
+                                                onCaptureDialogDismiss = controllerViewModel::dismissCaptureDialog,
+                                                onConflictResolution = controllerViewModel::resolveConflict,
+                                                onResetPlayer = controllerViewModel::resetPlayer,
+                                                onResetAllConfirm = controllerViewModel::confirmResetAll,
+                                                onResetAllRequest = controllerViewModel::requestResetAll,
+                                                onResetAllCancel = controllerViewModel::cancelResetAll,
                                             )
                                         }
                                     }

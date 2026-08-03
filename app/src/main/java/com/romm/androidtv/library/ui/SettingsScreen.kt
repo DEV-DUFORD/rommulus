@@ -57,6 +57,7 @@ fun SettingsScreen(
     viewModelFactory: SettingsViewModel.Factory,
     onOpenSegaCdBios: () -> Unit = {},
     onOpenPlayStationBios: () -> Unit = {},
+    onOpenControllerSettings: () -> Unit = {},
 ) {
     val viewModel: SettingsViewModel = viewModel(factory = viewModelFactory)
 
@@ -364,6 +365,24 @@ fun SettingsScreen(
                 checked = uiState.hideUnsupportedSystems,
                 onCheckedChange = viewModel::onHideUnsupportedSystemsChanged,
             )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Controllers",
+            style = MaterialTheme.typography.titleLarge,
+            color = RommTvColors.Romm300,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Text(
+            text = "Customize controller layouts for each console.",
+            style = MaterialTheme.typography.bodySmall,
+            color = RommTvColors.TextSecondary,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+        Button(onClick = onOpenControllerSettings) {
+            Text("Controller Settings")
         }
 
         Spacer(modifier = Modifier.height(24.dp))
