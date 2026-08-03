@@ -13,7 +13,7 @@
   in commercial and personal projects, modify and share them. You cannot,
   however, redistribute them or sell them for profit." This corroborates the
   OFL-1.1 attribution requirement.
-- **Status**: The 2.1 outline SVG paths for SNES, NES, and N64 are bundled as
+- **Status**: The 2.1 solid SVG paths for SNES, NES, and N64 are bundled as
   Android vector drawables. The generic
   fallback and seven artist-provided family drawables are not Controllercons
   assets.

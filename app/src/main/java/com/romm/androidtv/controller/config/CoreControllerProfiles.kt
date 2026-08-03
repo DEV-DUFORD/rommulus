@@ -360,7 +360,7 @@ object CoreControllerProfiles {
 
     private fun controllerconsArt(resourceName: String) = ControllerArtwork(
         resourceName = resourceName,
-        source = "Controllercons 2.1 outline",
+        source = "Controllercons 2.1 solid",
         license = "SIL Open Font License 1.1",
         licenseAssetPath = "licenses/controllercons-OFL-1.1.txt",
         viewBoxWidth = 64f,
