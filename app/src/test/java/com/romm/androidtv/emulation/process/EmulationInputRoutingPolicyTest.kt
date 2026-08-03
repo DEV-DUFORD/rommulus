@@ -14,6 +14,14 @@ class EmulationInputRoutingPolicyTest {
     }
 
     @Test
+    fun `backgrounding gameplay opens pause menu without discarding an existing pause page`() {
+        assertThat(pauseOverlayOnBackground(PauseOverlay.CLOSED)).isEqualTo(PauseOverlay.MENU)
+        assertThat(pauseOverlayOnBackground(PauseOverlay.MENU)).isEqualTo(PauseOverlay.MENU)
+        assertThat(pauseOverlayOnBackground(PauseOverlay.CONTROLLER_SETTINGS))
+            .isEqualTo(PauseOverlay.CONTROLLER_SETTINGS)
+    }
+
+    @Test
     fun `game without save memory exits without reporting a checkpoint failure`() {
         assertThat(classifyCheckpointOutcome(0L, checkpointSucceeded = false))
             .isEqualTo(CheckpointOutcome.NO_SAVE_MEMORY)

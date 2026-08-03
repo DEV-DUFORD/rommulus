@@ -626,6 +626,13 @@ class EmulationActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        if (sessionStarted && !isFinishing) {
+            // Home, screen-off, and task switches must freeze the core immediately. Keeping the
+            // overlay open also ensures that restoring the retained TV task returns to the pause
+            // menu rather than silently resuming gameplay.
+            host.nativeSetPaused(true)
+            pauseOverlay.value = pauseOverlayOnBackground(pauseOverlay.value)
+        }
         // Checkpoint on pause, not just on destroy: LIBRETRO_REFACTOR.md section
         // 11.1 requires checkpointing "on pause or quit", so a task switch or
         // screen-off doesn't lose progress if the process is later killed outright
@@ -885,6 +892,12 @@ internal fun shouldRouteGameplayInput(
     pauseOverlay: PauseOverlay,
     saveFailureVisible: Boolean,
 ): Boolean = sessionStarted && pauseOverlay == PauseOverlay.CLOSED && !saveFailureVisible
+
+internal fun pauseOverlayOnBackground(current: PauseOverlay): PauseOverlay = when (current) {
+    PauseOverlay.CLOSED -> PauseOverlay.MENU
+    PauseOverlay.MENU,
+    PauseOverlay.CONTROLLER_SETTINGS -> current
+}
 
 internal enum class CheckpointOutcome {
     SAVED,

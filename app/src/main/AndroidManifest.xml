@@ -17,6 +17,7 @@
     <application
         android:name=".RommApplication"
         android:allowBackup="false"
+        android:alwaysRetainTaskState="true"
         android:hardwareAccelerated="true"
         android:icon="@drawable/ic_launcher"
         android:banner="@drawable/ic_tv_banner"
@@ -43,6 +44,10 @@
           exported: reachable only from within this app, currently only via a
           debug-only diagnostics entry point in MainActivity and the native
           library's game launch flow.
+
+          The application retains its task state so relaunching it from the TV
+          launcher after Home returns to this activity instead of resetting the
+          task to MainActivity while a native session is still alive.
 
           IMPORTANT: launchMode is intentionally left as the default
           ("standard"), NOT singleTask/singleInstance. MainActivity launches
