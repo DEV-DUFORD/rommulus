@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace romm {
 
@@ -64,6 +65,31 @@ public:
         glContextProvider_ = std::move(provider);
     }
 
+    // A single descriptor retained from a core's SET_INPUT_DESCRIPTORS call.
+    struct RetainedInputDescriptor {
+        unsigned port = 0;
+        unsigned device = 0;
+        unsigned index = 0;
+        unsigned id = 0;
+        std::string description;
+    };
+
+    // Deep-copied RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS snapshot (Phase 8:
+    // native descriptor validation/hardening). The core's `description`
+    // pointers are only valid until retro_unload_game(), so we own our own
+    // copies. Empty until a core populates descriptors.
+    const std::vector<RetainedInputDescriptor>& inputDescriptors() const {
+        return inputDescriptors_;
+    }
+
+    // Replaces any retained descriptors with fresh deep copies. Called by the
+    // SET_INPUT_DESCRIPTORS handler.
+    void retainInputDescriptors(const struct retro_input_descriptor* descriptors);
+
+    // Frees the retained descriptor copies; called during session teardown so
+    // a stale core's strings are never read after retro_unload_game().
+    void clearInputDescriptors() { inputDescriptors_.clear(); }
+
 private:
     enum retro_pixel_format pixelFormat_ = RETRO_PIXEL_FORMAT_0RGB1555;
     bool shutdownRequested_ = false;
@@ -87,6 +113,8 @@ private:
     // Commands we've already logged as unsupported, so a core hammering an
     // unsupported query every frame doesn't spam the log.
     std::unordered_set<unsigned> loggedUnsupported_;
+
+    std::vector<RetainedInputDescriptor> inputDescriptors_;
 };
 
 }  // namespace romm

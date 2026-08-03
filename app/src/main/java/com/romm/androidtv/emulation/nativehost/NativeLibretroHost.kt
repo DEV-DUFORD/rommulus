@@ -135,6 +135,16 @@ class NativeLibretroHost {
      */
     external fun nativeGetSramSizeBytes(): Long
 
+    /**
+     * Phase 8: returns a serialized snapshot of the currently loaded core's
+     * `RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS` data (deep-copied natively).
+     * Wire format is one line per descriptor, `port|device|index|id|description`
+     * joined with `\n` — see [RetroInputDescriptorSnapshot.parse]. Returns an
+     * empty string (which parses to an empty list) when no session is active
+     * or the core has not populated any descriptors.
+     */
+    external fun nativeGetInputDescriptorsSnapshot(): String
+
     companion object {
         @Volatile
         private var loaded = false

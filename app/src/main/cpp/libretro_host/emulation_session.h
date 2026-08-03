@@ -90,6 +90,14 @@ public:
     const std::string& lastError() const { return lastError_; }
     const SessionDiagnostics& diagnostics() const { return diagnostics_; }
 
+    // Deep-copied input descriptors retained from the core's
+    // SET_INPUT_DESCRIPTORS calls (Phase 8). Empty until a core populates
+    // them, and cleared on stop(). Safe to read only from the JNI-calling
+    // thread (the emulation thread owns the EnvironmentHandler otherwise).
+    const std::vector<EnvironmentHandler::RetainedInputDescriptor>& inputDescriptors() const {
+        return environment_.inputDescriptors();
+    }
+
     // SRAM access — valid only while a core is loaded. Returns nullptr/0 if
     // the core exposes no save RAM region.
     void* memoryData(unsigned id);

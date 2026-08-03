@@ -282,6 +282,9 @@ void EmulationSession::stop() {
     }
     core_.unload();
 
+    // The core's descriptor strings are invalid after retro_unload_game().
+    environment_.clearInputDescriptors();
+
     state_ = SessionState::kStopped;
     releaseProcessSlot();
     LOGI("session stopped");

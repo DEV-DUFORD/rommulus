@@ -235,6 +235,37 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetSramSiz
     return static_cast<jlong>(size);
 }
 
+// Phase 8: serializes the retained SET_INPUT_DESCRIPTORS snapshot into a
+// simple Kotlin-consumable text form. Wire format: one line per descriptor,
+// `port|device|index|id|description`, joined with '\n'. The description
+// field is escaped so '|' and newlines in a core's human-readable string
+// cannot break the parsing (they are replaced with a space). Returns an empty
+// string when no session is active or no descriptors have been set yet, so
+// the Kotlin side never crashes on this call.
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetInputDescriptorsSnapshot(
+        JNIEnv* env, jobject /*thiz*/) {
+    if (g_session == nullptr) return env->NewStringUTF("");
+
+    std::string out;
+    for (const auto& d : g_session->inputDescriptors()) {
+        if (!out.empty()) out.push_back('\n');
+        out += std::to_string(d.port);
+        out.push_back('|');
+        out += std::to_string(d.device);
+        out.push_back('|');
+        out += std::to_string(d.index);
+        out.push_back('|');
+        out += std::to_string(d.id);
+        out.push_back('|');
+        for (char c : d.description) {
+            out.push_back((c == '\n' || c == '|') ? ' ' : c);
+        }
+    }
+    return env->NewStringUTF(out.c_str());
+}
+
 // Attaches (surface != null) or detaches (surface == null) the video output
 // window. Called from the UI thread whenever EmulationActivity's Surface
 // becomes available/is destroyed (LIBRETRO_REFACTOR.md section 8.1). This

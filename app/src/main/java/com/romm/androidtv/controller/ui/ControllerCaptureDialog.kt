@@ -16,9 +16,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.romm.androidtv.R
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureState
+import com.romm.androidtv.controller.config.BindingLabelFormatter
 import com.romm.androidtv.library.ui.RommTvColors
 
 /**
@@ -53,30 +58,37 @@ fun ControllerCaptureDialog(
             Triple("", "", false)
         is ControllerBindingCaptureState.AwaitingNeutral ->
             Triple(
-                "Press a button or move a stick on the controller for $playerLabel.",
-                "Press Back on the remote to cancel.",
+                stringResource(R.string.controller_capture_dialog_awaiting_input, playerLabel),
+                stringResource(R.string.controller_capture_dialog_back_hint),
                 false,
             )
         is ControllerBindingCaptureState.Capturing ->
             Triple(
-                "Press a button or move a stick on the controller for $playerLabel.",
-                "Press Back on the remote to cancel.",
+                stringResource(R.string.controller_capture_dialog_awaiting_input, playerLabel),
+                stringResource(R.string.controller_capture_dialog_back_hint),
                 false,
             )
         is ControllerBindingCaptureState.Result ->
             Triple(
-                "Captured: ${com.romm.androidtv.controller.config.BindingLabelFormatter.label(captureState.binding)}",
+                stringResource(
+                    R.string.controller_capture_dialog_result,
+                    BindingLabelFormatter.label(captureState.binding),
+                ),
                 "",
                 false,
             )
         is ControllerBindingCaptureState.Cancelled ->
             Triple("", "", false)
         is ControllerBindingCaptureState.TimedOut ->
-            Triple("No input detected", "Press Back on the remote to cancel.", true)
+            Triple(
+                stringResource(R.string.controller_capture_dialog_timeout),
+                stringResource(R.string.controller_capture_dialog_back_hint),
+                true,
+            )
         is ControllerBindingCaptureState.NoDeviceAssigned ->
             Triple(
-                "Connect $playerLabel to remap inputs",
-                "Press Back on the remote to cancel.",
+                stringResource(R.string.controller_capture_dialog_no_device, playerLabel),
+                stringResource(R.string.controller_capture_dialog_back_hint),
                 true,
             )
     }
@@ -106,10 +118,11 @@ fun ControllerCaptureDialog(
     ) {
         // ---- Title ----
         Text(
-            text = "Map $controlLabel",
+            text = stringResource(R.string.controller_capture_dialog_title, controlLabel),
             style = MaterialTheme.typography.headlineSmall,
             color = RommTvColors.TextPrimary,
             textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { heading() },
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -131,7 +144,7 @@ fun ControllerCaptureDialog(
                 horizontalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    text = "Connected: ",
+                    text = stringResource(R.string.controller_capture_dialog_connected_label),
                     style = MaterialTheme.typography.bodySmall,
                     color = RommTvColors.TextSecondary,
                 )

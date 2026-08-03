@@ -1,4 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RomM TV</string>
+
+    <!-- Controller Settings UI -->
+    <string name="controller_settings_title">Controller Settings</string>
+    <string name="controller_console_port_count">%1$d port%2$s</string>
+    <string name="controller_console_card_content_description">%1$s, %2$d port%3$s</string>
+
+    <!-- Controller Config Screen -->
+    <string name="controller_config_back">Back</string>
+    <string name="controller_config_reset_controller">Reset Controller</string>
+    <string name="controller_config_footer_hint">Press Select to remap \u2022 Back to return</string>
+    <string name="controller_config_player_tab_label">Controller %1$d</string>
+    <string name="controller_config_player_tab_content_description">Controller %1$d tab</string>
+    <string name="controller_config_binding_row_content_description">%1$s, currently mapped to %2$s</string>
+    <string name="controller_config_reset_all">Reset All Controllers</string>
+    <string name="controller_config_reset_all_title">Reset All Controllers?</string>
+    <string name="controller_config_reset_all_body">This resets every controller for this console to its defaults.</string>
+    <string name="controller_config_reset_all_confirm">Confirm</string>
+    <string name="controller_config_reset_all_cancel">Cancel</string>
+
+    <!-- Conflict Dialog -->
+    <string name="controller_conflict_title">Mapping Conflict</string>
+    <string name="controller_conflict_body">%1$s is already mapped to this input. Mapping %2$s to the same input will un-map %1$s.</string>
+    <string name="controller_conflict_swap">Swap</string>
+    <string name="controller_conflict_replace">Replace</string>
+
+    <!-- Capture Dialog -->
+    <string name="controller_capture_dialog_title">Map %1$s</string>
+    <string name="controller_capture_dialog_awaiting_input">Press a button or move a stick on the controller for %1$s.</string>
+    <string name="controller_capture_dialog_back_hint">Press Back on the remote to cancel.</string>
+    <string name="controller_capture_dialog_result">Captured: %1$s</string>
+    <string name="controller_capture_dialog_timeout">No input detected</string>
+    <string name="controller_capture_dialog_no_device">Connect %1$s to remap inputs</string>
+    <string name="controller_capture_dialog_connected_label">Connected: </string>
 </resources>

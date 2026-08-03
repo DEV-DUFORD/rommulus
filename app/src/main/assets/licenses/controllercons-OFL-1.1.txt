@@ -1,0 +1,1 @@
+Placeholder — populate with the actual SIL Open Font License 1.1 text when Controllercons 2.1 outline SVG assets are imported. See CONTROLLER_SETTINGS.md for licensing requirements.

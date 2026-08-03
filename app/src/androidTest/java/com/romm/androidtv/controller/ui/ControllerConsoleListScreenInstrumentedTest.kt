@@ -1,8 +1,11 @@
 package com.romm.androidtv.controller.ui
 
+import android.content.Context
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.romm.androidtv.R
 import com.romm.androidtv.controller.config.CoreControllerProfile
 import com.romm.androidtv.controller.config.ControllerArtwork
 import com.romm.androidtv.controller.config.CoreControlDescriptor
@@ -43,8 +46,10 @@ class ControllerConsoleListScreenInstrumentedTest {
         }
 
         // Title
-        composeTestRule.onNodeWithText("Controller Settings", useUnmergedTree = true)
-            .assertExists()
+        composeTestRule.onNodeWithText(
+            ApplicationProvider.getApplicationContext<Context>().getString(R.string.controller_settings_title),
+            useUnmergedTree = true,
+        ).assertExists()
 
         // Each console name appears
         composeTestRule.onNodeWithText("Super Nintendo", useUnmergedTree = true)
@@ -112,8 +117,10 @@ class ControllerConsoleListScreenInstrumentedTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Controller Settings", useUnmergedTree = true)
-            .assertExists()
+        composeTestRule.onNodeWithText(
+            ApplicationProvider.getApplicationContext<Context>().getString(R.string.controller_settings_title),
+            useUnmergedTree = true,
+        ).assertExists()
     }
 }
 

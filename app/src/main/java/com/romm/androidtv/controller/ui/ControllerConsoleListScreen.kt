@@ -37,7 +37,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.romm.androidtv.R
 import com.romm.androidtv.controller.config.CoreControllerProfile
 import com.romm.androidtv.library.ui.RommTvColors
 
@@ -88,7 +92,7 @@ fun ControllerConsoleListScreen(
     ) {
         // ---- Title ----
         Text(
-            text = "Controller Settings",
+            text = stringResource(R.string.controller_settings_title),
             style = MaterialTheme.typography.headlineMedium,
             color = RommTvColors.TextPrimary,
             modifier = Modifier
@@ -133,6 +137,14 @@ private fun ConsoleCard(
     val isFocused by interactionSource.collectIsFocusedAsState()
     val cardFocusRequester = if (isFirst) firstItemFocusRequester else remember { FocusRequester() }
 
+    val portSuffix = if (profile.playerCount > 1) "s" else ""
+    val cardContentDescription = stringResource(
+        R.string.controller_console_card_content_description,
+        profile.consoleName,
+        profile.playerCount,
+        portSuffix,
+    )
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -156,7 +168,8 @@ private fun ConsoleCard(
                 onClick = onClick,
             )
             .padding(horizontal = 20.dp, vertical = 16.dp)
-            .testTag("console_card_${profile.coreId}"),
+            .testTag("console_card_${profile.coreId}")
+            .semantics { contentDescription = cardContentDescription },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -179,7 +192,7 @@ private fun ConsoleCard(
 
         // Player count badge
         Text(
-            text = "${profile.playerCount} port${if (profile.playerCount > 1) "s" else ""}",
+            text = stringResource(R.string.controller_console_port_count, profile.playerCount, portSuffix),
             style = MaterialTheme.typography.labelMedium,
             color = RommTvColors.TextSecondary,
         )

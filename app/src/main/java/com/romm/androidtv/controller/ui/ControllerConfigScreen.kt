@@ -44,9 +44,13 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.romm.androidtv.R
 import com.romm.androidtv.controller.config.ControllerHighlightRegion
 import com.romm.androidtv.controller.config.CoreControlId
 import com.romm.androidtv.controller.config.HighlightShape
@@ -182,7 +186,7 @@ fun ControllerConfigScreen(
 
         // Persistent footer.
         Text(
-            text = "Press Select to remap • Back to return",
+            text = stringResource(R.string.controller_config_footer_hint),
             style = MaterialTheme.typography.labelSmall,
             color = RommTvColors.TextSecondary,
             textAlign = TextAlign.Center,
@@ -231,13 +235,13 @@ fun ControllerConfigScreen(
     if (state.resetAllAwaitingConfirmation) {
         AlertDialog(
             onDismissRequest = onResetAllCancel,
-            title = { Text("Reset All Controllers?") },
-            text = { Text("This resets every controller for this console to its defaults.") },
+            title = { Text(stringResource(R.string.controller_config_reset_all_title)) },
+            text = { Text(stringResource(R.string.controller_config_reset_all_body)) },
             confirmButton = {
-                TextButton(onClick = onResetAllConfirm) { Text("Confirm", color = RommTvColors.Romm300) }
+                TextButton(onClick = onResetAllConfirm) { Text(stringResource(R.string.controller_config_reset_all_confirm), color = RommTvColors.Romm300) }
             },
             dismissButton = {
-                TextButton(onClick = onResetAllCancel) { Text("Cancel", color = RommTvColors.TextSecondary) }
+                TextButton(onClick = onResetAllCancel) { Text(stringResource(R.string.controller_config_reset_all_cancel), color = RommTvColors.TextSecondary) }
             },
         )
     }
@@ -253,7 +257,7 @@ private fun ControllerHeader(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(onClick = onBack) { Text("Back", color = RommTvColors.TextSecondary) }
+        TextButton(onClick = onBack) { Text(stringResource(R.string.controller_config_back), color = RommTvColors.TextSecondary) }
         Text(
             text = title,
             style = MaterialTheme.typography.headlineSmall,
@@ -262,7 +266,11 @@ private fun ControllerHeader(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
         )
-        TextButton(onClick = onResetPlayer) { Text("Reset Controller", color = RommTvColors.TextSecondary) }
+        val resetControllerLabel = stringResource(R.string.controller_config_reset_controller)
+        TextButton(
+            onClick = onResetPlayer,
+            modifier = Modifier.semantics { contentDescription = resetControllerLabel },
+        ) { Text(resetControllerLabel, color = RommTvColors.TextSecondary) }
     }
 }
 
@@ -282,12 +290,17 @@ private fun PlayerTabRow(
         for (playerIndex in 0 until playerCount) {
             val interactionSource = remember { MutableInteractionSource() }
             val isFocused by interactionSource.collectIsFocusedAsState()
+            val playerNumber = playerIndex + 1
+            val tabContentDescription = stringResource(
+                R.string.controller_config_player_tab_content_description,
+                playerNumber,
+            )
             Tab(
                 selected = playerIndex == selectedIndex,
                 onClick = { onSelectTab(playerIndex) },
                 text = {
                     Text(
-                        text = "Controller ${playerIndex + 1}",
+                        text = stringResource(R.string.controller_config_player_tab_label, playerNumber),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = if (isFocused) RommTvColors.Romm300 else RommTvColors.TextSecondary,
@@ -300,7 +313,8 @@ private fun PlayerTabRow(
                         if (isFocused) Modifier.border(3.dp, RommTvColors.Romm500, RoundedCornerShape(8.dp))
                         else Modifier,
                     )
-                    .onFocusChanged { if (it.isFocused) onFocused(playerIndex) },
+                    .onFocusChanged { if (it.isFocused) onFocused(playerIndex) }
+                    .semantics { contentDescription = tabContentDescription },
             )
         }
     }
@@ -355,6 +369,12 @@ private fun BindingRow(
         onFocusRequesterCreated(focusRequester)
     }
 
+    val rowContentDescription = stringResource(
+        R.string.controller_config_binding_row_content_description,
+        row.label,
+        row.bindingLabel,
+    )
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -375,7 +395,8 @@ private fun BindingRow(
                 indication = null,
                 onClick = onClick,
             )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .semantics { contentDescription = rowContentDescription },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -398,6 +419,7 @@ private fun BindingRow(
 private fun ResetAllRow(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    val resetAllLabel = stringResource(R.string.controller_config_reset_all)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -413,12 +435,13 @@ private fun ResetAllRow(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 indication = null,
                 onClick = onClick,
             )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .semantics { contentDescription = resetAllLabel },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "Reset All Controllers",
+            text = resetAllLabel,
             style = MaterialTheme.typography.bodyLarge,
             color = if (isFocused) RommTvColors.Romm300 else RommTvColors.TextSecondary,
         )
@@ -493,18 +516,21 @@ private fun ConflictDialog(
 ) {
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text("Mapping Conflict") },
+        title = { Text(stringResource(R.string.controller_conflict_title)) },
         text = {
             Text(
-                "$conflictingLabel is already mapped to this input. " +
-                    "Mapping $targetLabel to the same input will un-map $conflictingLabel.",
+                stringResource(
+                    R.string.controller_conflict_body,
+                    conflictingLabel,
+                    targetLabel,
+                ),
             )
         },
-        confirmButton = { TextButton(onClick = onSwap) { Text("Swap", color = RommTvColors.Romm300) } },
+        confirmButton = { TextButton(onClick = onSwap) { Text(stringResource(R.string.controller_conflict_swap), color = RommTvColors.Romm300) } },
         dismissButton = {
             Row {
-                TextButton(onClick = onReplace) { Text("Replace", color = RommTvColors.Romm300) }
-                TextButton(onClick = onCancel) { Text("Cancel", color = RommTvColors.TextSecondary) }
+                TextButton(onClick = onReplace) { Text(stringResource(R.string.controller_conflict_replace), color = RommTvColors.Romm300) }
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.controller_config_reset_all_cancel), color = RommTvColors.TextSecondary) }
             }
         },
     )

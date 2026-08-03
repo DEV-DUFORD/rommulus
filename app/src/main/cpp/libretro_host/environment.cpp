@@ -105,6 +105,27 @@ void registerV2Options(
 
 EnvironmentHandler::EnvironmentHandler() = default;
 
+void EnvironmentHandler::retainInputDescriptors(
+        const struct retro_input_descriptor* descriptors) {
+    // Replace any previously retained copy: a core may issue
+    // SET_INPUT_DESCRIPTORS more than once (e.g. per new-game-load), and each
+    // new call invalidates the previous one.
+    inputDescriptors_.clear();
+    if (descriptors == nullptr) return;
+
+    for (const struct retro_input_descriptor* desc = descriptors;
+         desc->description != nullptr;
+         ++desc) {
+        inputDescriptors_.push_back(RetainedInputDescriptor{
+            desc->port,
+            desc->device,
+            desc->index,
+            desc->id,
+            desc->description == nullptr ? std::string() : std::string(desc->description),
+        });
+    }
+}
+
 void EnvironmentHandler::setCoreOptionOverride(
         const std::string& key, const std::string& value) {
     coreOptionOverrides_[key] = value;
@@ -226,8 +247,14 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
         }
 
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS: {
-            // Accepted; the host doesn't need to display them yet, but this is
-            // real support, not a silent claim (LIBRETRO_REFACTOR.md section 7.2).
+            // Phase 8: retain a deep copy of the descriptors for validation /
+            // JNI snapshot exposure (LIBRETRO_REFACTOR.md section 7.2 keeps
+            // this real support). The array is null-terminated (a core emits a
+            // trailing all-zero entry with description == nullptr, e.g. the
+            // snes9x init_descriptors() sentinel), and the core's description
+            // pointers are only valid until retro_unload_game(), so we must
+            // copy the strings into host-owned memory.
+            retainInputDescriptors(static_cast<const struct retro_input_descriptor*>(data));
             return true;
         }
 
