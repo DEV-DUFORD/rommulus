@@ -553,6 +553,10 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         if (range == null) return AxisNormalizer.normalizeFallback(rawValue)
 
         return if (
+            axisConstant == android.view.MotionEvent.AXIS_LTRIGGER ||
+            axisConstant == android.view.MotionEvent.AXIS_RTRIGGER ||
+            axisConstant == android.view.MotionEvent.AXIS_BRAKE ||
+            axisConstant == android.view.MotionEvent.AXIS_GAS ||
             logicalControl == LogicalControl.TRIGGER_LEFT ||
             logicalControl == LogicalControl.TRIGGER_RIGHT
         ) {
@@ -567,7 +571,16 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         mapping: ControllerMapping
     ): Map<Int, LogicalControl> {
         val supportedAxes = device.motionRanges.orEmpty().mapTo(mutableSetOf()) { it.axis }
-        return AxisMappingPolicy.resolve(supportedAxes, mapping.axes)
+        val resolved = AxisMappingPolicy.resolve(supportedAxes, mapping.axes).toMutableMap()
+        for (direction in mapping.axisDirections.keys) {
+            if (direction.axis in supportedAxes) {
+                resolved.putIfAbsent(
+                    direction.axis,
+                    AXIS_TO_CONTROL[direction.axis] ?: mapping.axisDirections.getValue(direction),
+                )
+            }
+        }
+        return resolved
     }
 
     /**

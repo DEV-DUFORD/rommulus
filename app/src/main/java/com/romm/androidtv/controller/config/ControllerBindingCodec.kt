@@ -16,6 +16,7 @@ object ControllerBindingCodec {
     const val TYPE_KEY = "KEY"
     const val TYPE_AXIS = "AXIS"
     const val TYPE_AXIS_DIRECTION = "AXIS_DIRECTION"
+    const val TYPE_UNMAPPED = "UNMAPPED"
 
     /**
      * Encode [binding] as the persisted row for ([coreId], [playerIndex], [controlId]).
@@ -29,11 +30,13 @@ object ControllerBindingCodec {
         playerIndex: Int,
         controlId: CoreControlId,
         binding: PhysicalBinding,
+        bindingSlot: BindingSlot = BindingSlot.PRIMARY,
     ): ControllerBindingEntity = when (binding) {
         is PhysicalBinding.Key -> ControllerBindingEntity(
             coreId = coreId,
             playerIndex = playerIndex,
             controlId = controlId.id,
+            bindingSlot = bindingSlot.index,
             bindingType = TYPE_KEY,
             inputCode = binding.keyCode,
             polarity = null,
@@ -43,6 +46,7 @@ object ControllerBindingCodec {
             coreId = coreId,
             playerIndex = playerIndex,
             controlId = controlId.id,
+            bindingSlot = bindingSlot.index,
             bindingType = TYPE_AXIS,
             inputCode = binding.axis,
             polarity = null,
@@ -52,6 +56,7 @@ object ControllerBindingCodec {
             coreId = coreId,
             playerIndex = playerIndex,
             controlId = controlId.id,
+            bindingSlot = bindingSlot.index,
             bindingType = TYPE_AXIS_DIRECTION,
             inputCode = binding.axis,
             polarity = binding.polarity,
@@ -71,4 +76,33 @@ object ControllerBindingCodec {
         }
         else -> null
     }
+
+    sealed interface DecodedOverride {
+        data class Mapped(val binding: PhysicalBinding) : DecodedOverride
+        data object Unmapped : DecodedOverride
+    }
+
+    fun decodeOverride(entity: ControllerBindingEntity): DecodedOverride? = when (entity.bindingType) {
+        TYPE_UNMAPPED -> DecodedOverride.Unmapped
+        TYPE_KEY,
+        TYPE_AXIS,
+        TYPE_AXIS_DIRECTION,
+        -> decode(entity)?.let(DecodedOverride::Mapped)
+        else -> null
+    }
+
+    fun encodeUnmapped(
+        coreId: String,
+        playerIndex: Int,
+        address: BindingAddress,
+    ): ControllerBindingEntity = ControllerBindingEntity(
+        coreId = coreId,
+        playerIndex = playerIndex,
+        controlId = address.controlId.id,
+        bindingSlot = address.slot.index,
+        bindingType = TYPE_UNMAPPED,
+        inputCode = 0,
+        polarity = null,
+        schemaVersion = SCHEMA_VERSION,
+    )
 }

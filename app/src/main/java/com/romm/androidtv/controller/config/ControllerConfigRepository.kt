@@ -34,33 +34,33 @@ interface ControllerConfigRepository {
         playerIndex: Int,
         controlId: CoreControlId,
         binding: PhysicalBinding,
+        bindingSlot: BindingSlot = BindingSlot.PRIMARY,
     )
 
     /**
      * Atomically swap the bindings of [controlIdA] and [controlIdB] within one player.
      *
-     * If both controls have persisted bindings, they are exchanged. If only one exists, its
-     * binding is moved to the other control (the source row is deleted, the destination is
-     * upserted). If neither exists, the operation is a no-op.
+     * Exchanges the two effective slot values, including catalog defaults. A null side is
+     * persisted as an explicit unmapped override so a conflicting catalog default does not
+     * immediately reappear.
      */
     suspend fun swapBindings(
         coreId: String,
         playerIndex: Int,
-        controlIdA: CoreControlId,
-        controlIdB: CoreControlId,
+        addressA: BindingAddress,
+        addressB: BindingAddress,
     )
 
     /**
      * Atomically replace the binding of [controlId] with [binding] within one player.
      *
-     * Because a physical input maps to only one target per player, any **other** control in
-     * the same player whose persisted binding equals the new [binding] is deleted first
-     * (conflict resolution), then the new entity is upserted.
+     * Because a physical input maps to only one target per player, every other effective slot
+     * holding [binding] is persisted as explicitly unmapped before the target is upserted.
      */
     suspend fun replaceBinding(
         coreId: String,
         playerIndex: Int,
-        controlId: CoreControlId,
+        address: BindingAddress,
         binding: PhysicalBinding,
     )
 

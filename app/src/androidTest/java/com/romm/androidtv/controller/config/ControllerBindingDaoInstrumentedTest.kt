@@ -45,6 +45,7 @@ class ControllerBindingDaoInstrumentedTest {
         coreId: String = "snes9x",
         playerIndex: Int = 0,
         controlId: String = CoreControlId.BUTTON_A.id,
+        bindingSlot: Int = BindingSlot.PRIMARY.index,
         bindingType: String = ControllerBindingCodec.TYPE_KEY,
         inputCode: Int = 84,
         polarity: Int? = null,
@@ -53,6 +54,7 @@ class ControllerBindingDaoInstrumentedTest {
         coreId = coreId,
         playerIndex = playerIndex,
         controlId = controlId,
+        bindingSlot = bindingSlot,
         bindingType = bindingType,
         inputCode = inputCode,
         polarity = polarity,
@@ -85,6 +87,20 @@ class ControllerBindingDaoInstrumentedTest {
             assertEquals(3, loaded.size)
             assertTrue(loaded.containsAll(rows))
         }
+
+        @Test
+        fun primaryAndSecondaryRowsCoexistForOneControl() {
+            runBlocking {
+                dao.upsert(entity(bindingSlot = BindingSlot.PRIMARY.index, inputCode = 96))
+                dao.upsert(entity(bindingSlot = BindingSlot.SECONDARY.index, inputCode = 100))
+
+                val rows = dao.loadForCore("snes9x")
+
+                assertEquals(2, rows.size)
+                assertTrue(rows.any { it.bindingSlot == BindingSlot.PRIMARY.index && it.inputCode == 96 })
+                assertTrue(rows.any { it.bindingSlot == BindingSlot.SECONDARY.index && it.inputCode == 100 })
+            }
+        }
     }
 
     @Test
@@ -109,7 +125,12 @@ class ControllerBindingDaoInstrumentedTest {
             dao.upsert(entity(controlId = CoreControlId.BUTTON_A.id))
             dao.upsert(entity(controlId = CoreControlId.BUTTON_B.id))
 
-            dao.delete("snes9x", 0, CoreControlId.BUTTON_A.id)
+            dao.delete(
+                "snes9x",
+                0,
+                CoreControlId.BUTTON_A.id,
+                BindingSlot.PRIMARY.index,
+            )
 
             val remaining = dao.loadForCore("snes9x")
             assertEquals(1, remaining.size)

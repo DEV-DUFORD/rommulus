@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * Dedicated Room database for per-core controller configuration overrides
@@ -20,7 +22,7 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [ControllerBindingEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class ControllerConfigDatabase : RoomDatabase() {
@@ -43,8 +45,42 @@ abstract class ControllerConfigDatabase : RoomDatabase() {
                     context.applicationContext,
                     ControllerConfigDatabase::class.java,
                     DB_NAME,
-                ).enableMultiInstanceInvalidation()
+                ).addMigrations(MIGRATION_1_2)
+                    .enableMultiInstanceInvalidation()
                     .build().also { instance = it }
+            }
+        }
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                        CREATE TABLE controller_bindings_v2 (
+                            coreId TEXT NOT NULL,
+                            playerIndex INTEGER NOT NULL,
+                            controlId TEXT NOT NULL,
+                            bindingSlot INTEGER NOT NULL,
+                            bindingType TEXT NOT NULL,
+                            inputCode INTEGER NOT NULL,
+                            polarity INTEGER,
+                            schemaVersion INTEGER NOT NULL,
+                            PRIMARY KEY(coreId, playerIndex, controlId, bindingSlot)
+                        )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                        INSERT INTO controller_bindings_v2 (
+                            coreId, playerIndex, controlId, bindingSlot,
+                            bindingType, inputCode, polarity, schemaVersion
+                        )
+                        SELECT coreId, playerIndex, controlId, 0,
+                               bindingType, inputCode, polarity, schemaVersion
+                        FROM controller_bindings
+                    """.trimIndent(),
+                )
+                db.execSQL("DROP TABLE controller_bindings")
+                db.execSQL("ALTER TABLE controller_bindings_v2 RENAME TO controller_bindings")
             }
         }
     }

@@ -48,6 +48,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.MutableSharedFlow
 import com.romm.androidtv.auth.AuthRepository
 import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.romm.ClientTokenStore
@@ -167,6 +168,9 @@ class MainActivity : ComponentActivity() {
      * `HomeViewModel`'s creation (see `NATIVE_HOME` composable branch).
      */
     private var continuePlayingRefreshTick by mutableStateOf(0)
+
+    /** Re-fetches any library view model that survived a pre-login navigation session. */
+    private val libraryRefreshEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     // Pre-launch save sync overlay state (conflict/quarantine). Scoped to a single ROM/session;
     // survives recomposition because it lives on the Activity, not inside remember().
@@ -623,6 +627,7 @@ class MainActivity : ComponentActivity() {
                                     libraryRepository,
                                     hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                     hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
+                                    refreshEvents = libraryRefreshEvents,
                                 )
                             )
                             // Re-fetch Continue Playing right after exiting a game (continuePlayingRefreshTick's
@@ -645,6 +650,7 @@ class MainActivity : ComponentActivity() {
                                                     com.romm.androidtv.library.RomQuery.ByPlatform(platformId),
                                                     hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                                     hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
+                                                    refreshEvents = libraryRefreshEvents,
                                                 ),
                                             )
                                             com.romm.androidtv.library.ui.RomGridScreen(
@@ -668,6 +674,7 @@ class MainActivity : ComponentActivity() {
                                                     com.romm.androidtv.library.RomQuery.ByCollection(collectionId),
                                                     hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                                     hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
+                                                    refreshEvents = libraryRefreshEvents,
                                                 ),
                                             )
                                             com.romm.androidtv.library.ui.RomGridScreen(
@@ -686,7 +693,11 @@ class MainActivity : ComponentActivity() {
                                         if (romId != null) {
                                             val detailViewModel: com.romm.androidtv.library.RomDetailViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                                 key = "game-detail-$romId",
-                                                factory = com.romm.androidtv.library.RomDetailViewModel.Factory(libraryRepository, romId),
+                                                factory = com.romm.androidtv.library.RomDetailViewModel.Factory(
+                                                    libraryRepository,
+                                                    romId,
+                                                    refreshEvents = libraryRefreshEvents,
+                                                ),
                                             )
                                             // Production overlay: only conflict/quarantine (blocking) overlays replace the game detail screen.
                                             // Error-only states render inline within GameDetailScreen.
@@ -811,6 +822,7 @@ class MainActivity : ComponentActivity() {
                                             },
                                             hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                             hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
+                                            refreshEvents = libraryRefreshEvents,
                                         )
                                     }
                                     Screen.NATIVE_SETTINGS -> {
@@ -829,7 +841,9 @@ class MainActivity : ComponentActivity() {
                                                         currentScreen = Screen.NATIVE_HOME
                                                     },
                                                     onLoginSuccess = {
-                                                        // Native login from Settings: no WebView round-trip needed.
+                                                        // Existing view models may still contain responses fetched
+                                                        // before credentials were available.
+                                                        libraryRefreshEvents.tryEmit(Unit)
                                                         currentScreen = Screen.NATIVE_HOME
                                                     },
                                                 ),

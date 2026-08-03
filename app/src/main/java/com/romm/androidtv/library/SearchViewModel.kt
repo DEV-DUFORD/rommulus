@@ -63,6 +63,7 @@ class SearchViewModel(
     testScope: CoroutineScope? = null,
     private val hideUnsupportedSystems: () -> Boolean = { false },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
+    refreshEvents: Flow<Unit>? = null,
 ) : ViewModel() {
 
     /** Internal scope: uses injected [testScope] in tests, [viewModelScope] in production. */
@@ -84,6 +85,11 @@ class SearchViewModel(
         hideUnsupportedSystemsFlow?.let { flow ->
             scope.launch {
                 flow.drop(1).collect { refresh() }
+            }
+        }
+        refreshEvents?.let { events ->
+            scope.launch {
+                events.collect { refresh() }
             }
         }
     }
@@ -237,6 +243,7 @@ class SearchViewModel(
         private val context: Context,
         private val hideUnsupportedSystems: () -> Boolean = { false },
         private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
+        private val refreshEvents: Flow<Unit>? = null,
         private val dispatcher: CoroutineDispatcher = Dispatchers.Main,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -245,7 +252,13 @@ class SearchViewModel(
             val settings = SettingsRepository(prefs, BuildConfig.ROMM_ORIGIN)
             val originProvider: () -> String = { settings.currentProfile().origin }
             val repository = LibraryRepositoryImpl(RommOkHttpClient.build(), originProvider)
-            return SearchViewModel(repository, null, hideUnsupportedSystems, hideUnsupportedSystemsFlow) as T
+            return SearchViewModel(
+                repository,
+                null,
+                hideUnsupportedSystems,
+                hideUnsupportedSystemsFlow,
+                refreshEvents,
+            ) as T
         }
     }
 }

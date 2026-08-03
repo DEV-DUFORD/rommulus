@@ -3,12 +3,13 @@ package com.romm.androidtv.controller.config
 import androidx.room.Entity
 
 /**
- * One persisted binding override for a single [coreId], [playerIndex], [controlId] tuple
+ * One persisted binding override for a single [coreId], [playerIndex], [controlId], [bindingSlot] tuple
  * (CONTROLLER_SETTINGS.md Architecture section 2). Only user overrides are stored; catalog
  * defaults are merged over them at read time by the repository (a separate task).
  *
- * [bindingType] is one of [ControllerBindingCodec.TYPE_KEY], [ControllerBindingCodec.TYPE_AXIS]
- * or [ControllerBindingCodec.TYPE_AXIS_DIRECTION]. [polarity] is non-null **only** for
+ * [bindingType] is one of [ControllerBindingCodec.TYPE_KEY], [ControllerBindingCodec.TYPE_AXIS],
+ * [ControllerBindingCodec.TYPE_AXIS_DIRECTION], or [ControllerBindingCodec.TYPE_UNMAPPED].
+ * [polarity] is non-null **only** for
  * [ControllerBindingCodec.TYPE_AXIS_DIRECTION] and must then be exactly -1 or +1; for KEY and
  * AXIS rows it must be null. [inputCode] carries the Android keyCode or [android.view.MotionEvent]
  * axis constant depending on [bindingType].
@@ -18,7 +19,7 @@ import androidx.room.Entity
  */
 @Entity(
     tableName = "controller_bindings",
-    primaryKeys = ["coreId", "playerIndex", "controlId"],
+    primaryKeys = ["coreId", "playerIndex", "controlId", "bindingSlot"],
 )
 data class ControllerBindingEntity(
     /** Stable core ID (e.g., `snes9x`). */
@@ -27,6 +28,8 @@ data class ControllerBindingEntity(
     val playerIndex: Int,
     /** Persistence-stable [CoreControlId] string key. */
     val controlId: String,
+    /** Ordered [BindingSlot] index (0 = primary, 1 = secondary). */
+    val bindingSlot: Int = BindingSlot.PRIMARY.index,
     /** One of [ControllerBindingCodec.TYPE_KEY], [ControllerBindingCodec.TYPE_AXIS], [ControllerBindingCodec.TYPE_AXIS_DIRECTION]. */
     val bindingType: String,
     /** Android keyCode or [android.view.MotionEvent] axis constant. */
@@ -40,9 +43,11 @@ data class ControllerBindingEntity(
         require(coreId.isNotBlank()) { "coreId must not be blank" }
         require(controlId.isNotBlank()) { "controlId must not be blank" }
         require(playerIndex >= 0) { "playerIndex must be >= 0, was $playerIndex" }
+        require(BindingSlot.fromIndex(bindingSlot) != null) { "unknown bindingSlot $bindingSlot" }
         when (bindingType) {
             ControllerBindingCodec.TYPE_KEY,
             ControllerBindingCodec.TYPE_AXIS,
+            ControllerBindingCodec.TYPE_UNMAPPED,
             -> {
                 require(polarity == null) {
                     "polarity must be null for $bindingType, was $polarity"

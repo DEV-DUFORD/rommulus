@@ -29,20 +29,23 @@ class FakeControllerBindingDao : ControllerBindingDao {
         storage.value.filter { it.coreId == coreId && it.playerIndex == playerIndex }
 
     override suspend fun upsert(entity: ControllerBindingEntity) {
-        val updated = storage.value.filterNot { it == entity }.toMutableList()
+        val updated = storage.value.filterNot { it.hasSameKey(entity) }.toMutableList()
         updated.add(entity)
         storage.value = updated
     }
 
     override suspend fun upsertAll(entities: List<ControllerBindingEntity>) {
-        val updated = storage.value.filterNot { stored -> entities.any { it == stored } }.toMutableList()
+        val updated = storage.value.filterNot { stored ->
+            entities.any { entity -> stored.hasSameKey(entity) }
+        }.toMutableList()
         updated.addAll(entities)
         storage.value = updated
     }
 
-    override suspend fun delete(coreId: String, playerIndex: Int, controlId: String) {
+    override suspend fun delete(coreId: String, playerIndex: Int, controlId: String, bindingSlot: Int) {
         storage.value = storage.value.filterNot {
-            it.coreId == coreId && it.playerIndex == playerIndex && it.controlId == controlId
+            it.coreId == coreId && it.playerIndex == playerIndex && it.controlId == controlId &&
+                it.bindingSlot == bindingSlot
         }
     }
 
@@ -60,4 +63,10 @@ class FakeControllerBindingDao : ControllerBindingDao {
     fun clear() {
         storage.value = emptyList()
     }
+
+    private fun ControllerBindingEntity.hasSameKey(other: ControllerBindingEntity): Boolean =
+        coreId == other.coreId &&
+            playerIndex == other.playerIndex &&
+            controlId == other.controlId &&
+            bindingSlot == other.bindingSlot
 }

@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureState
 import com.romm.androidtv.controller.config.BindingLabelFormatter
+import com.romm.androidtv.controller.config.BindingAddress
+import com.romm.androidtv.controller.config.BindingSlot
+import com.romm.androidtv.controller.config.ControlBindings
 import com.romm.androidtv.controller.config.ControllerConfigRepository
 import com.romm.androidtv.controller.config.ControllerHighlightRegion
 import com.romm.androidtv.controller.config.CoreControllerConfig
@@ -44,7 +47,7 @@ enum class ConflictResolution {
  */
 internal sealed interface BindingApplyDecision {
     data object Direct : BindingApplyDecision
-    data class Conflict(val conflictingControlId: CoreControlId) : BindingApplyDecision
+    data class Conflict(val conflictingAddress: BindingAddress) : BindingApplyDecision
 }
 
 /**
@@ -56,13 +59,17 @@ internal sealed interface BindingApplyDecision {
  * [capturedBinding]; otherwise [BindingApplyDecision.Direct].
  */
 internal fun decideApply(
-    targetControlId: CoreControlId,
+    targetAddress: BindingAddress,
     capturedBinding: PhysicalBinding,
-    playerBindings: Map<CoreControlId, PhysicalBinding>,
+    playerBindings: Map<CoreControlId, ControlBindings>,
 ): BindingApplyDecision {
-    val colliding = playerBindings.entries
-        .firstOrNull { it.key != targetControlId && it.value == capturedBinding }
-        ?.key
+    val colliding = playerBindings.entries.firstNotNullOfOrNull { (controlId, bindings) ->
+        bindings.entries()
+            .firstOrNull { (slot, binding) ->
+                BindingAddress(controlId, slot) != targetAddress && binding == capturedBinding
+            }
+            ?.let { (slot, _) -> BindingAddress(controlId, slot) }
+    }
     return if (colliding != null) {
         BindingApplyDecision.Conflict(colliding)
     } else {
@@ -74,7 +81,8 @@ internal fun decideApply(
 data class ControllerBindingRow(
     val controlId: CoreControlId,
     val label: String,
-    val bindingLabel: String,
+    val primaryBindingLabel: String,
+    val secondaryBindingLabel: String,
     val inputKind: InputKind,
     val highlightRegion: ControllerHighlightRegion,
 )
@@ -107,6 +115,7 @@ internal fun playerControllerLabels(
 /** Live info for the open capture dialog overlay. */
 data class CaptureDialogInfo(
     val controlLabel: String,
+    val bindingSlotLabel: String,
     val playerLabel: String,
     val connectedDeviceName: String?,
     val captureState: ControllerBindingCaptureState,
@@ -114,8 +123,8 @@ data class CaptureDialogInfo(
 
 /** Pending conflict awaiting the user's Swap / Replace / Cancel decision. */
 data class ConflictDialogInfo(
-    val targetControlId: CoreControlId,
-    val conflictingControlId: CoreControlId,
+    val targetAddress: BindingAddress,
+    val conflictingAddress: BindingAddress,
     val targetControlLabel: String,
     val conflictingControlLabel: String,
 )
@@ -174,7 +183,7 @@ class ControllerSettingsViewModel(
     private var latestConfig: CoreControllerConfig? = null
 
     /** The control row a capture was opened for (pending capture or pending conflict). */
-    private var pendingControlId: CoreControlId? = null
+    private var pendingAddress: BindingAddress? = null
 
     /** The captured binding waiting on a conflict decision. */
     private var pendingConflictBinding: PhysicalBinding? = null
@@ -232,7 +241,7 @@ class ControllerSettingsViewModel(
         if (playerIndex == _uiState.value.selectedPlayerIndex) return
         // Spec rule 8: cancel capture on selected-tab change.
         if (_uiState.value.capture != null) cancelCapture()
-        pendingControlId = null
+        pendingAddress = null
         pendingConflictBinding = null
         _uiState.update {
             it.copy(
@@ -252,7 +261,7 @@ class ControllerSettingsViewModel(
     }
 
     /** Opens a capture for [controlId] in the selected player tab. */
-    fun onRowSelected(controlId: CoreControlId) {
+    fun onRowSelected(controlId: CoreControlId, bindingSlot: BindingSlot) {
         val state = _uiState.value
         if (state.capture != null || state.conflict != null) return
         val descriptor = profile.controls.firstOrNull { it.id == controlId } ?: return
@@ -264,13 +273,14 @@ class ControllerSettingsViewModel(
             else -> "${devices.size} connected controllers"
         }
 
-        pendingControlId = controlId
+        pendingAddress = BindingAddress(controlId, bindingSlot)
         pendingConflictBinding = null
         _uiState.update {
             it.copy(
                 focusedControlId = controlId,
                 capture = CaptureDialogInfo(
                     controlLabel = descriptor.label,
+                    bindingSlotLabel = bindingSlot.displayName,
                     playerLabel = playerLabel(playerIndex),
                     connectedDeviceName = deviceLabel,
                     captureState = ControllerBindingCaptureState.AwaitingNeutral,
@@ -291,19 +301,19 @@ class ControllerSettingsViewModel(
 
     fun dismissCaptureDialog() {
         cancelCapture()
-        pendingControlId = null
+        pendingAddress = null
         pendingConflictBinding = null
         _uiState.update { it.copy(capture = null) }
     }
 
     /** Applies a chosen conflict resolution. */
     fun resolveConflict(resolution: ConflictResolution) {
-        val target = pendingControlId
+        val target = pendingAddress
         val conflicting = _uiState.value.conflict
         val binding = pendingConflictBinding
         val playerIndex = _uiState.value.selectedPlayerIndex
         // Capture is resolved regardless of choice; Cancel keeps the old binding.
-        pendingControlId = null
+        pendingAddress = null
         pendingConflictBinding = null
         _uiState.update { it.copy(capture = null, conflict = null) }
 
@@ -312,7 +322,7 @@ class ControllerSettingsViewModel(
         viewModelScope.launch {
             when (resolution) {
                 ConflictResolution.SWAP -> {
-                    repository.swapBindings(coreId, playerIndex, target, conflicting.conflictingControlId)
+                    repository.swapBindings(coreId, playerIndex, target, conflicting.conflictingAddress)
                     showMessage("${conflicting.targetControlLabel} swapped with ${conflicting.conflictingControlLabel}")
                 }
                 ConflictResolution.REPLACE -> {
@@ -373,34 +383,37 @@ class ControllerSettingsViewModel(
     }
 
     private fun applyCapturedBinding(binding: PhysicalBinding) {
-        val target = pendingControlId ?: return
+        val target = pendingAddress ?: return
         val playerIndex = _uiState.value.selectedPlayerIndex
         val bindings = latestConfig?.players?.get(playerIndex)?.bindings ?: emptyMap()
 
         when (val decision = decideApply(target, binding, bindings)) {
             BindingApplyDecision.Direct -> {
-                pendingControlId = null
+                pendingAddress = null
                 _uiState.update { it.copy(capture = null) }
                 viewModelScope.launch {
-                    repository.setBinding(coreId, playerIndex, target, binding)
-                    val controlLabel = profile.controls.firstOrNull { it.id == target }?.label ?: target.id
+                    repository.setBinding(coreId, playerIndex, target.controlId, binding, target.slot)
+                    val controlLabel = profile.controls.firstOrNull { it.id == target.controlId }?.label
+                        ?: target.controlId.id
                     showMessage("$controlLabel mapped to ${labelFormatter(binding)}")
                 }
             }
             is BindingApplyDecision.Conflict -> {
                 pendingConflictBinding = binding
-                val targetLabel = profile.controls.firstOrNull { it.id == target }?.label ?: target.id
+                val targetLabel = profile.controls.firstOrNull { it.id == target.controlId }?.label
+                    ?: target.controlId.id
                 val conflictingLabel =
-                    profile.controls.firstOrNull { it.id == decision.conflictingControlId }?.label
-                        ?: decision.conflictingControlId.id
+                    profile.controls.firstOrNull { it.id == decision.conflictingAddress.controlId }?.label
+                        ?: decision.conflictingAddress.controlId.id
                 _uiState.update {
                     it.copy(
                         capture = null,
                         conflict = ConflictDialogInfo(
-                            targetControlId = target,
-                            conflictingControlId = decision.conflictingControlId,
-                            targetControlLabel = targetLabel,
-                            conflictingControlLabel = conflictingLabel,
+                            targetAddress = target,
+                            conflictingAddress = decision.conflictingAddress,
+                            targetControlLabel = "$targetLabel (${target.slot.displayName})",
+                            conflictingControlLabel =
+                                "$conflictingLabel (${decision.conflictingAddress.slot.displayName})",
                         ),
                     )
                 }
@@ -420,7 +433,8 @@ class ControllerSettingsViewModel(
             ControllerBindingRow(
                 controlId = desc.id,
                 label = desc.label,
-                bindingLabel = bindings[desc.id]?.let(labelFormatter) ?: "Unmapped",
+                primaryBindingLabel = bindings[desc.id]?.primary?.let(labelFormatter) ?: "Unmapped",
+                secondaryBindingLabel = bindings[desc.id]?.secondary?.let(labelFormatter) ?: "Unmapped",
                 inputKind = desc.inputKind,
                 highlightRegion = desc.highlightRegion,
             )

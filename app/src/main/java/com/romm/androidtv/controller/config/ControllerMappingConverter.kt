@@ -31,13 +31,21 @@ fun CoreControllerConfig.toRouterMappings(profile: CoreControllerProfile): Map<I
             val axes = mutableMapOf<Int, LogicalControl>()
             val axisDirections = mutableMapOf<AxisDirection, LogicalControl>()
 
-            for ((controlId, binding) in playerConfig.bindings) {
+            for ((controlId, controlBindings) in playerConfig.bindings) {
                 val target = descriptorByControlId[controlId]?.target ?: continue
-                when (binding) {
-                    is PhysicalBinding.Key -> buttons[binding.keyCode] = target
-                    is PhysicalBinding.Axis -> axes[binding.axis] = target
-                    is PhysicalBinding.AxisDirection ->
-                        axisDirections[AxisDirection(binding.axis, binding.polarity)] = target
+                for ((_, binding) in controlBindings.entries()) {
+                    when (binding) {
+                        is PhysicalBinding.Key -> buttons[binding.keyCode] = target
+                        is PhysicalBinding.Axis -> {
+                            if (target.type == LogicalControl.Type.BUTTON) {
+                                axisDirections[AxisDirection(binding.axis, 1)] = target
+                            } else {
+                                axes[binding.axis] = target
+                            }
+                        }
+                        is PhysicalBinding.AxisDirection ->
+                            axisDirections[AxisDirection(binding.axis, binding.polarity)] = target
+                    }
                 }
             }
 

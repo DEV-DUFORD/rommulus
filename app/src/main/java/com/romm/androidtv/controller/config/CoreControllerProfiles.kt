@@ -298,7 +298,15 @@ object CoreControllerProfiles {
         artwork: ControllerArtwork,
         controls: List<CoreControlDescriptor>,
     ): CoreControllerProfile {
-        val bindings = controls.associate { it.id to defaultBinding(it.target) }
+        val hasAnalogControls = controls.any { it.inputKind == InputKind.ANALOG_STICK }
+        val bindings = controls.associate { descriptor ->
+            descriptor.id to ControlBindings(
+                primary = defaultBinding(descriptor.target),
+                secondary = defaultTriggerAxisAlias(descriptor)
+                    ?: defaultRightStickAxisAlias(descriptor.target)
+                    ?: if (!hasAnalogControls) defaultDigitalDpadAlias(descriptor.id) else null,
+            )
+        }
         val defaults = (0 until playerCount).associateWith { PlayerControllerConfig(bindings) }
         return CoreControllerProfile(
             coreId = coreId,
@@ -356,6 +364,29 @@ object CoreControllerProfiles {
             }
             PhysicalBinding.Axis(axis)
         }
+    }
+
+    private fun defaultDigitalDpadAlias(controlId: CoreControlId): PhysicalBinding? = when (controlId) {
+        CoreControlId.D_PAD_UP -> PhysicalBinding.AxisDirection(MotionEvent.AXIS_Y, -1)
+        CoreControlId.D_PAD_DOWN -> PhysicalBinding.AxisDirection(MotionEvent.AXIS_Y, 1)
+        CoreControlId.D_PAD_LEFT -> PhysicalBinding.AxisDirection(MotionEvent.AXIS_X, -1)
+        CoreControlId.D_PAD_RIGHT -> PhysicalBinding.AxisDirection(MotionEvent.AXIS_X, 1)
+        else -> null
+    }
+
+    private fun defaultTriggerAxisAlias(descriptor: CoreControlDescriptor): PhysicalBinding? {
+        if (descriptor.inputKind != InputKind.TRIGGER) return null
+        return when (descriptor.target) {
+            LogicalControl.BUTTON_LT -> PhysicalBinding.Axis(MotionEvent.AXIS_LTRIGGER)
+            LogicalControl.BUTTON_RT -> PhysicalBinding.Axis(MotionEvent.AXIS_RTRIGGER)
+            else -> null
+        }
+    }
+
+    private fun defaultRightStickAxisAlias(target: LogicalControl): PhysicalBinding? = when (target) {
+        LogicalControl.AXIS_RX -> PhysicalBinding.Axis(MotionEvent.AXIS_Z)
+        LogicalControl.AXIS_RY -> PhysicalBinding.Axis(MotionEvent.AXIS_RZ)
+        else -> null
     }
 
     private fun controllerconsArt(resourceName: String) = ControllerArtwork(

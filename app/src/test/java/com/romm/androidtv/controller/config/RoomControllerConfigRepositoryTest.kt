@@ -53,13 +53,57 @@ class RoomControllerConfigRepositoryTest {
     }
 
     @Test
+    fun `secondary override preserves primary binding`() = runTest {
+        val secondary = PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_X, 1)
+
+        repository.setBinding(
+            "snes9x",
+            player0,
+            CoreControlId.BUTTON_A,
+            secondary,
+            BindingSlot.SECONDARY,
+        )
+        val player = repository.loadCore("snes9x").players.getValue(player0)
+
+        assertThat(player.get(CoreControlId.BUTTON_A, BindingSlot.PRIMARY))
+            .isEqualTo(snesProfile.defaults.getValue(player0).get(CoreControlId.BUTTON_A))
+        assertThat(player.get(CoreControlId.BUTTON_A, BindingSlot.SECONDARY)).isEqualTo(secondary)
+    }
+
+    @Test
+    fun `swapBindings exchanges individual slots`() = runTest {
+        val secondary = PhysicalBinding.Key(14)
+        repository.setBinding(
+            "snes9x",
+            player0,
+            CoreControlId.BUTTON_A,
+            secondary,
+            BindingSlot.SECONDARY,
+        )
+        val aSecondary = BindingAddress(CoreControlId.BUTTON_A, BindingSlot.SECONDARY)
+        val bPrimary = BindingAddress(CoreControlId.BUTTON_B, BindingSlot.PRIMARY)
+        val oldBPrimary = snesProfile.defaults.getValue(player0).get(CoreControlId.BUTTON_B)
+
+        repository.swapBindings("snes9x", player0, aSecondary, bPrimary)
+        val player = repository.loadCore("snes9x").players.getValue(player0)
+
+        assertThat(player.get(CoreControlId.BUTTON_A, BindingSlot.SECONDARY)).isEqualTo(oldBPrimary)
+        assertThat(player.get(CoreControlId.BUTTON_B, BindingSlot.PRIMARY)).isEqualTo(secondary)
+    }
+
+    @Test
     fun `swapBindings swaps two controls bindings`() = runTest {
         val a = PhysicalBinding.Key(14)
         val b = PhysicalBinding.Key(23)
         repository.setBinding("snes9x", player0, CoreControlId.BUTTON_A, a)
         repository.setBinding("snes9x", player0, CoreControlId.BUTTON_B, b)
 
-        repository.swapBindings("snes9x", player0, CoreControlId.BUTTON_A, CoreControlId.BUTTON_B)
+        repository.swapBindings(
+            "snes9x",
+            player0,
+            BindingAddress(CoreControlId.BUTTON_A, BindingSlot.PRIMARY),
+            BindingAddress(CoreControlId.BUTTON_B, BindingSlot.PRIMARY),
+        )
         val config = repository.loadCore("snes9x")
 
         assertThat(config.players[player0]!![CoreControlId.BUTTON_A]).isEqualTo(b)
@@ -71,12 +115,17 @@ class RoomControllerConfigRepositoryTest {
         val a = PhysicalBinding.Key(14)
         repository.setBinding("snes9x", player0, CoreControlId.BUTTON_A, a)
 
-        repository.swapBindings("snes9x", player0, CoreControlId.BUTTON_A, CoreControlId.BUTTON_B)
+        repository.swapBindings(
+            "snes9x",
+            player0,
+            BindingAddress(CoreControlId.BUTTON_A, BindingSlot.PRIMARY),
+            BindingAddress(CoreControlId.BUTTON_B, BindingSlot.PRIMARY),
+        )
         val config = repository.loadCore("snes9x")
 
-        // Binding moved from A to B; A is back to default.
+        // The effective values are exchanged, including catalog defaults.
         assertThat(config.players[player0]!![CoreControlId.BUTTON_A])
-            .isEqualTo(snesProfile.defaults[player0]!![CoreControlId.BUTTON_A])
+            .isEqualTo(snesProfile.defaults[player0]!![CoreControlId.BUTTON_B])
         assertThat(config.players[player0]!![CoreControlId.BUTTON_B]).isEqualTo(a)
     }
 
@@ -87,13 +136,17 @@ class RoomControllerConfigRepositoryTest {
         repository.setBinding("snes9x", player0, CoreControlId.BUTTON_A, conflicting)
         repository.setBinding("snes9x", player0, CoreControlId.BUTTON_B, conflicting)
 
-        repository.replaceBinding("snes9x", player0, CoreControlId.BUTTON_A, conflicting)
+        repository.replaceBinding(
+            "snes9x",
+            player0,
+            BindingAddress(CoreControlId.BUTTON_A, BindingSlot.PRIMARY),
+            conflicting,
+        )
         val config = repository.loadCore("snes9x")
 
-        // A keeps the binding; B is cleared back to default (no duplicate physical input).
+        // A keeps the binding; B is explicitly unmapped so its conflicting default cannot return.
         assertThat(config.players[player0]!![CoreControlId.BUTTON_A]).isEqualTo(conflicting)
-        assertThat(config.players[player0]!![CoreControlId.BUTTON_B])
-            .isEqualTo(snesProfile.defaults[player0]!![CoreControlId.BUTTON_B])
+        assertThat(config.players[player0]!![CoreControlId.BUTTON_B]).isNull()
     }
 
     @Test

@@ -48,6 +48,32 @@ class ControllerBindingCodecTest {
             assertThat(entity.inputCode).isEqualTo(8)
             assertThat(entity.polarity).isEqualTo(-1)
         }
+
+        @Test
+        fun `secondary binding preserves its slot`() {
+            val entity = ControllerBindingCodec.encode(
+                coreId,
+                playerIndex,
+                controlId,
+                PhysicalBinding.Key(23),
+                BindingSlot.SECONDARY,
+            )
+
+            assertThat(entity.bindingSlot).isEqualTo(BindingSlot.SECONDARY.index)
+        }
+
+        @Test
+        fun `explicit unmapped override decodes distinctly from an unknown type`() {
+            val entity = ControllerBindingCodec.encodeUnmapped(
+                coreId,
+                playerIndex,
+                BindingAddress(controlId, BindingSlot.SECONDARY),
+            )
+
+            assertThat(ControllerBindingCodec.decodeOverride(entity))
+                .isEqualTo(ControllerBindingCodec.DecodedOverride.Unmapped)
+            assertThat(ControllerBindingCodec.decode(entity)).isNull()
+        }
     }
 
     @Nested

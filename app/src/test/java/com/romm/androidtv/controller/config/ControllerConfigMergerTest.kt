@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Test
 @DisplayName("ControllerConfigMerger — merge-over-defaults semantics")
 class ControllerConfigMergerTest {
 
+    private fun primary(binding: PhysicalBinding): Map<BindingSlot, PhysicalBinding?> =
+        mapOf(BindingSlot.PRIMARY to binding)
+
     private val snesProfile = CoreControllerProfiles.byCoreId("snes9x")
         ?: throw IllegalStateException("snes9x profile not found in catalog")
 
@@ -31,7 +34,7 @@ class ControllerConfigMergerTest {
     fun `an override replaces a default binding`() {
         val overrides = mapOf(
             0 to mapOf(
-                CoreControlId.BUTTON_A to PhysicalBinding.Key(14),
+                CoreControlId.BUTTON_A to primary(PhysicalBinding.Key(14)),
             ),
         )
 
@@ -56,8 +59,8 @@ class ControllerConfigMergerTest {
         // simulates an obsolete control persisted from a different profile or app version.
         val overrides = mapOf(
             0 to mapOf(
-                CoreControlId.N64_C_UP to PhysicalBinding.Key(18),
-                CoreControlId.BUTTON_A to PhysicalBinding.Key(23),
+                CoreControlId.N64_C_UP to primary(PhysicalBinding.Key(18)),
+                CoreControlId.BUTTON_A to primary(PhysicalBinding.Key(23)),
             ),
         )
 
@@ -81,7 +84,7 @@ class ControllerConfigMergerTest {
     fun `per-player isolation, player 1 override does not affect player 2`() {
         val overrides = mapOf(
             1 to mapOf(
-                CoreControlId.BUTTON_B to PhysicalBinding.Key(15),
+                CoreControlId.BUTTON_B to primary(PhysicalBinding.Key(15)),
             ),
         )
 
@@ -108,9 +111,9 @@ class ControllerConfigMergerTest {
     @Test
     fun `merged config covers all controls for every player`() {
         val overrides = mapOf(
-            0 to mapOf(CoreControlId.START to PhysicalBinding.Key(20)),
-            2 to mapOf(CoreControlId.D_PAD_UP to PhysicalBinding.Key(19)),
-            3 to mapOf(CoreControlId.N64_C_DOWN to PhysicalBinding.Key(23)),
+            0 to mapOf(CoreControlId.START to primary(PhysicalBinding.Key(140))),
+            2 to mapOf(CoreControlId.D_PAD_UP to primary(PhysicalBinding.Key(141))),
+            3 to mapOf(CoreControlId.N64_C_DOWN to primary(PhysicalBinding.Key(142))),
         )
 
         val config = ControllerConfigMerger.merge(n64Profile, overrides)
@@ -145,9 +148,9 @@ class ControllerConfigMergerTest {
     fun `multiple overrides on same player all applied`() {
         val overrides = mapOf(
             0 to mapOf(
-                CoreControlId.BUTTON_A to PhysicalBinding.Key(14),
-                CoreControlId.BUTTON_B to PhysicalBinding.Key(23),
-                CoreControlId.START to PhysicalBinding.Key(30),
+                CoreControlId.BUTTON_A to primary(PhysicalBinding.Key(14)),
+                CoreControlId.BUTTON_B to primary(PhysicalBinding.Key(23)),
+                CoreControlId.START to primary(PhysicalBinding.Key(30)),
             ),
         )
 
@@ -167,7 +170,7 @@ class ControllerConfigMergerTest {
     fun `override with axis binding replaces key default`() {
         val overrides = mapOf(
             0 to mapOf(
-                CoreControlId.BUTTON_A to PhysicalBinding.Axis(0),
+                CoreControlId.BUTTON_A to primary(PhysicalBinding.Axis(0)),
             ),
         )
 
@@ -181,7 +184,7 @@ class ControllerConfigMergerTest {
     fun `override with axis direction binding replaces key default`() {
         val overrides = mapOf(
             0 to mapOf(
-                CoreControlId.BUTTON_A to PhysicalBinding.AxisDirection(0, 1),
+                CoreControlId.BUTTON_A to primary(PhysicalBinding.AxisDirection(0, 1)),
             ),
         )
 
@@ -192,11 +195,28 @@ class ControllerConfigMergerTest {
     }
 
     @Test
+    fun `existing override wins over a newly added secondary default`() {
+        val stickUp = PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_Y, -1)
+        val overrides = mapOf(
+            0 to mapOf(
+                CoreControlId.BUTTON_A to mapOf(BindingSlot.PRIMARY to stickUp),
+            ),
+        )
+
+        val player = ControllerConfigMerger.merge(snesProfile, overrides).players.getValue(0)
+
+        assertThat(player.get(CoreControlId.BUTTON_A, BindingSlot.PRIMARY)).isEqualTo(stickUp)
+        assertThat(player.get(CoreControlId.D_PAD_UP, BindingSlot.SECONDARY)).isNull()
+        assertThat(player.get(CoreControlId.D_PAD_UP, BindingSlot.PRIMARY))
+            .isEqualTo(snesProfile.defaults.getValue(0).get(CoreControlId.D_PAD_UP))
+    }
+
+    @Test
     fun `overrides for player index beyond profile playerCount are ignored`() {
         // SNES has 2 players (0, 1); an override for player 5 should not crash.
         val overrides = mapOf(
             5 to mapOf(
-                CoreControlId.BUTTON_A to PhysicalBinding.Key(14),
+                CoreControlId.BUTTON_A to primary(PhysicalBinding.Key(14)),
             ),
         )
 

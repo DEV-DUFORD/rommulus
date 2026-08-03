@@ -40,6 +40,7 @@ class RomGridViewModel(
     private val query: RomQuery,
     private val hideUnsupportedSystems: () -> Boolean = { false },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
+    refreshEvents: Flow<Unit>? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RomGridUiState())
@@ -62,6 +63,11 @@ class RomGridViewModel(
         hideUnsupportedSystemsFlow?.let { flow ->
             viewModelScope.launch {
                 flow.drop(1).collect { refresh() }
+            }
+        }
+        refreshEvents?.let { events ->
+            viewModelScope.launch {
+                events.collect { refresh() }
             }
         }
     }
@@ -134,10 +140,17 @@ class RomGridViewModel(
         private val query: RomQuery,
         private val hideUnsupportedSystems: () -> Boolean = { false },
         private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
+        private val refreshEvents: Flow<Unit>? = null,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return RomGridViewModel(repository, query, hideUnsupportedSystems, hideUnsupportedSystemsFlow) as T
+            return RomGridViewModel(
+                repository,
+                query,
+                hideUnsupportedSystems,
+                hideUnsupportedSystemsFlow,
+                refreshEvents,
+            ) as T
         }
     }
 }

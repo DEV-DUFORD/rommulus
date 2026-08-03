@@ -43,6 +43,7 @@ class HomeViewModel(
     private val repository: LibraryRepository,
     private val hideUnsupportedSystems: () -> Boolean = { false },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
+    refreshEvents: Flow<Unit>? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -63,6 +64,11 @@ class HomeViewModel(
         hideUnsupportedSystemsFlow?.let { flow ->
             viewModelScope.launch {
                 flow.drop(1).collect { refresh() }
+            }
+        }
+        refreshEvents?.let { events ->
+            viewModelScope.launch {
+                events.collect { refresh() }
             }
         }
     }
@@ -242,10 +248,11 @@ class HomeViewModel(
         private val repository: LibraryRepository,
         private val hideUnsupportedSystems: () -> Boolean = { false },
         private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
+        private val refreshEvents: Flow<Unit>? = null,
     ) : androidx.lifecycle.ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return HomeViewModel(repository, hideUnsupportedSystems, hideUnsupportedSystemsFlow) as T
+            return HomeViewModel(repository, hideUnsupportedSystems, hideUnsupportedSystemsFlow, refreshEvents) as T
         }
     }
 }

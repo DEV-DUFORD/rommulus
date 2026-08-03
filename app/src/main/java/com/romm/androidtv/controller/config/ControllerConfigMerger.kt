@@ -27,7 +27,7 @@ object ControllerConfigMerger {
      */
     fun merge(
         profile: CoreControllerProfile,
-        overrides: Map<Int, Map<CoreControlId, PhysicalBinding>>,
+        overrides: Map<Int, Map<CoreControlId, Map<BindingSlot, PhysicalBinding?>>>,
     ): CoreControllerConfig {
         val knownIds = profile.controls.mapNotNull { it.id }.toSet()
 
@@ -36,11 +36,38 @@ object ControllerConfigMerger {
             val playerOverrides = overrides[playerIndex] ?: emptyMap()
 
             val mergedBindings = baseDefaults.bindings.toMutableMap()
-            for ((controlId, binding) in playerOverrides) {
+            for ((controlId, slotOverrides) in playerOverrides) {
                 if (controlId in knownIds) {
-                    mergedBindings[controlId] = binding
+                    var resolved = mergedBindings[controlId] ?: ControlBindings()
+                    for ((slot, binding) in slotOverrides) {
+                        resolved = resolved.with(slot, binding)
+                    }
+                    mergedBindings[controlId] = resolved
                 }
                 // Unknown controlId: silently ignored (retained in storage, not in active profile)
+            }
+
+            // Explicit user overrides take precedence over newly introduced catalog defaults.
+            // This prevents an older custom stick-direction mapping from being silently stolen
+            // when a later app version adds the same physical input as a secondary default.
+            val explicitBindings = playerOverrides.flatMap { (controlId, slotOverrides) ->
+                slotOverrides.mapNotNull { (slot, binding) ->
+                    binding?.let { BindingAddress(controlId, slot) to it }
+                }
+            }
+            for ((controlId, bindings) in mergedBindings.toMap()) {
+                var resolved = bindings
+                for ((slot, binding) in bindings.entries()) {
+                    val address = BindingAddress(controlId, slot)
+                    val isExplicit = playerOverrides[controlId]?.containsKey(slot) == true
+                    val conflictsWithExplicit = explicitBindings.any { (explicitAddress, explicitBinding) ->
+                        explicitAddress != address && explicitBinding == binding
+                    }
+                    if (!isExplicit && conflictsWithExplicit) {
+                        resolved = resolved.with(slot, null)
+                    }
+                }
+                mergedBindings[controlId] = resolved
             }
 
             PlayerControllerConfig(mergedBindings)

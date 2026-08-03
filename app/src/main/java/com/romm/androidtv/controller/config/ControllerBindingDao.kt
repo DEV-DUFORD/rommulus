@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.Flow
  * Room DAO for [ControllerBindingEntity] (CONTROLLER_SETTINGS.md Architecture section 2).
  *
  * All reads are scoped by [coreId], optionally narrowing to a single [playerIndex] — there is
- * deliberately no "list everything" query. The primary key triple
- * ([coreId], [playerIndex], [controlId]) means [upsert]/[upsertAll] overwrite the full row for
+ * deliberately no "list everything" query. The primary key tuple
+ * ([coreId], [playerIndex], [controlId], [bindingSlot]) means [upsert]/[upsertAll] overwrite the full row for
  * an existing tuple, which is the desired override-replace semantics.
  */
 @Dao
@@ -37,12 +37,13 @@ interface ControllerBindingDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(entities: List<ControllerBindingEntity>)
 
-    /** Delete the single binding identified by the primary key triple. */
+    /** Delete one binding slot for a control. */
     @Query(
         "DELETE FROM controller_bindings " +
-            "WHERE coreId = :coreId AND playerIndex = :playerIndex AND controlId = :controlId",
+            "WHERE coreId = :coreId AND playerIndex = :playerIndex AND controlId = :controlId " +
+            "AND bindingSlot = :bindingSlot",
     )
-    suspend fun delete(coreId: String, playerIndex: Int, controlId: String)
+    suspend fun delete(coreId: String, playerIndex: Int, controlId: String, bindingSlot: Int)
 
     /** Delete every override for one player port of [coreId] (reset-player). */
     @Query("DELETE FROM controller_bindings WHERE coreId = :coreId AND playerIndex = :playerIndex")

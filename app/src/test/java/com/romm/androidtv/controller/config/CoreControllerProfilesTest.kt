@@ -68,6 +68,81 @@ class CoreControllerProfilesTest {
                         .`as`("default binding control %s for %s", controlId, profile.coreId)
                         .isIn(controlIds)
                 }
+
+                @Test
+                fun `digital-only profiles default left stick directions as secondary D-pad bindings`() {
+                    val digitalProfiles = profiles.filter { profile ->
+                        profile.controls.none { it.inputKind == InputKind.ANALOG_STICK }
+                    }
+
+                    for (profile in digitalProfiles) {
+                        for (player in profile.defaults.values) {
+                            assertThat(player.get(CoreControlId.D_PAD_UP, BindingSlot.SECONDARY))
+                                .isEqualTo(
+                                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_Y, -1),
+                                )
+                            assertThat(player.get(CoreControlId.D_PAD_DOWN, BindingSlot.SECONDARY))
+                                .isEqualTo(
+                                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_Y, 1),
+                                )
+                            assertThat(player.get(CoreControlId.D_PAD_LEFT, BindingSlot.SECONDARY))
+                                .isEqualTo(
+                                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_X, -1),
+                                )
+                            assertThat(player.get(CoreControlId.D_PAD_RIGHT, BindingSlot.SECONDARY))
+                                .isEqualTo(
+                                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_X, 1),
+                                )
+                        }
+                    }
+                }
+
+                @Test
+                fun `analog profiles do not alias left stick to D-pad`() {
+                    val analogProfiles = profiles.filter { profile ->
+                        profile.controls.any { it.inputKind == InputKind.ANALOG_STICK }
+                    }
+
+                    @Test
+                    fun `trigger controls default digital buttons and analog trigger axes`() {
+                        val playStation = CoreControllerProfiles.byCoreId("pcsx_rearmed")!!
+                        val player = playStation.defaults.getValue(0)
+
+                        assertThat(player.get(CoreControlId.L2, BindingSlot.PRIMARY))
+                            .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_L2))
+                        assertThat(player.get(CoreControlId.L2, BindingSlot.SECONDARY))
+                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_LTRIGGER))
+                        assertThat(player.get(CoreControlId.R2, BindingSlot.PRIMARY))
+                            .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_R2))
+                        assertThat(player.get(CoreControlId.R2, BindingSlot.SECONDARY))
+                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RTRIGGER))
+                    }
+
+                    @Test
+                    fun `PlayStation right stick defaults support RX-RY and Xbox Z-RZ layouts`() {
+                        val player = CoreControllerProfiles.byCoreId("pcsx_rearmed")!!.defaults.getValue(0)
+
+                        assertThat(player.get(CoreControlId.RIGHT_STICK_X, BindingSlot.PRIMARY))
+                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RX))
+                        assertThat(player.get(CoreControlId.RIGHT_STICK_X, BindingSlot.SECONDARY))
+                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_Z))
+                        assertThat(player.get(CoreControlId.RIGHT_STICK_Y, BindingSlot.PRIMARY))
+                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RY))
+                        assertThat(player.get(CoreControlId.RIGHT_STICK_Y, BindingSlot.SECONDARY))
+                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RZ))
+                    }
+
+                    assertThat(analogProfiles.map { it.coreId })
+                        .containsExactlyInAnyOrder("pcsx_rearmed", "mupen64plus_next")
+                    for (profile in analogProfiles) {
+                        for (player in profile.defaults.values) {
+                            assertThat(player.get(CoreControlId.D_PAD_UP, BindingSlot.SECONDARY)).isNull()
+                            assertThat(player.get(CoreControlId.D_PAD_DOWN, BindingSlot.SECONDARY)).isNull()
+                            assertThat(player.get(CoreControlId.D_PAD_LEFT, BindingSlot.SECONDARY)).isNull()
+                            assertThat(player.get(CoreControlId.D_PAD_RIGHT, BindingSlot.SECONDARY)).isNull()
+                        }
+                    }
+                }
             }
         }
     }

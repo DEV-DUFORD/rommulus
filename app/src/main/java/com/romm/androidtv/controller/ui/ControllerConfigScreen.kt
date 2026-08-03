@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.R
+import com.romm.androidtv.controller.config.BindingSlot
 import com.romm.androidtv.controller.config.ControllerHighlightRegion
 import com.romm.androidtv.controller.config.CoreControlId
 import com.romm.androidtv.controller.config.HighlightShape
@@ -76,7 +77,7 @@ fun ControllerConfigScreen(
     onBack: () -> Unit,
     onSelectTab: (playerIndex: Int) -> Unit,
     onRowFocused: (controlId: CoreControlId) -> Unit,
-    onRowSelected: (controlId: CoreControlId) -> Unit,
+    onRowSelected: (controlId: CoreControlId, bindingSlot: BindingSlot) -> Unit,
     onCaptureDialogDismiss: () -> Unit,
     onConflictResolution: (resolution: ConflictResolution) -> Unit,
     onResetPlayer: () -> Unit,
@@ -92,16 +93,32 @@ fun ControllerConfigScreen(
 
     // Focus restoration: one FocusRequester per tab; track the last-focused row per tab.
     val tabFocusRequesters = remember { Array(4) { FocusRequester() } }
-    val rowFocusRequesters = remember { mutableStateOf<Map<Int, FocusRequester>>(emptyMap()) }
+    val rowFocusRequesters =
+        remember { mutableStateOf<Map<Pair<Int, BindingSlot>, FocusRequester>>(emptyMap()) }
     val lastFocusedRowByPlayer = remember { IntArray(4) }
+    val lastFocusedSlotByPlayer = remember {
+        Array(4) { BindingSlot.PRIMARY }
+    }
     val focusedTabIndex = remember { mutableStateOf<Int?>(null) }
     val focusedRowIndex = remember { mutableStateOf<Int?>(null) }
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
+    var initialListPositioned by remember { mutableStateOf(false) }
 
-    // Initial focus goes to the first binding row.
-    LaunchedEffect(currentPlayer, rowFocusRequesters.value.size) {
-        val requester = rowFocusRequesters.value[lastFocusedRowByPlayer[currentPlayer]]
+    // rememberLazyListState can restore the previous controller page's scroll position because
+    // every console uses this shared screen. Reset before requesting row focus so a newly opened
+    // page always starts with its first mapping composed and visible.
+    LaunchedEffect(listState) {
+        listState.scrollToItem(0)
+        initialListPositioned = true
+    }
+
+    // Initial focus goes to the first binding row; tab changes still restore that tab's last row.
+    LaunchedEffect(currentPlayer, rowFocusRequesters.value.size, initialListPositioned) {
+        if (!initialListPositioned) return@LaunchedEffect
+        val requester = rowFocusRequesters.value[
+            lastFocusedRowByPlayer[currentPlayer] to lastFocusedSlotByPlayer[currentPlayer]
+        ]
         if (requester != null) {
             focusManager.clearFocus()
             requester.requestFocus()
@@ -122,7 +139,8 @@ fun ControllerConfigScreen(
                         // Down from the selected tab returns to the last-focused row for that tab.
                         if (focusedTabIndex.value == currentPlayer) {
                             val idx = lastFocusedRowByPlayer[currentPlayer]
-                            rowFocusRequesters.value[idx]?.requestFocus()
+                            val slot = lastFocusedSlotByPlayer[currentPlayer]
+                            rowFocusRequesters.value[idx to slot]?.requestFocus()
                             focusedTabIndex.value = null
                             true
                         } else false
@@ -183,14 +201,15 @@ fun ControllerConfigScreen(
                 rows = state.rows,
                 listState = listState,
                 rowFocusRequesters = rowFocusRequesters,
-                onFocusChanged = { index, isFocused ->
+                onFocusChanged = { index, slot, isFocused ->
                     if (isFocused) {
                         focusedRowIndex.value = index
                         lastFocusedRowByPlayer[currentPlayer] = index
+                        lastFocusedSlotByPlayer[currentPlayer] = slot
                         state.rows.getOrNull(index)?.controlId?.let(onRowFocused)
                     }
                 },
-                onRowSelected = { controlId -> currentOnRowSelected(controlId) },
+                onRowSelected = { controlId, slot -> currentOnRowSelected(controlId, slot) },
                 onResetAllRequest = onResetAllRequest,
                 modifier = Modifier.weight(0.6f),
             )
@@ -224,7 +243,7 @@ fun ControllerConfigScreen(
     // Capture dialog overlay (owned by the parallel worker).
     state.capture?.let { capture ->
         ControllerCaptureDialog(
-            controlLabel = capture.controlLabel,
+            controlLabel = "${capture.controlLabel} (${capture.bindingSlotLabel})",
             playerLabel = capture.playerLabel,
             captureState = capture.captureState,
             connectedDeviceName = capture.connectedDeviceName,
@@ -360,30 +379,49 @@ private fun PlayerTabRow(
 private fun BindingList(
     rows: List<ControllerBindingRow>,
     listState: androidx.compose.foundation.lazy.LazyListState,
-    rowFocusRequesters: androidx.compose.runtime.MutableState<Map<Int, FocusRequester>>,
-    onFocusChanged: (index: Int, isFocused: Boolean) -> Unit,
-    onRowSelected: (CoreControlId) -> Unit,
+    rowFocusRequesters:
+        androidx.compose.runtime.MutableState<Map<Pair<Int, BindingSlot>, FocusRequester>>,
+    onFocusChanged: (index: Int, slot: BindingSlot, isFocused: Boolean) -> Unit,
+    onRowSelected: (CoreControlId, BindingSlot) -> Unit,
     onResetAllRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(rows.size) { index ->
-            val row = rows[index]
-            BindingRow(
-                row = row,
-                onFocusRequesterCreated = { fr ->
-                    rowFocusRequesters.value = rowFocusRequesters.value + (index to fr)
-                },
-                onFocusChanged = { focused -> onFocusChanged(index, focused) },
-                onClick = { onRowSelected(row.controlId) },
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Text(text = "", modifier = Modifier.weight(0.34f))
+            Text(
+                text = BindingSlot.PRIMARY.displayName,
+                style = MaterialTheme.typography.labelMedium,
+                color = RommTvColors.TextSecondary,
+                modifier = Modifier.weight(0.33f).padding(horizontal = 6.dp),
+            )
+            Text(
+                text = BindingSlot.SECONDARY.displayName,
+                style = MaterialTheme.typography.labelMedium,
+                color = RommTvColors.TextSecondary,
+                modifier = Modifier.weight(0.33f).padding(horizontal = 6.dp),
             )
         }
-        item(key = "reset_all") {
-            ResetAllRow(onClick = onResetAllRequest)
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(rows.size) { index ->
+                val row = rows[index]
+                BindingRow(
+                    row = row,
+                    onFocusRequesterCreated = { slot, requester ->
+                        rowFocusRequesters.value =
+                            rowFocusRequesters.value + ((index to slot) to requester)
+                    },
+                    onFocusChanged = { slot, focused -> onFocusChanged(index, slot, focused) },
+                    onMappingSelected = { slot -> onRowSelected(row.controlId, slot) },
+                )
+            }
+            item(key = "reset_all") {
+                ResetAllRow(onClick = onResetAllRequest)
+            }
         }
     }
 }
@@ -391,62 +429,89 @@ private fun BindingList(
 @Composable
 private fun BindingRow(
     row: ControllerBindingRow,
-    onFocusRequesterCreated: (FocusRequester) -> Unit,
-    onFocusChanged: (Boolean) -> Unit,
-    onClick: () -> Unit,
+    onFocusRequesterCreated: (BindingSlot, FocusRequester) -> Unit,
+    onFocusChanged: (BindingSlot, Boolean) -> Unit,
+    onMappingSelected: (BindingSlot) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val focusRequester = remember { FocusRequester() }
+    val primaryFocusRequester = remember { FocusRequester() }
+    val secondaryFocusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(focusRequester) {
-        onFocusRequesterCreated(focusRequester)
+    LaunchedEffect(primaryFocusRequester, secondaryFocusRequester) {
+        onFocusRequesterCreated(BindingSlot.PRIMARY, primaryFocusRequester)
+        onFocusRequesterCreated(BindingSlot.SECONDARY, secondaryFocusRequester)
     }
-
-    val rowContentDescription = stringResource(
-        R.string.controller_config_binding_row_content_description,
-        row.label,
-        row.bindingLabel,
-    )
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (isFocused) RommTvColors.Romm500.copy(alpha = 0.15f)
-                else RommTvColors.NightLo,
-            )
-            .then(
-                if (isFocused) Modifier.border(3.dp, RommTvColors.Romm500, RoundedCornerShape(8.dp))
-                else Modifier,
-            )
-            .focusRequester(focusRequester)
-            .onFocusChanged { onFocusChanged(it.isFocused) }
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            )
-            .padding(horizontal = 18.dp, vertical = 16.dp)
-            .semantics { contentDescription = rowContentDescription },
+            .background(RommTvColors.NightLo)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = row.label,
             style = MaterialTheme.typography.bodyLarge,
-            color = if (isFocused) RommTvColors.Romm300 else RommTvColors.TextPrimary,
+            color = RommTvColors.TextPrimary,
             maxLines = 1,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(0.34f).padding(horizontal = 6.dp),
         )
-        Text(
-            text = row.bindingLabel,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (isFocused) RommTvColors.Romm300 else RommTvColors.TextSecondary,
-            maxLines = 1,
+        BindingCell(
+            controlLabel = row.label,
+            slot = BindingSlot.PRIMARY,
+            bindingLabel = row.primaryBindingLabel,
+            focusRequester = primaryFocusRequester,
+            onFocusChanged = { focused -> onFocusChanged(BindingSlot.PRIMARY, focused) },
+            onClick = { onMappingSelected(BindingSlot.PRIMARY) },
+            modifier = Modifier.weight(0.33f),
+        )
+        BindingCell(
+            controlLabel = row.label,
+            slot = BindingSlot.SECONDARY,
+            bindingLabel = row.secondaryBindingLabel,
+            focusRequester = secondaryFocusRequester,
+            onFocusChanged = { focused -> onFocusChanged(BindingSlot.SECONDARY, focused) },
+            onClick = { onMappingSelected(BindingSlot.SECONDARY) },
+            modifier = Modifier.weight(0.33f),
         )
     }
+}
+
+@Composable
+private fun BindingCell(
+    controlLabel: String,
+    slot: BindingSlot,
+    bindingLabel: String,
+    onFocusChanged: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Text(
+        text = bindingLabel,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (isFocused) RommTvColors.Romm300 else RommTvColors.TextSecondary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .padding(horizontal = 4.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .then(
+                if (isFocused) Modifier.border(3.dp, RommTvColors.Romm500, RoundedCornerShape(6.dp))
+                else Modifier,
+            )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { onFocusChanged(it.isFocused) }
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 10.dp)
+            .semantics {
+                contentDescription = "$controlLabel, ${slot.displayName}, $bindingLabel"
+            },
+    )
 }
 
 @Composable

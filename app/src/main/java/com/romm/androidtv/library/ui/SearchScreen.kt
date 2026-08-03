@@ -55,11 +55,17 @@ fun SearchScreen(
     onGameSelected: (Long) -> Unit = {},
     hideUnsupportedSystems: () -> Boolean = { false },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
+    refreshEvents: Flow<Unit>? = null,
 ) {
     val context = LocalContext.current
     val viewModel: SearchViewModel = viewModel(
-        factory = remember(context) {
-            SearchViewModel.Factory(context, hideUnsupportedSystems, hideUnsupportedSystemsFlow)
+        factory = remember(context, refreshEvents) {
+            SearchViewModel.Factory(
+                context,
+                hideUnsupportedSystems,
+                hideUnsupportedSystemsFlow,
+                refreshEvents,
+            )
         },
     )
 

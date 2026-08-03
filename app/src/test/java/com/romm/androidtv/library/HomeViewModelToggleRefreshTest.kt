@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -120,6 +121,18 @@ class HomeViewModelToggleRefreshTest {
 
         // Should trigger another full refresh: +5 fetches.
         assertThat(repo.fetchCount).isEqualTo(beforeToggle + 5)
+    }
+
+    @Test
+    fun `successful login event triggers full refresh of all sections`() {
+        val repo = CountingMockRepository()
+        val refreshEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+        HomeViewModel(repository = repo, refreshEvents = refreshEvents)
+
+        assertThat(repo.fetchCount).isEqualTo(5)
+        refreshEvents.tryEmit(Unit)
+
+        assertThat(repo.fetchCount).isEqualTo(10)
     }
 
     @Test

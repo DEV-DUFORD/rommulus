@@ -17,7 +17,7 @@ class PlayerControllerConfigTest {
     fun `get returns binding for present key`() {
         val binding = PhysicalBinding.Key(23)
         val config = PlayerControllerConfig(
-            bindings = mapOf(CoreControlId.BUTTON_A to binding)
+            bindings = mapOf(CoreControlId.BUTTON_A to ControlBindings(primary = binding))
         )
         assertThat(config[CoreControlId.BUTTON_A]).isEqualTo(binding)
     }
@@ -25,15 +25,21 @@ class PlayerControllerConfigTest {
     @Test
     fun `get returns null for absent key`() {
         val config = PlayerControllerConfig(
-            bindings = mapOf(CoreControlId.BUTTON_B to PhysicalBinding.Key(24))
+            bindings = mapOf(
+                CoreControlId.BUTTON_B to ControlBindings(primary = PhysicalBinding.Key(24)),
+            )
         )
         assertThat(config[CoreControlId.BUTTON_A]).isNull()
     }
 
     @Test
     fun `data class equality works`() {
-        val a = PlayerControllerConfig(mapOf(CoreControlId.BUTTON_A to PhysicalBinding.Key(23)))
-        val b = PlayerControllerConfig(mapOf(CoreControlId.BUTTON_A to PhysicalBinding.Key(23)))
+        val a = PlayerControllerConfig(
+            mapOf(CoreControlId.BUTTON_A to ControlBindings(primary = PhysicalBinding.Key(23))),
+        )
+        val b = PlayerControllerConfig(
+            mapOf(CoreControlId.BUTTON_A to ControlBindings(primary = PhysicalBinding.Key(23))),
+        )
         assertThat(a).isEqualTo(b)
     }
 

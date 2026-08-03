@@ -18,9 +18,11 @@ class ControllerMappingConverterTest {
         players = mapOf(
             0 to PlayerControllerConfig(
                 bindings = mapOf(
-                    CoreControlId.BUTTON_A to PhysicalBinding.Key(97),
-                    CoreControlId.LEFT_STICK_X to PhysicalBinding.Axis(0),
-                    CoreControlId.D_PAD_LEFT to PhysicalBinding.AxisDirection(1, -1),
+                    CoreControlId.BUTTON_A to ControlBindings(primary = PhysicalBinding.Key(97)),
+                    CoreControlId.LEFT_STICK_X to ControlBindings(primary = PhysicalBinding.Axis(0)),
+                    CoreControlId.D_PAD_LEFT to ControlBindings(
+                        primary = PhysicalBinding.AxisDirection(1, -1),
+                    ),
                 ),
             ),
         ),
@@ -42,7 +44,11 @@ class ControllerMappingConverterTest {
             coreId = "mupen64plus_next",
             players = mapOf(
                 0 to PlayerControllerConfig(
-                    bindings = mapOf(CoreControlId.LEFT_STICK_X to PhysicalBinding.Axis(0)),
+                    bindings = mapOf(
+                        CoreControlId.LEFT_STICK_X to ControlBindings(
+                            primary = PhysicalBinding.Axis(0),
+                        ),
+                    ),
                 ),
             ),
         )
@@ -59,6 +65,74 @@ class ControllerMappingConverterTest {
         // D_PAD_LEFT -> DPAD_LEFT, physical (axis=1, polarity=-1)
         assertThat(mapping.axisDirections)
             .containsEntry(AxisDirection(axis = 1, polarity = -1), LogicalControl.DPAD_LEFT)
+    }
+
+    @Test
+    fun `primary and secondary bindings both map to the same logical control`() {
+        val dualConfig = CoreControllerConfig(
+            coreId = "snes9x",
+            players = mapOf(
+                0 to PlayerControllerConfig(
+                    mapOf(
+                        CoreControlId.D_PAD_UP to ControlBindings(
+                            primary = PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_DPAD_UP),
+                            secondary = PhysicalBinding.AxisDirection(
+                                android.view.MotionEvent.AXIS_Y,
+                                -1,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val mapping = dualConfig.toRouterMappings(profile).getValue(0)
+
+        assertThat(mapping.buttons)
+            .containsEntry(android.view.KeyEvent.KEYCODE_DPAD_UP, LogicalControl.DPAD_UP)
+        assertThat(mapping.axisDirections)
+            .containsEntry(
+                AxisDirection(android.view.MotionEvent.AXIS_Y, -1),
+                LogicalControl.DPAD_UP,
+            )
+    }
+
+    @Test
+    fun `analog trigger bound to digital L2 converts to a positive axis direction`() {
+        val playStationProfile = CoreControllerProfiles.byCoreId("pcsx_rearmed")!!
+        val triggerConfig = CoreControllerConfig(
+            coreId = "pcsx_rearmed",
+            players = mapOf(
+                0 to PlayerControllerConfig(
+                    mapOf(
+                        CoreControlId.L2 to ControlBindings(
+                            primary = PhysicalBinding.Axis(
+                                android.view.MotionEvent.AXIS_LTRIGGER,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val mapping = triggerConfig.toRouterMappings(playStationProfile).getValue(0)
+
+        assertThat(mapping.axisDirections).containsEntry(
+            AxisDirection(android.view.MotionEvent.AXIS_LTRIGGER, 1),
+            LogicalControl.BUTTON_LT,
+        )
+        val pressed = com.romm.androidtv.controller.model.GamepadSnapshot.fromPhysicalInput(
+            emptySet(),
+            mapOf(android.view.MotionEvent.AXIS_LTRIGGER to 0.9f),
+            mapping,
+        )
+        val released = com.romm.androidtv.controller.model.GamepadSnapshot.fromPhysicalInput(
+            emptySet(),
+            mapOf(android.view.MotionEvent.AXIS_LTRIGGER to 0f),
+            mapping,
+        )
+        assertThat(pressed.buttons[LogicalControl.BUTTON_LT.index]).isEqualTo(1f)
+        assertThat(released.buttons[LogicalControl.BUTTON_LT.index]).isZero()
     }
 
     @Test
@@ -80,8 +154,12 @@ class ControllerMappingConverterTest {
         val multiConfig = CoreControllerConfig(
             coreId = "snes9x",
             players = mapOf(
-                0 to PlayerControllerConfig(mapOf(CoreControlId.BUTTON_A to PhysicalBinding.Key(97))),
-                2 to PlayerControllerConfig(mapOf(CoreControlId.BUTTON_B to PhysicalBinding.Key(98))),
+                0 to PlayerControllerConfig(
+                    mapOf(CoreControlId.BUTTON_A to ControlBindings(primary = PhysicalBinding.Key(97))),
+                ),
+                2 to PlayerControllerConfig(
+                    mapOf(CoreControlId.BUTTON_B to ControlBindings(primary = PhysicalBinding.Key(98))),
+                ),
             ),
         )
         val result = multiConfig.toRouterMappings(profile)
@@ -96,7 +174,9 @@ class ControllerMappingConverterTest {
             coreId = "snes9x",
             players = mapOf(
                 0 to PlayerControllerConfig(
-                    bindings = mapOf(CoreControlId.Z to PhysicalBinding.Key(99)),
+                    bindings = mapOf(
+                        CoreControlId.Z to ControlBindings(primary = PhysicalBinding.Key(99)),
+                    ),
                 ),
             ),
         )
