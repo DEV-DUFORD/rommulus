@@ -561,8 +561,33 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         slotIndex: Int,
         transform: (ControllerMapping) -> ControllerMapping
     ) {
-        val slot = _slotsFlow.value[slotIndex]
-        val newMapping = transform(slot.mapping)
+        val newMapping = transform(_slotsFlow.value[slotIndex].mapping)
+        applyMapping(slotIndex, newMapping)
+    }
+
+    /**
+     * Atomically apply mappings to potentially all four slots in a single call.
+     *
+     * This is the single call site for bulk configuration (e.g. loading a core's
+     * saved config). Each affected slot is updated and pushed exactly once — callers
+     * never loop a per-slot setter. Slots not present in [mappingsBySlot] keep their
+     * current mapping. Out-of-range indices are ignored.
+     *
+     * @param mappingsBySlot map of slot index (0..3) -> the full mapping to install.
+     */
+    fun applyMappings(mappingsBySlot: Map<Int, ControllerMapping>) {
+        for ((slotIndex, newMapping) in mappingsBySlot) {
+            if (slotIndex !in 0..3) continue
+            applyMapping(slotIndex, newMapping)
+        }
+    }
+
+    /**
+     * Install [newMapping] on [slotIndex]: re-resolve the device's axis
+     * capabilities, rebuild the live snapshot from current physical input,
+     * and push the updated slot exactly once.
+     */
+    private fun applyMapping(slotIndex: Int, newMapping: ControllerMapping) {
         val deviceId = deviceIdToSlotIndex.entries
             .firstOrNull { it.value == slotIndex }
             ?.key

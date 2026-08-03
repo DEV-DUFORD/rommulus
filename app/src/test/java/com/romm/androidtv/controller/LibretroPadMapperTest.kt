@@ -232,6 +232,78 @@ class LibretroPadMapperTest {
     }
 
     @Nested
+    @DisplayName("effectiveLibretroPortOrder")
+    inner class EffectivePortOrder {
+        @Test
+        fun `only connected slots are returned in player-number order`() {
+            val slots = ControllerSlot.createAllSlots().mapIndexed { i, slot ->
+                slot.assign(
+                    DeviceSignature("controller$i", 1, i, "Controller $i")
+                )
+            }
+
+            val ordered = effectiveLibretroPortOrder(slots)
+
+            assertThat(ordered).hasSize(4)
+            assertThat(ordered.map { it.playerNumber }).containsExactly(1, 2, 3, 4)
+            assertThat(ordered).allSatisfy { assertThat(it.connectionState).isEqualTo(SlotConnectionState.CONNECTED) }
+        }
+
+        @Test
+        fun `connected physical slots come before virtual, which come before disconnected`() {
+            val slots = ControllerSlot.createAllSlots().toMutableList()
+            // Slot 1: virtual (CONNECTED)
+            slots[0] = slots[0].assign(DeviceSignature.VIRTUAL_REMOTE)
+            // Slot 2: physical (CONNECTED)
+            slots[1] = slots[1].assign(DeviceSignature("xbox", 0x045e, 0x0b13, "Xbox"))
+            // Slot 3: disconnected
+            slots[2] = slots[2].assign(DeviceSignature("ps5", 0x054c, 0x0ce6, "PS5")).disconnect()
+            // Slot 4: unassigned (default)
+
+            val ordered = effectiveLibretroPortOrder(slots)
+
+            assertThat(ordered).hasSize(4)
+            assertThat(ordered[0].playerNumber).isEqualTo(2) // connected physical
+            assertThat(ordered[0].connectionState).isEqualTo(SlotConnectionState.CONNECTED)
+            assertThat(ordered[1].playerNumber).isEqualTo(1) // connected virtual
+            assertThat(ordered[1].connectionState).isEqualTo(SlotConnectionState.CONNECTED)
+            assertThat(ordered[2].playerNumber).isEqualTo(3) // disconnected
+            assertThat(ordered[2].connectionState).isEqualTo(SlotConnectionState.DISCONNECTED)
+        }
+
+        @Test
+        fun `more than SLOT_COUNT slots are truncated`() {
+            val slots = ControllerSlot.createAllSlots() +
+                    ControllerSlot(playerNumber = 1).assign(
+                        DeviceSignature("extra", 99, 99, "Extra")
+                    )
+
+            val ordered = effectiveLibretroPortOrder(slots)
+
+            assertThat(ordered).hasSize(4)
+        }
+
+        @Test
+        fun `fewer than SLOT_COUNT slots are padded with empty slots`() {
+            val slots = listOf(
+                ControllerSlot.createAllSlots()[0].assign(
+                    DeviceSignature("xbox", 0x045e, 0x0b13, "Xbox")
+                )
+            )
+
+            val ordered = effectiveLibretroPortOrder(slots)
+
+            assertThat(ordered).hasSize(4)
+            assertThat(ordered[0].playerNumber).isEqualTo(1)
+            assertThat(ordered[0].connectionState).isEqualTo(SlotConnectionState.CONNECTED)
+            assertThat(ordered[1].playerNumber).isEqualTo(2)
+            assertThat(ordered[1].connectionState).isEqualTo(SlotConnectionState.UNASSIGNED)
+            assertThat(ordered[2].playerNumber).isEqualTo(3)
+            assertThat(ordered[3].playerNumber).isEqualTo(4)
+        }
+    }
+
+    @Nested
     @DisplayName("LibretroInputAdapter")
     inner class InputAdapter {
         @Test

@@ -65,6 +65,24 @@ data class GamepadSnapshot(
                 }
             }
 
+            // Apply half-axis (axis+polarity) -> digital button mappings.
+            // An axis is "active" for a bound polarity when it crosses beyond
+            // the deadzone on that side; returning to neutral (inside deadzone)
+            // releases the button. Deadzone is honored via AxisConfig.apply,
+            // which zeroes values within ±deadzone.
+            for ((direction, logical) in mapping.axisDirections) {
+                if (logical.type != LogicalControl.Type.BUTTON) continue
+                val rawValue = axisValues[direction.axis] ?: continue
+                val config = mapping.getAxisConfig(logical)
+                val value = config.apply(rawValue)
+                val onActiveSide = if (direction.polarity > 0) {
+                    value > 0f
+                } else {
+                    value < 0f
+                }
+                if (onActiveSide) buttons[logical.index] = 1.0f
+            }
+
             return GamepadSnapshot(buttons = buttons, axes = axes)
         }
 

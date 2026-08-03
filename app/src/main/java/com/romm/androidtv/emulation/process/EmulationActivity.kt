@@ -55,6 +55,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.romm.androidtv.controller.LibretroInputAdapter
+import com.romm.androidtv.controller.config.ControllerConfigDatabase
+import com.romm.androidtv.controller.config.ControllerConfigRepository
+import com.romm.androidtv.controller.config.CoreControllerProfiles
+import com.romm.androidtv.controller.config.RoomControllerConfigRepository
+import com.romm.androidtv.controller.config.toRouterMappings
 import com.romm.androidtv.controller.model.ControllerSlot
 import com.romm.androidtv.controller.router.ControllerEventRouter
 import com.romm.androidtv.emulation.model.AdoptionResult
@@ -75,6 +80,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
@@ -131,6 +137,13 @@ class EmulationActivity : ComponentActivity() {
     // class only calls the router's existing public API; none of its
     // internal button/axis/slot logic is modified.
     private val controllerRouter: ControllerEventRouter by lazy { ControllerEventRouter() }
+
+    // Reads the persisted per-core controller config overrides (Phase 3). Instantiated in the
+    // shared ControllerConfigDatabase (multi-instance invalidation enabled) so this :emulation
+    // process observes the same rows the main process writes.
+    private val controllerConfigRepository: ControllerConfigRepository by lazy {
+        RoomControllerConfigRepository.create(ControllerConfigDatabase.database(applicationContext))
+    }
 
     // Translates the router's four-slot snapshots into Libretro RetroPad
     // input and pushes them to the native input_state callback.
@@ -452,7 +465,41 @@ class EmulationActivity : ComponentActivity() {
                     controllerRouter.enumerateExistingDevices(inputManager)
                 }
             })
-            inputAdapter.start(lifecycleScope)
+
+            // Phase 3: apply the core's saved controller config before gameplay input flows to
+            // native. loadCore is suspend, so this runs in lifecycleScope; inputAdapter.start is
+            // deferred into the same coroutine so mappings are installed first. On any failure we
+            // log and let the router keep its default mapping — never crash or block startup.
+            val coreIdForMapping = coreId
+            lifecycleScope.launch {
+                try {
+                    val config = controllerConfigRepository.loadCore(coreIdForMapping ?: "")
+                    val profile = CoreControllerProfiles.byCoreId(coreIdForMapping ?: "")
+                    if (profile != null) {
+                        controllerRouter.applyMappings(config.toRouterMappings(profile))
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "onCreate: failed to apply controller mappings, keeping defaults", e)
+                }
+                inputAdapter.start(lifecycleScope)
+            }
+
+            // Phase 3: live updates. observeCore emits the current merged config immediately, then
+            // re-emits on any change, so in-game config edits take effect right away. Empty configs
+            // produce an empty map and are a no-op on the router.
+            lifecycleScope.launch {
+                try {
+                    controllerConfigRepository.observeCore(coreIdForMapping ?: "")
+                        .collect { config ->
+                            val profile = CoreControllerProfiles.byCoreId(coreIdForMapping ?: "")
+                            if (profile != null) {
+                                controllerRouter.applyMappings(config.toRouterMappings(profile))
+                            }
+                        }
+                } catch (e: Exception) {
+                    Log.w(TAG, "onCreate: controller config observation stopped", e)
+                }
+            }
         }
 
         this.savePath = savePath

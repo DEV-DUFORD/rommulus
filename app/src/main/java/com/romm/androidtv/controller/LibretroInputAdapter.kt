@@ -1,7 +1,6 @@
 package com.romm.androidtv.controller
 
 import com.romm.androidtv.controller.model.ControllerSlot
-import com.romm.androidtv.controller.model.DeviceSignature
 import com.romm.androidtv.controller.model.GamepadSnapshot
 import com.romm.androidtv.controller.model.LogicalControl
 import com.romm.androidtv.controller.model.SlotConnectionState
@@ -139,15 +138,7 @@ object LibretroPadMapper {
  * Pure and Android-independent — see `LibretroPadMapperTest`.
  */
 fun mapControllerSlotsToLibretroPorts(slots: List<ControllerSlot>): List<LibretroPadState> {
-    val orderedSlots = slots.sortedWith(
-        compareBy<ControllerSlot> { slot ->
-            when {
-                slot.connectionState != SlotConnectionState.CONNECTED -> 2
-                slot.preferredSignature.isAndroidTvVirtualController() -> 1
-                else -> 0
-            }
-        }.thenBy { it.playerNumber }
-    )
+    val orderedSlots = effectiveLibretroPortOrder(slots)
 
     return List(ControllerSlot.SLOT_COUNT) { port ->
         orderedSlots.getOrNull(port)
@@ -156,10 +147,6 @@ fun mapControllerSlotsToLibretroPorts(slots: List<ControllerSlot>): List<Libretr
             ?: LibretroPadState.NEUTRAL
     }
 }
-
-private fun DeviceSignature?.isAndroidTvVirtualController(): Boolean =
-    this == DeviceSignature.VIRTUAL_REMOTE ||
-        this?.name?.startsWith("virtual-", ignoreCase = true) == true
 
 /**
  * Feeds the existing four-slot [ControllerEventRouter] output to the native

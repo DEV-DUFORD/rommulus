@@ -29,10 +29,28 @@ data class AxisConfig(
 }
 
 /**
+ * A single half-axis direction of a physical motion axis.
+ *
+ * Mirrors [com.romm.androidtv.controller.config.PhysicalBinding.AxisDirection]
+ * at the runtime layer: an [axis] constant (e.g. [android.view.MotionEvent.AXIS_X])
+ * plus a [polarity] of -1 (negative half-axis) or +1 (positive half-axis).
+ * When bound to a digital [LogicalControl], the axis crossing the active side
+ * of this polarity acts like a digital button press.
+ */
+data class AxisDirection(
+    val axis: Int,
+    val polarity: Int
+) {
+    init {
+        require(polarity == -1 || polarity == 1) { "polarity must be -1 or 1, was $polarity" }
+    }
+}
+
+/**
  * Mapping configuration for a single logical player slot.
  *
- * Maps physical Android inputs (keyCode or axis constant) to standard
- * [LogicalControl] outputs. The map is keyed by the physical input
+ * Maps physical Android inputs (keyCode, axis constant, or axis+polarity) to
+ * standard [LogicalControl] outputs. The map is keyed by the physical input
  * and valued by the target logical control.
  */
 data class ControllerMapping(
@@ -43,7 +61,10 @@ data class ControllerMapping(
     val axes: Map<Int, LogicalControl> = DEFAULT_AXES,
 
     /** Per-logical-axis configuration (deadzone, inversion). */
-    val axisConfigs: Map<LogicalControl, AxisConfig> = emptyMap()
+    val axisConfigs: Map<LogicalControl, AxisConfig> = emptyMap(),
+
+    /** Physical axis+polarity -> digital LogicalControl mapping (half-axis to button). */
+    val axisDirections: Map<AxisDirection, LogicalControl> = emptyMap()
 ) {
     /** Retrieve the deadzone/inversion config for a given logical axis. Defaults to standard. */
     fun getAxisConfig(logical: LogicalControl): AxisConfig =
@@ -81,7 +102,8 @@ data class ControllerMapping(
             return ControllerMapping(
                 buttons = newButtons,
                 axes = mapping.axes,
-                axisConfigs = mapping.axisConfigs
+                axisConfigs = mapping.axisConfigs,
+                axisDirections = mapping.axisDirections
             )
         }
     }

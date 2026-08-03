@@ -358,6 +358,157 @@ class ControllerEventRouterTest {
     }
 
     @Nested
+    @DisplayName("Axis-direction (half-axis) digital bindings")
+    inner class AxisDirectionBindingTests {
+
+        private fun snap(axes: Map<Int, Float>, mapping: ControllerMapping): GamepadSnapshot =
+            GamepadSnapshot.fromPhysicalInput(emptySet(), axes, mapping)
+
+        @Test
+        @DisplayName("positive polarity axis beyond deadzone presses target button")
+        fun `positivePolarityPressesButton`() {
+            val mapping = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                )
+            )
+            val snap = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.8f), mapping)
+            assertThat(snap.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
+        }
+
+        @Test
+        @DisplayName("return to neutral (or within deadzone) releases target button")
+        fun `returnToNeutralReleasesButton`() {
+            val mapping = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                )
+            )
+            val neutral = snap(mapOf(android.view.MotionEvent.AXIS_X to 0f), mapping)
+            assertThat(neutral.buttons[LogicalControl.BUTTON_A.index]).isZero()
+
+            val withinDeadzone = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.1f), mapping)
+            assertThat(withinDeadzone.buttons[LogicalControl.BUTTON_A.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("deadzone threshold respected (just past deadzone presses)")
+        fun `deadzoneThresholdRespected`() {
+            val mapping = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                )
+            )
+            val justInside = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.14f), mapping)
+            assertThat(justInside.buttons[LogicalControl.BUTTON_A.index]).isZero()
+
+            val justOutside = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.16f), mapping)
+            assertThat(justOutside.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
+        }
+
+        @Test
+        @DisplayName("negative polarity only presses when axis is on negative side")
+        fun `negativePolarityOnlyOnNegativeSide`() {
+            val mapping = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(android.view.MotionEvent.AXIS_X, -1) to LogicalControl.DPAD_LEFT
+                )
+            )
+            val negative = snap(mapOf(android.view.MotionEvent.AXIS_X to -0.8f), mapping)
+            assertThat(negative.buttons[LogicalControl.DPAD_LEFT.index]).isEqualTo(1f)
+
+            val positive = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.8f), mapping)
+            assertThat(positive.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+
+            val neutral = snap(mapOf(android.view.MotionEvent.AXIS_X to 0f), mapping)
+            assertThat(neutral.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("both half-axes of one stick can drive two different buttons")
+        fun `bothHalfAxesMapToDifferentButtons`() {
+            val mapping = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(android.view.MotionEvent.AXIS_X, -1) to LogicalControl.DPAD_LEFT,
+                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.DPAD_RIGHT
+                )
+            )
+            val right = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.9f), mapping)
+            assertThat(right.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1f)
+            assertThat(right.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("axis-direction binding does not affect existing axis output")
+        fun `axisDirectionBindingPreservesAnalogAxis`() {
+            val mapping = ControllerMapping(
+                axes = mapOf(android.view.MotionEvent.AXIS_X to LogicalControl.AXIS_LX),
+                axisDirections = mapOf(
+                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                )
+            )
+            val snap = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.8f), mapping)
+            assertThat(snap.axes[LogicalControl.AXIS_LX.index]).isEqualTo(0.8f)
+            assertThat(snap.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
+        }
+    }
+
+    @Nested
+    @DisplayName("Bulk applyMappings")
+    inner class ApplyMappingsTests {
+
+        @Test
+        fun `applyMappings replaces multiple slots in one call`() {
+            val router = ControllerEventRouter()
+            router.setActive(true)
+
+            val custom = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                )
+            )
+            router.applyMappings(mapOf(0 to custom, 1 to custom, 3 to custom))
+
+            assertThat(router.slotsFlow.value[0].mapping).isEqualTo(custom)
+            assertThat(router.slotsFlow.value[1].mapping).isEqualTo(custom)
+            assertThat(router.slotsFlow.value[2].mapping).isEqualTo(ControllerMapping())
+            assertThat(router.slotsFlow.value[3].mapping).isEqualTo(custom)
+        }
+
+        @Test
+        fun `applyMappings with equivalent-to-default mappings leaves slots unaffected`() {
+            val router = ControllerEventRouter()
+            router.setActive(true)
+            router.routeTvRemoteKey(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER)
+            val before = router.slotsFlow.value
+
+            router.applyMappings(mapOf(0 to ControllerMapping(), 1 to ControllerMapping()))
+
+            val after = router.slotsFlow.value
+            assertThat(after[0].mapping).isEqualTo(ControllerMapping())
+            assertThat(after[0].currentSnapshot.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
+            assertThat(after[1].mapping).isEqualTo(ControllerMapping())
+            // Unchanged snapshot content — no spurious change beyond the remap.
+            assertThat(after).hasSize(before.size)
+        }
+
+        @Test
+        fun `applyMappings ignores out-of-range slot indices`() {
+            val router = ControllerEventRouter()
+            router.setActive(true)
+
+            val custom = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(android.view.MotionEvent.AXIS_Y, -1) to LogicalControl.DPAD_UP
+                )
+            )
+            router.applyMappings(mapOf(4 to custom, -1 to custom))
+
+            assertThat(router.slotsFlow.value[0].mapping).isEqualTo(ControllerMapping())
+        }
+    }
+
+    @Nested
     @DisplayName("Lifecycle reset")
     inner class LifecycleResetTests {
 
