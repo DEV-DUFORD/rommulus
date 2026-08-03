@@ -3,6 +3,7 @@ package com.romm.androidtv.library.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -27,14 +28,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.tv.foundation.lazy.list.TvLazyRow
-import androidx.tv.foundation.lazy.list.items
+import androidx.tv.foundation.lazy.list.itemsIndexed
 import coil.compose.AsyncImage
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.library.RomDetailViewModel
@@ -68,6 +79,9 @@ sealed interface RequiredBiosState {
  * @param onLogin Called when user taps "Log in" from the auth-expired state. Does NOT auto-submit credentials.
  * @param onChooseSave Called when the user picks the "Choose Save" affordance next to Play,
  *   to open the save-picker screen (browse all server saves for this ROM and adopt one before launch).
+ * @param onOpenScreenshot Called when the user selects a screenshot from the shelf, with the full
+ *   list of screenshot URLs and the tapped index — the caller opens a full-screen viewer
+ *   ([ScreenshotViewerScreen]) seeded at that index.
  */
 @Composable
 fun GameDetailScreen(
@@ -82,6 +96,7 @@ fun GameDetailScreen(
     onChooseSave: (Long) -> Unit = {},
     biosState: RequiredBiosState = RequiredBiosState.Ready,
     onCheckBios: (String) -> Unit = {},
+    onOpenScreenshot: (List<String>, Int) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -116,6 +131,7 @@ fun GameDetailScreen(
                 onChooseSave = onChooseSave,
                 biosState = biosState,
                 onCheckBios = onCheckBios,
+                onOpenScreenshot = onOpenScreenshot,
             )
         }
     }
@@ -133,6 +149,7 @@ private fun GameDetailContent(
     onChooseSave: (Long) -> Unit,
     biosState: RequiredBiosState,
     onCheckBios: (String) -> Unit,
+    onOpenScreenshot: (List<String>, Int) -> Unit,
 ) {
     LaunchedEffect(rom.id, rom.platformSlug) {
         if (rom.platformSlug == "segacd" || rom.platformSlug == "psx") {
@@ -227,21 +244,48 @@ private fun GameDetailContent(
                     contentPadding = PaddingValues(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(rom.screenshotUrls) { url ->
-                        AsyncImage(
-                            model = url,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .width(280.dp)
-                                .aspectRatio(16f / 9f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(RommTvColors.NightLo),
+                    itemsIndexed(rom.screenshotUrls) { index, url ->
+                        ScreenshotThumbnail(
+                            url = url,
+                            onClick = { onOpenScreenshot(rom.screenshotUrls, index) },
                         )
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * A single focusable/clickable screenshot thumbnail in the game detail screen's shelf.
+ * Selecting it (D-pad center / click) opens [ScreenshotViewerScreen] full-screen at this
+ * item's index — previously these were plain, non-interactive `AsyncImage`s with no way
+ * to focus or select them at all.
+ */
+@Composable
+private fun ScreenshotThumbnail(url: String, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    AsyncImage(
+        model = url,
+        contentDescription = "Screenshot",
+        modifier = Modifier
+            .width(280.dp)
+            .aspectRatio(16f / 9f)
+            .clip(RoundedCornerShape(8.dp))
+            .background(RommTvColors.NightLo)
+            .border(
+                width = if (isFocused) 3.dp else 0.dp,
+                color = if (isFocused) RommTvColors.Romm500 else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+    )
 }
 
 @Composable
@@ -448,4 +492,69 @@ private fun formatFileSize(bytes: Long): String {
         unitIndex++
     }
     return if (unitIndex == 0) "${value.toInt()} ${units[unitIndex]}" else "%.1f %s".format(value, units[unitIndex])
+}
+
+/**
+ * Full-screen screenshot viewer, reached by selecting a thumbnail in
+ * [GameDetailScreen]'s screenshot shelf. D-pad left/right steps between
+ * screenshots without leaving the viewer; system Back returns to the game
+ * detail screen (wired by the caller's navigation — this composable has no
+ * back handling of its own, matching every other native screen in the app).
+ */
+@Composable
+fun ScreenshotViewerScreen(
+    screenshotUrls: List<String>,
+    initialIndex: Int,
+    modifier: Modifier = Modifier,
+) {
+    var index by remember(screenshotUrls) {
+        mutableStateOf(initialIndex.coerceIn(0, (screenshotUrls.size - 1).coerceAtLeast(0)))
+    }
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionLeft -> {
+                        if (index > 0) index--
+                        true
+                    }
+                    Key.DirectionRight -> {
+                        if (index < screenshotUrls.lastIndex) index++
+                        true
+                    }
+                    else -> false
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        val url = screenshotUrls.getOrNull(index)
+        if (url != null) {
+            AsyncImage(
+                model = url,
+                contentDescription = "Screenshot ${index + 1} of ${screenshotUrls.size}",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (screenshotUrls.size > 1) {
+            Text(
+                text = "${index + 1} / ${screenshotUrls.size}",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
+    }
 }

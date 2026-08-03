@@ -139,7 +139,7 @@ class MainActivity : ComponentActivity() {
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
         NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
         NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_BIOS_CONFIGURATION,
-        NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG
+        NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG, NATIVE_SCREENSHOT_VIEWER
     }
 
     private var currentScreen by mutableStateOf(Screen.HOME)
@@ -155,6 +155,10 @@ class MainActivity : ComponentActivity() {
     private var selectedCollectionId by mutableStateOf<Long?>(null)
     private var selectedRomId by mutableStateOf<Long?>(null)
     private var gameDetailParent by mutableStateOf(Screen.NATIVE_HOME)
+    // Selection state for the full-screen screenshot viewer, opened from the game detail
+    // screen's screenshot shelf. Always returns to NATIVE_GAME_DETAIL on Back.
+    private var selectedScreenshotUrls by mutableStateOf<List<String>>(emptyList())
+    private var selectedScreenshotIndex by mutableStateOf(0)
     private var requiredBiosState by mutableStateOf<com.romm.androidtv.library.ui.RequiredBiosState>(
         com.romm.androidtv.library.ui.RequiredBiosState.Checking,
     )
@@ -417,6 +421,7 @@ class MainActivity : ComponentActivity() {
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
                     Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
+                    Screen.NATIVE_SCREENSHOT_VIEWER -> currentScreen = Screen.NATIVE_GAME_DETAIL
                     Screen.NATIVE_SAVE_PICKER -> {
                         // Dismiss picker; no filesystem/Room/network mutation occurred yet.
                         savePickerState = null
@@ -621,7 +626,8 @@ class MainActivity : ComponentActivity() {
                         Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL,
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
                         Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_BIOS_CONFIGURATION,
-                        Screen.NATIVE_CONTROLLER_LIST, Screen.NATIVE_CONTROLLER_CONFIG -> {
+                        Screen.NATIVE_CONTROLLER_LIST, Screen.NATIVE_CONTROLLER_CONFIG,
+                        Screen.NATIVE_SCREENSHOT_VIEWER -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(
                                     libraryRepository,
@@ -734,9 +740,20 @@ class MainActivity : ComponentActivity() {
                                                          },
                                                          biosState = requiredBiosState,
                                                          onCheckBios = ::checkRequiredBiosAvailability,
+                                                         onOpenScreenshot = { urls, index ->
+                                                             selectedScreenshotUrls = urls
+                                                             selectedScreenshotIndex = index
+                                                             currentScreen = Screen.NATIVE_SCREENSHOT_VIEWER
+                                                         },
                                                     )
                                             }
                                         }
+                                    }
+                                    Screen.NATIVE_SCREENSHOT_VIEWER -> {
+                                        com.romm.androidtv.library.ui.ScreenshotViewerScreen(
+                                            screenshotUrls = selectedScreenshotUrls,
+                                            initialIndex = selectedScreenshotIndex,
+                                        )
                                     }
                                     Screen.NATIVE_CONFLICT -> {
                                         val state = preLaunchState
