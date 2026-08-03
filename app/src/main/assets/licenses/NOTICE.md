@@ -30,29 +30,31 @@
   mappings with the real per-console resources. Bundle the OFL copyright
   notice from the release alongside the imported assets per OFL condition 2.
 
-## Pineapple Graphics Handheld Silhouettes
+## Handheld Silhouettes ("1 Color Controllers and Handhelds")
 
-- **Author**: Pineapple Graphics
-- **Shop**: https://www.etsy.com/shop/PineappleGraphicsShp
-- **Collection**: "1 Color Controllers and Handhelds"
-- **License**: No formal license published by the author — attribution
-  required. The shop's pages returned HTTP 403 to automated fetching in this
-  environment, so its policies/terms of use for digital downloads could not
-  be verified here. **Before importing these assets, open the shop manually
-  in a browser, review its About/Policies tabs, and obtain explicit written
-  permission from the seller for commercial redistribution** — Etsy's
-  default policy treats digital downloads as personal-use only unless the
-  seller states otherwise, which would be a blocker for shipping in a public
-  app without seller sign-off.
-- **Status**: Placeholder — pending SVG asset import and seller license
-  confirmation. The current placeholder drawable
-  (`controller_outline_generic_handheld.xml`) is an original shape drawn for
-  this app, not Pineapple Graphics artwork.
+- **Author**: Individual artist, contacted directly for permission to use this
+  artwork in this app. Permission has been granted by the artist.
+- **Correction (superseding an earlier note in this file)**: The assets are
+  **not** actually hosted or sold on the Etsy shop
+  https://www.etsy.com/shop/PineappleGraphicsShp — that page was only used as
+  a contact channel to reach the artist and is unrelated to the artwork
+  itself. It should not be cited as the asset source or as an Etsy
+  marketplace-license question; there is no Etsy digital-download licensing
+  concern here.
+- **License**: No formal written license document exists; permission was
+  granted directly by the artist for use of this artwork in this app.
+  Attribution to the artist should still be included once the real assets and
+  their preferred credit line are on hand.
+- **Status**: Placeholder — the real SVG assets are still not imported into
+  this app (no network access to retrieve them in this environment). The
+  current placeholder drawable (`controller_outline_generic_handheld.xml`) is
+  an original shape drawn for this app, not the artist's artwork.
 - **Assets covered**: GBA, Game Boy / Game Boy Color, TurboGrafx-16, Neo Geo
   Pocket, WonderSwan, Atari Lynx, Atari 7800.
-- **Attribution**: The handheld SVGs are authored by Pineapple Graphics (Etsy
-  shop https://www.etsy.com/shop/PineappleGraphicsShp). They are single
-  compound-path, filled silhouettes with viewBox `0 0 360 360` and no
-  per-control subpaths, so they use the same annotation-layer highlighting
-  approach as the Controllercons outlines. Record the source/license of
-  every shipped asset once imported.
+- **Remaining work**: Obtain the actual SVG files from the artist directly
+  (not via Etsy), confirm their preferred attribution wording, convert to
+  Android vector drawables per the annotation-layer approach in
+  CONTROLLER_SETTINGS.md (single compound-path, filled silhouettes, viewBox
+  `0 0 360 360`, no per-control subpaths — same highlighting approach as the
+  Controllercons outlines), and replace `ControllerArtworkResolver`'s generic
+  handheld mapping with the real per-console resources.
