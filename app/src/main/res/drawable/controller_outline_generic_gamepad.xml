@@ -1,0 +1,39 @@
+<!--
+  ORIGINAL generic placeholder artwork for the "Required asset spike".
+  This is NOT Controllercons 2.1 or Pineapple Graphics artwork and is NOT
+  an attempt to recreate either. It is a hand-drawn, generic twin-stick
+  gamepad silhouette (rounded-rect body, D-pad cross, two thumbsticks)
+  used only to exercise the rendering pipeline until the real licensed
+  SVGs are swapped in. Viewport 64x64 matches the controllercons profiles'
+  declared viewBox. Replace this file with the licensed asset when imported.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+  <!-- Body: rounded rectangle -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 8,20 L 56,20 A 6,6 0 0 1 62,26 L 62,38 A 6,6 0 0 1 56,44 L 8,44 A 6,6 0 0 1 2,38 L 2,26 A 6,6 0 0 1 8,20 Z"/>
+  <!-- D-pad cross -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 8,28 L 8,38"/>
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 3,33 L 13,33"/>
+  <!-- Left thumbstick -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 17.5,33 A 4.5,4.5 0 1 0 26.5,33 A 4.5,4.5 0 1 0 17.5,33 Z"/>
+  <!-- Right thumbstick -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="2.5"
+      android:pathData="M 35.5,33 A 4.5,4.5 0 1 0 44.5,33 A 4.5,4.5 0 1 0 35.5,33 Z"/>
+</vector>

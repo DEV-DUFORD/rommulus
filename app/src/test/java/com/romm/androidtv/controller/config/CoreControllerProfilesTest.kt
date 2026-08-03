@@ -97,6 +97,12 @@ class CoreControllerProfilesTest {
         for (profile in profiles) {
             for (control in profile.controls) {
                 val region = control.highlightRegion
+                // No NaN/Infinite coordinates anywhere.
+                assertThat(region.x).`as`("region x for %s/%s", profile.coreId, control.id).isFinite()
+                assertThat(region.y).`as`("region y for %s/%s", profile.coreId, control.id).isFinite()
+                assertThat(region.width).`as`("region width for %s/%s", profile.coreId, control.id).isFinite()
+                assertThat(region.height).`as`("region height for %s/%s", profile.coreId, control.id).isFinite()
+                // All coordinates within normalized 0..1 bounds.
                 assertThat(region.x).`as`("region x for %s/%s", profile.coreId, control.id)
                     .isBetween(0f, 1f)
                 assertThat(region.y).`as`("region y for %s/%s", profile.coreId, control.id)
@@ -105,6 +111,7 @@ class CoreControllerProfilesTest {
                     .isGreaterThan(0f)
                 assertThat(region.height).`as`("region height for %s/%s", profile.coreId, control.id)
                     .isGreaterThan(0f)
+                // Region stays within the artwork viewBox (no off-canvas hotspot).
                 assertThat(region.x + region.width)
                     .`as`("region x+width for %s/%s", profile.coreId, control.id)
                     .isLessThanOrEqualTo(1.0001f)
@@ -112,6 +119,27 @@ class CoreControllerProfilesTest {
                     .`as`("region y+height for %s/%s", profile.coreId, control.id)
                     .isLessThanOrEqualTo(1.0001f)
             }
+        }
+    }
+
+    @Test
+    fun `every profile artwork resourceName resolves to a known drawable`() {
+        // Guards against a wrong/typo'd resourceName shipping unnoticed (spec point 5,
+        // non-visual stand-in for a screenshot/golden review until a golden library is added).
+        // Every declared resourceName must map to one of the generic placeholder drawables
+        // (explicit branch), never silently to the fallback.
+        val gamepadId = ControllerArtworkResolver.resourceIdFor(ControllerArtworkResolver.GENERIC_GAMEPAD)
+        val handheldId = ControllerArtworkResolver.resourceIdFor(ControllerArtworkResolver.GENERIC_HANDHELD)
+        assertThat(gamepadId).isGreaterThan(0)
+        assertThat(handheldId).isGreaterThan(0)
+        assertThat(gamepadId).isNotEqualTo(handheldId)
+        for (profile in profiles) {
+            val resourceName = profile.artwork.resourceName
+            assertThat(resourceName).`as`("artwork resourceName for %s", profile.coreId).isNotBlank()
+            // The resolver must return a valid, non-zero drawable id for every declared name.
+            val resolved = ControllerArtworkResolver.resourceIdFor(resourceName)
+            assertThat(resolved).`as`("resolved drawable id for %s", profile.coreId).isGreaterThan(0)
+            assertThat(resolved).`as`("resolved drawable for %s", profile.coreId).isIn(gamepadId, handheldId)
         }
     }
 

@@ -1,5 +1,6 @@
 package com.romm.androidtv.controller.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,6 +33,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -44,6 +46,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -51,7 +54,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.R
+import com.romm.androidtv.controller.config.ControllerArtworkResolver
 import com.romm.androidtv.controller.config.ControllerHighlightRegion
+import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.controller.config.CoreControlId
 import com.romm.androidtv.controller.config.HighlightShape
 import com.romm.androidtv.library.ui.RommTvColors
@@ -158,10 +163,16 @@ fun ControllerConfigScreen(
         )
 
         Row(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            // Left 40%: artwork placeholder panel.
+            // Left 40%: artwork panel (base vector + focused highlight overlay).
             val focusedRegion = state.rows.firstOrNull { it.controlId == state.focusedControlId }?.highlightRegion
+            val artworkResourceId = CoreControllerProfiles.all
+                .firstOrNull { it.consoleName == state.consoleName }
+                ?.artwork
+                ?.let { ControllerArtworkResolver.resourceIdFor(it) }
+                ?: ControllerArtworkResolver.fallbackResourceId
             ArtworkPlaceholder(
                 consoleName = state.consoleName,
+                artworkResourceId = artworkResourceId,
                 focusedRegion = focusedRegion,
                 modifier = Modifier.weight(0.4f).padding(end = 12.dp),
             )
@@ -449,14 +460,17 @@ private fun ResetAllRow(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 /**
- * Placeholder artwork panel. Draws the console name and, when a control row has
- * focus, a purple [ControllerHighlightRegion] rectangle/circle scaled from the
- * normalized (0..1) region to the panel's Canvas size. Real SVGs plug in later
- * without changing this architecture.
+ * Artwork panel. Renders the base controller/handheld vector drawable (resolved via
+ * [ControllerArtworkResolver] from the profile's [com.romm.androidtv.controller.config.ControllerArtwork])
+ * beneath the focused highlight overlay. The base illustration is dimmed slightly; the
+ * focused [ControllerHighlightRegion] is drawn at full RomM purple accent on top, so a
+ * wrong hotspot is visually obvious. Swapping the real licensed drawables in later
+ * requires zero changes here — only the drawable resource files / resolver mapping change.
  */
 @Composable
 private fun ArtworkPlaceholder(
     consoleName: String,
+    artworkResourceId: Int,
     focusedRegion: ControllerHighlightRegion?,
     modifier: Modifier = Modifier,
 ) {
@@ -466,15 +480,23 @@ private fun ArtworkPlaceholder(
             .clip(RoundedCornerShape(12.dp))
             .background(RommTvColors.NightLo),
     ) {
+        // Base illustration, dimmed to make the active region stand out.
+        Image(
+            painter = painterResource(id = artworkResourceId),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(0.65f),
+        )
         androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
             // Dim the base drawing slightly.
-            drawRect(color = Color.Black.copy(alpha = 0.4f))
+            drawRect(color = Color.Black.copy(alpha = 0.35f))
             focusedRegion?.let { region ->
                 val width = size.width * region.width
                 val height = size.height * region.height
                 val left = size.width * region.x
                 val top = size.height * region.y
-                val highlight = RommTvColors.Romm500.copy(alpha = 0.6f)
+                val highlight = RommTvColors.Romm500.copy(alpha = 0.85f)
                 rotate(region.rotationDegrees, pivot = Offset(left + width / 2f, top + height / 2f)) {
                     when (region.shape) {
                         HighlightShape.CIRCLE -> {

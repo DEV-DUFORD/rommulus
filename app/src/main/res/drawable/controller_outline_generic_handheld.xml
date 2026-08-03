@@ -1,0 +1,25 @@
+<!--
+  ORIGINAL generic placeholder artwork for the "Required asset spike".
+  This is NOT Controllercons 2.1 or Pineapple Graphics artwork and is NOT
+  an attempt to recreate either. It is a hand-drawn, generic vertical
+  handheld silhouette (rounded-rect body with a simple screen window) used
+  only to exercise the rendering pipeline until the real licensed SVGs are
+  swapped in. Viewport 360x360 matches the pineapple-graphics profiles'
+  declared viewBox. Replace this file with the licensed asset when imported.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+  <!-- Body: vertical rounded rectangle -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="12"
+      android:pathData="M 140,40 L 220,40 A 30,30 0 0 1 250,70 L 250,290 A 30,30 0 0 1 220,320 L 140,320 A 30,30 0 0 1 110,290 L 110,70 A 30,30 0 0 1 140,40 Z"/>
+  <!-- Screen window -->
+  <path
+      android:strokeColor="#B0B4C0"
+      android:strokeWidth="8"
+      android:pathData="M 145,80 L 215,80 A 15,15 0 0 1 230,95 L 230,155 A 15,15 0 0 1 215,170 L 145,170 A 15,15 0 0 1 130,155 L 130,95 A 15,15 0 0 1 145,80 Z"/>
+</vector>
