@@ -55,6 +55,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.romm.androidtv.controller.LibretroInputAdapter
+import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
 import com.romm.androidtv.controller.config.ControllerConfigDatabase
 import com.romm.androidtv.controller.config.ControllerConfigRepository
 import com.romm.androidtv.controller.config.CoreControllerProfiles
@@ -137,6 +138,16 @@ class EmulationActivity : ComponentActivity() {
     // class only calls the router's existing public API; none of its
     // internal button/axis/slot logic is modified.
     private val controllerRouter: ControllerEventRouter by lazy { ControllerEventRouter() }
+
+    /**
+     * Phase 4 capture coordinator. Intercepts raw input (before gameplay/UI
+     * routing) only while a capture is active; returns null when [ControllerBindingCaptureState.Idle]
+     * so normal routing is untouched. Wired as an extra InputDeviceListener so
+     * physical disconnects cancel an in-progress capture.
+     */
+    private val captureCoordinator: ControllerBindingCaptureCoordinator by lazy {
+        ControllerBindingCaptureCoordinator(lifecycleScope)
+    }
 
     // Reads the persisted per-core controller config overrides (Phase 3). Instantiated in the
     // shared ControllerConfigDatabase (multi-instance invalidation enabled) so this :emulation
@@ -458,6 +469,9 @@ class EmulationActivity : ComponentActivity() {
 
             val inputManager = getSystemService(INPUT_SERVICE) as InputManager
             inputManager.registerInputDeviceListener(controllerRouter, null)
+            // Phase 4: also listen for disconnects so an in-progress capture
+            // cancels when the assigned controller is physically removed.
+            inputManager.registerInputDeviceListener(captureCoordinator, null)
             controllerRouter.attachLifecycle(this)
             controllerRouter.enumerateExistingDevices(inputManager)
             lifecycle.addObserver(LifecycleEventObserver { _, event ->
@@ -521,6 +535,10 @@ class EmulationActivity : ComponentActivity() {
                         onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
                         onSetNativePaused = { paused -> host.nativeSetPaused(paused) },
                         onOpenPauseMenuCheckpoint = { checkpointForPauseMenu() },
+                        // Phase 4: opening the pause menu must cancel any in-progress capture
+                        // ("Entering controller settings from a paused game must never resume
+                        // gameplay" — capture must not survive the pause menu).
+                        onCaptureCancel = { captureCoordinator.cancel() },
                     )
                 }
             }
@@ -597,6 +615,8 @@ class EmulationActivity : ComponentActivity() {
         // screen-off doesn't lose progress if the process is later killed outright
         // (onDestroy is not guaranteed to run in that case).
         checkpointIfRunning()
+        // Phase 4: capture must not survive activity stop (spec rule 8).
+        captureCoordinator.cancel()
         super.onPause()
     }
 
@@ -699,9 +719,12 @@ class EmulationActivity : ComponentActivity() {
     override fun onDestroy() {
         checkpointIfRunning()
         inputAdapter.stop()
+        // Phase 4: capture must not survive activity destroy (spec rule 8).
+        captureCoordinator.cancel()
         try {
             val inputManager = getSystemService(INPUT_SERVICE) as InputManager
             inputManager.unregisterInputDeviceListener(controllerRouter)
+            inputManager.unregisterInputDeviceListener(captureCoordinator)
         } catch (_: Exception) {
             // Mirrors MainActivity's own defensive onDestroy unregistration —
             // the listener may already be gone if the session never
@@ -743,6 +766,11 @@ class EmulationActivity : ComponentActivity() {
      */
     @Suppress("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Phase 4: capture raw input before all normal routing. Returns non-null
+        // (consume) only while a capture is active; null when Idle lets the
+        // existing gameplay/UI routing below run completely unchanged.
+        captureCoordinator.onKeyEvent(event)?.let { return it }
+
         // The Xbox/game controller must never trigger the back-hint icon or the hold-to-exit
         // gesture — only the TV remote should. IMPORTANT: this Android TV box (Google TV
         // Streamer) routes the physical remote's Back/Home/Select buttons through a
@@ -806,6 +834,9 @@ class EmulationActivity : ComponentActivity() {
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        // Phase 4: capture raw input before all normal routing (see dispatchKeyEvent).
+        captureCoordinator.onMotionEvent(event)?.let { return it }
+
         if ((event.source and InputDevice.SOURCE_JOYSTICK) == 0 &&
             (event.source and InputDevice.SOURCE_GAMEPAD) == 0
         ) {
@@ -848,6 +879,7 @@ private fun EmulationScreen(
     onQuitAnywayAfterSaveFailure: () -> Unit,
     onSetNativePaused: (Boolean) -> Unit,
     onOpenPauseMenuCheckpoint: () -> Unit,
+    onCaptureCancel: () -> Unit,
 ) {
     // Diagnostics are polled silently to drive the core-requested-shutdown auto-stop below; none
     // of it is rendered on screen — gameplay should show only the game itself.
@@ -919,6 +951,7 @@ private fun EmulationScreen(
         onSetNativePaused(pauseMenuOpen)
         if (pauseMenuOpen) {
             onOpenPauseMenuCheckpoint()
+            onCaptureCancel()
         }
     }
 

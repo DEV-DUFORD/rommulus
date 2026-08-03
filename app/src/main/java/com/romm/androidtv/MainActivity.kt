@@ -54,6 +54,7 @@ import com.romm.androidtv.romm.ClientTokenStore
 import com.romm.androidtv.cache.CacheDatabase
 import com.romm.androidtv.cache.ContentCache
 import com.romm.androidtv.config.SettingsRepository
+import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.router.ControllerEventRouter
 import com.romm.androidtv.diagnostic.DiagnosticPageHtml
@@ -243,6 +244,16 @@ class MainActivity : ComponentActivity() {
         ControllerEventRouter()
     }
 
+    /**
+     * Phase 4 capture coordinator. Intercepts raw input before normal routing
+     * only while a capture is active; returns null when Idle so the existing
+     * per-screen routing below is completely unaffected. Registered as an extra
+     * InputDeviceListener so physical disconnects cancel an in-progress capture.
+     */
+    private val captureCoordinator: ControllerBindingCaptureCoordinator by lazy {
+        ControllerBindingCaptureCoordinator(lifecycleScope)
+    }
+
     // Gamepad injection diagnostics — shared observable state
     private val gamepadDiagnostics: GamepadInjectionDiagnostics by lazy {
         GamepadInjectionDiagnostics()
@@ -334,6 +345,9 @@ class MainActivity : ComponentActivity() {
         // Initialize controller router and register device listener
         val inputManager = getSystemService(INPUT_SERVICE) as InputManager
         inputManager.registerInputDeviceListener(controllerRouter, null)
+        // Phase 4: also listen for disconnects so an in-progress capture cancels
+        // when the assigned controller is physically removed.
+        inputManager.registerInputDeviceListener(captureCoordinator, null)
         controllerRouter.attachLifecycle(this)
         // Enumerate controllers already connected before listener registration.
         // Without this, controllers plugged in before app launch are never assigned.
@@ -499,6 +513,14 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
+            // Phase 4 PLACEHOLDER: cancel any in-progress capture whenever the
+            // active screen changes. The actual capture-triggering UI (pause /
+            // controller-config screens) does not exist yet — it arrives in
+            // Phase 5/7 — so this generic hook guarantees a capture can never
+            // survive a screen transition. Revisit when that UI is wired.
+            LaunchedEffect(Unit) {
+                snapshotFlow { currentScreen }.collect { captureCoordinator.cancel() }
+            }
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -1817,6 +1839,11 @@ class MainActivity : ComponentActivity() {
             return super.dispatchKeyEvent(event)
         }
 
+        // Phase 4: capture raw input before all normal routing. Returns non-null
+        // (consume) only while a capture is active; null when Idle lets the
+        // existing per-screen routing below run completely unchanged.
+        captureCoordinator.onKeyEvent(event)?.let { return it }
+
         when (currentScreen) {
             Screen.AUTHENTICATED_WEBVIEW -> {
                 // WebView visible: route through controller router.
@@ -1840,6 +1867,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        // Phase 4: capture raw input before all normal routing (see dispatchKeyEvent).
+        captureCoordinator.onMotionEvent(event)?.let { return it }
+
         // Only process joystick/hat motion events
         if ((event.source and InputDevice.SOURCE_JOYSTICK) == 0 &&
             (event.source and InputDevice.SOURCE_GAMEPAD) == 0) {
@@ -1866,9 +1896,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        // Phase 4: capture must not survive activity destroy (spec rule 8).
+        captureCoordinator.cancel()
         val inputManager = getSystemService(INPUT_SERVICE) as InputManager
         try {
             inputManager.unregisterInputDeviceListener(controllerRouter)
+            inputManager.unregisterInputDeviceListener(captureCoordinator)
         } catch (_: Exception) {
             // Already unregistered or activity finishing
         }
