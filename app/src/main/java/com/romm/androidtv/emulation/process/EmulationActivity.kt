@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.romm.androidtv.controller.LibretroInputAdapter
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
 import com.romm.androidtv.controller.config.ControllerConfigDatabase
@@ -62,6 +63,8 @@ import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.controller.config.RoomControllerConfigRepository
 import com.romm.androidtv.controller.config.toRouterMappings
 import com.romm.androidtv.controller.model.ControllerSlot
+import com.romm.androidtv.controller.ui.ControllerConfigScreen
+import com.romm.androidtv.controller.ui.ControllerSettingsViewModel
 import com.romm.androidtv.controller.router.ControllerEventRouter
 import com.romm.androidtv.emulation.model.AdoptionResult
 import com.romm.androidtv.emulation.model.CandidateAdoptionHelper
@@ -156,6 +159,9 @@ class EmulationActivity : ComponentActivity() {
         RoomControllerConfigRepository.create(ControllerConfigDatabase.database(applicationContext))
     }
 
+    /** Active core ID (Phase 7): used to resolve the controller profile for the in-pause-menu settings subpage. */
+    private var coreIdForMapping: String? = null
+
     // Translates the router's four-slot snapshots into Libretro RetroPad
     // input and pushes them to the native input_state callback.
     private val inputAdapter: LibretroInputAdapter by lazy {
@@ -206,8 +212,8 @@ class EmulationActivity : ComponentActivity() {
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
 
-    /** Whether the native pause-menu overlay is currently shown; drives [NativeLibretroHost.nativeSetPaused]. */
-    private val pauseMenuVisible = MutableStateFlow(false)
+    /** The current pause-menu overlay state; drives [NativeLibretroHost.nativeSetPaused] whenever not [PauseOverlay.CLOSED]. */
+    private val pauseOverlay = MutableStateFlow(PauseOverlay.CLOSED)
 
     /**
      * Set when [finishAndDeliverResult] is called on an active session but [checkpointIfRunning]
@@ -484,7 +490,7 @@ class EmulationActivity : ComponentActivity() {
             // native. loadCore is suspend, so this runs in lifecycleScope; inputAdapter.start is
             // deferred into the same coroutine so mappings are installed first. On any failure we
             // log and let the router keep its default mapping — never crash or block startup.
-            val coreIdForMapping = coreId
+            coreIdForMapping = coreId
             lifecycleScope.launch {
                 try {
                     val config = controllerConfigRepository.loadCore(coreIdForMapping ?: "")
@@ -529,7 +535,10 @@ class EmulationActivity : ComponentActivity() {
                         keyActivityEvents = keyActivityEvents,
                         backKeyHeld = backKeyHeld,
                         quickBackTapEvents = quickBackTapEvents,
-                        pauseMenuVisible = pauseMenuVisible,
+                        pauseOverlay = pauseOverlay,
+                        coreIdForMapping = coreIdForMapping,
+                        controllerConfigRepository = controllerConfigRepository,
+                        captureCoordinator = captureCoordinator,
                         saveFailureVisible = saveFailureVisible,
                         onStop = { finishAndDeliverResult() },
                         onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
@@ -820,7 +829,7 @@ class EmulationActivity : ComponentActivity() {
         }
         if (shouldRouteGameplayInput(
                 sessionStarted = sessionStarted,
-                pauseMenuVisible = pauseMenuVisible.value,
+                pauseOverlay = pauseOverlay.value,
                 saveFailureVisible = saveFailureVisible.value,
             )
         ) {
@@ -844,7 +853,7 @@ class EmulationActivity : ComponentActivity() {
         }
         if (shouldRouteGameplayInput(
                 sessionStarted = sessionStarted,
-                pauseMenuVisible = pauseMenuVisible.value,
+                pauseOverlay = pauseOverlay.value,
                 saveFailureVisible = saveFailureVisible.value,
             )
         ) {
@@ -860,10 +869,11 @@ class EmulationActivity : ComponentActivity() {
 
 internal fun shouldRouteGameplayInput(
     sessionStarted: Boolean,
-    pauseMenuVisible: Boolean,
+    pauseOverlay: PauseOverlay,
     saveFailureVisible: Boolean,
-): Boolean = sessionStarted && !pauseMenuVisible && !saveFailureVisible
+): Boolean = sessionStarted && pauseOverlay == PauseOverlay.CLOSED && !saveFailureVisible
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun EmulationScreen(
     host: NativeLibretroHost,
@@ -873,7 +883,10 @@ private fun EmulationScreen(
     keyActivityEvents: Flow<Unit>,
     backKeyHeld: Flow<Boolean>,
     quickBackTapEvents: Flow<Unit>,
-    pauseMenuVisible: MutableStateFlow<Boolean>,
+    pauseOverlay: MutableStateFlow<PauseOverlay>,
+    coreIdForMapping: String?,
+    controllerConfigRepository: ControllerConfigRepository,
+    captureCoordinator: ControllerBindingCaptureCoordinator,
     saveFailureVisible: Flow<Boolean>,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
@@ -892,7 +905,7 @@ private fun EmulationScreen(
     // :emulation process — that was the earlier "back exits instantly, no animation" bug.
     val backHoldProgress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
-    val pauseMenuOpen by pauseMenuVisible.collectAsState()
+    val overlayState by pauseOverlay.collectAsState()
     val saveFailureShown by saveFailureVisible.collectAsState(initial = false)
 
     LaunchedEffect(sessionStarted) {
@@ -937,20 +950,32 @@ private fun EmulationScreen(
         }
     }
 
-    // A quick Back tap (released before the hold-to-exit threshold) toggles the pause menu.
+    // A quick Back tap (released before the hold-to-exit threshold) navigates the overlay: CLOSED
+    // opens the pause menu; MENU closes it; CONTROLLER_SETTINGS returns to MENU (never resumes
+    // gameplay — the core stays paused while on a subpage, see the LaunchedEffect below).
     LaunchedEffect(Unit) {
         quickBackTapEvents.collectLatest {
-            pauseMenuVisible.value = !pauseMenuVisible.value
+            pauseOverlay.value = when (pauseOverlay.value) {
+                PauseOverlay.CLOSED -> PauseOverlay.MENU
+                PauseOverlay.MENU -> PauseOverlay.CLOSED
+                PauseOverlay.CONTROLLER_SETTINGS -> PauseOverlay.MENU
+            }
         }
     }
 
-    // Freeze/unfreeze the native session whenever the pause menu opens/closes, and take a silent
-    // local-only checkpoint on open as a safety net (not shown to the user, not uploaded to the
-    // server until this session actually ends — see [EmulationActivity.checkpointForPauseMenu]).
-    LaunchedEffect(pauseMenuOpen) {
-        onSetNativePaused(pauseMenuOpen)
-        if (pauseMenuOpen) {
-            onOpenPauseMenuCheckpoint()
+    // Freeze the native session whenever the overlay is not CLOSED (MENU or CONTROLLER_SETTINGS) and
+    // unfreeze on CLOSED. The silent local-only checkpoint runs ONLY on the CLOSED -> MENU transition
+    // (not on MENU <-> CONTROLLER_SETTINGS subpage transitions), so it never double-fires. Any
+    // in-progress capture is cancelled on overlay entry.
+    var previousOverlay by remember { mutableStateOf(PauseOverlay.CLOSED) }
+    LaunchedEffect(overlayState) {
+        val prev = previousOverlay
+        previousOverlay = overlayState
+        onSetNativePaused(overlayState != PauseOverlay.CLOSED)
+        if (prev == PauseOverlay.CLOSED && overlayState != PauseOverlay.CLOSED) {
+            if (overlayState == PauseOverlay.MENU) {
+                onOpenPauseMenuCheckpoint()
+            }
             onCaptureCancel()
         }
     }
@@ -975,11 +1000,21 @@ private fun EmulationScreen(
             )
         }
 
-        if (pauseMenuOpen && sessionStarted) {
-            PauseMenuOverlay(
-                onResume = { pauseMenuVisible.value = false },
-                onQuit = onStop,
-            )
+        if (sessionStarted) {
+            when (overlayState) {
+                PauseOverlay.CLOSED -> Unit
+                PauseOverlay.MENU -> PauseMenuOverlay(
+                    onResume = { pauseOverlay.value = PauseOverlay.CLOSED },
+                    onOpenControllerSettings = { pauseOverlay.value = PauseOverlay.CONTROLLER_SETTINGS },
+                    onQuit = onStop,
+                )
+                PauseOverlay.CONTROLLER_SETTINGS -> ControllerSettingsSubpage(
+                    coreId = coreIdForMapping,
+                    repository = controllerConfigRepository,
+                    captureCoordinator = captureCoordinator,
+                    onBack = { pauseOverlay.value = PauseOverlay.MENU },
+                )
+            }
         }
 
         if (saveFailureShown) {
@@ -1005,6 +1040,16 @@ private const val BACK_HOLD_DURATION_MS = 1200
 
 /** Coarse category used to select which native error screen to show. */
 enum class LaunchFailureCategory { NONE, CORE_LOAD, CONTENT_LOAD, UNKNOWN }
+
+/** Explicit state machine for the in-session pause overlay (CONTROLLER_SETTINGS.md Phase 7). */
+enum class PauseOverlay {
+    /** No overlay visible; native gameplay input is routed normally. */
+    CLOSED,
+    /** The pause menu (Resume / Controller Settings / Quit) is visible. */
+    MENU,
+    /** The shared controller-settings subpage is visible; the core stays paused. */
+    CONTROLLER_SETTINGS,
+}
 
 /**
  * Classifies [NativeLibretroHost.nativeGetLastError]'s message into a [LaunchFailureCategory] so
@@ -1095,25 +1140,32 @@ private fun SaveFailureOverlay(onRetry: () -> Unit, onQuitAnyway: () -> Unit) {
 }
 
 /**
- * Native pause-menu overlay (LIBRETRO_REFACTOR.md section 13, Phase 6): Resume and Quit (with
- * confirm) — the sole in-session menu, opened by a quick Back tap. Emulation is frozen (native
- * `paused_` flag) for the whole time this is visible; see [EmulationScreen]'s
- * `LaunchedEffect(pauseMenuOpen)`, which also takes a silent local-only save checkpoint on open
- * (not surfaced here — see [EmulationActivity.checkpointForPauseMenu]).
+ * Native pause-menu overlay (LIBRETRO_REFACTOR.md section 13, Phase 6): Resume, Controller
+ * Settings, and Quit (with confirm) — the sole in-session menu, opened by a quick Back tap.
+ * Emulation is frozen (native `paused_` flag) for the whole time this is visible; see
+ * [EmulationScreen]'s overlay LaunchedEffect, which also takes a silent local-only save
+ * checkpoint on the CLOSED -> MENU transition (not surfaced here — see
+ * [EmulationActivity.checkpointForPauseMenu]).
  */
 @Composable
 private fun PauseMenuOverlay(
     onResume: () -> Unit,
+    onOpenControllerSettings: () -> Unit,
     onQuit: () -> Unit,
 ) {
     var showQuitConfirm by remember { mutableStateOf(false) }
     val resumeFocusRequester = remember { FocusRequester() }
+    val controllerSettingsFocusRequester = remember { FocusRequester() }
 
-    // Grab initial D-pad focus on the Resume button — with the emulation core's controller
-    // routing suppressed while paused (see EmulationActivity.dispatchKeyEvent), Compose's own
-    // focus system needs a starting focused node to move D-pad events between the menu buttons.
+    // Grab initial D-pad focus on the Controller Settings button (the middle entry of the
+    // Resume / Controller Settings / Quit order, per CONTROLLER_SETTINGS.md Phase 7) — with the
+    // emulation core's controller routing suppressed while paused (see
+    // EmulationActivity.dispatchKeyEvent), Compose's own focus system needs a starting focused
+    // node to move D-pad events between the menu buttons. This composable is recreated fresh on
+    // each return from the controller-settings subpage, so this request also restores focus to
+    // Controller Settings after Back (CONTROLLER_SETTINGS -> MENU).
     LaunchedEffect(Unit) {
-        resumeFocusRequester.requestFocus()
+        controllerSettingsFocusRequester.requestFocus()
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
@@ -1125,6 +1177,13 @@ private fun PauseMenuOverlay(
                 onClick = onResume,
                 modifier = Modifier.fillMaxWidth().focusRequester(resumeFocusRequester),
             ) { Text("Resume") }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onOpenControllerSettings,
+                modifier = Modifier.fillMaxWidth().focusRequester(controllerSettingsFocusRequester),
+            ) { Text("Controller Settings") }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = { showQuitConfirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Quit") }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(onClick = { showQuitConfirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Quit") }
         }
@@ -1143,6 +1202,51 @@ private fun PauseMenuOverlay(
             },
         )
     }
+}
+
+/**
+ * The shared controller-settings subpage shown while [PauseOverlay.CONTROLLER_SETTINGS].
+ * Reuses the same [ControllerSettingsViewModel.Factory] pattern as MainActivity's Phase 6 work;
+ * the running core stays paused (see [EmulationScreen]'s overlay LaunchedEffect). If the active
+ * core has no controller profile, logs a warning and falls back to [PauseOverlay.MENU].
+ */
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+private fun ControllerSettingsSubpage(
+    coreId: String?,
+    repository: ControllerConfigRepository,
+    captureCoordinator: ControllerBindingCaptureCoordinator,
+    onBack: () -> Unit,
+) {
+    val profile = remember(coreId) { CoreControllerProfiles.byCoreId(coreId ?: "") }
+    if (profile == null) {
+        Log.w("EmulationActivity", "Controller settings: no profile for core '${coreId}', returning to pause menu")
+        LaunchedEffect(Unit) { onBack() }
+        return
+    }
+    val factory = ControllerSettingsViewModel.Factory(
+        coreId = coreId ?: "",
+        profile = profile,
+        repository = repository,
+        captureCoordinator = captureCoordinator,
+    )
+    val viewModel: ControllerSettingsViewModel = viewModel(
+        key = "pause-menu-controller-settings",
+        factory = factory,
+    )
+    val uiState by viewModel.uiState.collectAsState()
+    ControllerConfigScreen(
+        state = uiState,
+        onBack = onBack,
+        onSelectTab = viewModel::selectTab,
+        onRowSelected = viewModel::onRowSelected,
+        onCaptureDialogDismiss = viewModel::dismissCaptureDialog,
+        onConflictResolution = viewModel::resolveConflict,
+        onResetPlayer = viewModel::resetPlayer,
+        onResetAllConfirm = viewModel::confirmResetAll,
+        onResetAllRequest = viewModel::requestResetAll,
+        onResetAllCancel = viewModel::cancelResetAll,
+    )
 }
 
 /**
