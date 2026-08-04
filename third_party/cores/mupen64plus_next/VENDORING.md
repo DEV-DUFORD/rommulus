@@ -188,3 +188,8 @@ and makes these CMake-side adaptations:
   without processing that frame's HLE display list or LLE RDP command list, and
   suppresses the final video callback. N64 CPU emulation, input, and audio still
   advance normally while expensive graphics work is skipped.
+- **Threaded GLideN64 latency cap**: the app enables GLideN64's libretro
+  threaded renderer, which runs N64 emulation on a worker while executing queued
+  GL commands on the EGL-owning frontend thread. The pending swap limit is
+  reduced from two to one, and its cross-thread counter is atomic, to cap the
+  renderer's additional frame queue latency.

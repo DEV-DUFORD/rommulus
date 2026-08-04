@@ -91,11 +91,9 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         std::strcmp(systemInfo.library_name, "Mupen64Plus-Next") == 0;
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     if (isMupen64PlusNext) {
-        // GLideN64's threaded renderer spawns its own rendering thread,
-        // which conflicts with the libretro single-threaded model (the host
-        // owns the emulation thread and the EGL context). Disable it so
-        // GLideN64 draws on the host's thread where the context is current.
-        environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "False");
+        // The libretro threaded path keeps GL commands on this EGL-owning
+        // frontend thread while moving N64 emulation to a worker thread.
+        environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "True");
         environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
         environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");
         environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");

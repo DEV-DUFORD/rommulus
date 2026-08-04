@@ -4,6 +4,7 @@
 #include "readerwriterqueue.h"
 #include "opengl_WrappedFunctions.h"
 #include "opengl_Command.h"
+#include <atomic>
 #include <thread>
 #include <map>
 
@@ -30,7 +31,7 @@ namespace opengl {
 
 		static bool m_threaded_wrapper;
 		static bool m_shutdown;
-		static int m_swapBuffersQueued;
+		static std::atomic<int> m_swapBuffersQueued;
 		static bool m_fastVertexAttributes;
 		static std::thread m_commandExecutionThread;
 		static std::mutex m_condvarMutex;
@@ -54,7 +55,7 @@ namespace opengl {
 		static std::chrono::time_point<std::chrono::high_resolution_clock> m_lastProfilingOutput;
 #endif
 
-		static const int MAX_SWAP = 2;
+		static const int MAX_SWAP = 1;
 
 	public:
 		static void setThreadedMode(u32 _threaded);

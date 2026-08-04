@@ -15,6 +15,8 @@ namespace romm {
 
 namespace {
 
+constexpr unsigned kRetroEnvironmentGetClearAllThreadWaitsCallback = 0x800003;
+
 // Free functions used as callback implementations for the HW render callback.
 // Lambdas cannot be assigned to C function-pointer types, so these must be
 // plain functions with the correct signature.
@@ -28,6 +30,12 @@ retro_proc_address_t hwGetProcAddress(const char* sym) {
     // eglGetProcAddress returns __eglMustCastToProperFunctionPointerType
     // (aka void(*)()), which is the same as retro_proc_address_t.
     return reinterpret_cast<retro_proc_address_t>(eglGetProcAddress(sym));
+}
+
+bool clearAllThreadWaits(unsigned, void*) {
+    // This frontend has no core-facing thread waits of its own. GLideN64 uses
+    // the callback as a shutdown coordination hook for its own worker.
+    return true;
 }
 
 void retro_log_printf(enum retro_log_level level, const char* fmt, ...) {
@@ -422,6 +430,13 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
             // GLideN64 does not use context negotiation; Vulkan cores may.
             // Log and reject so the core knows we don't support it.
             return false;
+        }
+
+        case kRetroEnvironmentGetClearAllThreadWaitsCallback: {
+            auto* callback = static_cast<retro_environment_t*>(data);
+            if (callback == nullptr) return false;
+            *callback = clearAllThreadWaits;
+            return true;
         }
 
         default: {
