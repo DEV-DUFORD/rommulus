@@ -423,7 +423,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .focusRequester(segaCdFocusRequester)
                 .focusProperties {
-                    up = filterToggleFocusRequester
+                    up = controllerSettingsFocusRequester
                     down = playStationFocusRequester
                 },
         ) {
