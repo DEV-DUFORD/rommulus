@@ -82,7 +82,7 @@ class CookieSyncTest {
     @Nested
     @DisplayName("parseCookieStringPreservingAttributes() — session cookies")
     inner class SessionCookies {
-        private val origin = RommOrigin.parse("https://romm.dufserver.net")!!
+        private val origin = RommOrigin.parse("https://romm.example.com")!!
 
         @Test
         @DisplayName("parses romm_session cookie")
@@ -94,7 +94,7 @@ class CookieSyncTest {
             assertThat(cookies).hasSize(1)
             assertThat(cookies[0].name).isEqualTo("romm_session")
             assertThat(cookies[0].value).isEqualTo("abc123def456")
-            assertThat(cookies[0].domain).isEqualTo("romm.dufserver.net")
+            assertThat(cookies[0].domain).isEqualTo("romm.example.com")
             assertThat(cookies[0].secure).isTrue() // HTTPS origin -> Secure
         }
 
@@ -157,7 +157,7 @@ class CookieSyncTest {
         @DisplayName("skips Domain attribute")
         fun `skips domain attribute`() {
             val cookies = testParser.parsePreserving(
-                "romm_session=val; Domain=.romm.dufserver.net",
+                "romm_session=val; Domain=.romm.example.com",
                 origin
             )
             assertThat(cookies).hasSize(1)
@@ -200,7 +200,7 @@ class CookieSyncTest {
         @Test
         @DisplayName("HTTPS origin cookies get Secure=true")
         fun `https origin secure`() {
-            val httpsOrigin = RommOrigin.parse("https://romm.dufserver.net")!!
+            val httpsOrigin = RommOrigin.parse("https://romm.example.com")!!
             val cookies = testParser.parsePreserving("session=val", httpsOrigin)
             assertThat(cookies[0].secure).isTrue()
         }
@@ -230,13 +230,13 @@ class CookieSyncTest {
         fun `cross-origin isolation`() {
             val sync = RomMCookieSync(java.net.CookieManager())
 
-            val rommUrl = "https://romm.dufserver.net/api".toHttpUrl()
+            val rommUrl = "https://romm.example.com/api".toHttpUrl()
             val evilUrl = "https://evil.example.com/api".toHttpUrl()
 
             val rommCookie = Cookie.Builder()
                 .name("session")
                 .value("romm_session_value")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
@@ -337,9 +337,9 @@ class CookieSyncTest {
         @Test
         @DisplayName("complex Set-Cookie header with all attributes")
         fun `full set-cookie`() {
-            val rommOrigin = RommOrigin.parse("https://romm.dufserver.net")!!
+            val rommOrigin = RommOrigin.parse("https://romm.example.com")!!
             val cookies = testParser.parsePreserving(
-                "romm_session=abc123; Path=/; Domain=.romm.dufserver.net; Secure; HttpOnly; SameSite=Lax",
+                "romm_session=abc123; Path=/; Domain=.romm.example.com; Secure; HttpOnly; SameSite=Lax",
                 rommOrigin
             )
             assertThat(cookies).hasSize(1)
@@ -350,7 +350,7 @@ class CookieSyncTest {
         @Test
         @DisplayName("multiple cookies with attributes interleaved")
         fun `interleaved attributes`() {
-            val rommOrigin = RommOrigin.parse("https://romm.dufserver.net")!!
+            val rommOrigin = RommOrigin.parse("https://romm.example.com")!!
             val cookies = testParser.parsePreserving(
                 "romm_session=s1; Secure; romm_csrftoken=c1; HttpOnly",
                 rommOrigin
@@ -363,13 +363,13 @@ class CookieSyncTest {
         @Test
         @DisplayName("port in origin is stripped for host extraction")
         fun `port stripped`() {
-            val portOrigin = RommOrigin.parse("https://romm.dufserver.net:8443")!!
+            val portOrigin = RommOrigin.parse("https://romm.example.com:8443")!!
             val cookies = testParser.parsePreserving(
                 "session=val",
                 portOrigin
             )
             assertThat(cookies).hasSize(1)
-            assertThat(cookies[0].domain).isEqualTo("romm.dufserver.net")
+            assertThat(cookies[0].domain).isEqualTo("romm.example.com")
         }
 
         @Test
@@ -401,19 +401,19 @@ class CookieSyncTest {
         @DisplayName("cookies saved and loaded for same host")
         fun `save and load`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url = "https://romm.dufserver.net/api/heartbeat".toHttpUrl()
+            val url = "https://romm.example.com/api/heartbeat".toHttpUrl()
 
             val cookie1 = Cookie.Builder()
                 .name("romm_session")
                 .value("session_value")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
             val cookie2 = Cookie.Builder()
                 .name("romm_csrftoken")
                 .value("csrf_value")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
@@ -429,12 +429,12 @@ class CookieSyncTest {
         @DisplayName("new cookie with same name replaces old one")
         fun `cookie replacement`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url = "https://romm.dufserver.net/api/login".toHttpUrl()
+            val url = "https://romm.example.com/api/login".toHttpUrl()
 
             val oldCookie = Cookie.Builder()
                 .name("romm_session")
                 .value("old_value")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
@@ -443,7 +443,7 @@ class CookieSyncTest {
             val newCookie = Cookie.Builder()
                 .name("romm_session")
                 .value("new_value")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
@@ -458,13 +458,13 @@ class CookieSyncTest {
         @DisplayName("different hosts have separate cookie stores")
         fun `separate host stores`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url1 = "https://romm.dufserver.net/api".toHttpUrl()
+            val url1 = "https://romm.example.com/api".toHttpUrl()
             val url2 = "https://other.example.com/api".toHttpUrl()
 
             val cookie1 = Cookie.Builder()
                 .name("session")
                 .value("romm_session")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
@@ -489,7 +489,7 @@ class CookieSyncTest {
         @DisplayName("empty cookies list is safe")
         fun `empty save`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url = "https://romm.dufserver.net/api".toHttpUrl()
+            val url = "https://romm.example.com/api".toHttpUrl()
 
             sync.saveFromResponse(url, emptyList())
             val loaded = sync.loadForRequest(url)
@@ -500,7 +500,7 @@ class CookieSyncTest {
         @DisplayName("unknown host returns empty cookies")
         fun `unknown host`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url = "https://romm.dufserver.net/api".toHttpUrl()
+            val url = "https://romm.example.com/api".toHttpUrl()
             val loaded = sync.loadForRequest(url)
             assertThat(loaded).isEmpty()
         }
@@ -509,12 +509,12 @@ class CookieSyncTest {
         @DisplayName("saveFromResponse does not block (no Android calls)")
         fun `non-blocking save`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url = "https://romm.dufserver.net/api".toHttpUrl()
+            val url = "https://romm.example.com/api".toHttpUrl()
 
             val cookie = Cookie.Builder()
                 .name("test")
                 .value("val")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
@@ -535,7 +535,7 @@ class CookieSyncTest {
         @Test
         @DisplayName("cookie values are preserved as-is (session tokens)")
         fun `session token preserved`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net")!!
+            val origin = RommOrigin.parse("https://romm.example.com")!!
             val cookies = testParser.parsePreserving(
                 "romm_session=REDACTED_SESSION_TOKEN_12345",
                 origin
@@ -546,7 +546,7 @@ class CookieSyncTest {
         @Test
         @DisplayName("csrf token preserved as-is")
         fun `csrf token preserved`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net")!!
+            val origin = RommOrigin.parse("https://romm.example.com")!!
             val cookies = testParser.parsePreserving(
                 "romm_csrftoken=REDACTED_CSRF_TOKEN_67890",
                 origin
@@ -562,12 +562,12 @@ class CookieSyncTest {
         @DisplayName("cookie with custom path is preserved in OkHttp store")
         fun `custom path preserved`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url = "https://romm.dufserver.net/api".toHttpUrl()
+            val url = "https://romm.example.com/api".toHttpUrl()
 
             val cookie = Cookie.Builder()
                 .name("api_token")
                 .value("secret")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/api")
                 .build()
 
@@ -582,19 +582,19 @@ class CookieSyncTest {
         @DisplayName("cookies with same name but different paths coexist")
         fun `same name different paths`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url = "https://romm.dufserver.net/api".toHttpUrl()
+            val url = "https://romm.example.com/api".toHttpUrl()
 
             val cookieRoot = Cookie.Builder()
                 .name("session")
                 .value("root_val")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
             val cookieApi = Cookie.Builder()
                 .name("session")
                 .value("api_val")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/api")
                 .build()
 
@@ -609,12 +609,12 @@ class CookieSyncTest {
         @DisplayName("cookie replacement only removes matching name+domain+path")
         fun `replacement exact match`() {
             val sync = RomMCookieSync(java.net.CookieManager())
-            val url = "https://romm.dufserver.net/api".toHttpUrl()
+            val url = "https://romm.example.com/api".toHttpUrl()
 
             val oldRoot = Cookie.Builder()
                 .name("session")
                 .value("old_root")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/")
                 .build()
 
@@ -624,7 +624,7 @@ class CookieSyncTest {
             val newApi = Cookie.Builder()
                 .name("session")
                 .value("new_api")
-                .domain("romm.dufserver.net")
+                .domain("romm.example.com")
                 .path("/api")
                 .build()
 

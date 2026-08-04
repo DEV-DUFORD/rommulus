@@ -3,6 +3,7 @@ package com.romm.androidtv.library
 import com.romm.androidtv.romm.RommApiError
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.*
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,8 +42,12 @@ class StaleToggleResponseTest {
 
     @AfterEach
     fun tearDown() {
+        blockingDispatcher.close()
+        if (!blockingExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+            blockingExecutor.shutdownNow()
+            blockingExecutor.awaitTermination(1, TimeUnit.SECONDS)
+        }
         Dispatchers.resetMain()
-        blockingExecutor.shutdown()
     }
 
     // =========================================================================

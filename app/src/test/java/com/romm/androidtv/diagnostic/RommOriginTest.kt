@@ -20,10 +20,10 @@ class RommOriginTest {
         @Test
         @DisplayName("parses standard HTTPS origin")
         fun `standard https`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net")
+            val origin = RommOrigin.parse("https://romm.example.com")
             assertThat(origin).isNotNull
             assertThat(origin!!.scheme).isEqualTo("https")
-            assertThat(origin.host).isEqualTo("romm.dufserver.net")
+            assertThat(origin.host).isEqualTo("romm.example.com")
             assertThat(origin.port).isEqualTo(-1)
             assertThat(origin.effectivePort).isEqualTo(443)
             assertThat(origin.path).isEmpty()
@@ -32,7 +32,7 @@ class RommOriginTest {
         @Test
         @DisplayName("strips trailing slash from path")
         fun `trailing slash removed`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net/")
+            val origin = RommOrigin.parse("https://romm.example.com/")
             assertThat(origin).isNotNull
             assertThat(origin!!.path).isEmpty()
         }
@@ -40,7 +40,7 @@ class RommOriginTest {
         @Test
         @DisplayName("handles explicit port 443")
         fun `explicit 443`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net:443")
+            val origin = RommOrigin.parse("https://romm.example.com:443")
             assertThat(origin).isNotNull
             assertThat(origin!!.effectivePort).isEqualTo(443)
         }
@@ -48,7 +48,7 @@ class RommOriginTest {
         @Test
         @DisplayName("handles non-standard port")
         fun `non standard port`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net:8443")
+            val origin = RommOrigin.parse("https://romm.example.com:8443")
             assertThat(origin).isNotNull
             assertThat(origin!!.effectivePort).isEqualTo(8443)
         }
@@ -56,22 +56,22 @@ class RommOriginTest {
         @Test
         @DisplayName("toUrl reconstructs without trailing slash")
         fun `to url no trailing slash`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net/")!!
-            assertThat(origin.toUrl()).isEqualTo("https://romm.dufserver.net")
+            val origin = RommOrigin.parse("https://romm.example.com/")!!
+            assertThat(origin.toUrl()).isEqualTo("https://romm.example.com")
         }
 
         @Test
         @DisplayName("toUrl includes non-standard port")
         fun `to url with port`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net:8443")!!
-            assertThat(origin.toUrl()).isEqualTo("https://romm.dufserver.net:8443")
+            val origin = RommOrigin.parse("https://romm.example.com:8443")!!
+            assertThat(origin.toUrl()).isEqualTo("https://romm.example.com:8443")
         }
 
         @Test
         @DisplayName("toUrl omits default port 443")
         fun `to url omits default port`() {
-            val origin = RommOrigin.parse("https://romm.dufserver.net:443")!!
-            assertThat(origin.toUrl()).isEqualTo("https://romm.dufserver.net")
+            val origin = RommOrigin.parse("https://romm.example.com:443")!!
+            assertThat(origin.toUrl()).isEqualTo("https://romm.example.com")
         }
 
         @Test
@@ -99,33 +99,33 @@ class RommOriginTest {
     @Nested
     @DisplayName("isSameOrigin() — parsed scheme/host/effective-port comparison")
     inner class SameOriginComparison {
-        private val base = RommOrigin.parse("https://romm.dufserver.net")!!
+        private val base = RommOrigin.parse("https://romm.example.com")!!
 
         @Test
         @DisplayName("same origin matches")
         fun `exact match`() {
-            val other = RommOrigin.parse("https://romm.dufserver.net")!!
+            val other = RommOrigin.parse("https://romm.example.com")!!
             assertThat(base.isSameOrigin(other)).isTrue()
         }
 
         @Test
         @DisplayName("same origin with explicit 443 matches")
         fun `explicit 443 matches`() {
-            val other = RommOrigin.parse("https://romm.dufserver.net:443")!!
+            val other = RommOrigin.parse("https://romm.example.com:443")!!
             assertThat(base.isSameOrigin(other)).isTrue()
         }
 
         @Test
         @DisplayName("different port is different origin")
         fun `different port`() {
-            val other = RommOrigin.parse("https://romm.dufserver.net:8443")!!
+            val other = RommOrigin.parse("https://romm.example.com:8443")!!
             assertThat(base.isSameOrigin(other)).isFalse()
         }
 
         @Test
         @DisplayName("HTTP vs HTTPS is different origin")
         fun `http vs https`() {
-            val other = RommOrigin.parse("http://romm.dufserver.net")!!
+            val other = RommOrigin.parse("http://romm.example.com")!!
             assertThat(base.isSameOrigin(other)).isFalse()
         }
 
@@ -139,21 +139,21 @@ class RommOriginTest {
         @Test
         @DisplayName("subdomain is different origin")
         fun `subdomain`() {
-            val other = RommOrigin.parse("https://romm.dufserver.net.evil.com")!!
+            val other = RommOrigin.parse("https://romm.example.com.evil.com")!!
             assertThat(base.isSameOrigin(other)).isFalse()
         }
 
         @Test
         @DisplayName("case-insensitive host comparison")
         fun `case insensitive host`() {
-            val other = RommOrigin.parse("https://ROMM.DUFSERVER.NET")!!
+            val other = RommOrigin.parse("https://ROMM.EXAMPLE.COM")!!
             assertThat(base.isSameOrigin(other)).isTrue()
         }
 
         @Test
         @DisplayName("case-insensitive scheme comparison")
         fun `case insensitive scheme`() {
-            val other = RommOrigin.parse("HTTPS://romm.dufserver.net")!!
+            val other = RommOrigin.parse("HTTPS://romm.example.com")!!
             assertThat(base.isSameOrigin(other)).isTrue()
         }
     }
@@ -161,8 +161,8 @@ class RommOriginTest {
     @Nested
     @DisplayName("containsUri() — same-origin URL containment")
     inner class ContainsUri {
-        private val base = RommOrigin.parse("https://romm.dufserver.net")!!
-        private val baseUrl = "https://romm.dufserver.net"
+        private val base = RommOrigin.parse("https://romm.example.com")!!
+        private val baseUrl = "https://romm.example.com"
 
         @Test
         @DisplayName("allows same-origin paths")
@@ -175,14 +175,14 @@ class RommOriginTest {
         @Test
         @DisplayName("blocks HTTP URLs")
         fun `http blocked`() {
-            assertThat(base.containsUri(java.net.URI("http://romm.dufserver.net/"))).isFalse()
+            assertThat(base.containsUri(java.net.URI("http://romm.example.com/"))).isFalse()
         }
 
         @Test
         @DisplayName("blocks different domain")
         fun `different domain blocked`() {
             assertThat(base.containsUri(java.net.URI("https://evil.example.com/"))).isFalse()
-            assertThat(base.containsUri(java.net.URI("https://romm.dufserver.net.evil.com/"))).isFalse()
+            assertThat(base.containsUri(java.net.URI("https://romm.example.com.evil.com/"))).isFalse()
         }
 
         @Test
@@ -220,8 +220,8 @@ class RommOriginTest {
     @Nested
     @DisplayName("isLoginPath() — exact /login path detection")
     inner class LoginPathDetection {
-        private val base = RommOrigin.parse("https://romm.dufserver.net")!!
-        private val baseUrl = "https://romm.dufserver.net"
+        private val base = RommOrigin.parse("https://romm.example.com")!!
+        private val baseUrl = "https://romm.example.com"
 
         @Test
         @DisplayName("exact /login is detected")
@@ -282,7 +282,7 @@ class RommOriginTest {
         @Test
         @DisplayName("/LOGIN case-insensitive host still matches")
         fun `case insensitive host`() {
-            val uri = java.net.URI("https://ROMM.DUFSERVER.NET/login")
+            val uri = java.net.URI("https://ROMM.EXAMPLE.COM/login")
             assertThat(base.isLoginPath(uri)).isTrue()
         }
     }
@@ -290,7 +290,7 @@ class RommOriginTest {
     @Nested
     @DisplayName("Legacy string-based same-origin checks (backward compat)")
     inner class LegacyChecks {
-        private val origin = "https://romm.dufserver.net"
+        private val origin = "https://romm.example.com"
 
         private fun isAllowed(url: String): Boolean {
             if (!url.startsWith("https://", ignoreCase = true)) return false
@@ -308,14 +308,14 @@ class RommOriginTest {
         @Test
         @DisplayName("blocks HTTP URLs")
         fun `http blocked`() {
-            assertThat(isAllowed("http://romm.dufserver.net/")).isFalse()
+            assertThat(isAllowed("http://romm.example.com/")).isFalse()
         }
 
         @Test
         @DisplayName("blocks different domain")
         fun `different domain blocked`() {
             assertThat(isAllowed("https://evil.example.com/")).isFalse()
-            assertThat(isAllowed("https://romm.dufserver.net.evil.com/")).isFalse()
+            assertThat(isAllowed("https://romm.example.com.evil.com/")).isFalse()
         }
 
         @Test
@@ -333,16 +333,16 @@ class RommOriginTest {
         @Test
         @DisplayName("case-sensitive origin matching")
         fun `case sensitive`() {
-            assertThat(isAllowed("HTTPS://romm.dufserver.net/")).isFalse()
-            assertThat(isAllowed("https://ROMM.DUFSERVER.NET/")).isFalse()
+            assertThat(isAllowed("HTTPS://romm.example.com/")).isFalse()
+            assertThat(isAllowed("https://ROMM.EXAMPLE.COM/")).isFalse()
         }
 
         @Test
         @DisplayName("handles multiple trailing slashes")
         fun `multiple trailing slashes`() {
-            val origin = "https://romm.dufserver.net//"
+            val origin = "https://romm.example.com//"
             val normalized = if (origin.endsWith("/")) origin.removeSuffix("/") else origin
-            assertThat(normalized).isEqualTo("https://romm.dufserver.net/")
+            assertThat(normalized).isEqualTo("https://romm.example.com/")
         }
     }
 }

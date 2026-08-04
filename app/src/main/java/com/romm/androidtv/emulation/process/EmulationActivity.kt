@@ -938,7 +938,7 @@ private fun EmulationScreen(
 ) {
     // Diagnostics are polled silently to drive the core-requested-shutdown auto-stop below; none
     // of it is rendered on screen — gameplay should show only the game itself.
-    var diagnostics by remember { mutableStateOf(LongArray(20).also { it[4] = -1 }) }
+    var diagnostics by remember { mutableStateOf(LongArray(21).also { it[4] = -1 }) }
     var showBackHint by remember { mutableStateOf(false) }
     // Owned entirely inside this composition: a LaunchedEffect's coroutine has access to
     // Compose's MonotonicFrameClock, which Animatable.animateTo requires. Driving this same

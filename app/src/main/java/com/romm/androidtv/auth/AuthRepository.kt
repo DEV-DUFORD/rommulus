@@ -1,17 +1,31 @@
 package com.romm.androidtv.auth
 
+import com.romm.androidtv.network.AuthError
 import com.romm.androidtv.network.AuthFlowResult
 import com.romm.androidtv.network.HeartbeatCallResult
+import com.romm.androidtv.network.HeartbeatParser
+import com.romm.androidtv.network.InvalidReason
 import com.romm.androidtv.network.RomMCookieSync
+import com.romm.androidtv.network.RommServerAddress
+import com.romm.androidtv.network.ServerAddressResult
 import com.romm.androidtv.network.executeAuthFlow
 import com.romm.androidtv.network.executeHeartbeat
 import com.romm.androidtv.network.verifyExistingSession
 import com.romm.androidtv.romm.ClientToken
 import com.romm.androidtv.romm.ClientTokenAcquireResult
+import com.romm.androidtv.romm.ClientTokenInfo
 import com.romm.androidtv.romm.RommSyncApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 
 /** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
 private const val TAG = "RommAuthDx"
@@ -46,7 +60,7 @@ private fun diagLog(priority: Int, message: String) {
  */
 interface ClientTokenStorage {
     fun getToken(origin: String, username: String): ClientToken?
-    fun setToken(origin: String, username: String, token: ClientToken)
+    fun setToken(origin: String, username: String, token: ClientToken): TokenPersistResult
     fun clearToken(origin: String, username: String)
 }
 
@@ -141,12 +155,12 @@ class AuthRepository(
             val result = RommSyncApi.acquireClientToken(
                 client = client,
                 origin = origin,
-                scopes = CLIENT_TOKEN_SCOPES,
+                scopes = RommClientTokenScopes.FOREGROUND_NATIVE,
             )
             when (result) {
                 is ClientTokenAcquireResult.Success -> {
-                    storage.setToken(origin, username, result.info.token)
-                    diagLog(android.util.Log.DEBUG, "forceReconcileClientToken: reconciled=true")
+                    val persist = storage.setToken(origin, username, result.info.token)
+                    diagLog(android.util.Log.DEBUG, "forceReconcileClientToken: reconciled=true persist=${persist::class.simpleName}")
                     true
                 }
                 is ClientTokenAcquireResult.Failure -> {
@@ -188,6 +202,203 @@ class AuthRepository(
         diagLog(android.util.Log.DEBUG, "clearExpiredSession: clearing session+token")
         sessionStore.clear()
         clientTokenStorage?.clearToken(origin, username)
+    }
+
+    /**
+     * Typed, cancellable heartbeat validation used by first-run onboarding.
+     *
+     * - Parses/normalizes [origin] via [RommServerAddress] first (no network):
+     *   a public-HTTP origin is rejected as [ServerValidationResult.InsecurePublicHttp],
+     *   any other structural problem as [ServerValidationResult.InvalidAddress].
+     * - Builds a validation client from the shared config ([OkHttpClient.newBuilder])
+     *   with redirects disabled and bounded timeouts, so a 3xx is never silently
+     *   followed and a hung server cannot block onboarding.
+     * - Requests `GET {origin}/api/heartbeat`, preserving any base path.
+     * - Classifies every outcome truthfully into [ServerValidationResult] —
+     *   no [okhttp3.Response]/[Throwable] escapes the boundary.
+     *
+     * Cancellable: coroutine cancellation cancels the in-flight OkHttp call.
+     *
+     * The timeout parameters are defaulted to the required production bounds so
+     * callers use `validateServer(origin)`; tests may pass smaller values.
+     */
+    suspend fun validateServer(
+        origin: String,
+        connectTimeoutSeconds: Long = VALIDATE_CONNECT_TIMEOUT_SECONDS,
+        readTimeoutSeconds: Long = VALIDATE_READ_TIMEOUT_SECONDS,
+        callTimeoutSeconds: Long = VALIDATE_CALL_TIMEOUT_SECONDS,
+    ): ServerValidationResult {
+        val valid = when (val parsed = RommServerAddress.parseAndNormalize(origin)) {
+            is ServerAddressResult.Invalid -> return if (parsed.reason == InvalidReason.INSECURE_PUBLIC_HTTP) {
+                ServerValidationResult.InsecurePublicHttp
+            } else {
+                ServerValidationResult.InvalidAddress
+            }
+            is ServerAddressResult.Valid -> parsed
+        }
+
+        val url = RommServerAddress.toHttpUrl(valid).newBuilder()
+            .addPathSegments("api/heartbeat")
+            .build()
+
+        val validationClient = client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .connectTimeout(connectTimeoutSeconds, TimeUnit.SECONDS)
+            .readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
+            .build()
+
+        val request = Request.Builder().url(url).get().build()
+        return withContext(Dispatchers.IO) {
+            executeValidationCall(validationClient, request, valid.origin)
+        }
+    }
+
+    /**
+     * New typed login-completion path for onboarding. Reuses the existing
+     * [executeAuthFlow], then makes client-token creation + encrypted persistence
+     * + bearer verification REQUIRED and FATAL (unlike the legacy [login] path
+     * which treats token acquisition as best-effort).
+     *
+     * On success returns [LoginCompletionResult.Success] with the verified user
+     * and the durable client token. On any failure, partial local completion state
+     * (session/token written so far) is removed and the newly-created server token
+     * is best-effort revoked. The [password] [CharArray] is zeroed inside
+     * [executeAuthFlow] regardless of outcome.
+     */
+    suspend fun loginOnboarding(origin: String, username: String, password: CharArray): LoginCompletionResult {
+        return withContext(Dispatchers.IO) {
+            val authResult = executeAuthFlow(client, origin, username, password)
+            when (authResult) {
+                is AuthFlowResult.Failure -> mapLoginFailure(authResult)
+                is AuthFlowResult.Success -> completeOnboarding(origin, authResult)
+            }
+        }
+    }
+
+    private suspend fun completeOnboarding(origin: String, success: AuthFlowResult.Success): LoginCompletionResult {
+        val verifiedUser = success.verifiedUser
+        val uname = verifiedUser.username ?: run {
+            // Cannot durably scope a token without a username.
+            return LoginCompletionResult.PersistenceFailure
+        }
+        val storage = clientTokenStorage ?: run {
+            diagLog(android.util.Log.WARN, "loginOnboarding: storage not configured")
+            return LoginCompletionResult.PersistenceFailure
+        }
+
+        // 1. Persist verified session record durably.
+        if (!sessionStore.save(origin, uname)) {
+            return LoginCompletionResult.PersistenceFailure
+        }
+
+        // 2. Create the full-scope, non-expiring client token.
+        val tokenInfo = when (val acquire = RommSyncApi.acquireClientToken(
+            client = client,
+            origin = origin,
+            scopes = RommClientTokenScopes.FOREGROUND_NATIVE,
+        )) {
+            is ClientTokenAcquireResult.Success -> acquire.info
+            is ClientTokenAcquireResult.Failure -> {
+                diagLog(android.util.Log.WARN, "loginOnboarding: tokenCreationFailed error=${acquire.error.name} httpCode=${acquire.httpCode}")
+                cleanupPartialOnboarding(origin, uname, tokenInfo = null)
+                return LoginCompletionResult.TokenCreationFailure
+            }
+        }
+
+        // 3. Encrypt + durably persist it.
+        val persist = storage.setToken(origin, uname, tokenInfo.token)
+        if (persist != TokenPersistResult.Success) {
+            diagLog(android.util.Log.WARN, "loginOnboarding: tokenPersistenceFailed result=${persist::class.simpleName}")
+            cleanupPartialOnboarding(origin, uname, tokenInfo)
+            return LoginCompletionResult.PersistenceFailure
+        }
+
+        // 4. Verify the stored token with an authenticated bearer request.
+        if (!RommSyncApi.verifyBearerToken(client, origin, tokenInfo.token)) {
+            diagLog(android.util.Log.WARN, "loginOnboarding: tokenVerificationFailed")
+            cleanupPartialOnboarding(origin, uname, tokenInfo)
+            return LoginCompletionResult.TokenVerificationFailure
+        }
+
+        return LoginCompletionResult.Success(verifiedUser, tokenInfo.token)
+    }
+
+    /** Removes any partial local completion state and best-effort revokes the newly-created server token. */
+    private fun cleanupPartialOnboarding(origin: String, username: String, tokenInfo: ClientTokenInfo?) {
+        sessionStore.clear()
+        clientTokenStorage?.clearToken(origin, username)
+        tokenInfo?.let { info ->
+            runCatching { RommSyncApi.revokeClientToken(client, origin, info.id) }
+        }
+    }
+
+    private fun mapLoginFailure(failure: AuthFlowResult.Failure): LoginCompletionResult = when (failure.error) {
+        AuthError.INVALID_CREDENTIALS -> LoginCompletionResult.InvalidCredentials
+        AuthError.TLS_ERROR -> LoginCompletionResult.TlsFailure
+        AuthError.NETWORK_ERROR, AuthError.POST_LOGIN_HEARTBEAT_FAILED -> LoginCompletionResult.NetworkFailure
+        AuthError.SERVER_ERROR, AuthError.VERIFICATION_FAILED, AuthError.LOGIN_NOT_AVAILABLE, AuthError.ORIGIN_NOT_CONFIGURED ->
+            LoginCompletionResult.ServerFailure
+    }
+
+    /**
+     * Suspends until the OkHttp call completes, cancelling the call when the
+     * enclosing coroutine is cancelled so ViewModel teardown aborts the request.
+     */
+    private suspend fun executeValidationCall(
+        client: OkHttpClient,
+        request: Request,
+        origin: String,
+    ): ServerValidationResult {
+        return suspendCancellableCoroutine { cont ->
+            val call = client.newCall(request)
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (!cont.isCancelled) cont.resume(classifyValidationTransport(e))
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    if (!cont.isCancelled) cont.resume(classifyValidationResponse(response, origin))
+                }
+            })
+        }
+    }
+
+    private fun classifyValidationResponse(response: Response, origin: String): ServerValidationResult {
+        return try {
+            // 3xx: redirects are disabled; any redirect is NOT a RomM server.
+            if (response.code in 300..399) return ServerValidationResult.NotRomm
+            if (!response.isSuccessful) return ServerValidationResult.NotRomm
+
+            val body = response.body?.string()
+            if (body == null || body.isBlank()) return ServerValidationResult.NotRomm
+
+            val parse = HeartbeatParser.parse(body)
+            val heartbeat = parse.response ?: return ServerValidationResult.NotRomm
+
+            // Unrelated/malformed JSON that parsed to all-defaults (no version, setup not
+            // flagged complete) is not a structurally valid RomM heartbeat.
+            if (!heartbeat.isReachable()) return ServerValidationResult.NotRomm
+
+            when {
+                !heartbeat.setupComplete -> ServerValidationResult.SetupIncomplete
+                !heartbeat.userpassEnabled -> ServerValidationResult.UserpassDisabled
+                else -> ServerValidationResult.Valid(origin = origin, heartbeat = heartbeat)
+            }
+        } finally {
+            response.close()
+        }
+    }
+
+    private fun classifyValidationTransport(e: IOException): ServerValidationResult {
+        val cause = e.cause
+        val isTls = e is javax.net.ssl.SSLException ||
+            cause is javax.net.ssl.SSLException ||
+            e.javaClass.name.contains("SSL", ignoreCase = true) ||
+            cause?.javaClass?.name?.contains("SSL", ignoreCase = true) == true
+        return if (isTls) ServerValidationResult.TlsFailure else ServerValidationResult.NetworkFailure
     }
 
     private fun recordIfSuccessful(origin: String, result: AuthFlowResult, forceReplaceToken: Boolean) {
@@ -232,12 +443,12 @@ class AuthRepository(
             val result = RommSyncApi.acquireClientToken(
                 client = client,
                 origin = origin,
-                scopes = CLIENT_TOKEN_SCOPES,
+                scopes = RommClientTokenScopes.FOREGROUND_NATIVE,
             )
             when (result) {
                 is ClientTokenAcquireResult.Success -> {
-                    storage.setToken(origin, uname, result.info.token)
-                    diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: acquired+persisted scopes=${CLIENT_TOKEN_SCOPES}")
+                    val persist = storage.setToken(origin, uname, result.info.token)
+                    diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: acquired+persisted scopes=${RommClientTokenScopes.FOREGROUND_NATIVE} persist=${persist::class.simpleName}")
                 }
                 is ClientTokenAcquireResult.Failure -> {
                     val httpCode = result.httpCode ?: -1
@@ -251,16 +462,9 @@ class AuthRepository(
     }
 
     companion object {
-        /**
-         * Minimum scopes required for device registration, save upload via Bearer token, and
-         * play-session reporting (needed for "Continue Playing").
-         * RomM's `POST /api/client-tokens` requires exact scope strings; the generic
-         * `assets`/`device` shorthand is rejected by the pinned backend contract.
-         */
-        private val CLIENT_TOKEN_SCOPES = listOf(
-            "assets.read", "assets.write",
-            "devices.read", "devices.write",
-            "roms.user.read", "roms.user.write",
-        )
+        /** Default bounded timeouts for the typed heartbeat validation client (connect/read/call). */
+        internal const val VALIDATE_CONNECT_TIMEOUT_SECONDS = 5L
+        internal const val VALIDATE_READ_TIMEOUT_SECONDS = 10L
+        internal const val VALIDATE_CALL_TIMEOUT_SECONDS = 15L
     }
 }

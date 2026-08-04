@@ -73,21 +73,23 @@ data class RommOrigin(
         /**
          * Parses a RomM origin URL. Normalizes trailing slashes from path.
          * Returns null for invalid URIs.
+         *
+         * Delegates to [RommServerAddress.parseStructure] so parsing agrees with
+         * the shared canonicalizer on scheme/host/port/base-path (including IPv6
+         * literals and IDN). Structural only — private-LAN HTTP enforcement is a
+         * separate concern handled by [RommServerAddress.parseAndNormalize] at the
+         * configuration/request boundary, so same-origin/cookie checks here accept
+         * any valid http/https origin.
          */
         fun parse(origin: String): RommOrigin? {
-            if (origin.isBlank()) return null
-            return try {
-                val uri = URI(origin)
-                // Strip trailing slashes from path
-                val normalizedPath = uri.path?.trimEnd('/') ?: ""
-                RommOrigin(
-                    scheme = uri.scheme ?: "https",
-                    host = uri.host ?: "",
-                    port = uri.port,
-                    path = normalizedPath
+            return when (val result = RommServerAddress.parseStructure(origin)) {
+                is ServerAddressResult.Invalid -> null
+                is ServerAddressResult.Valid -> RommOrigin(
+                    scheme = result.scheme,
+                    host = result.host,
+                    port = result.port ?: -1,
+                    path = result.basePath,
                 )
-            } catch (_: Exception) {
-                null
             }
         }
 

@@ -321,6 +321,8 @@ data class ClientToken(val raw: String) {
 data class ClientTokenInfo(
     val token: ClientToken,
     val expiresAtEpochSeconds: Long?,
+    /** Server-side token id (0 when the response omitted it); used for best-effort revocation. */
+    val id: Long = 0,
 )
 
 sealed interface ClientTokenAcquireResult {
@@ -470,6 +472,7 @@ object RommSyncApi {
         else ClientTokenInfo(
             token = ClientToken(json.raw_token),
             expiresAtEpochSeconds = json.expires_at?.let { Instant.parse(it).epochSecond },
+            id = json.id,
         )
     } catch (_: Exception) {
         null
@@ -592,6 +595,49 @@ object RommSyncApi {
             diagLog(android.util.Log.WARN, "RommSyncApi.acquireClientToken: ioError $error")
             ClientTokenAcquireResult.Failure(error)
         }
+    }
+
+    /**
+     * `GET /api/users/me` authenticated with `Authorization: Bearer <token>`.
+     * Returns true only when the server answers 200 with a parseable user — used
+     * to confirm a freshly-persisted client token actually works before onboarding
+     * returns success. Failure is boolean (no OkHttp/Throwable leaks upward).
+     */
+    fun verifyBearerToken(client: okhttp3.OkHttpClient, origin: String, token: ClientToken): Boolean {
+        if (origin.isBlank()) return false
+        val url = apiUrl(origin, "users/me") ?: return false
+        val request = okhttp3.Request.Builder().url(url)
+            .header("Authorization", "Bearer ${token.raw}")
+            .get()
+            .build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful && parseVerifiedUserOrNull(response.body?.string()) != null
+            }
+        } catch (e: IOException) {
+            false
+        }
+    }
+
+    /**
+     * Best-effort server-side revocation of a client token (`DELETE /api/client-tokens/{id}`).
+     * Never throws; callers (onboarding cleanup) invoke this only to reduce orphaned
+     * tokens on the server and must not depend on its outcome.
+     */
+    fun revokeClientToken(client: okhttp3.OkHttpClient, origin: String, tokenId: Long) {
+        if (origin.isBlank() || tokenId <= 0) return
+        val url = apiUrl(origin, "client-tokens/$tokenId") ?: return
+        val request = okhttp3.Request.Builder().url(url).delete().build()
+        try {
+            client.newCall(request).execute().use { }
+        } catch (e: IOException) {
+            diagLog(android.util.Log.WARN, "RommSyncApi.revokeClientToken: failed ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun parseVerifiedUserOrNull(body: String?): com.romm.androidtv.network.VerifiedUser? {
+        if (body == null || body.isBlank()) return null
+        return com.romm.androidtv.network.parseVerifiedUser(body)
     }
 
     /** `POST /api/sync/negotiate`. */

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">RomM TV</string>
+    <string name="app_name">RomMulus</string>
 
     <!-- Controller Settings UI -->
     <string name="controller_settings_title">Controller Settings</string>
@@ -36,4 +36,43 @@
     <string name="controller_capture_dialog_timeout">No input detected</string>
     <string name="controller_capture_dialog_no_device">Connect %1$s to remap inputs</string>
     <string name="controller_capture_dialog_connected_label">Connected: </string>
+
+    <!-- First-run Onboarding -->
+    <string name="onboarding_logo_description">RomMulus</string>
+    <string name="onboarding_welcome_headline">Welcome to RomMulus</string>
+    <string name="onboarding_welcome_body">Welcome to RomMulus, a companion app to RomM. Let\u2019s get you setup!</string>
+    <string name="onboarding_continue">Continue</string>
+
+    <string name="onboarding_server_headline">Connect to your RomM server</string>
+    <string name="onboarding_server_instruction">Please enter your RomM server\u2019s URL</string>
+    <string name="onboarding_server_label">RomM Server URL</string>
+    <string name="onboarding_server_placeholder">https://romm.example.com</string>
+    <string name="onboarding_server_example">Example: https://romm.example.com or http://192.168.1.50:8080</string>
+    <string name="onboarding_server_http_warning">This connection is not encrypted. Only use HTTP on a network you trust.</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_next_loading">Checking\u2026</string>
+
+    <!-- Server validation errors (copy must match OnboardingViewModel literals) -->
+    <string name="onboarding_server_error_not_romm">URL does not resolve to a valid RomM Server</string>
+    <string name="onboarding_server_error_setup">This RomM server has not completed setup</string>
+    <string name="onboarding_server_error_userpass">Username/password login is disabled on this RomM server</string>
+    <string name="onboarding_server_error_public_http">This server address is not secure. Use HTTPS, or an HTTP address on a private network.</string>
+
+    <string name="onboarding_credentials_headline">Sign in to RomM</string>
+    <string name="onboarding_credentials_instruction">Please enter your username and password</string>
+    <string name="onboarding_username_label">Username</string>
+    <string name="onboarding_password_label">Password</string>
+    <string name="onboarding_login">Login</string>
+    <string name="onboarding_login_loading">Signing in\u2026</string>
+    <string name="onboarding_connecting_to">Connecting to %1$s</string>
+
+    <!-- Login errors (copy must match OnboardingViewModel literals) -->
+    <string name="onboarding_login_error_invalid">Invalid Username/Password for %1$s, please press the Back Button if you need to change the URL</string>
+    <string name="onboarding_login_error_network">Unable to reach %1$s. Check your connection and try again.</string>
+    <string name="onboarding_login_error_tls">Could not verify the security certificate for %1$s</string>
+    <string name="onboarding_login_error_server">RomM returned an error while signing in. Please try again.</string>
+    <string name="onboarding_login_error_verification">Login succeeded, but the RomM user could not be verified</string>
+    <string name="onboarding_login_error_persist">Login succeeded, but this device could not save your sign-in. Please try again.</string>
+    <string name="onboarding_login_error_empty">Username and password are required</string>
+    <string name="onboarding_server_error_persistence">Could not save this server address. Please try again.</string>
 </resources>

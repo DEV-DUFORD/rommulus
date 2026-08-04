@@ -9,6 +9,7 @@ import com.romm.androidtv.romm.ClientToken
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -380,16 +381,367 @@ class AuthRepositoryTest {
         }
     }
 
+    @Nested
+    @DisplayName("validateServer classification")
+    inner class ServerValidation {
+
+        private fun validHeartbeat(setup: Boolean = true, userpass: Boolean = true) =
+            """{"version":"5.0.0","setup_complete":$setup,"userpass_enabled":$userpass,"emulatorjs_enabled":true}"""
+
+        @Test
+        fun `valid heartbeat at root origin returns Valid with origin and heartbeat`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody(validHeartbeat()))
+
+                val result = repository.validateServer(baseUrl())
+
+                assertThat(result).isInstanceOf(ServerValidationResult.Valid::class.java)
+                val valid = result as ServerValidationResult.Valid
+                assertThat(valid.origin).isEqualTo(baseUrl())
+                assertThat(valid.heartbeat.version).isEqualTo("5.0.0")
+                assertThat(valid.heartbeat.canLogin()).isTrue()
+                assertThat(server.takeRequest().path).isEqualTo("/api/heartbeat")
+            }
+        }
+
+        @Test
+        fun `valid heartbeat under a base path preserves the base path`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody(validHeartbeat()))
+                val basePathOrigin = baseUrl() + "/romm"
+
+                val result = repository.validateServer(basePathOrigin)
+
+                assertThat(result).isInstanceOf(ServerValidationResult.Valid::class.java)
+                assertThat((result as ServerValidationResult.Valid).origin).isEqualTo(basePathOrigin)
+                assertThat(server.takeRequest().path).isEqualTo("/romm/api/heartbeat")
+            }
+        }
+
+        @Test
+        fun `setup incomplete is classified SetupIncomplete`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody(validHeartbeat(setup = false)))
+
+                val result = repository.validateServer(baseUrl())
+
+                assertThat(result).isEqualTo(ServerValidationResult.SetupIncomplete)
+            }
+        }
+
+        @Test
+        fun `userpass disabled is classified UserpassDisabled`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody(validHeartbeat(userpass = false)))
+
+                val result = repository.validateServer(baseUrl())
+
+                assertThat(result).isEqualTo(ServerValidationResult.UserpassDisabled)
+            }
+        }
+
+        @Test
+        fun `html body is classified NotRomm`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>Not RomM</body></html>"))
+
+                assertThat(repository.validateServer(baseUrl())).isEqualTo(ServerValidationResult.NotRomm)
+            }
+        }
+
+        @Test
+        fun `empty body is classified NotRomm`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody(""))
+
+                assertThat(repository.validateServer(baseUrl())).isEqualTo(ServerValidationResult.NotRomm)
+            }
+        }
+
+        @Test
+        fun `malformed json is classified NotRomm`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody("not json {"))
+
+                assertThat(repository.validateServer(baseUrl())).isEqualTo(ServerValidationResult.NotRomm)
+            }
+        }
+
+        @Test
+        fun `unrelated json is classified NotRomm`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody("""{"foo":"bar","baz":1}"""))
+
+                assertThat(repository.validateServer(baseUrl())).isEqualTo(ServerValidationResult.NotRomm)
+            }
+        }
+
+        @Test
+        fun `401 403 404 500 are all classified NotRomm`() {
+            runBlocking {
+                for (code in listOf(401, 403, 404, 500)) {
+                    server.enqueue(MockResponse().setResponseCode(code))
+                    assertThat(repository.validateServer(baseUrl()))
+                        .`as`("code %s", code)
+                        .isEqualTo(ServerValidationResult.NotRomm)
+                }
+            }
+        }
+
+        @Test
+        fun `3xx redirects are not followed and classified NotRomm`() {
+            runBlocking {
+                for (code in listOf(301, 302, 307, 308)) {
+                    server.enqueue(
+                        MockResponse().setResponseCode(code).setHeader("Location", "https://elsewhere.example.com")
+                    )
+                    assertThat(repository.validateServer(baseUrl()))
+                        .`as`("code %s", code)
+                        .isEqualTo(ServerValidationResult.NotRomm)
+                }
+                // Redirects are not followed: exactly one request per validation.
+                assertThat(server.requestCount).isEqualTo(4)
+            }
+        }
+
+        @Test
+        fun `public http origin is rejected as InsecurePublicHttp without a network call`() {
+            runBlocking {
+                val result = repository.validateServer("http://romm.example.com")
+
+                assertThat(result).isEqualTo(ServerValidationResult.InsecurePublicHttp)
+                assertThat(server.requestCount).isEqualTo(0)
+            }
+        }
+
+        @Test
+        fun `blank origin is classified InvalidAddress`() {
+            runBlocking {
+                assertThat(repository.validateServer("")).isEqualTo(ServerValidationResult.InvalidAddress)
+                assertThat(repository.validateServer("   ")).isEqualTo(ServerValidationResult.InvalidAddress)
+                assertThat(server.requestCount).isEqualTo(0)
+            }
+        }
+
+        @Test
+        fun `unsupported scheme is classified InvalidAddress`() {
+            runBlocking {
+                assertThat(repository.validateServer("ftp://romm.example.com")).isEqualTo(ServerValidationResult.InvalidAddress)
+                assertThat(server.requestCount).isEqualTo(0)
+            }
+        }
+
+        @Test
+        fun `disconnect is classified NetworkFailure`() {
+            runBlocking {
+                server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+
+                assertThat(repository.validateServer(baseUrl())).isEqualTo(ServerValidationResult.NetworkFailure)
+            }
+        }
+
+        @Test
+        fun `read timeout is classified NetworkFailure`() {
+            runBlocking {
+                server.enqueue(
+                    MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+                )
+                // Use tiny timeouts so the bounded call completes quickly in the test.
+                assertThat(repository.validateServer(baseUrl(), readTimeoutSeconds = 1, callTimeoutSeconds = 1))
+                    .isEqualTo(ServerValidationResult.NetworkFailure)
+            }
+        }
+
+        @Test
+        fun `tls failure is classified TlsFailure`() {
+            runBlocking {
+                // A plain TCP listener that answers a TLS ClientHello with an HTTP response.
+                // The TLS handshake fails with an SSLException instead of hanging/timing out.
+                val plainSocket = java.net.ServerSocket(0)
+                val port = plainSocket.localPort
+                Thread {
+                    runCatching {
+                        plainSocket.accept().use { s ->
+                            s.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                        }
+                    }
+                }.start()
+                try {
+                    val origin = "https://127.0.0.1:$port"
+                    assertThat(
+                        repository.validateServer(origin, connectTimeoutSeconds = 1, readTimeoutSeconds = 1, callTimeoutSeconds = 2)
+                    ).isEqualTo(ServerValidationResult.TlsFailure)
+                } finally {
+                    plainSocket.close()
+                }
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("loginOnboarding")
+    inner class LoginOnboarding {
+
+        private lateinit var tokenStorage: FakeClientTokenStorage
+        private lateinit var repo: AuthRepository
+
+        @BeforeEach
+        fun setUp() {
+            tokenStorage = FakeClientTokenStorage()
+            val cookieSync = RomMCookieSync(CookieManager(null, CookiePolicy.ACCEPT_ALL))
+            sessionStore = SessionStore(FakeSharedPreferences())
+            repo = AuthRepository(client, cookieSync, sessionStore, tokenStorage)
+        }
+
+        private fun enqueueAuthSuccess() {
+            // POST /api/login
+            server.enqueue(MockResponse().setResponseCode(200))
+            // heartbeat after login
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"version":"5.0.0","setup_complete":true,"userpass_enabled":true,"emulatorjs_enabled":true}"""
+                )
+            )
+            // /api/users/me (cookie-authenticated)
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+        }
+
+        private fun enqueueClientToken(raw: String = "rmm_onboard_token", id: Long = 1) {
+            server.enqueue(
+                MockResponse().setResponseCode(201).setBody(
+                    """{"id": $id, "name": "romm-android-tv", "scopes": ["me.read"],
+                        "raw_token": "$raw", "expires_at": null}"""
+                )
+            )
+        }
+
+        @Test
+        fun `happy path persists session token and returns Success`() {
+            runBlocking {
+                enqueueAuthSuccess()
+                enqueueClientToken()
+                // bearer verification /api/users/me
+                server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+
+                val result = repo.loginOnboarding(baseUrl(), "root", "hunter2".toCharArray())
+
+                assertThat(result).isInstanceOf(LoginCompletionResult.Success::class.java)
+                val success = result as LoginCompletionResult.Success
+                assertThat(success.verifiedUser.username).isEqualTo("root")
+                assertThat(success.durableClientToken.raw).isEqualTo("rmm_onboard_token")
+                assertThat(sessionStore.current()?.username).isEqualTo("root")
+                assertThat(tokenStorage.storedTokens[listOf(baseUrl(), "root")]).isEqualTo("rmm_onboard_token")
+                assertThat(server.requestCount).isEqualTo(5)
+            }
+        }
+
+        @Test
+        fun `invalid credentials returns InvalidCredentials`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(401))
+
+                val result = repo.loginOnboarding(baseUrl(), "root", "wrong".toCharArray())
+
+                assertThat(result).isEqualTo(LoginCompletionResult.InvalidCredentials)
+                assertThat(sessionStore.current()).isNull()
+                assertThat(tokenStorage.storedKeys).isEmpty()
+            }
+        }
+
+        @Test
+        fun `token creation failure is fatal and clears partial state`() {
+            runBlocking {
+                enqueueAuthSuccess()
+                // POST /api/client-tokens fails with 500
+                server.enqueue(MockResponse().setResponseCode(500))
+
+                val result = repo.loginOnboarding(baseUrl(), "root", "hunter2".toCharArray())
+
+                assertThat(result).isEqualTo(LoginCompletionResult.TokenCreationFailure)
+                assertThat(sessionStore.current()).isNull()
+                assertThat(tokenStorage.storedKeys).isEmpty()
+            }
+        }
+
+        @Test
+        fun `token verification failure clears partial state`() {
+            runBlocking {
+                enqueueAuthSuccess()
+                enqueueClientToken()
+                // bearer verification /api/users/me -> 401
+                server.enqueue(MockResponse().setResponseCode(401))
+                // best-effort revoke DELETE /api/client-tokens/1
+                server.enqueue(MockResponse().setResponseCode(204))
+
+                val result = repo.loginOnboarding(baseUrl(), "root", "hunter2".toCharArray())
+
+                assertThat(result).isEqualTo(LoginCompletionResult.TokenVerificationFailure)
+                assertThat(sessionStore.current()).isNull()
+                assertThat(tokenStorage.storedKeys).isEmpty()
+                val requests = (0 until server.requestCount).map { server.takeRequest() }
+                val revoke = requests.last()
+                assertThat(revoke.method).isEqualTo("DELETE")
+                assertThat(revoke.path).isEqualTo("/api/client-tokens/1")
+            }
+        }
+
+        @Test
+        fun `persistence failure returns PersistenceFailure and clears state`() {
+            runBlocking {
+                enqueueAuthSuccess()
+                enqueueClientToken()
+                // best-effort revoke DELETE /api/client-tokens/1 during cleanup
+                server.enqueue(MockResponse().setResponseCode(204))
+                tokenStorage.failPersist = true
+
+                val result = repo.loginOnboarding(baseUrl(), "root", "hunter2".toCharArray())
+
+                assertThat(result).isEqualTo(LoginCompletionResult.PersistenceFailure)
+                assertThat(sessionStore.current()).isNull()
+                // token was cleared from storage (partial state removed)
+                assertThat(tokenStorage.storedKeys).isEmpty()
+            }
+        }
+
+        @Test
+        fun `password CharArray is zeroed after terminal outcomes`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(401))
+                val password = "hunter2".toCharArray()
+
+                repo.loginOnboarding(baseUrl(), "root", password)
+
+                assertThat(String(password)).isEqualTo("\u0000".repeat(7))
+            }
+        }
+
+        @Test
+        fun `no duplicate login - second login reuses flow`() {
+            runBlocking {
+                enqueueAuthSuccess()
+                enqueueClientToken()
+                server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+
+                val first = repo.loginOnboarding(baseUrl(), "root", "hunter2".toCharArray())
+                assertThat(first).isInstanceOf(LoginCompletionResult.Success::class.java)
+                assertThat(server.requestCount).isEqualTo(5)
+            }
+        }
+    }
+
     /** In-memory fake ClientTokenStorage for unit testing. */
     private class FakeClientTokenStorage : ClientTokenStorage {
         private val tokens = mutableMapOf<List<String>, String>()
+        var failPersist: Boolean = false
 
         override fun getToken(origin: String, username: String): ClientToken? {
             return tokens[listOf(origin, username)]?.let { ClientToken(it) }
         }
 
-        override fun setToken(origin: String, username: String, token: ClientToken) {
+        override fun setToken(origin: String, username: String, token: ClientToken): TokenPersistResult {
+            if (failPersist) return TokenPersistResult.Failure
             tokens[listOf(origin, username)] = token.raw
+            return TokenPersistResult.Success
         }
 
         override fun clearToken(origin: String, username: String) {

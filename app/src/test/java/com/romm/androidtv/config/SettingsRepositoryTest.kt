@@ -1,5 +1,6 @@
 package com.romm.androidtv.config
 
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -45,6 +46,45 @@ class SettingsRepositoryTest {
         val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "")
 
         assertThat(repo.currentProfile()).isEqualTo(ServerProfile.UNCONFIGURED)
+    }
+
+    @Test
+    fun `persistValidatedOrigin persists and reads back the canonical value`() {
+        val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "https://build-default.example.com")
+
+        val persisted = runBlocking { repo.persistValidatedOrigin("HTTPS://Romm.Example.com") }
+
+        assertThat(persisted).isTrue()
+        assertThat(repo.currentProfile().origin).isEqualTo("https://romm.example.com")
+    }
+
+    @Test
+    fun `persistValidatedOrigin rejects public http origin`() {
+        val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "https://build-default.example.com")
+
+        val persisted = runBlocking { repo.persistValidatedOrigin("http://romm.example.com") }
+
+        assertThat(persisted).isFalse()
+        assertThat(repo.currentProfile().origin).isEqualTo("https://build-default.example.com")
+    }
+
+    @Test
+    fun `persistValidatedOrigin rejects blank and malformed origins`() {
+        val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "https://build-default.example.com")
+
+        assertThat(runBlocking { repo.persistValidatedOrigin("") }).isFalse()
+        assertThat(runBlocking { repo.persistValidatedOrigin("ftp://romm.example.com") }).isFalse()
+        assertThat(repo.currentProfile().origin).isEqualTo("https://build-default.example.com")
+    }
+
+    @Test
+    fun `persistValidatedOrigin preserves base path in canonical origin`() {
+        val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "https://build-default.example.com")
+
+        val persisted = runBlocking { repo.persistValidatedOrigin("https://romm.example.com/romm/") }
+
+        assertThat(persisted).isTrue()
+        assertThat(repo.currentProfile().origin).isEqualTo("https://romm.example.com/romm")
     }
 
     @Test

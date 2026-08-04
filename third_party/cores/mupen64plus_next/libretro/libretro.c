@@ -139,6 +139,7 @@ static bool     load_game_successful = false;
 static bool     context_setup_first_init = false;
 
 bool libretro_swap_buffer;
+bool libretro_video_enabled = true;
 
 uint32_t *blitter_buf = NULL;
 uint32_t *blitter_buf_lock = NULL;
@@ -2042,8 +2043,14 @@ void retro_unload_game(void)
 
 void retro_run (void)
 {
+    const int av_enable_video = 1 << 0;
+    const int av_enable_audio = 1 << 1;
     libretro_swap_buffer = false;
     static bool updated = false;
+    int av_enable = av_enable_audio | av_enable_video;
+
+    environ_cb(RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE, &av_enable);
+    libretro_video_enabled = (av_enable & av_enable_video) != 0;
 
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
        update_variables(false);
@@ -2069,7 +2076,7 @@ void retro_run (void)
        glsm_ctl(GLSM_CTL_STATE_UNBIND, NULL);
     }
     
-    if (libretro_swap_buffer)
+    if (libretro_video_enabled && libretro_swap_buffer)
     {
        if(current_rdp_type == RDP_PLUGIN_GLIDEN64)
        {
@@ -2091,7 +2098,7 @@ void retro_run (void)
        }
 #endif
     }
-    else if(EnableFrameDuping)
+    else if(libretro_video_enabled && EnableFrameDuping)
     {
         // screen_pitch will be 0 for GLN
         video_cb(NULL, retro_screen_width, retro_screen_height, screen_pitch);

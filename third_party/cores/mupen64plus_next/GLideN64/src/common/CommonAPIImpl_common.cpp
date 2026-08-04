@@ -19,6 +19,7 @@
 #include "Graphics/Context.h"
 #include <DisplayWindow.h>
 #include <osal_keys.h>
+#include <libretro_private.h>
 
 PluginAPI & PluginAPI::get()
 {
@@ -154,6 +155,11 @@ private:
 void PluginAPI::ProcessDList()
 {
 	LOG(LOG_APIFUNC, "ProcessDList");
+	if (!libretro_video_enabled) {
+		*REG.MI_INTR |= MI_INTR_DP;
+		CheckInterrupts();
+		return;
+	}
 #ifdef RSPTHREAD
 	_callAPICommand(ProcessDListCommand());
 #else
@@ -164,6 +170,11 @@ void PluginAPI::ProcessDList()
 void PluginAPI::ProcessRDPList()
 {
 	LOG(LOG_APIFUNC, "ProcessRDPList");
+	if (!libretro_video_enabled) {
+		*(u32*)REG.DPC_CURRENT = *(u32*)REG.DPC_END;
+		gDPFullSync();
+		return;
+	}
 #ifdef RSPTHREAD
 	_callAPICommand(ProcessRDPListCommand());
 #else

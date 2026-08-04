@@ -1,6 +1,8 @@
 package com.romm.androidtv.config
 
 import android.content.SharedPreferences
+import com.romm.androidtv.network.RommServerAddress
+import com.romm.androidtv.network.ServerAddressResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +31,25 @@ class SettingsRepository(
     /** Persists a new origin. Pass a blank string to explicitly mark the profile unconfigured. */
     fun setOrigin(origin: String) {
         prefs.edit().putString(KEY_ORIGIN, origin).apply()
+    }
+
+    /**
+     * Durable validated-origin write used by onboarding. Normalizes [origin]
+     * through [RommServerAddress.parseAndNormalize] (so public HTTP and other
+     * invalid forms are rejected), commits synchronously via `commit()`, and
+     * verifies the canonical value reads back exactly before returning.
+     *
+     * Returns `true` only when the origin was valid AND durably persisted AND
+     * read back equal to the canonical value.
+     */
+    suspend fun persistValidatedOrigin(origin: String): Boolean {
+        val canonical = when (val result = RommServerAddress.parseAndNormalize(origin)) {
+            is ServerAddressResult.Invalid -> return false
+            is ServerAddressResult.Valid -> result.origin
+        }
+        val committed = prefs.edit().putString(KEY_ORIGIN, canonical).commit()
+        if (!committed) return false
+        return prefs.getString(KEY_ORIGIN, null) == canonical
     }
 
     /** Removes any persisted override, reverting [currentProfile] to [defaultOrigin]. */

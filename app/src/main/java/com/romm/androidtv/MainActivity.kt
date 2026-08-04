@@ -48,6 +48,12 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import com.romm.androidtv.auth.AuthRepository
 import com.romm.androidtv.auth.SessionStore
+import com.romm.androidtv.onboarding.OnboardingEffect
+import com.romm.androidtv.onboarding.OnboardingRoutingPolicy
+import com.romm.androidtv.onboarding.OnboardingStep
+import com.romm.androidtv.onboarding.OnboardingViewModel
+import com.romm.androidtv.onboarding.OnboardingViewModelFactory
+import com.romm.androidtv.onboarding.ui.OnboardingScreen
 import com.romm.androidtv.romm.ClientTokenStore
 import com.romm.androidtv.cache.CacheDatabase
 import com.romm.androidtv.cache.ContentCache
@@ -111,11 +117,16 @@ fun Modifier.tvSelect(onSelect: () -> Unit): Modifier = onKeyEvent { event ->
 /**
  * TV-launchable Activity with deterministic D-pad focus.
  *
- * Startup flow:
- * 1. App launches directly into Native Library (currentScreen defaults to NATIVE_HOME).
- * 2. In the background, cookies are imported and any existing session is verified/refreshed.
- * 3. If no valid session exists, the user logs in from Native Settings — there is no
- *    separate login screen; Native Library and Settings handle authentication natively.
+ * Startup flow (Phase 5a):
+ * 1. A root AppMode gate runs synchronously before the first composition. When a coherent
+ *    session record, a matching durable client token, and the active profile origin all agree,
+ *    the app boots straight into Native Library (AppMode.MAIN). Otherwise it boots into the
+ *    first-run onboarding flow (AppMode.ONBOARDING).
+ * 2. Onboarding completes when a durable token is created and verified; the app then switches
+ *    to AppMode.MAIN and renders Native Library (currentScreen = NATIVE_HOME). The user can
+ *    never navigate Back into onboarding afterwards.
+ * 3. Library ViewModels (HomeViewModel, etc.) are constructed ONLY inside the MAIN branch, so
+ *    onboarding never issues unauthorized library requests.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -128,6 +139,31 @@ class MainActivity : ComponentActivity() {
     }
 
     private var currentScreen by mutableStateOf(Screen.NATIVE_HOME)
+
+    /**
+     * Root launch mode (Phase 5a): ONBOARDING renders the first-run flow; MAIN renders the
+     * native library. Selected SYNCHRONOUSLY in onCreate before setContent so onboarding never
+     * flashes Home or constructs library ViewModels (spec sections 2.2, 5.1).
+     */
+    private var appMode by mutableStateOf(OnboardingRoutingPolicy.AppMode.MAIN)
+
+    /**
+     * Bumped each time the app (re)enters onboarding so a fresh [OnboardingViewModel] is
+     * created per session (keyed by this value). A completed instance is never reused —
+     * e.g. after Settings invalidates the session and routes back to onboarding.
+     */
+    private var onboardingSessionId by mutableStateOf(0)
+
+    /** The currently-active onboarding ViewModel, used for Activity-level Back dispatch. */
+    private var activeOnboardingViewModel: OnboardingViewModel? = null
+
+    /**
+     * Desired first step + username prefill for the NEXT onboarding session (Phase 5a).
+     * Fresh installs default to WELCOME/""; Settings invalidation requests SERVER; a
+     * definitively-invalid bearer token requests CREDENTIALS with the known username.
+     */
+    private var onboardingStartStep by mutableStateOf(OnboardingStep.WELCOME)
+    private var onboardingStartUsername by mutableStateOf("")
 
     // Selected core for the Phase 6 controller-configuration flow (CONTROLLER_SETTINGS.md §7).
     private var selectedControllerCoreId by mutableStateOf<String?>(null)
@@ -200,10 +236,15 @@ class MainActivity : ComponentActivity() {
         SessionStore(getSharedPreferences(SessionStore.PREFS_NAME, MODE_PRIVATE))
     }
 
+    // Durable, encrypted bearer-client token store (origin + username scoped).
+    private val clientTokenStore: com.romm.androidtv.romm.ClientTokenStore by lazy {
+        com.romm.androidtv.romm.ClientTokenStore(this)
+    }
+
     // Auth repository — owns login/session-verification/cookie-sync network calls so
     // MainActivity coordinates navigation rather than owning network internals.
     private val authRepository: AuthRepository by lazy {
-        AuthRepository(okHttpClient, RommOkHttpClient.cookieSyncJar, sessionStore, ClientTokenStore(this))
+        AuthRepository(okHttpClient, RommOkHttpClient.cookieSyncJar, sessionStore, clientTokenStore)
     }
 
     // Phase 3/4 native content pipeline — quota-limited, identity-keyed cache of
@@ -280,7 +321,7 @@ class MainActivity : ComponentActivity() {
     // matching RommWorkerFactory's durable credential rule.
     private val saveSyncCoordinator: SaveSyncCoordinator by lazy {
         val db = com.romm.androidtv.RommApplication.database(this)
-        val tokenStore = com.romm.androidtv.romm.ClientTokenStore(this)
+        val tokenStore = clientTokenStore
         val bearerClient = buildBearerAuthClient(tokenStore)
         val devicePrefs = getSharedPreferences(com.romm.androidtv.romm.DeviceIdentityStore.PREFS_NAME, MODE_PRIVATE)
         SaveSyncCoordinatorImpl(
@@ -300,14 +341,26 @@ class MainActivity : ComponentActivity() {
      * Never imports WebView cookies — follows the durable credential rule from RommWorkerFactory.
      */
     private fun buildBearerAuthClient(tokenStore: com.romm.androidtv.romm.ClientTokenStore): okhttp3.OkHttpClient {
-        return okhttp3.OkHttpClient.Builder()
-            .addInterceptor(com.romm.androidtv.romm.BearerAuthInterceptor {
-                val session = sessionStore.current()
-                session?.let { s ->
+        // Phase 5a: origin-scoped bearer auth (spec section 5.2, 7.4). The interceptor attaches
+        // the stored client token ONLY to same-origin native API requests, so third-party cover
+        // URLs never receive the credential. Cookie import/verification is compatibility
+        // maintenance, NOT the native auth gate.
+        //
+        // Non-throwing by design: with empty/fresh app data the profile origin is blank. We must
+        // NOT crash the UI or construct a bearer client for an invalid origin — fall back to a
+        // plain token-less shared client instead (the "never attach a token to a non-origin"
+        // invariant holds because there is no interceptor at all). A valid bearer client is only
+        // built once a canonical origin exists (i.e. in MAIN mode after onboarding).
+        val origin = RommServerAddress.parseAndNormalize(currentOrigin) as? ServerAddressResult.Valid
+            ?: return RommOkHttpClient.build()
+        return RommOkHttpClient.nativeClient(
+            origin = origin,
+            tokenProvider = {
+                sessionStore.current()?.let { s ->
                     tokenStore.getToken(s.origin, s.username ?: "")?.raw
                 }
-            })
-            .build()
+            },
+        )
     }
 
     // Phase B: Orchestrates pre-launch save-sync preparation. Eliminates duplicated
@@ -344,9 +397,6 @@ class MainActivity : ComponentActivity() {
         com.romm.androidtv.library.ui.NavDestination.SEARCH -> Screen.NATIVE_SEARCH
         com.romm.androidtv.library.ui.NavDestination.SETTINGS -> Screen.NATIVE_SETTINGS
     }
-
-    // Single-flight guard: prevents concurrent auth flow submissions.
-    private var authFlowActive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -389,6 +439,14 @@ class MainActivity : ComponentActivity() {
         // never delegated to WebView.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                // Phase 5a (spec section 5.4): during onboarding, Back drives the step machine
+                // (Welcome → finish, Server → Welcome, Credentials → Server). The editing
+                // text-field wrapper consumes Back while a field is focused, so this
+                // Activity-level handler only fires once the keyboard is dismissed.
+                if (appMode == OnboardingRoutingPolicy.AppMode.ONBOARDING) {
+                    handleOnboardingBack()
+                    return
+                }
                 when (currentScreen) {
                     // finish() exits the activity directly. Calling
                     // onBackPressedDispatcher.onBackPressed() here would re-invoke this
@@ -426,11 +484,26 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        // Startup: verify existing session via lifecycle-aware coroutine. The app always
-        // opens straight into Native Library (currentScreen defaults to NATIVE_HOME); this
-        // just refreshes cookies/session state in the background. If no valid session
-        // exists, the user logs in from Native Settings instead of a separate screen.
+        // Phase 5a: select the root AppMode SYNCHRONOUSLY, before setContent renders its
+        // first branch. This prevents a Home flash and prevents unauthorized library calls
+        // during onboarding (spec sections 2.2, 5.1). MAIN requires a coherent session record
+        // AND a matching durable client token AND canonical origin agreement.
+        val startupProfile = settingsRepository.currentProfile()
+        val startupSession = sessionStore.current()
+        val startupToken = startupSession?.let { s ->
+            clientTokenStore.getToken(s.origin, s.username.orEmpty())
+        }
+        appMode = OnboardingRoutingPolicy.decide(startupSession, startupProfile.origin, startupToken != null)
+        Log.d(DIAG_TAG, "MainActivity.onCreate: appMode=${appMode.name}")
+
+        // Startup: verify existing session via lifecycle-aware coroutine. Runs ONLY in
+        // AppMode.MAIN — during onboarding we must not import cookies or verify a session
+        // (no unauthorized native calls). It refreshes cookies/session state in the background.
         lifecycleScope.launch {
+            if (appMode != OnboardingRoutingPolicy.AppMode.MAIN) {
+                Log.d(TAG, "Startup: skipping session verification (appMode=$appMode)")
+                return@launch
+            }
             val origin = currentOrigin
             Log.d(TAG, "Startup: origin configured=${origin.isNotBlank()}")
             val sessionBefore = sessionStore.current()
@@ -489,9 +562,12 @@ class MainActivity : ComponentActivity() {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Black
-                ) {
-                    when (currentScreen) {
-                        Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
+        ) {
+            if (appMode == OnboardingRoutingPolicy.AppMode.ONBOARDING) {
+                OnboardingHost()
+            } else {
+                when (currentScreen) {
+                Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
                         Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL,
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
                         Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_VERSION_PICKER, Screen.NATIVE_BIOS_CONFIGURATION,
@@ -745,8 +821,16 @@ class MainActivity : ComponentActivity() {
                                                     authRepository,
                                                     BuildConfig.ROMM_ORIGIN,
                                                     onSessionInvalidated = {
+                                                        // Phase 5a (spec section 5.3): a server-origin change invalidated
+                                                        // the session. Route to onboarding (Server step) with the newly
+                                                        // selected origin prefilled by the fresh OnboardingViewModel; do
+                                                        // NOT show Home. SettingsViewModel's clearSessionFn already cleared
+                                                        // the old username + client token.
                                                         verifiedUser = null
-                                                        currentScreen = Screen.NATIVE_HOME
+                                                        authResult = null
+                                                        // Route to onboarding at the SERVER step; the newly selected origin
+                                                        // is prefilled via initialServerInput (currentProfile().origin).
+                                                        enterOnboarding(startStep = OnboardingStep.SERVER)
                                                     },
                                                     onLoginSuccess = {
                                                         // Existing view models may still contain responses fetched
@@ -876,12 +960,127 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    }
+
+    /**
+     * Phase 5a: renders the first-run onboarding flow when [OnboardingRoutingPolicy.AppMode]
+     * is ONBOARDING. Constructs a fresh [OnboardingViewModel] per onboarding session (keyed by
+     * [onboardingSessionId]) so a completed instance is never reused. On
+     * [OnboardingEffect.Completed]: syncs cookies best-effort, flips to MAIN, lands in Native
+     * Library Home, and refreshes surviving library view models. Home's initial focus is placed
+     * by NativeHomeScreen's existing focus behavior.
+     */
+    @Composable
+    private fun OnboardingHost() {
+        val onboardingViewModel: OnboardingViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+            key = "onboarding-${onboardingSessionId}",
+            factory = OnboardingViewModelFactory(
+                validateRommServer = { origin -> authRepository.validateServer(origin) },
+                persistValidatedOrigin = { origin -> settingsRepository.persistValidatedOrigin(origin) },
+                loginToRomm = { origin, username, password -> authRepository.loginOnboarding(origin, username, password) },
+                initialServerInput = settingsRepository.currentProfile().origin,
+                initialStep = onboardingStartStep,
+                initialUsername = onboardingStartUsername,
+            ),
+        )
+        activeOnboardingViewModel = onboardingViewModel
+
+        LaunchedEffect(onboardingViewModel) {
+            onboardingViewModel.effects.collect { effect ->
+                if (effect == OnboardingEffect.Completed) {
+                    // 1. Best-effort cookie sync so any served WebView shares the native session.
+                    runCatching { authRepository.syncCookiesToWebView(settingsRepository.currentProfile().origin) }
+                    // 2–3. Switch to MAIN and land in Native Library Home.
+                    appMode = OnboardingRoutingPolicy.AppMode.MAIN
+                    currentScreen = Screen.NATIVE_HOME
+                    // 4. Refresh any surviving library view models.
+                    libraryRefreshEvents.tryEmit(Unit)
+                    // 5. NativeHomeScreen already places initial focus on Home.
+                }
+            }
+        }
+
+        val state by onboardingViewModel.uiState.collectAsState()
+        OnboardingScreen(
+            state = state,
+            onContinue = onboardingViewModel::onContinue,
+            onServerChanged = onboardingViewModel::onServerChanged,
+            onValidateServer = onboardingViewModel::onValidateServer,
+            onUsernameChanged = onboardingViewModel::onUsernameChanged,
+            onPasswordChanged = onboardingViewModel::onPasswordChanged,
+            onLogin = onboardingViewModel::onLogin,
+            onBack = ::handleOnboardingBack,
+        )
+
+        DisposableEffect(onboardingViewModel) {
+            onDispose {
+                if (activeOnboardingViewModel === onboardingViewModel) {
+                    activeOnboardingViewModel = null
+                }
+            }
+        }
+    }
+
+    /**
+     * Phase 5a Back dispatch (spec section 5.4). Welcome finishes the Activity; Server and
+     * Credentials delegate to [OnboardingViewModel.onBack], which handles step transitions and
+     * password clearing. Called both from the onboarding screen's key handler and the
+     * Activity-level Back callback (mutually exclusive in practice).
+     */
+    private fun handleOnboardingBack() {
+        val vm = activeOnboardingViewModel
+        if (vm == null) {
+            finish()
+            return
+        }
+        when (vm.uiState.value.step) {
+            OnboardingStep.WELCOME -> finish()
+            else -> vm.onBack()
+        }
+    }
+
+    /**
+     * Switches to the onboarding flow with a fresh ViewModel (new session). [startStep]
+     * selects the initial step (WELCOME fresh install, SERVER after Settings invalidation,
+     * CREDENTIALS after a definitively-invalid bearer token) and [prefillUsername] is the
+     * known username to prefill when starting at CREDENTIALS.
+     */
+    private fun enterOnboarding(
+        startStep: OnboardingStep = OnboardingStep.WELCOME,
+        prefillUsername: String = "",
+    ) {
+        onboardingStartStep = startStep
+        onboardingStartUsername = prefillUsername
+        onboardingSessionId++
+        appMode = OnboardingRoutingPolicy.AppMode.ONBOARDING
+    }
+
+    /**
+     * Routes to onboarding CREDENTIALS with [username] prefilled after a DEFINITIVE token or
+     * session failure (spec 5.2.7). Only called after verification confirmed the token is
+     * actually invalid — never on transient network/TLS failures or permission-only errors.
+     */
+    private suspend fun routeToCredentials(username: String?) {
+        withContext(Dispatchers.Main) {
+            preLaunchState = null
+            enterOnboarding(
+                startStep = OnboardingStep.CREDENTIALS,
+                prefillUsername = username.orEmpty(),
+            )
+        }
+    }
 
     // Phase B: recover pending journal entries on resume. If EmulationActivity died
     // without delivering a result, the journal's ADOPTED state is replayed idempotently.
     override fun onResume() {
         super.onResume()
-        emulationResultHandler.recoverPendingSessions()
+        // Phase 5a: do NOT force the sync/emulation lazy chain (emulationResultHandler ->
+        // saveSyncCoordinator -> buildBearerAuthClient) while onboarding is active — with
+        // empty app data the profile origin is blank and the chain must not run at all.
+        // It evaluates lazily only once the app is in MAIN mode with a valid origin.
+        if (appMode == OnboardingRoutingPolicy.AppMode.MAIN) {
+            emulationResultHandler.recoverPendingSessions()
+        }
     }
 
     private fun launchEmulationActivity(spec: com.romm.androidtv.emulation.model.LaunchSpec, savePath: String, candidateMetadata: CandidateSaveMetadata?) {
@@ -1468,44 +1667,62 @@ class MainActivity : ComponentActivity() {
                     val sess = sessionStore.current()
                     val origin = sess?.origin ?: currentOrigin
                     val username = sess?.username
-                    val sessionPresent = sess != null
-                    Log.d(DIAG_TAG, "MainActivity.launchNative: authExpired sessionPresent=$sessionPresent")
-                    val reconciled = if (username != null && origin.isNotBlank()) {
-                        // Verify cookie session is still valid, then force-acquire durable token.
-                        val verifyResult = authRepository.verifySession(origin)
-                        val verifyOk = verifyResult is AuthFlowResult.Success
-                        Log.d(DIAG_TAG, "MainActivity.launchNative: verifySession=${if (verifyOk) "ok" else "fail"}")
-                        if (verifyOk) {
-                            authRepository.forceReconcileClientToken(origin, username)
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
+                    Log.d(DIAG_TAG, "MainActivity.launchNative: authExpired sessionPresent=${sess != null}")
+
+                    // No coherent session to reconcile — token is missing/undecryptable/unknown
+                    // user, or the session was already cleared. Route to Credentials.
+                    if (origin.isBlank() || username.isNullOrBlank()) {
+                        routeToCredentials(username)
+                        return@launch
                     }
 
-                    Log.d(DIAG_TAG, "MainActivity.launchNative: reconciled=$reconciled")
-                    if (reconciled) {
-                        // Retry preparation once after successful reconciliation.
-                        val retryPreparation = saveLaunchOrchestrator.prepare(
-                            romId = spec.romId,
-                            romHash = spec.romHash,
-                            coreId = spec.coreId,
-                            coreBuildRevision = "",
-                            expectedSramSizeBytes = knownSramSize,
-                            fileName = spec.serverSaveFileName,
-                        )
-                        // Dispatch retry result (no recursive auth-expired recovery).
-                        dispatchPreparationResult(retryPreparation, spec, savePath)
-                    } else {
-                        // Reconciliation failed: clear stale session/token and expose auth-expired state.
-                        if (username != null && origin.isNotBlank()) {
-                            Log.d(DIAG_TAG, "MainActivity.launchNative: clearing expired session after reconcile failure")
-                            authRepository.clearExpiredSession(origin, username)
+                    // Verify the cookie session ONCE to distinguish a definitively-invalid token
+                    // from a transient network/TLS failure (spec 5.2.4-5.2.6). Only a definitive
+                    // auth failure (VERIFICATION_FAILED) or a failed token re-acquisition against
+                    // a valid cookie session means the token is actually revoked/expired, and
+                    // only then do we erase the session/token and route to Credentials (5.2.7).
+                    val verifyResult = authRepository.verifySession(origin)
+                    when (verifyResult) {
+                        is AuthFlowResult.Success -> {
+                            // Cookie session is valid; the bearer token was stale/revoked.
+                            // Force-reconcile to acquire a fresh durable token.
+                            val reconciled = authRepository.forceReconcileClientToken(origin, username)
+                            Log.d(DIAG_TAG, "MainActivity.launchNative: reconciled=$reconciled")
+                            if (reconciled) {
+                                // Retry preparation once after successful reconciliation.
+                                val retryPreparation = saveLaunchOrchestrator.prepare(
+                                    romId = spec.romId,
+                                    romHash = spec.romHash,
+                                    coreId = spec.coreId,
+                                    coreBuildRevision = "",
+                                    expectedSramSizeBytes = knownSramSize,
+                                    fileName = spec.serverSaveFileName,
+                                )
+                                // Dispatch retry result (no recursive auth-expired recovery).
+                                dispatchPreparationResult(retryPreparation, spec, savePath)
+                            } else {
+                                // Valid cookie session but token re-acquisition failed: definitive.
+                                Log.d(DIAG_TAG, "MainActivity.launchNative: token reconcile failed — routing to Credentials")
+                                authRepository.clearExpiredSession(origin, username)
+                                routeToCredentials(username)
+                            }
                         }
-                        withContext(Dispatchers.Main) {
-                            preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)
-                                .apply { isAuthExpired = true }
+                        is AuthFlowResult.Failure -> {
+                            if (verifyResult.error == com.romm.androidtv.network.AuthError.VERIFICATION_FAILED) {
+                                // Definitive: token AND cookie session are both invalid.
+                                Log.d(DIAG_TAG, "MainActivity.launchNative: verify failed — routing to Credentials")
+                                authRepository.clearExpiredSession(origin, username)
+                                routeToCredentials(username)
+                            } else {
+                                // Transient network/TLS failure: preserve session + token, stay in Main.
+                                Log.d(DIAG_TAG, "MainActivity.launchNative: transient verify failure — preserving session/token")
+                                withContext(Dispatchers.Main) {
+                                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
+                                        romId = spec.romId,
+                                        romHash = spec.romHash,
+                                    ).apply { isAuthExpired = true }
+                                }
+                            }
                         }
                     }
                 }

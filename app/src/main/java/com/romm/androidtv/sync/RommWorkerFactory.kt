@@ -6,9 +6,11 @@ import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 import com.romm.androidtv.RommApplication
 import com.romm.androidtv.auth.SessionStore
-import com.romm.androidtv.romm.BearerAuthInterceptor
 import com.romm.androidtv.romm.ClientTokenStore
 import com.romm.androidtv.romm.DeviceIdentityStore
+import com.romm.androidtv.network.RommOkHttpClient
+import com.romm.androidtv.network.RommServerAddress
+import com.romm.androidtv.network.ServerAddressResult
 import com.romm.androidtv.romm.DeviceRepository
 import com.romm.androidtv.romm.DeviceRepositoryImpl
 import com.romm.androidtv.romm.RommSyncApi
@@ -70,14 +72,23 @@ class RommWorkerFactory(
             val deviceIdentityStore = DeviceIdentityStore(devicePrefs)
 
             // Cookie-independent OkHttp client for worker execution.
-            val workerClient = OkHttpClient.Builder()
-                .addInterceptor(BearerAuthInterceptor {
-                    val session = sessionStore.current()
-                    session?.let { s ->
-                        tokenStore.getToken(s.origin, s.username ?: "")?.raw
+            // Origin-scoped bearer auth: derives origin from the current session;
+            // falls back to a token-free client if session is absent or origin is invalid.
+            val session = sessionStore.current()
+            val workerClient: OkHttpClient = when {
+                session != null -> {
+                    val parsedOrigin = RommServerAddress.parseAndNormalize(session.origin)
+                    when (parsedOrigin) {
+                        is ServerAddressResult.Valid ->
+                            RommOkHttpClient.nativeClient(parsedOrigin, tokenProvider = {
+                                tokenStore.getToken(session.origin, session.username ?: "")?.raw
+                            })
+                        is ServerAddressResult.Invalid ->
+                            RommOkHttpClient.build()
                     }
-                })
-                .build()
+                }
+                else -> RommOkHttpClient.build()
+            }
 
             val deviceRepo: DeviceRepository = DeviceRepositoryImpl(workerClient, deviceIdentityStore)
 

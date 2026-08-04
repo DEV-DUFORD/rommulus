@@ -263,6 +263,14 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
             return true;
         }
 
+        case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE: {
+            if (data == nullptr) return false;
+            int flags = RETRO_AV_ENABLE_AUDIO;
+            if (videoEnabled_) flags |= RETRO_AV_ENABLE_VIDEO;
+            *static_cast<int*>(data) = flags;
+            return true;
+        }
+
         case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL: {
             return true;
         }

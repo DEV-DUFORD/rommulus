@@ -10,7 +10,10 @@ import com.romm.androidtv.config.ServerProfile
 import com.romm.androidtv.config.SettingsRepository
 import com.romm.androidtv.model.HeartbeatError as NetworkHeartbeatError
 import com.romm.androidtv.network.HeartbeatCallResult
+import com.romm.androidtv.network.InvalidReason
 import com.romm.androidtv.network.RommOrigin
+import com.romm.androidtv.network.RommServerAddress
+import com.romm.androidtv.network.ServerAddressResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -330,15 +333,20 @@ class SettingsViewModel(
     // ---- Validation ----
 
     /** Returns null if [origin] is valid, or a human-readable error string. */
-    internal fun validateOrigin(origin: String): String? {
-        if (origin.isBlank()) return "Server address is required"
-        val parsed = RommOrigin.parse(origin)
-        if (parsed == null) return "Invalid URL format"
-        if (parsed.scheme !in listOf("http", "https")) {
-            return "Only HTTP and HTTPS schemes are supported"
-        }
-        if (parsed.host.isBlank()) return "Host is required"
-        return null
+    internal fun validateOrigin(origin: String): String? = when (
+        val result = RommServerAddress.parseAndNormalize(origin)
+    ) {
+        is ServerAddressResult.Valid -> null
+        is ServerAddressResult.Invalid -> originErrorMessage(result.reason)
+    }
+
+    private fun originErrorMessage(reason: InvalidReason): String = when (reason) {
+        InvalidReason.BLANK -> "Server address is required"
+        InvalidReason.UNSUPPORTED_SCHEME -> "Only HTTP and HTTPS schemes are supported"
+        InvalidReason.MISSING_HOST -> "Host is required"
+        InvalidReason.INSECURE_PUBLIC_HTTP ->
+            "Public HTTP origins are not allowed; use HTTPS or a private LAN address"
+        else -> "Invalid URL format"
     }
 
     /** Compares two origin strings using [RommOrigin] semantics (normalizes scheme/port). */

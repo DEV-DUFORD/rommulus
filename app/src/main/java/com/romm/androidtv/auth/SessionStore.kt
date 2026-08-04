@@ -1,6 +1,7 @@
 package com.romm.androidtv.auth
 
 import android.content.SharedPreferences
+import com.romm.androidtv.network.RommOrigin
 
 /** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
 private const val TAG = "RommAuthDx"
@@ -32,14 +33,27 @@ class SessionStore(private val prefs: SharedPreferences) {
         val verifiedAtEpochMillis: Long,
     )
 
-    fun save(origin: String, username: String?, verifiedAtEpochMillis: Long = System.currentTimeMillis()) {
-        prefs.edit()
+    /**
+     * Durable, synchronous write using [android.content.SharedPreferences.Editor.commit]
+     * (which returns success and guarantees the write reaches disk before returning).
+     *
+     * Returns `true` only when the commit succeeded; a `false` result means the
+     * record is NOT durably persisted (callers such as onboarding treat this as
+     * terminal [TokenPersistResult.Failure]/persistence failure rather than
+     * proceeding with an in-memory-only write).
+     *
+     * This replaces the previous fire-and-forget `apply()` write so onboarding
+     * can verify durability before creating a client token scoped to this session.
+     */
+    fun save(origin: String, username: String?, verifiedAtEpochMillis: Long = System.currentTimeMillis()): Boolean {
+        val committed = prefs.edit()
             .putString(KEY_ORIGIN, origin)
             .putString(KEY_USERNAME, username)
             .putLong(KEY_VERIFIED_AT, verifiedAtEpochMillis)
-            .apply()
+            .commit()
         val usernamePresent = username != null
-        diagLog(android.util.Log.DEBUG, "SessionStore.save: completed usernamePresent=$usernamePresent")
+        diagLog(android.util.Log.DEBUG, "SessionStore.save: completed usernamePresent=$usernamePresent committed=$committed")
+        return committed
     }
 
     fun current(): Record? {
@@ -52,6 +66,34 @@ class SessionStore(private val prefs: SharedPreferences) {
         val record = Record(origin, username, verifiedAt)
         diagLog(android.util.Log.DEBUG, "SessionStore.current: present=true")
         return record
+    }
+
+    /**
+     * Returns the current [Record] only when it is *coherent* with the active
+     * profile origin: a non-blank origin, a non-blank username, and an origin
+     * that is canonically equivalent (same scheme/host/effective-port/base-path)
+     * to [profileOrigin] after normalization. Returns null when any fact is
+     * missing or the origins disagree — used to decide whether a persisted
+     * session is trustworthy for the currently-configured server.
+     */
+    fun coherentRecord(profileOrigin: String?): Record? {
+        val record = current() ?: run {
+            diagLog(android.util.Log.DEBUG, "SessionStore.coherentRecord: absent")
+            return null
+        }
+        if (record.origin.isBlank()) return null
+        if (record.username.isNullOrBlank()) return null
+        if (profileOrigin.isNullOrBlank()) return null
+
+        val recordOrigin = RommOrigin.parse(record.origin) ?: run {
+            diagLog(android.util.Log.DEBUG, "SessionStore.coherentRecord: record origin unparseable")
+            return null
+        }
+        val profileParsed = RommOrigin.parse(profileOrigin) ?: return null
+        val sameOrigin = recordOrigin.isSameOrigin(profileParsed) &&
+            recordOrigin.path == profileParsed.path
+        diagLog(android.util.Log.DEBUG, "SessionStore.coherentRecord: sameOrigin=$sameOrigin")
+        return if (sameOrigin) record else null
     }
 
     fun clear() {

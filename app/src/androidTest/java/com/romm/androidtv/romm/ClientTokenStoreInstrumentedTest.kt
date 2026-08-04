@@ -1,5 +1,6 @@
 package com.romm.androidtv.romm
 
+import com.romm.androidtv.auth.TokenPersistResult
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -36,12 +37,22 @@ class ClientTokenStoreInstrumentedTest {
     @Test
     fun setTokenThenGetTokenRoundTripsRawValue() {
         val token = ClientToken("rmm_roundtrip_token_value")
-        store.setToken(origin, username, token)
+        val persist = store.setToken(origin, username, token)
+
+        assertEquals(TokenPersistResult.Success, persist)
 
         val retrieved = store.getToken(origin, username)
 
         assertTrue(retrieved != null)
         assertEquals("rmm_roundtrip_token_value", retrieved!!.raw)
+    }
+
+    @Test
+    fun setTokenReturnsSuccessTypedResultOnDurableWrite() {
+        val result = store.setToken(origin, username, ClientToken("rmm_typed_result"))
+
+        assertEquals(TokenPersistResult.Success, result)
+        assertEquals("rmm_typed_result", store.getToken(origin, username)!!.raw)
     }
 
     @Test

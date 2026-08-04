@@ -84,6 +84,27 @@ object RommOkHttpClient {
      * Returns the underlying java.net.CookieManager for inspection/testing.
      */
     fun cookieManager(): JavaCookieManager = javaCookieManager
+
+    /**
+     * Builds an origin-scoped, bearer-authenticated OkHttpClient for the
+     * foreground native client. Shares the shared client's cookie jar, trust
+     * anchors, and strict hostname verification, but adds a
+     * [com.romm.androidtv.romm.BearerAuthInterceptor] scoped to [origin].
+     *
+     * The token is attached ONLY to requests under [origin] (scheme + host +
+     * effective port + base path). Requests to any other host — e.g. third-party
+     * cover image URLs — never receive the credential, and any `Authorization`
+     * a cross-origin redirect would carry is stripped.
+     *
+     * Deliberately NOT added to [build]: the shared client must remain token-free.
+     */
+    fun nativeClient(
+        origin: ServerAddressResult.Valid,
+        tokenProvider: () -> String?,
+    ): okhttp3.OkHttpClient =
+        build().newBuilder()
+            .addInterceptor(com.romm.androidtv.romm.BearerAuthInterceptor(origin, tokenProvider))
+            .build()
 }
 
 /**

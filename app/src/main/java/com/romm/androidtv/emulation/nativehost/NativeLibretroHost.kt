@@ -75,7 +75,8 @@ class NativeLibretroHost {
     /**
      * `[frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown,
      * audioUnderrunFrames, audioOverrunFrames, port0ButtonMask, port1ButtonMask, port2ButtonMask, port3ButtonMask,
-     * port0LeftX, port0LeftY, port1LeftX, port1LeftY, port2LeftX, port2LeftY, port3LeftX, port3LeftY]`.
+     * port0LeftX, port0LeftY, port1LeftX, port1LeftY, port2LeftX, port2LeftY, port3LeftX, port3LeftY,
+     * skippedVideoFrames]`.
      * `pixelFormat` is `-1` and all counts are `0` when no session is active.
      * The per-port button masks and left-stick analog values are
      * debug/diagnostics-only (LIBRETRO_REFACTOR.md section 9) — they show

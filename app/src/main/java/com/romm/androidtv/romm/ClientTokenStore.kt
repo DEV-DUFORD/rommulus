@@ -69,8 +69,13 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
         }
     }
 
-    /** Encrypts and persists the raw token for this scope. Fails closed: never crashes login, never persists plaintext. */
-    override fun setToken(origin: String, username: String, token: ClientToken) {
+    /**
+     * Encrypts and persists the raw token for this scope. Fails closed: never
+     * crashes login, never persists plaintext. Returns a [com.romm.androidtv.auth.TokenPersistResult]
+     * so an encryption/commit failure is surfaced (not swallowed) — onboarding
+     * treats a non-`Success` result as terminal persistence failure.
+     */
+    override fun setToken(origin: String, username: String, token: ClientToken): com.romm.androidtv.auth.TokenPersistResult {
         val scopeKey = makeScopeKey(origin, username)
         val encPrefKey = "${scopeKey}.enc"
         val noncePrefKey = "${scopeKey}.nonce"
@@ -81,7 +86,7 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
         while (attempt <= 1) {
             val key = try { ensureKey() } catch (e: Exception) {
                 Log.w(TAG, "ensureKey failed in setToken (attempt $attempt); aborting persist", e)
-                return
+                return com.romm.androidtv.auth.TokenPersistResult.Failure
             }
 
             try {
@@ -96,7 +101,7 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
                 val generatedIv = localCipher.iv
                 if (generatedIv.size !in GCM_IV_MIN_SIZE..GCM_IV_MAX_SIZE) {
                     Log.w(TAG, "Keystore generated IV of unexpected length ${generatedIv.size}; aborting persist")
-                    return
+                    return com.romm.androidtv.auth.TokenPersistResult.Failure
                 }
 
                 // Atomic commit: both ciphertext and nonce written together.
@@ -108,10 +113,10 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
                 if (!committed) {
                     Log.w(TAG, "SharedPreferences commit failed in setToken; token NOT stored")
                     Log.d("RommAuthDx", "ClientTokenStore.setToken: persistFailed committed=false")
-                    return
+                    return com.romm.androidtv.auth.TokenPersistResult.Failure
                 }
                 Log.d("RommAuthDx", "ClientTokenStore.setToken: persisted=true")
-                return // Success
+                return com.romm.androidtv.auth.TokenPersistResult.Success
             } catch (e: Exception) {
                 // On first failure, try key recreation. On second, fail safely.
                 if (attempt == 0) {
@@ -121,11 +126,12 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
                     // Remove stale partial prefs from a failed write attempt.
                     removePrefPair(encPrefKey, noncePrefKey)
                     Log.w(TAG, "Encryption/persist failed after retry in setToken; token NOT stored", e)
-                    return
+                    return com.romm.androidtv.auth.TokenPersistResult.Failure
                 }
             }
             attempt++
         }
+        return com.romm.androidtv.auth.TokenPersistResult.Failure
     }
 
     /** Removes the stored token for this scope (sign-out / session clear). */

@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Conservative default: HTTPS only; cleartext disabled globally. -->
-    <base-config cleartextTrafficPermitted="false">
+    <!--
+      Cleartext is permitted at the platform layer because Android's
+      network-security XML cannot express arbitrary runtime private IP ranges
+      (RFC1918 / link-local / ULA / .local). The strict private-LAN-only HTTP
+      policy is enforced instead by RommServerAddress (the canonicalizer /
+      request boundary), which rejects any public HTTP origin before a network
+      call can be built. System trust anchors remain the only trusted roots.
+    -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

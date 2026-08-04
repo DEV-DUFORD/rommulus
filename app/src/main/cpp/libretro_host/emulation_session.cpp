@@ -89,6 +89,7 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
 
     const bool isMupen64PlusNext = systemInfo.library_name != nullptr &&
         std::strcmp(systemInfo.library_name, "Mupen64Plus-Next") == 0;
+    adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     if (isMupen64PlusNext) {
         // GLideN64's threaded renderer spawns its own rendering thread,
         // which conflicts with the libretro single-threaded model (the host
@@ -97,6 +98,9 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "False");
         environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
         environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");
+        environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");
+        environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Off");
+        environment_.setCoreOptionOverride("mupen64plus-EnableCopyDepthToRDRAM", "Off");
     }
 
     fns.retro_set_environment(&EmulationSession::environmentTrampoline);
@@ -165,6 +169,7 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
 
 void EmulationSession::runLoop() {
     FrameScheduler scheduler(avFps_);
+    AdaptiveFrameSkip frameSkip(avFps_);
 
     // For hardware-rendering cores (GLideN64), we need an EGL context
     // current on this thread. Create it now and make it current before
@@ -230,9 +235,20 @@ void EmulationSession::runLoop() {
         }
 
         scheduler.waitForNextFrame();
+        const bool videoEnabled =
+            !adaptiveFrameSkipEnabled_ || frameSkip.shouldRenderFrame();
+        presentVideoFrame_.store(videoEnabled, std::memory_order_relaxed);
+        environment_.setVideoEnabled(videoEnabled);
         const auto frameWorkStarted = std::chrono::steady_clock::now();
         core_.functions().retro_run();
-        scheduler.reportFrameWorkDuration(std::chrono::steady_clock::now() - frameWorkStarted);
+        const auto frameWorkDuration = std::chrono::steady_clock::now() - frameWorkStarted;
+        scheduler.reportFrameWorkDuration(frameWorkDuration);
+        if (adaptiveFrameSkipEnabled_) {
+            frameSkip.reportFrameWorkDuration(frameWorkDuration, videoEnabled);
+            if (!videoEnabled) {
+                diagnostics_.skippedVideoFrames.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
 
         if (environment_.shutdownRequested()) {
             diagnostics_.coreRequestedShutdown = true;
@@ -448,7 +464,10 @@ void EmulationSession::videoRefreshTrampoline(const void* data, unsigned width, 
     self->diagnostics_.pixelFormat.store(static_cast<int>(self->environment_.pixelFormat()),
                                            std::memory_order_relaxed);
 
-    if (self->environment_.isHardwareRendering()) {
+    if (!self->presentVideoFrame_.load(std::memory_order_relaxed)) {
+        // Defensive fallback for cores that do not honor
+        // RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE themselves.
+    } else if (self->environment_.isHardwareRendering()) {
         // Hardware-rendering core (GLideN64): the core drew directly to the
         // GL backbuffer. data is nullptr for HW rendering (the core doesn't
         // pass pixel data — it's already in the GL framebuffer). We just

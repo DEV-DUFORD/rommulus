@@ -121,7 +121,7 @@ class SettingsViewModelTest {
     @Test
     fun `validateOrigin rejects invalid URL format`() = runBlocking {
         val (vm, _) = makeViewModel()
-        assertThat(vm.validateOrigin("not-a-url")).isEqualTo("Invalid URL format")
+        assertThat(vm.validateOrigin("https://exa mple.com")).isEqualTo("Invalid URL format")
     }
 
     @Test
@@ -165,7 +165,7 @@ class SettingsViewModelTest {
     @Test
     fun `onOriginTextChanged sets validation error for invalid input`() = runBlocking {
         val (vm, _) = makeViewModel(initialOrigin = "https://default.example.com")
-        vm.onOriginTextChanged("invalid")
+        vm.onOriginTextChanged("https://exa mple.com")
 
         val state = vm.uiState.value
         assertThat(state.validationError).isEqualTo("Invalid URL format")
@@ -185,7 +185,7 @@ class SettingsViewModelTest {
     @Test
     fun `onSave with invalid origin shows error and does not persist`() = runBlocking {
         val (vm, mocks) = makeViewModel(initialOrigin = "https://current.example.com")
-        vm.onOriginTextChanged("invalid-url")
+        vm.onOriginTextChanged("https://exa mple.com")
         vm.onSave()
 
         val state = vm.uiState.value
@@ -295,7 +295,7 @@ class SettingsViewModelTest {
     @Test
     fun `onCheckConnection with invalid origin shows error immediately`() = runBlocking {
         val (vm, mocks) = makeViewModel()
-        vm.onOriginTextChanged("invalid")
+        vm.onOriginTextChanged("https://exa mple.com")
         vm.onCheckConnection()
 
         val state = vm.uiState.value

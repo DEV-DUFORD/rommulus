@@ -1,5 +1,7 @@
 package com.romm.androidtv.romm
 
+import com.romm.androidtv.network.RommServerAddress
+import com.romm.androidtv.network.ServerAddressResult
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -705,9 +707,15 @@ class RommSyncApiTest {
 
             // 2. Bearer-only client (cookie-free) built from the durable token, matching the
             // background-auth rule: never use a live WebView cookie jar for this traffic.
-            val bearerClient = OkHttpClient.Builder()
-                .addInterceptor(BearerAuthInterceptor { acquiredToken.raw })
-                .build()
+            val parsedOrigin = RommServerAddress.parseAndNormalize(baseUrl())
+            val bearerClient = when (parsedOrigin) {
+                is ServerAddressResult.Valid ->
+                    OkHttpClient.Builder()
+                        .addInterceptor(BearerAuthInterceptor(parsedOrigin, { acquiredToken.raw }))
+                        .build()
+                is ServerAddressResult.Invalid ->
+                    OkHttpClient.Builder().build()
+            }
 
             // 3. POST /api/devices — device registration presents the Bearer token, not cookies.
             server.enqueue(
@@ -740,9 +748,15 @@ class RommSyncApiTest {
         fun `device registration without a durable token is rejected as AUTH_EXPIRED, never falling back to cookies`() {
             // Simulates the terminal loop: no durable token was ever persisted, so the
             // cookie-free Bearer client sends no Authorization header and the server rejects it.
-            val bearerClientNoToken = OkHttpClient.Builder()
-                .addInterceptor(BearerAuthInterceptor { null })
-                .build()
+            val parsedOriginNoToken = RommServerAddress.parseAndNormalize(baseUrl())
+            val bearerClientNoToken = when (parsedOriginNoToken) {
+                is ServerAddressResult.Valid ->
+                    OkHttpClient.Builder()
+                        .addInterceptor(BearerAuthInterceptor(parsedOriginNoToken, { null }))
+                        .build()
+                is ServerAddressResult.Invalid ->
+                    OkHttpClient.Builder().build()
+            }
 
             server.enqueue(MockResponse().setResponseCode(403).setBody("""{"detail":"AUTH_EXPIRED"}"""))
             val deviceResult = RommSyncApi.registerDevice(

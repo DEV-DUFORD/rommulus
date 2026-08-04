@@ -148,7 +148,7 @@ not vendored.
 
 ## Local build fixes
 
-None of the vendored sources were modified. The project's CMake target
+The project's CMake target
 (`mupen64plus_next_core` in `app/src/main/cpp/CMakeLists.txt`) reproduces the
 upstream `Android.mk` + `Makefile.common` closure for `armeabi-v7a`/`arm64-v8a`
 and makes these CMake-side adaptations:
@@ -178,3 +178,9 @@ and makes these CMake-side adaptations:
   `HAVE_PARALLEL_RSP`, `HAVE_PARALLEL_RDP`, `HAVE_THR_AL` (Angrylion),
   `HAVE_MMAP=1`, `PARALLEL_INTEGRATION`, `GRANITE_VULKAN_MT`, and
   `GIT_VERSION=" 98c1b0d"`.
+- **Frontend-directed frame skipping**: `libretro/libretro.c` queries
+  `RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE` once per `retro_run()`. When video
+  is disabled, the GLideN64 integration completes the emulated DP task/interrupt
+  without processing that frame's HLE display list or LLE RDP command list, and
+  suppresses the final video callback. N64 CPU emulation, input, and audio still
+  advance normally while expensive graphics work is skipped.

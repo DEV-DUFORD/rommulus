@@ -161,20 +161,21 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeIsPaused(
 
 // Returns [frameCount, audioFramesProduced, lastWidth, lastHeight, pixelFormat, coreRequestedShutdown,
 //          audioUnderrunFrames, audioOverrunFrames, port0ButtonMask, port1ButtonMask, port2ButtonMask, port3ButtonMask,
-//          port0LeftX, port0LeftY, port1LeftX, port1LeftY, port2LeftX, port2LeftY, port3LeftX, port3LeftY]
+//          port0LeftX, port0LeftY, port1LeftX, port1LeftY, port2LeftX, port2LeftY, port3LeftX, port3LeftY,
+//          skippedVideoFrames]
 extern "C"
 JNIEXPORT jlongArray JNICALL
 Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetDiagnostics(
         JNIEnv* env, jobject /*thiz*/) {
-    jlongArray result = env->NewLongArray(20);
+    jlongArray result = env->NewLongArray(21);
     if (g_session == nullptr) {
-        jlong zeros[20] = {0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-        env->SetLongArrayRegion(result, 0, 20, zeros);
+        jlong zeros[21] = {0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        env->SetLongArrayRegion(result, 0, 21, zeros);
         return result;
     }
 
     const romm::SessionDiagnostics& d = g_session->diagnostics();
-    jlong values[20] = {
+    jlong values[21] = {
         static_cast<jlong>(d.frameCount.load()),
         static_cast<jlong>(d.audioFramesProduced.load()),
         static_cast<jlong>(d.lastWidth.load()),
@@ -195,8 +196,9 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetDiagnos
         static_cast<jlong>(g_session->debugInputAnalogLeftY(2)),
         static_cast<jlong>(g_session->debugInputAnalogLeftX(3)),
         static_cast<jlong>(g_session->debugInputAnalogLeftY(3)),
+        static_cast<jlong>(d.skippedVideoFrames.load()),
     };
-    env->SetLongArrayRegion(result, 0, 20, values);
+    env->SetLongArrayRegion(result, 0, 21, values);
     return result;
 }
 

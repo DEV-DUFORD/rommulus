@@ -13,6 +13,7 @@
 #pragma once
 
 #include "audio_output.h"
+#include "adaptive_frame_skip.h"
 #include "core_library.h"
 #include "environment.h"
 #include "frame_scheduler.h"
@@ -51,6 +52,7 @@ struct SessionDiagnostics {
     // LIBRETRO_REFACTOR.md section 8.2's "track underruns, overruns".
     std::atomic<uint64_t> audioUnderrunFrames{0};
     std::atomic<uint64_t> audioOverrunFrames{0};
+    std::atomic<uint64_t> skippedVideoFrames{0};
 };
 
 class EmulationSession {
@@ -192,6 +194,8 @@ private:
     InputState inputState_;
     double avFps_ = 60.0;
     double avSampleRate_ = 44100.0;
+    bool adaptiveFrameSkipEnabled_ = false;
+    std::atomic<bool> presentVideoFrame_{true};
 
     std::thread thread_;
     std::atomic<bool> threadShouldRun_{false};

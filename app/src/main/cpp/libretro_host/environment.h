@@ -52,6 +52,7 @@ public:
     void setSaveDirectory(const std::string& dir) { saveDirectory_ = dir; }
     void setContentDirectory(const std::string& dir) { contentDirectory_ = dir; }
     void setCoreOptionOverride(const std::string& key, const std::string& value);
+    void setVideoEnabled(bool enabled) { videoEnabled_ = enabled; }
 
     // Hardware rendering (RETRO_ENVIRONMENT_SET_HW_RENDER)
     bool isHardwareRendering() const { return hwRenderActive_; }
@@ -94,6 +95,7 @@ private:
     enum retro_pixel_format pixelFormat_ = RETRO_PIXEL_FORMAT_0RGB1555;
     bool shutdownRequested_ = false;
     bool supportsNoGame_ = false;
+    bool videoEnabled_ = true;
     std::string systemDirectory_;
     std::string saveDirectory_;
     std::string contentDirectory_;
