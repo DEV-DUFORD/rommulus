@@ -56,6 +56,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.romm.androidtv.BuildConfig
 import com.romm.androidtv.R
 import com.romm.androidtv.controller.config.BindingSlot
 import com.romm.androidtv.controller.config.ControllerHighlightRegion
@@ -213,7 +214,12 @@ fun ControllerConfigScreen(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
         ) {
             // Left 40%: artwork panel (base vector + focused highlight overlay).
-            val focusedRegion = state.rows.firstOrNull { it.controlId == state.focusedControlId }?.highlightRegion
+            // Highlighting is opt-in via CONTROLLER_HIGHLIGHTING_ENABLED (defaults off).
+            val focusedRegion = if (BuildConfig.CONTROLLER_HIGHLIGHTING_ENABLED) {
+                state.rows.firstOrNull { it.controlId == state.focusedControlId }?.highlightRegion
+            } else {
+                null
+            }
             ArtworkPlaceholder(
                 consoleName = state.consoleName,
                 artworkResourceId = state.artworkResourceId,

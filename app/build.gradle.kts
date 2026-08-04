@@ -42,6 +42,15 @@ android {
         val rommOrigin = localProp("romm.origin", "")
         buildConfigField("String", "ROMM_ORIGIN", "\"$rommOrigin\"")
 
+        // Controller-config artwork highlighting: opt-in via env var, defaulted off.
+        // Checks the real environment first, then local.properties, so CI/dev shells
+        // can toggle it without editing tracked files.
+        val controllerHighlightingEnabled =
+            (System.getenv("CONTROLLER_HIGHLIGHTING_ENABLED")
+                ?: localProp("controller.highlighting.enabled", "false"))
+                .toBoolean()
+        buildConfigField("boolean", "CONTROLLER_HIGHLIGHTING_ENABLED", "$controllerHighlightingEnabled")
+
         ndk {
             // The physical Google TV Streamer is 32-bit userspace (armeabi-v7a); it is a
             // release gate, not a legacy afterthought (LIBRETRO_REFACTOR.md section 3).
