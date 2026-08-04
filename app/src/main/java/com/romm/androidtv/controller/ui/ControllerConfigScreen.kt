@@ -14,8 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -92,30 +93,36 @@ fun ControllerConfigScreen(
     val currentOnBack by rememberUpdatedState(onBack)
 
     // Focus restoration: one FocusRequester per tab; track the last-focused row per tab.
-    val tabFocusRequesters = remember { Array(4) { FocusRequester() } }
+    val tabFocusRequesters = remember(state.consoleName) { Array(4) { FocusRequester() } }
     val rowFocusRequesters =
-        remember { mutableStateOf<Map<Pair<Int, BindingSlot>, FocusRequester>>(emptyMap()) }
-    val lastFocusedRowByPlayer = remember { IntArray(4) }
-    val lastFocusedSlotByPlayer = remember {
+        remember(state.consoleName) {
+            mutableStateOf<Map<Pair<Int, BindingSlot>, FocusRequester>>(emptyMap())
+        }
+    val lastFocusedRowByPlayer = remember(state.consoleName) { IntArray(4) }
+    val lastFocusedSlotByPlayer = remember(state.consoleName) {
         Array(4) { BindingSlot.PRIMARY }
     }
-    val focusedTabIndex = remember { mutableStateOf<Int?>(null) }
-    val focusedRowIndex = remember { mutableStateOf<Int?>(null) }
+    val focusedTabIndex = remember(state.consoleName) { mutableStateOf<Int?>(null) }
+    val focusedRowIndex = remember(state.consoleName) { mutableStateOf<Int?>(null) }
     val focusManager = LocalFocusManager.current
-    val listState = rememberLazyListState()
-    var initialListPositioned by remember { mutableStateOf(false) }
+    val listState = remember(state.consoleName) { LazyListState() }
+    var initialListPositioned by remember(state.consoleName) { mutableStateOf(false) }
+    var listLaidOut by remember(state.consoleName) { mutableStateOf(false) }
 
-    // rememberLazyListState can restore the previous controller page's scroll position because
-    // every console uses this shared screen. Reset before requesting row focus so a newly opened
-    // page always starts with its first mapping composed and visible.
-    LaunchedEffect(listState) {
+    // Focus restoration can move the list before its first layout. Reset after layout and clear
+    // that focus first so every newly opened console starts with its first mapping visible.
+    LaunchedEffect(state.consoleName, listLaidOut) {
+        if (!listLaidOut) return@LaunchedEffect
+        focusManager.clearFocus(force = true)
         listState.scrollToItem(0)
+        lastFocusedRowByPlayer[currentPlayer] = 0
+        lastFocusedSlotByPlayer[currentPlayer] = BindingSlot.PRIMARY
         initialListPositioned = true
     }
 
     // Initial focus goes to the first binding row; tab changes still restore that tab's last row.
-    LaunchedEffect(currentPlayer, rowFocusRequesters.value.size, initialListPositioned) {
-        if (!initialListPositioned) return@LaunchedEffect
+    LaunchedEffect(currentPlayer, rowFocusRequesters.value.size, initialListPositioned, listLaidOut) {
+        if (!initialListPositioned || !listLaidOut) return@LaunchedEffect
         val requester = rowFocusRequesters.value[
             lastFocusedRowByPlayer[currentPlayer] to lastFocusedSlotByPlayer[currentPlayer]
         ]
@@ -123,6 +130,22 @@ fun ControllerConfigScreen(
             focusManager.clearFocus()
             requester.requestFocus()
         }
+    }
+
+    // When the capture dialog closes after a successful mapping, restore focus to the
+    // row/slot that was just remapped instead of letting Compose fall back to row 0.
+    var wasCapturing by remember { mutableStateOf(false) }
+    LaunchedEffect(state.capture) {
+        if (state.capture == null && wasCapturing) {
+            val requester = rowFocusRequesters.value[
+                lastFocusedRowByPlayer[currentPlayer] to lastFocusedSlotByPlayer[currentPlayer]
+            ]
+            if (requester != null) {
+                focusManager.clearFocus()
+                requester.requestFocus()
+            }
+        }
+        wasCapturing = state.capture != null
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -211,6 +234,7 @@ fun ControllerConfigScreen(
                 },
                 onRowSelected = { controlId, slot -> currentOnRowSelected(controlId, slot) },
                 onResetAllRequest = onResetAllRequest,
+                onListLaidOut = { listLaidOut = true },
                 modifier = Modifier.weight(0.6f),
             )
         }
@@ -384,6 +408,7 @@ private fun BindingList(
     onFocusChanged: (index: Int, slot: BindingSlot, isFocused: Boolean) -> Unit,
     onRowSelected: (CoreControlId, BindingSlot) -> Unit,
     onResetAllRequest: () -> Unit,
+    onListLaidOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -404,7 +429,7 @@ private fun BindingList(
         }
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(1f).onGloballyPositioned { onListLaidOut() },
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(rows.size) { index ->

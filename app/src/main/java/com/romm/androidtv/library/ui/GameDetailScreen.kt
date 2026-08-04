@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -162,6 +163,12 @@ private fun GameDetailContent(
             onCheckBios(rom.platformSlug)
         }
     }
+    val playButtonFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(Unit) {
+        focusManager.clearFocus()
+        playButtonFocusRequester.requestFocus()
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -210,7 +217,7 @@ private fun GameDetailContent(
                         RequiredBiosUnavailableState(biosState)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging)
+                            PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging, focusRequester = playButtonFocusRequester)
                             Spacer(modifier = Modifier.width(12.dp))
                             ChooseSaveButton(onClick = { onChooseSave(rom.id) }, enabled = !isStaging)
                             if (rom.siblingRoms.isNotEmpty()) {
@@ -412,12 +419,13 @@ private fun AuthExpiredState(onLogin: () -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun PlayButton(onPlay: () -> Unit, isStaging: Boolean = false) {
+private fun PlayButton(onPlay: () -> Unit, isStaging: Boolean = false, focusRequester: FocusRequester) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     Box(
         modifier = Modifier
+            .focusRequester(focusRequester)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (isStaging) RommTvColors.NightLo
