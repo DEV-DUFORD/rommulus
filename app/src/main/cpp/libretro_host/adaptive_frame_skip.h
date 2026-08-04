@@ -43,7 +43,7 @@ public:
 private:
     static constexpr double kOverBudgetThreshold = 1.05;
     static constexpr unsigned kActivationFrames = 2;
-    static constexpr unsigned kMaxConsecutiveSkips = 2;
+    static constexpr unsigned kMaxConsecutiveSkips = 4;
 
     std::chrono::duration<double> frameDuration_;
     unsigned consecutiveSlowFrames_ = 0;

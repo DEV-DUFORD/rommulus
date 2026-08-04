@@ -234,9 +234,13 @@ void EmulationSession::runLoop() {
             continue;
         }
 
-        scheduler.waitForNextFrame();
         const bool videoEnabled =
             !adaptiveFrameSkipEnabled_ || frameSkip.shouldRenderFrame();
+        // A skipped frame must retain the existing timeline so it can catch
+        // emulation back up. Resetting the schedule here would pace cheap
+        // skipped runs as new frames and preserve the slowdown we are trying
+        // to recover from.
+        scheduler.waitForNextFrame(videoEnabled);
         presentVideoFrame_.store(videoEnabled, std::memory_order_relaxed);
         environment_.setVideoEnabled(videoEnabled);
         const auto frameWorkStarted = std::chrono::steady_clock::now();

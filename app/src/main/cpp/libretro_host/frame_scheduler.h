@@ -22,12 +22,12 @@ public:
     // production within the current interval while retaining enough measured
     // headroom for the core to finish. This reduces the age of input in the
     // presented frame without changing emulation speed.
-    void waitForNextFrame() {
+    void waitForNextFrame(bool resetIfBehind = true) {
         auto now = std::chrono::steady_clock::now();
         const auto duration =
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDuration_);
 
-        if (now - nextFrameTime_ > duration) {
+        if (resetIfBehind && now - nextFrameTime_ > duration) {
             nextFrameTime_ = now;
         }
 

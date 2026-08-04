@@ -2683,6 +2683,15 @@ endif()
 # -Wno-write-strings). Clang ignores -Wno- groups that don't apply to a given
 # translation unit, so a single shared option set is safe for both C and CXX.
 target_compile_options(mupen64plus_next_core PRIVATE
+    # Upstream Makefile release CPUOPTS (lines 650-652). The project-wide
+    # RelWithDebInfo default is only -O2, so keep this target aligned with the
+    # performance profile used by the pinned libretro core.
+    -O3
+    -fsigned-char
+    -ffast-math
+    -fno-strict-aliasing
+    -fomit-frame-pointer
+    -fvisibility=hidden
     -Wno-strict-prototypes
     -Wno-deprecated-non-prototype
     -Wno-switch
@@ -2694,6 +2703,10 @@ target_compile_options(mupen64plus_next_core PRIVATE
     -Wno-xor-used-as-pow
     -Wno-shift-negative-value
     -Wno-absolute-value
+)
+
+target_compile_options(mupen64plus_next_core PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-fvisibility-inlines-hidden>
 )
 
 # Linked with upstream's own version script so only the standard retro_*

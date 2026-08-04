@@ -168,6 +168,10 @@ and makes these CMake-side adaptations:
   `-Wno-write-strings`, `-Wno-strict-prototypes`, `-Wno-switch`,
   `-Wno-invalid-offsetof`, `-Wno-xor-used-as-pow`,
   `-Wno-incompatible-pointer-types-discards-qualifiers`). Build is warning-free.
+- **Release optimization flags**: the target explicitly applies upstream's
+  non-debug `CPUOPTS` (`-O3`, `-ffast-math`, `-fno-strict-aliasing`,
+  `-fomit-frame-pointer`, hidden visibility, and signed `char`) instead of
+  inheriting this app's less aggressive `RelWithDebInfo` `-O2` default.
 - **Linker**: `-Wl,--version-script=libretro/link.T` (verified: only the 49
   `retro_*` ABI symbols are exported), plus `--gc-sections`,
   `-z,max-page-size=16384` (Android 16 KiB page-size requirement), and
