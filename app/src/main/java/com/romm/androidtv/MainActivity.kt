@@ -580,6 +580,7 @@ class MainActivity : ComponentActivity() {
                                     hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                     hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
                                     refreshEvents = libraryRefreshEvents,
+                                    onRetrySucceeded = { libraryRefreshEvents.tryEmit(Unit) },
                                 )
                             )
                             // Re-fetch Continue Playing right after exiting a game (continuePlayingRefreshTick's

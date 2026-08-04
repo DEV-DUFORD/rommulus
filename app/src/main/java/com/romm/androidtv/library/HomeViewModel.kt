@@ -44,6 +44,7 @@ class HomeViewModel(
     private val hideUnsupportedSystems: () -> Boolean = { false },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
+    private val onRetrySucceeded: () -> Unit = {},
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -113,6 +114,7 @@ class HomeViewModel(
             }
             if (generation == gen) {
                 _uiState.update { it.copy(continuePlaying = state) }
+                if (state is SectionState.Loaded) onRetrySucceeded()
             }
         }
     }
@@ -128,6 +130,7 @@ class HomeViewModel(
             }
             if (generation == gen) {
                 _uiState.update { it.copy(recentlyAdded = state) }
+                if (state is SectionState.Loaded) onRetrySucceeded()
             }
         }
     }
@@ -143,6 +146,7 @@ class HomeViewModel(
             }
             if (generation == gen) {
                 _uiState.update { it.copy(favorites = state) }
+                if (state is SectionState.Loaded) onRetrySucceeded()
             }
         }
     }
@@ -158,6 +162,7 @@ class HomeViewModel(
             }
             if (generation == gen) {
                 _uiState.update { it.copy(platforms = state) }
+                if (state is SectionState.Loaded) onRetrySucceeded()
             }
         }
     }
@@ -172,6 +177,7 @@ class HomeViewModel(
             }
             if (generation == gen) {
                 _uiState.update { it.copy(collections = state) }
+                if (state is SectionState.Loaded) onRetrySucceeded()
             }
         }
     }
@@ -249,10 +255,17 @@ class HomeViewModel(
         private val hideUnsupportedSystems: () -> Boolean = { false },
         private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
         private val refreshEvents: Flow<Unit>? = null,
+        private val onRetrySucceeded: () -> Unit = {},
     ) : androidx.lifecycle.ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return HomeViewModel(repository, hideUnsupportedSystems, hideUnsupportedSystemsFlow, refreshEvents) as T
+            return HomeViewModel(
+                repository,
+                hideUnsupportedSystems,
+                hideUnsupportedSystemsFlow,
+                refreshEvents,
+                onRetrySucceeded,
+            ) as T
         }
     }
 }

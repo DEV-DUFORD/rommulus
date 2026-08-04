@@ -43,6 +43,7 @@ class HomeViewModelToggleRefreshTest {
     /** Mock repository that counts total fetch invocations. */
     private class CountingMockRepository : LibraryRepository {
         var fetchCount = 0
+        var favoritesResult: LibraryResult<List<LibraryRom>> = LibraryResult.Success(emptyList())
 
         override suspend fun fetchRecentlyAdded(limit: Int): LibraryResult<List<LibraryRom>> {
             fetchCount++
@@ -56,7 +57,7 @@ class HomeViewModelToggleRefreshTest {
 
         override suspend fun fetchFavorites(limit: Int): LibraryResult<List<LibraryRom>> {
             fetchCount++
-            return LibraryResult.Success(emptyList())
+            return favoritesResult
         }
 
         override suspend fun fetchPlatforms(): LibraryResult<List<PlatformSummary>> {
@@ -133,6 +134,35 @@ class HomeViewModelToggleRefreshTest {
         refreshEvents.tryEmit(Unit)
 
         assertThat(repo.fetchCount).isEqualTo(10)
+    }
+
+    @Test
+    fun `successful section retry publishes app-wide refresh`() {
+        val repo = CountingMockRepository()
+        var successfulRetries = 0
+        val vm = HomeViewModel(
+            repository = repo,
+            onRetrySucceeded = { successfulRetries++ },
+        )
+
+        vm.retryFavorites()
+
+        assertThat(successfulRetries).isEqualTo(1)
+    }
+
+    @Test
+    fun `failed section retry does not publish app-wide refresh`() {
+        val repo = CountingMockRepository()
+        var successfulRetries = 0
+        val vm = HomeViewModel(
+            repository = repo,
+            onRetrySucceeded = { successfulRetries++ },
+        )
+        repo.favoritesResult = LibraryResult.Failure(RommApiError.NETWORK_ERROR)
+
+        vm.retryFavorites()
+
+        assertThat(successfulRetries).isZero()
     }
 
     @Test
