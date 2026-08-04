@@ -79,6 +79,9 @@ import com.romm.androidtv.emulation.model.SessionDescriptorPatch
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
 import com.romm.androidtv.emulation.video.EmulationSurface
+import com.romm.androidtv.library.ui.tvButtonFocus
+import com.romm.androidtv.library.ui.TvButton
+import com.romm.androidtv.library.ui.TvOutlinedButton
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -1142,7 +1145,7 @@ private fun NativeErrorScreen(category: LaunchFailureCategory, lastError: String
             Text(text = lastError, color = Color(0xFFf44336), style = MaterialTheme.typography.bodySmall)
         }
         Spacer(modifier = Modifier.height(24.dp))
-        Button(
+        TvButton(
             onClick = onBackToLibrary,
             modifier = Modifier.focusRequester(backFocusRequester),
         ) { Text("Back to Library") }
@@ -1171,12 +1174,14 @@ private fun SaveFailureOverlay(onRetry: () -> Unit, onQuitAnyway: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(24.dp))
             Row {
-                Button(
+                TvButton(
                     onClick = onRetry,
                     modifier = Modifier.focusRequester(retryFocusRequester),
                 ) { Text("Retry") }
                 Spacer(modifier = Modifier.width(16.dp))
-                OutlinedButton(onClick = onQuitAnyway) { Text("Quit anyway") }
+                TvOutlinedButton(onClick = onQuitAnyway) {
+                    Text("Quit anyway")
+                }
             }
         }
     }
@@ -1216,19 +1221,25 @@ private fun PauseMenuOverlay(
             Text(text = "Paused", color = Color.White, style = MaterialTheme.typography.headlineSmall)
             Spacer(modifier = Modifier.height(20.dp))
 
-            Button(
+            TvButton(
                 onClick = onResume,
                 modifier = Modifier.fillMaxWidth().focusRequester(resumeFocusRequester),
             ) { Text("Resume") }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
+            TvOutlinedButton(
                 onClick = onOpenControllerSettings,
                 modifier = Modifier.fillMaxWidth().focusRequester(controllerSettingsFocusRequester),
             ) { Text("Controller Settings") }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(onClick = { showQuitConfirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Quit") }
+            TvOutlinedButton(
+                onClick = { showQuitConfirm = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Quit") }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(onClick = { showQuitConfirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Quit") }
+            TvOutlinedButton(
+                onClick = { showQuitConfirm = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Quit") }
         }
     }
 
@@ -1238,10 +1249,16 @@ private fun PauseMenuOverlay(
             title = { Text("Quit game?") },
             text = { Text("Your save will be checkpointed before quitting.") },
             confirmButton = {
-                TextButton(onClick = { showQuitConfirm = false; onQuit() }) { Text("Yes") }
+                TextButton(
+                    onClick = { showQuitConfirm = false; onQuit() },
+                    modifier = Modifier.tvButtonFocus(),
+                ) { Text("Yes") }
             },
             dismissButton = {
-                TextButton(onClick = { showQuitConfirm = false }) { Text("No") }
+                TextButton(
+                    onClick = { showQuitConfirm = false },
+                    modifier = Modifier.tvButtonFocus(),
+                ) { Text("No") }
             },
         )
     }

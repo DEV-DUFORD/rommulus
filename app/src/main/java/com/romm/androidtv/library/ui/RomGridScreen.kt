@@ -74,7 +74,9 @@ fun RomGridScreen(
                     text = "Couldn't load $title (${section.error.name.lowercase().replace('_', ' ')})",
                     color = RommTvColors.TextSecondary,
                 )
-                TextButton(onClick = viewModel::refresh) { Text("Retry", color = RommTvColors.Romm300) }
+                TextButton(onClick = viewModel::refresh, modifier = Modifier.tvButtonFocus()) {
+                    Text("Retry", color = RommTvColors.Romm300)
+                }
             }
             is SectionState.Loaded -> {
                 if (section.data.isEmpty()) {

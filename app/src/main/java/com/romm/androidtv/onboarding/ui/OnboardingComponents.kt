@@ -1,7 +1,6 @@
 package com.romm.androidtv.onboarding.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -39,6 +38,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.library.ui.RommTvColors
+import com.romm.androidtv.library.ui.tvFocusRing
 
 /** Error text color with WCAG AA contrast against the NightHi background. */
 private val OnboardingErrorColor = Color(0xFFF87171)
@@ -123,13 +123,7 @@ fun OnboardingPrimaryButton(
             .widthIn(min = 240.dp)
             .heightIn(min = 48.dp)
             .background(containerColor, RoundedCornerShape(8.dp))
-            .then(
-                if (isFocused && enabled && !loading) {
-                    Modifier.border(2.dp, RommTvColors.Romm500, RoundedCornerShape(8.dp))
-                } else {
-                    Modifier
-                },
-            )
+            .tvFocusRing(isFocused && enabled && !loading)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,

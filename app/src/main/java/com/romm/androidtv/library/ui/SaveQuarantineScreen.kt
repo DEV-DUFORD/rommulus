@@ -1,7 +1,6 @@
 package com.romm.androidtv.library.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -203,11 +202,7 @@ private fun QuarantineDismissButton(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(Color.Transparent)
-            .border(
-                width = if (isFocused) 2.dp else 0.dp,
-                color = RommTvColors.Romm300,
-                shape = RoundedCornerShape(8.dp),
-            )
+            .tvFocusRing(isFocused)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,

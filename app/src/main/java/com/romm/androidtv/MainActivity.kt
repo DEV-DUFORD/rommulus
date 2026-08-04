@@ -80,6 +80,7 @@ import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.gamepad.GamepadInjectionBridge
 import com.romm.androidtv.gamepad.GamepadInjectionDiagnostics
 import com.romm.androidtv.model.*
+import com.romm.androidtv.library.ui.tvButtonFocus
 import com.romm.androidtv.network.*
 import com.romm.androidtv.romm.DeviceRepositoryImpl
 import com.romm.androidtv.romm.RomRepositoryImpl
@@ -1787,11 +1788,14 @@ class MainActivity : ComponentActivity() {
                         color = Color(0xFFf44336),
                     )
                     androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(24.dp))
-                    androidx.compose.material3.TextButton(onClick = {
-                        state.clear()
-                        preLaunchState = null
-                        currentScreen = Screen.NATIVE_GAME_DETAIL
-                    }) {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            state.clear()
+                            preLaunchState = null
+                            currentScreen = Screen.NATIVE_GAME_DETAIL
+                        },
+                        modifier = Modifier.tvButtonFocus(),
+                    ) {
                         androidx.compose.material3.Text("Go Back", color = com.romm.androidtv.library.ui.RommTvColors.Romm300)
                     }
                 }
@@ -1966,4 +1970,3 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 }
-

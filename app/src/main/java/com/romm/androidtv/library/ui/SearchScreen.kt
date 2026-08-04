@@ -173,7 +173,7 @@ private fun ErrorState(error: com.romm.androidtv.romm.RommApiError, onRetry: () 
                 text = "Search failed (${error.name.lowercase().replace('_', ' ')})",
                 color = RommTvColors.TextSecondary,
             )
-            TextButton(onClick = onRetry) {
+            TextButton(onClick = onRetry, modifier = Modifier.tvButtonFocus()) {
                 Text("Retry", color = RommTvColors.Romm300)
             }
         }

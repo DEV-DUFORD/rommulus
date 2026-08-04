@@ -123,7 +123,9 @@ fun GameDetailScreen(
                     text = "Couldn't load this game (${section.error.name.lowercase().replace('_', ' ')})",
                     color = RommTvColors.TextSecondary,
                 )
-                TextButton(onClick = viewModel::refresh) { Text("Retry", color = RommTvColors.Romm300) }
+                TextButton(onClick = viewModel::refresh, modifier = Modifier.tvButtonFocus()) {
+                    Text("Retry", color = RommTvColors.Romm300)
+                }
             }
             is SectionState.Loaded -> GameDetailContent(
                 rom = section.data,
@@ -239,7 +241,7 @@ private fun GameDetailContent(
                                     color = Color(0xFFf44336),
                                     modifier = Modifier.weight(1f).padding(end = 8.dp),
                                 )
-                                TextButton(onClick = onDismissError) {
+                                TextButton(onClick = onDismissError, modifier = Modifier.tvButtonFocus()) {
                                     Text("Dismiss", color = RommTvColors.Romm300)
                                 }
                             }
@@ -408,10 +410,10 @@ private fun AuthExpiredState(onLogin: () -> Unit, onDismiss: () -> Unit) {
         }
         Spacer(modifier = Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onLogin) {
+            TextButton(onClick = onLogin, modifier = Modifier.tvButtonFocus()) {
                 Text("Log in", color = RommTvColors.Romm300)
             }
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, modifier = Modifier.tvButtonFocus()) {
                 Text("Dismiss", color = RommTvColors.TextSecondary)
             }
         }
@@ -432,11 +434,7 @@ private fun PlayButton(onPlay: () -> Unit, isStaging: Boolean = false, focusRequ
                 else if (isFocused) RommTvColors.Romm500
                 else RommTvColors.Romm600.copy(alpha = 0.6f)
             )
-            .border(
-                width = if (isFocused && !isStaging) 2.dp else 0.dp,
-                color = RommTvColors.Romm300,
-                shape = RoundedCornerShape(8.dp),
-            )
+            .tvFocusRing(isFocused && !isStaging)
             .then(
                 if (!isStaging) {
                     Modifier.clickable(
@@ -472,7 +470,7 @@ private fun ChooseSaveButton(onClick: () -> Unit, enabled: Boolean = true) {
                 else RommTvColors.NightLo
             )
             .border(
-                width = if (isFocused && enabled) 2.dp else 1.dp,
+                width = if (isFocused && enabled) 3.dp else 1.dp,
                 color = if (isFocused && enabled) RommTvColors.Romm300 else RommTvColors.TextSecondary.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(8.dp),
             )
@@ -517,7 +515,7 @@ private fun ChooseVersionButton(onClick: () -> Unit, enabled: Boolean = true) {
                 else RommTvColors.NightLo
             )
             .border(
-                width = if (isFocused && enabled) 2.dp else 1.dp,
+                width = if (isFocused && enabled) 3.dp else 1.dp,
                 color = if (isFocused && enabled) RommTvColors.Romm300 else RommTvColors.TextSecondary.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(8.dp),
             )

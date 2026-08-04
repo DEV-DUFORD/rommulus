@@ -1,7 +1,6 @@
 package com.romm.androidtv.library.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -59,7 +58,9 @@ fun BiosConfigurationScreen(
                     color = RommTvColors.TextSecondary,
                 )
             }
-            TextButton(onClick = onBack) { Text("Back", color = RommTvColors.TextSecondary) }
+            TextButton(onClick = onBack, modifier = Modifier.tvButtonFocus()) {
+                Text("Back", color = RommTvColors.TextSecondary)
+            }
         }
         Spacer(modifier = Modifier.height(20.dp))
         when (val current = state) {
@@ -71,7 +72,9 @@ fun BiosConfigurationScreen(
             }
             is BiosConfigurationState.Error -> Column {
                 Text(current.message, color = RommTvColors.TextSecondary)
-                TextButton(onClick = viewModel::refresh) { Text("Retry", color = RommTvColors.Romm300) }
+                TextButton(onClick = viewModel::refresh, modifier = Modifier.tvButtonFocus()) {
+                    Text("Retry", color = RommTvColors.Romm300)
+                }
             }
             is BiosConfigurationState.Loaded -> {
                 if (current.options.isEmpty()) {
@@ -117,11 +120,7 @@ private fun BiosOptionRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(if (focused) RommTvColors.Romm600.copy(alpha = 0.3f) else RommTvColors.NightLo)
-            .border(
-                width = if (focused) 2.dp else 0.dp,
-                color = RommTvColors.Romm300,
-                shape = RoundedCornerShape(8.dp),
-            )
+            .tvFocusRing(focused)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,

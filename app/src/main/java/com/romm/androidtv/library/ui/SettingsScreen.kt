@@ -19,8 +19,6 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
@@ -71,6 +70,11 @@ fun SettingsScreen(
     val usernameFieldFocusRequester = remember { FocusRequester() }
     val passwordFieldFocusRequester = remember { FocusRequester() }
     val loginFocusRequester = remember { FocusRequester() }
+    val filterToggleFocusRequester = remember { FocusRequester() }
+    val controllerSettingsFocusRequester = remember { FocusRequester() }
+    val segaCdFocusRequester = remember { FocusRequester() }
+    val playStationFocusRequester = remember { FocusRequester() }
+    val verifySha1FocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         focusManager.clearFocus()
@@ -153,14 +157,14 @@ fun SettingsScreen(
                 onClick = viewModel::onCheckConnection,
             )
 
-            Button(
+            TvButton(
                 onClick = viewModel::onSave,
                 modifier = Modifier.focusRequester(saveFocusRequester),
             ) {
                 Text("Save")
             }
 
-            OutlinedButton(
+            TvOutlinedButton(
                 onClick = viewModel::onRestoreDefault,
                 modifier = Modifier.focusRequester(restoreDefaultFocusRequester),
             ) {
@@ -308,6 +312,7 @@ fun SettingsScreen(
             focusRequester = loginFocusRequester,
             isLoading = uiState.loginState is SettingsLoginState.Loading,
             onClick = viewModel::onLogin,
+            modifier = Modifier.focusProperties { down = filterToggleFocusRequester },
         )
 
         // Login feedback
@@ -361,9 +366,15 @@ fun SettingsScreen(
                     color = RommTvColors.TextSecondary,
                 )
             }
-            androidx.compose.material3.Switch(
+            TvSwitch(
                 checked = uiState.hideUnsupportedSystems,
                 onCheckedChange = viewModel::onHideUnsupportedSystemsChanged,
+                modifier = Modifier
+                    .focusRequester(filterToggleFocusRequester)
+                    .focusProperties {
+                        up = loginFocusRequester
+                        down = controllerSettingsFocusRequester
+                    },
             )
         }
 
@@ -381,7 +392,15 @@ fun SettingsScreen(
             color = RommTvColors.TextSecondary,
             modifier = Modifier.padding(bottom = 12.dp),
         )
-        Button(onClick = onOpenControllerSettings) {
+        TvButton(
+            onClick = onOpenControllerSettings,
+            modifier = Modifier
+                .focusRequester(controllerSettingsFocusRequester)
+                .focusProperties {
+                    up = filterToggleFocusRequester
+                    down = segaCdFocusRequester
+                },
+        ) {
             Text("Controller Settings")
         }
 
@@ -399,11 +418,27 @@ fun SettingsScreen(
             color = RommTvColors.TextSecondary,
             modifier = Modifier.padding(bottom = 12.dp),
         )
-        OutlinedButton(onClick = onOpenSegaCdBios) {
+        TvOutlinedButton(
+            onClick = onOpenSegaCdBios,
+            modifier = Modifier
+                .focusRequester(segaCdFocusRequester)
+                .focusProperties {
+                    up = filterToggleFocusRequester
+                    down = playStationFocusRequester
+                },
+        ) {
             Text("Sega CD")
         }
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(onClick = onOpenPlayStationBios) {
+        TvOutlinedButton(
+            onClick = onOpenPlayStationBios,
+            modifier = Modifier
+                .focusRequester(playStationFocusRequester)
+                .focusProperties {
+                    up = segaCdFocusRequester
+                    down = verifySha1FocusRequester
+                },
+        ) {
             Text("PlayStation")
         }
 
@@ -430,9 +465,12 @@ fun SettingsScreen(
                     color = RommTvColors.TextSecondary,
                 )
             }
-            androidx.compose.material3.Switch(
+            TvSwitch(
                 checked = uiState.verifySha1OnLaunch,
                 onCheckedChange = viewModel::onVerifySha1OnLaunchChanged,
+                modifier = Modifier
+                    .focusRequester(verifySha1FocusRequester)
+                    .focusProperties { up = playStationFocusRequester },
             )
         }
 
@@ -460,11 +498,12 @@ private fun SettingsActionButton(
     focusRequester: FocusRequester,
     isLoading: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    OutlinedButton(
+    TvOutlinedButton(
         onClick = onClick,
         enabled = !isLoading,
-        modifier = Modifier.focusRequester(focusRequester),
+        modifier = modifier.focusRequester(focusRequester),
     ) {
         if (isLoading) {
             CircularProgressIndicator(

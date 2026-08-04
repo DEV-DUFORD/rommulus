@@ -62,6 +62,8 @@ import com.romm.androidtv.controller.config.ControllerHighlightRegion
 import com.romm.androidtv.controller.config.CoreControlId
 import com.romm.androidtv.controller.config.HighlightShape
 import com.romm.androidtv.library.ui.RommTvColors
+import com.romm.androidtv.library.ui.tvButtonFocus
+import com.romm.androidtv.library.ui.tvFocusRing
 
 /**
  * Shared, host-agnostic controller-configuration screen (CONTROLLER_SETTINGS.md §7).
@@ -293,10 +295,14 @@ fun ControllerConfigScreen(
             title = { Text(stringResource(R.string.controller_config_reset_all_title)) },
             text = { Text(stringResource(R.string.controller_config_reset_all_body)) },
             confirmButton = {
-                TextButton(onClick = onResetAllConfirm) { Text(stringResource(R.string.controller_config_reset_all_confirm), color = RommTvColors.Romm300) }
+                TextButton(onClick = onResetAllConfirm, modifier = Modifier.tvButtonFocus()) {
+                    Text(stringResource(R.string.controller_config_reset_all_confirm), color = RommTvColors.Romm300)
+                }
             },
             dismissButton = {
-                TextButton(onClick = onResetAllCancel) { Text(stringResource(R.string.controller_config_reset_all_cancel), color = RommTvColors.TextSecondary) }
+                TextButton(onClick = onResetAllCancel, modifier = Modifier.tvButtonFocus()) {
+                    Text(stringResource(R.string.controller_config_reset_all_cancel), color = RommTvColors.TextSecondary)
+                }
             },
         )
     }
@@ -312,7 +318,9 @@ private fun ControllerHeader(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(onClick = onBack) { Text(stringResource(R.string.controller_config_back), color = RommTvColors.TextSecondary) }
+        TextButton(onClick = onBack, modifier = Modifier.tvButtonFocus()) {
+            Text(stringResource(R.string.controller_config_back), color = RommTvColors.TextSecondary)
+        }
         Text(
             text = title,
             style = MaterialTheme.typography.headlineSmall,
@@ -324,7 +332,7 @@ private fun ControllerHeader(
         val resetControllerLabel = stringResource(R.string.controller_config_reset_controller)
         TextButton(
             onClick = onResetPlayer,
-            modifier = Modifier.semantics { contentDescription = resetControllerLabel },
+            modifier = Modifier.tvButtonFocus().semantics { contentDescription = resetControllerLabel },
         ) { Text(resetControllerLabel, color = RommTvColors.TextSecondary) }
     }
 }
@@ -660,11 +668,19 @@ private fun ConflictDialog(
                 ),
             )
         },
-        confirmButton = { TextButton(onClick = onSwap) { Text(stringResource(R.string.controller_conflict_swap), color = RommTvColors.Romm300) } },
+        confirmButton = {
+            TextButton(onClick = onSwap, modifier = Modifier.tvButtonFocus()) {
+                Text(stringResource(R.string.controller_conflict_swap), color = RommTvColors.Romm300)
+            }
+        },
         dismissButton = {
             Row {
-                TextButton(onClick = onReplace) { Text(stringResource(R.string.controller_conflict_replace), color = RommTvColors.Romm300) }
-                TextButton(onClick = onCancel) { Text(stringResource(R.string.controller_config_reset_all_cancel), color = RommTvColors.TextSecondary) }
+                TextButton(onClick = onReplace, modifier = Modifier.tvButtonFocus()) {
+                    Text(stringResource(R.string.controller_conflict_replace), color = RommTvColors.Romm300)
+                }
+                TextButton(onClick = onCancel, modifier = Modifier.tvButtonFocus()) {
+                    Text(stringResource(R.string.controller_config_reset_all_cancel), color = RommTvColors.TextSecondary)
+                }
             }
         },
     )

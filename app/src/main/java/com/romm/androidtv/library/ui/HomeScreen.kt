@@ -140,7 +140,7 @@ private fun RomShelf(
                         color = RommTvColors.TextSecondary,
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    TextButton(onClick = onRetry) {
+                    TextButton(onClick = onRetry, modifier = Modifier.tvButtonFocus()) {
                         Text("Retry", color = RommTvColors.Romm300)
                     }
                 }
@@ -257,7 +257,9 @@ private fun <T> TileGridScreen(
                     text = "Couldn't load $title (${state.error.name.lowercase().replace('_', ' ')})",
                     color = RommTvColors.TextSecondary,
                 )
-                TextButton(onClick = onRetry) { Text("Retry", color = RommTvColors.Romm300) }
+                TextButton(onClick = onRetry, modifier = Modifier.tvButtonFocus()) {
+                    Text("Retry", color = RommTvColors.Romm300)
+                }
             }
             is SectionState.Loaded -> {
                 if (state.data.isEmpty()) {
@@ -354,5 +356,3 @@ private fun TileCard(title: String, subtitle: String, imageUrls: List<String>, i
         )
     }
 }
-
-

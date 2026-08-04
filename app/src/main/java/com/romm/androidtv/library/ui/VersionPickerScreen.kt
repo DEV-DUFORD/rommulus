@@ -1,7 +1,6 @@
 package com.romm.androidtv.library.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -69,8 +68,12 @@ fun VersionPickerScreen(
                 Text(text = "Couldn't load versions (${state.message})", color = RommTvColors.TextSecondary)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row {
-                    TextButton(onClick = onRetry) { Text("Retry", color = RommTvColors.Romm300) }
-                    TextButton(onClick = onBack) { Text("Back", color = RommTvColors.TextSecondary) }
+                    TextButton(onClick = onRetry, modifier = Modifier.tvButtonFocus()) {
+                        Text("Retry", color = RommTvColors.Romm300)
+                    }
+                    TextButton(onClick = onBack, modifier = Modifier.tvButtonFocus()) {
+                        Text("Back", color = RommTvColors.TextSecondary)
+                    }
                 }
             }
             is VersionPickerState.Loaded -> VersionPickerContent(
@@ -111,7 +114,9 @@ private fun VersionPickerContent(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            TextButton(onClick = onBack) { Text("Back", color = RommTvColors.TextSecondary) }
+            TextButton(onClick = onBack, modifier = Modifier.tvButtonFocus()) {
+                Text("Back", color = RommTvColors.TextSecondary)
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -143,11 +148,7 @@ private fun VersionEntryRow(entry: VersionPickerEntryUiModel, onClick: () -> Uni
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) RommTvColors.Romm600.copy(alpha = 0.3f) else RommTvColors.NightLo)
-            .border(
-                width = if (isFocused) 2.dp else 0.dp,
-                color = RommTvColors.Romm300,
-                shape = RoundedCornerShape(8.dp),
-            )
+            .tvFocusRing(isFocused)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
