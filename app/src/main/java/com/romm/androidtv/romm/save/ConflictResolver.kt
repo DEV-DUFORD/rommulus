@@ -129,6 +129,8 @@ class ConflictResolverImpl(
     private val saveReplicaDao: SaveReplicaDao,
     private val saveContentStore: SaveContentStore,
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /** Resolved per-upload: governs the server auto-clean of the autosave slot. Defaults to on. */
+    private val shouldAutoclean: () -> Boolean = { true },
 ) : ConflictResolver {
 
     override suspend fun resolveKeepLocal(
@@ -209,7 +211,8 @@ class ConflictResolverImpl(
                 fileName = localFileName,
                 bytes = localBytes,
                 // Same autosave-slot autocleanup as the ordinary upload paths.
-                autocleanup = true,
+                // May be disabled by the user via Settings → Advanced → "Auto-clean uploaded saves".
+                autocleanup = shouldAutoclean(),
                 autocleanupLimit = 5,
             ),
         )

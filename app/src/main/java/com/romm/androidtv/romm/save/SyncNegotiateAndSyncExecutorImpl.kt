@@ -36,6 +36,8 @@ class SyncNegotiateAndSyncExecutorImpl(
     private val deviceIdentityLoader: DeviceIdentityLoader,
     private val uploadCaller: SaveUploadCaller,
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /** Resolved per-upload: governs the server auto-clean of the autosave slot. Defaults to on. */
+    private val shouldAutoclean: () -> Boolean = { true },
 ) : SyncNegotiateAndSyncExecutor {
 
     override suspend fun executeOne(op: PendingOperationEntity): SyncNegotiateAndSyncExecutor.ExecutionOutcome =
@@ -190,7 +192,8 @@ class SyncNegotiateAndSyncExecutorImpl(
             // Keep this device's own "autosave" slot from growing unbounded server-side —
             // the server still mints a new timestamped file per upload, but only the newest
             // 5 are retained. Other slots/devices/manual web-UI saves are untouched.
-            autocleanup = true,
+            // May be disabled by the user via Settings → Advanced → "Auto-clean uploaded saves".
+            autocleanup = shouldAutoclean(),
             autocleanupLimit = 5,
         )
         val uploadResult = uploadCaller.call(origin, uploadRequest)

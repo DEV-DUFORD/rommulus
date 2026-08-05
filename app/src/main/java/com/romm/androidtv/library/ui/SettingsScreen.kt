@@ -75,6 +75,7 @@ fun SettingsScreen(
     val segaCdFocusRequester = remember { FocusRequester() }
     val playStationFocusRequester = remember { FocusRequester() }
     val verifySha1FocusRequester = remember { FocusRequester() }
+    val autocleanFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         focusManager.clearFocus()
@@ -470,7 +471,35 @@ fun SettingsScreen(
                 onCheckedChange = viewModel::onVerifySha1OnLaunchChanged,
                 modifier = Modifier
                     .focusRequester(verifySha1FocusRequester)
-                    .focusProperties { up = playStationFocusRequester },
+                    .focusProperties {
+                        up = playStationFocusRequester
+                        down = autocleanFocusRequester
+                    },
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Auto-clean uploaded saves", color = RommTvColors.TextPrimary)
+                Text(
+                    text = "Ask the server to keep only the most recent 5 files in the autosave slot after " +
+                        "an upload, instead of keeping every copy on exit.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RommTvColors.TextSecondary,
+                )
+            }
+            TvSwitch(
+                checked = uiState.autocleanSavesOnUpload,
+                onCheckedChange = viewModel::onAutocleanSavesOnUploadChanged,
+                modifier = Modifier
+                    .focusRequester(autocleanFocusRequester)
+                    .focusProperties { up = verifySha1FocusRequester },
             )
         }
 

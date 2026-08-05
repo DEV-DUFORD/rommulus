@@ -62,11 +62,15 @@ class SaveSyncCoordinatorImpl(
      * Defaults to a no-op so plain-JVM unit tests never need an Android [android.content.Context].
      */
     private val onOperationQueued: () -> Unit = {},
+    /** Resolved per-upload: governs the server auto-clean of the autosave slot. Defaults to on. */
+    private val shouldAutoclean: () -> Boolean = { true },
 ) : SaveSyncCoordinator, SaveSyncCoordinatorInternal {
 
     /** Lazy singleton: resolves once on first conflict, reuses across calls. */
     private val resolver: ConflictResolver by lazy {
-        conflictResolver ?: ConflictResolverImpl(client, deviceRepository, saveReplicaDao, saveContentStore, clock)
+        conflictResolver ?: ConflictResolverImpl(
+            client, deviceRepository, saveReplicaDao, saveContentStore, clock, shouldAutoclean,
+        )
     }
 
     override suspend fun syncBeforeLaunch(request: SaveSyncRequest): SaveSyncOutcome = withContext(Dispatchers.IO) {

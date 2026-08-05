@@ -53,6 +53,7 @@ class SettingsViewModelTest {
         var loginCalls: Int = 0,
         var loginSuccessInvoked: Boolean = false,
         var verifySha1OnLaunch: Boolean = false,
+        var autocleanSavesOnUpload: Boolean = true,
     )
 
     private fun makeViewModel(
@@ -84,6 +85,8 @@ class SettingsViewModelTest {
             onSessionInvalidated = { mocks.invalidated = true },
             getVerifySha1OnLaunch = { mocks.verifySha1OnLaunch },
             setVerifySha1OnLaunchFn = { verify -> mocks.verifySha1OnLaunch = verify },
+            getAutocleanSavesOnUpload = { mocks.autocleanSavesOnUpload },
+            setAutocleanSavesOnUploadFn = { enabled -> mocks.autocleanSavesOnUpload = enabled },
         )
 
         return vm to mocks
@@ -460,5 +463,25 @@ class SettingsViewModelTest {
         vm.onVerifySha1OnLaunchChanged(false)
         assertThat(vm.uiState.value.verifySha1OnLaunch).isFalse()
         assertThat(mocks.verifySha1OnLaunch).isFalse()
+    }
+
+    @Test
+    fun `autocleanSavesOnUpload defaults to true when nothing is persisted`() = runBlocking {
+        val (vm, _) = makeViewModel()
+
+        assertThat(vm.uiState.value.autocleanSavesOnUpload).isTrue()
+    }
+
+    @Test
+    fun `onAutocleanSavesOnUploadChanged persists the toggle and updates state immediately`() = runBlocking {
+        val (vm, mocks) = makeViewModel()
+
+        vm.onAutocleanSavesOnUploadChanged(false)
+        assertThat(vm.uiState.value.autocleanSavesOnUpload).isFalse()
+        assertThat(mocks.autocleanSavesOnUpload).isFalse()
+
+        vm.onAutocleanSavesOnUploadChanged(true)
+        assertThat(vm.uiState.value.autocleanSavesOnUpload).isTrue()
+        assertThat(mocks.autocleanSavesOnUpload).isTrue()
     }
 }

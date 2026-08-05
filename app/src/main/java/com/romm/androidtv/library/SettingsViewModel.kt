@@ -74,6 +74,13 @@ data class SettingsUiState(
      * default — most users trust their library and don't need this overhead.
      */
     val verifySha1OnLaunch: Boolean = false,
+    /**
+     * Advanced save-cleanup toggle (on by default): when true, SRAM uploads
+     * after a game session ask the server to auto-clean the "autosave" slot to
+     * a short recent history (5 files) instead of growing unbounded. When
+     * false, every uploaded copy is kept on the server.
+     */
+    val autocleanSavesOnUpload: Boolean = true,
 )
 
 /**
@@ -106,6 +113,8 @@ class SettingsViewModel(
     private val setHideUnsupportedSystemsFn: (Boolean) -> Unit = {},
     private val getVerifySha1OnLaunch: () -> Boolean = { false },
     private val setVerifySha1OnLaunchFn: (Boolean) -> Unit = {},
+    private val getAutocleanSavesOnUpload: () -> Boolean = { true },
+    private val setAutocleanSavesOnUploadFn: (Boolean) -> Unit = {},
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -125,6 +134,7 @@ class SettingsViewModel(
             currentUsername = session?.username,
             hideUnsupportedSystems = getHideUnsupportedSystems(),
             verifySha1OnLaunch = getVerifySha1OnLaunch(),
+            autocleanSavesOnUpload = getAutocleanSavesOnUpload(),
         )
     }
 
@@ -138,6 +148,12 @@ class SettingsViewModel(
     fun onVerifySha1OnLaunchChanged(verify: Boolean) {
         setVerifySha1OnLaunchFn(verify)
         _uiState.value = _uiState.value.copy(verifySha1OnLaunch = verify)
+    }
+
+    /** Toggles the advanced "auto-clean uploaded saves" setting and persists it immediately. */
+    fun onAutocleanSavesOnUploadChanged(enabled: Boolean) {
+        setAutocleanSavesOnUploadFn(enabled)
+        _uiState.value = _uiState.value.copy(autocleanSavesOnUpload = enabled)
     }
 
     /** Called on every TextField [onValueChange]. Validates and tracks dirty state. */
@@ -397,6 +413,8 @@ class SettingsViewModel(
                 setHideUnsupportedSystemsFn = { hide -> settingsRepository.setHideUnsupportedSystems(hide) },
                 getVerifySha1OnLaunch = { settingsRepository.verifySha1OnLaunch() },
                 setVerifySha1OnLaunchFn = { verify -> settingsRepository.setVerifySha1OnLaunch(verify) },
+                getAutocleanSavesOnUpload = { settingsRepository.autocleanSavesOnUpload() },
+                setAutocleanSavesOnUploadFn = { enabled -> settingsRepository.setAutocleanSavesOnUpload(enabled) },
             ) as T
         }
     }

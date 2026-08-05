@@ -347,6 +347,7 @@ class MainActivity : ComponentActivity() {
             pendingOperationDao = db.pendingOperationDao(),
             saveContentStore = FileSaveContentStore(filesDir),
             onOperationQueued = { com.romm.androidtv.sync.SaveUploadEnqueueHelper.enqueue(applicationContext) },
+            shouldAutoclean = { settingsRepository.autocleanSavesOnUpload() },
         )
     }
 
@@ -1793,6 +1794,8 @@ class MainActivity : ComponentActivity() {
         val pending = pendingNativeLaunch
         val focusRequester = remember { FocusRequester() }
         val alpha = remember { Animatable(0f) }
+        // Hoisted so the clickable never recreates an interaction source mid-composition.
+        val interactionSource = remember { MutableInteractionSource() }
 
         // Keep the overlay transparent whenever there's no active fade-to-black. This composable
         // stays composed permanently (it's invoked unconditionally in setContent), so the Animatable
@@ -1840,7 +1843,7 @@ class MainActivity : ComponentActivity() {
                     .focusRequester(focusRequester)
                     .focusable()
                     .clickable(
-                        interactionSource = MutableInteractionSource(),
+                        interactionSource = interactionSource,
                         indication = null,
                         onClick = {},
                     )

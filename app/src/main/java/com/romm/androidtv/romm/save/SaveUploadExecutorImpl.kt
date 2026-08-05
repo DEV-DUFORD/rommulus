@@ -14,6 +14,8 @@ class SaveUploadExecutorImpl(
     private val uploadCaller: SaveUploadCaller,
     private val negotiateAndSyncExecutor: SyncNegotiateAndSyncExecutor,
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /** Resolved per-upload: governs the server auto-clean of the autosave slot. Defaults to on. */
+    private val shouldAutoclean: () -> Boolean = { true },
 ) : SaveUploadExecutor {
 
     override suspend fun drainBatch(): SaveUploadExecutor.DrainResult {
@@ -131,7 +133,8 @@ class SaveUploadExecutorImpl(
             bytes = sramBytes,
             // See SyncNegotiateAndSyncExecutorImpl's identical comment: keeps this device's own
             // "autosave" slot at a short recent history (5 files) rather than growing unbounded.
-            autocleanup = true,
+            // May be disabled by the user via Settings → Advanced → "Auto-clean uploaded saves".
+            autocleanup = shouldAutoclean(),
             autocleanupLimit = 5,
         )
         val uploadResult = uploadCaller.call(origin, uploadRequest)

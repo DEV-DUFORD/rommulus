@@ -96,6 +96,18 @@ class SettingsRepository(
         prefs.edit().putBoolean(KEY_VERIFY_SHA1, verify).apply()
     }
 
+    /**
+     * Advanced save-cleanup toggle (on by default): when true, SRAM uploads ask
+     * the server to auto-clean the "autosave" slot down to a short recent
+     * history (5 files) right after each successful upload. When false, the
+     * server keeps every uploaded copy instead of pruning older ones.
+     */
+    fun autocleanSavesOnUpload(): Boolean = prefs.getBoolean(KEY_AUTOCLEAN_SAVES, true)
+
+    fun setAutocleanSavesOnUpload(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTOCLEAN_SAVES, enabled).apply()
+    }
+
     data class BiosSelection(
         val firmwareId: Long,
         val fileName: String,
@@ -144,6 +156,7 @@ class SettingsRepository(
         private const val KEY_ORIGIN = "romm_origin"
         private const val KEY_HIDE_UNSUPPORTED = "hide_unsupported_systems"
         private const val KEY_VERIFY_SHA1 = "verify_sha1_on_launch"
+        private const val KEY_AUTOCLEAN_SAVES = "autoclean_saves_on_upload"
         private const val KEY_SEGACD_BIOS_ID = "segacd_bios_id"
         private const val KEY_SEGACD_BIOS_FILE_NAME = "segacd_bios_file_name"
         private const val KEY_PSX_BIOS_ID = "psx_bios_id"

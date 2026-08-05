@@ -63,6 +63,14 @@ class RommWorkerFactory(
                 context.filesDir,
             )
 
+            val settingsRepository = com.romm.androidtv.config.SettingsRepository(
+                context.getSharedPreferences(
+                    com.romm.androidtv.config.SettingsRepository.PREFS_NAME, Context.MODE_PRIVATE,
+                ),
+                com.romm.androidtv.BuildConfig.ROMM_ORIGIN,
+            )
+            val shouldAutoclean = { settingsRepository.autocleanSavesOnUpload() }
+
             val sessionPrefs = context.getSharedPreferences(SessionStore.PREFS_NAME, Context.MODE_PRIVATE)
             val sessionStore = SessionStore(sessionPrefs)
 
@@ -115,6 +123,7 @@ class RommWorkerFactory(
                 sessionReader = sessionReader,
                 deviceIdentityLoader = deviceIdentityLoader,
                 uploadCaller = saveUploadCaller,
+                shouldAutoclean = shouldAutoclean,
             )
 
             return SaveUploadExecutorImpl(
@@ -125,6 +134,7 @@ class RommWorkerFactory(
                 deviceIdentityLoader = deviceIdentityLoader,
                 negotiateAndSyncExecutor = negotiateAndSyncExecutor,
                 uploadCaller = saveUploadCaller,
+                shouldAutoclean = shouldAutoclean,
             )
         }
     }
