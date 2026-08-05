@@ -23,6 +23,12 @@ data class SavePickerEntryUiModel(
      * a second network round-trip. Null when the server didn't report one.
      */
     val contentHash: String? = null,
+    /**
+     * When non-null, this save belongs to a different game file of the same multi-disc game
+     * (a sibling ROM). Shows a "From <file>" tag so the user knows loading it carries a save
+     * over from another disc. Null for saves of the currently-launched game file.
+     */
+    val sourceFileLabel: String? = null,
 )
 
 /** Pure-UI model for the save-picker screen's full state. */

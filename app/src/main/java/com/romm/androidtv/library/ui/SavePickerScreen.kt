@@ -174,6 +174,16 @@ private fun SaveEntryRow(entry: SavePickerEntryUiModel, onClick: () -> Unit) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (entry.sourceFileLabel != null) {
+                    Text(
+                        text = "From ${entry.sourceFileLabel}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = RommTvColors.Romm300,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
                 Row(modifier = Modifier.padding(top = 2.dp)) {
                     val meta = listOfNotNull(entry.coreId, entry.sizeText, entry.updatedAtText)
                     Text(

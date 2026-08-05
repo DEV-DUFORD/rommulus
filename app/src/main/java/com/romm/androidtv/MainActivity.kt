@@ -1326,10 +1326,17 @@ class MainActivity : ComponentActivity() {
                 savePickerStagedOutcome = stagingOutcome
                 val spec = stagingOutcome.launchSpec
 
-                val romTitle = when (val detail = libraryRepository.fetchRomDetail(romId)) {
-                    is com.romm.androidtv.library.LibraryResult.Success -> detail.data.title
-                    is com.romm.androidtv.library.LibraryResult.Failure -> "Game #$romId"
-                }
+                val detail = libraryRepository.fetchRomDetail(romId)
+                val romDetail = (detail as? com.romm.androidtv.library.LibraryResult.Success)?.data
+                val romTitle = romDetail?.title ?: "Game #$romId"
+
+                // Multi-disc game files: every sibling ROM is another disc of the same game
+                // (e.g. PS1 .bin/.cue per disc). Their server saves are offered too so a save
+                // made on one disc can be loaded into another (multi-disc save compatibility);
+                // adopting one works identically to a same-disc pick because adoptChosenSave
+                // downloads by server saveId into this disc's scope. The current ROM's own id is
+                // excluded from the sibling set.
+                val siblingRoms = romDetail?.siblingRoms?.filter { it.id != romId }.orEmpty()
 
                 when (val listResult = saveSyncCoordinator.listSavesForRom(romId)) {
                     is com.romm.androidtv.romm.SaveListResult.Success -> {
@@ -1344,13 +1351,25 @@ class MainActivity : ComponentActivity() {
                             )?.rommSaveId
                         }
 
-                        val entries = listResult.saves
-                            // Shows every save for this ROM regardless of which core produced it —
-                            // SRAM saves are cross-core compatible for the same platform (e.g. a
-                            // sameboy save loads fine under gambatte), so filtering by coreId would
-                            // hide perfectly valid choices.
-                            .sortedByDescending { it.updatedAt }
-                            .map { save ->
+                        val entries = buildList {
+                            // Every save for the launched ROM regardless of core — SRAM saves are
+                            // cross-core compatible for the same platform (e.g. a sameboy save loads
+                            // fine under gambatte), so filtering by coreId would hide valid choices.
+                            addAll(listResult.saves.map { save -> save to (null as String?) })
+                            siblingRoms.forEach { sibling ->
+                                val sourceLabel = sibling.fileName.ifBlank { "Game File #${sibling.id}" }
+                                when (val siblingResult = saveSyncCoordinator.listSavesForRom(sibling.id)) {
+                                    is com.romm.androidtv.romm.SaveListResult.Success ->
+                                        addAll(siblingResult.saves.map { save -> save to sourceLabel })
+                                    is com.romm.androidtv.romm.SaveListResult.Failure ->
+                                        Log.d(DIAG_TAG, "nativeLibraryOnChooseSave: sibling ${sibling.id} save list failed (${siblingResult.error}); skipping")
+                                }
+                            }
+                        }
+                            .sortedByDescending { (save, _) -> save.updatedAt }
+                            // Shows every save for this game regardless of which core produced it —
+                            // SRAM saves are cross-core compatible for the same platform.
+                            .map { (save, sourceFileLabel) ->
                                 com.romm.androidtv.library.ui.SavePickerEntryUiModel(
                                     saveId = save.saveId,
                                     fileName = save.fileName,
@@ -1359,8 +1378,10 @@ class MainActivity : ComponentActivity() {
                                     updatedAtText = com.romm.androidtv.library.ui.ConflictResolutionMapper.formatInstant(
                                         save.updatedAt?.toEpochMilli()
                                     ),
-                                    isCurrentlyAdopted = save.saveId == currentlyAdoptedSaveId,
+                                    // Only the launched disc's own saves can be the currently-adopted one.
+                                    isCurrentlyAdopted = sourceFileLabel == null && save.saveId == currentlyAdoptedSaveId,
                                     contentHash = save.contentHash,
+                                    sourceFileLabel = sourceFileLabel,
                                 )
                             }
 
