@@ -104,4 +104,57 @@ class SettingsRepositoryTest {
         repo.setVerifySha1OnLaunch(false)
         assertThat(repo.verifySha1OnLaunch()).isFalse()
     }
+
+    @Test
+    fun `scanlinesEnabled defaults to false when no value is persisted`() {
+        val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "https://example.com")
+
+        assertThat(repo.scanlinesEnabled()).isFalse()
+    }
+
+    @Test
+    fun `scanlinesEnabled persists true and reads back from a second repository backed by the same fake prefs`() {
+        val prefs = FakeSharedPreferences()
+        val repo1 = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+        val repo2 = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+
+        repo1.setScanlinesEnabled(true)
+
+        assertThat(repo1.scanlinesEnabled()).isTrue()
+        assertThat(repo2.scanlinesEnabled()).isTrue()
+    }
+
+    @Test
+    fun `scanlinesEnabled persists false after true`() {
+        val prefs = FakeSharedPreferences()
+        val repo = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+
+        repo.setScanlinesEnabled(true)
+        assertThat(repo.scanlinesEnabled()).isTrue()
+
+        repo.setScanlinesEnabled(false)
+        assertThat(repo.scanlinesEnabled()).isFalse()
+    }
+
+    @Test
+    fun `setScanlinesEnabled reports commit success`() {
+        val prefs = FakeSharedPreferences()
+        val repo = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+
+        val result = repo.setScanlinesEnabled(true)
+
+        assertThat(result).isTrue()
+    }
+
+    @Test
+    fun `setScanlinesEnabled returns false when commit fails`() {
+        val prefs = FakeSharedPreferences()
+        prefs.commitResult = false
+        val repo = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+
+        val result = repo.setScanlinesEnabled(true)
+
+        assertThat(result).isFalse()
+        assertThat(repo.scanlinesEnabled()).isFalse()
+    }
 }

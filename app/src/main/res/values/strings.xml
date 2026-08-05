@@ -78,4 +78,20 @@
     <string name="onboarding_remove_oldest_device_loading">Removing device…</string>
     <string name="onboarding_login_error_empty">Username and password are required</string>
     <string name="onboarding_server_error_persistence">Could not save this server address. Please try again.</string>
+
+    <!-- Pause Menu -->
+    <string name="pause_menu_paused">Paused</string>
+    <string name="pause_menu_resume">Resume</string>
+    <string name="pause_menu_video_options">Video Options</string>
+    <string name="pause_menu_controller_settings">Controller Settings</string>
+    <string name="pause_menu_quit">Quit</string>
+
+    <!-- Video Options Dialog -->
+    <string name="video_options_title">Video Options</string>
+    <string name="video_options_scanlines">Scanlines</string>
+    <string name="video_options_scanlines_description">Adds subtle horizontal lines for a classic CRT look.</string>
+    <string name="video_options_return">Return</string>
+    <string name="video_options_save_error">Couldn\'t save this video option. Try again.</string>
+    <string name="video_options_state_on">On</string>
+    <string name="video_options_state_off">Off</string>
 </resources>

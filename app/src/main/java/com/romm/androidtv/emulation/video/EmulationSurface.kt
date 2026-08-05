@@ -33,7 +33,8 @@ fun EmulationSurface(
     host: NativeLibretroHost,
     coreWidth: Int,
     coreHeight: Int,
-    modifier: Modifier = Modifier
+    scanlinesEnabled: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     val aspect = if (coreWidth > 0 && coreHeight > 0) {
         coreWidth.toFloat() / coreHeight.toFloat()
@@ -42,31 +43,39 @@ fun EmulationSurface(
     }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        AndroidView(
-            modifier = Modifier.aspectRatio(aspect),
-            factory = { context ->
-                SurfaceView(context).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            host.nativeSetSurface(holder.surface)
-                        }
+        Box(modifier = Modifier.aspectRatio(aspect)) {
+            AndroidView(
+                factory = { context ->
+                    SurfaceView(context).apply {
+                        holder.addCallback(object : SurfaceHolder.Callback {
+                            override fun surfaceCreated(holder: SurfaceHolder) {
+                                host.nativeSetSurface(holder.surface)
+                            }
 
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                            // No action needed: the native side re-derives buffer
-                            // geometry from the core's own width/height on the
-                            // next frame, not from the Surface's layout size.
-                        }
+                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                                // No action needed: the native side re-derives buffer
+                                // geometry from the core's own width/height on the
+                                // next frame, not from the Surface's layout size.
+                            }
 
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            // Synchronous: nativeSetSurface(null) blocks until the
-                            // native ANativeWindow reference is released, honoring
-                            // the "don't touch the Surface after this returns"
-                            // contract this callback requires.
-                            host.nativeSetSurface(null)
-                        }
-                    })
-                }
+                            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                // Synchronous: nativeSetSurface(null) blocks until the
+                                // native ANativeWindow reference is released, honoring
+                                // the "don't touch the Surface after this returns"
+                                // contract this callback requires.
+                                host.nativeSetSurface(null)
+                            }
+                        })
+                    }
+                },
+                modifier = Modifier.matchParentSize(),
+            )
+            if (scanlinesEnabled) {
+                ScanlineOverlay(
+                    coreHeight = coreHeight,
+                    modifier = Modifier.matchParentSize(),
+                )
             }
-        )
+        }
     }
 }

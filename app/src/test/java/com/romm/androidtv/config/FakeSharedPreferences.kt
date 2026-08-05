@@ -9,6 +9,7 @@ import android.content.SharedPreferences
 class FakeSharedPreferences : SharedPreferences {
 
     private val values = mutableMapOf<String, Any?>()
+    var commitResult: Boolean = true
 
     override fun getString(key: String?, defValue: String?): String? =
         values[key] as? String ?: defValue
@@ -35,6 +36,7 @@ class FakeSharedPreferences : SharedPreferences {
     ) = Unit
 
     private inner class FakeEditor : SharedPreferences.Editor {
+        private val outer = this@FakeSharedPreferences
         private val pending = mutableMapOf<String, Any?>()
         private val removals = mutableSetOf<String>()
         private var doClear = false
@@ -80,8 +82,8 @@ class FakeSharedPreferences : SharedPreferences {
         }
 
         override fun commit(): Boolean {
-            apply()
-            return true
+            if (outer.commitResult) apply()
+            return outer.commitResult
         }
 
         override fun apply() {

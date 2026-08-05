@@ -50,11 +50,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.romm.androidtv.BuildConfig
+import com.romm.androidtv.R
+import com.romm.androidtv.config.SettingsRepository
 import com.romm.androidtv.controller.LibretroInputAdapter
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
 import com.romm.androidtv.controller.config.ControllerConfigDatabase
@@ -79,6 +83,7 @@ import com.romm.androidtv.emulation.model.SessionDescriptorPatch
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
 import com.romm.androidtv.emulation.video.EmulationSurface
+import com.romm.androidtv.emulation.video.VideoOptionsDialog
 import com.romm.androidtv.library.ui.tvButtonFocus
 import com.romm.androidtv.library.ui.TvButton
 import com.romm.androidtv.library.ui.TvOutlinedButton
@@ -86,6 +91,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -217,6 +223,28 @@ class EmulationActivity : ComponentActivity() {
 
     /** The current pause-menu overlay state; drives [NativeLibretroHost.nativeSetPaused] whenever not [PauseOverlay.CLOSED]. */
     private val pauseOverlay = MutableStateFlow(PauseOverlay.CLOSED)
+
+    /** Activity-owned settings repository, lazily created from the shared prefs (scanlines persistence). */
+    private val settingsRepository by lazy {
+        SettingsRepository(
+            getSharedPreferences(SettingsRepository.PREFS_NAME, MODE_PRIVATE),
+            BuildConfig.ROMM_ORIGIN,
+        )
+    }
+
+    /** Scanlines toggle state, initialized from persistence; Compose observes this flow. */
+    private val scanlinesEnabled by lazy { MutableStateFlow(settingsRepository.scanlinesEnabled()) }
+
+    /**
+     * Mutation boundary: the activity owns persistence, Compose only emits intent. Persists the
+     * requested value and, on a successful synchronous commit, updates [scanlinesEnabled] so the
+     * UI reflects the committed state. Returns the commit success so callers can surface errors.
+     */
+    private fun setScanlinesEnabled(requested: Boolean): Boolean {
+        val ok = settingsRepository.setScanlinesEnabled(requested)
+        if (ok) scanlinesEnabled.value = requested
+        return ok
+    }
 
     /**
      * Set when [finishAndDeliverResult] is called on an active session but [checkpointIfRunning]
@@ -544,6 +572,8 @@ class EmulationActivity : ComponentActivity() {
                         captureCoordinator = captureCoordinator,
                         controllerRouter = controllerRouter,
                         saveFailureVisible = saveFailureVisible,
+                        scanlinesEnabled = scanlinesEnabled,
+                        onSetScanlinesEnabled = ::setScanlinesEnabled,
                         onStop = { finishAndDeliverResult() },
                         onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
                         onSetNativePaused = { paused -> host.nativeSetPaused(paused) },
@@ -899,6 +929,7 @@ internal fun shouldRouteGameplayInput(
 internal fun pauseOverlayOnBackground(current: PauseOverlay): PauseOverlay = when (current) {
     PauseOverlay.CLOSED -> PauseOverlay.MENU
     PauseOverlay.MENU,
+    PauseOverlay.VIDEO_OPTIONS,
     PauseOverlay.CONTROLLER_SETTINGS -> current
 }
 
@@ -933,6 +964,8 @@ private fun EmulationScreen(
     captureCoordinator: ControllerBindingCaptureCoordinator,
     controllerRouter: ControllerEventRouter,
     saveFailureVisible: Flow<Boolean>,
+    scanlinesEnabled: StateFlow<Boolean>,
+    onSetScanlinesEnabled: (Boolean) -> Boolean,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
     onSetNativePaused: (Boolean) -> Unit,
@@ -952,6 +985,9 @@ private fun EmulationScreen(
     val scope = rememberCoroutineScope()
     val overlayState by pauseOverlay.collectAsState()
     val saveFailureShown by saveFailureVisible.collectAsState(initial = false)
+    val scanlinesOn by scanlinesEnabled.collectAsState()
+    var persistenceError by remember { mutableStateOf(false) }
+    var pauseMenuFocusTarget by remember { mutableStateOf(PauseMenuFocusTarget.RESUME) }
 
     LaunchedEffect(sessionStarted) {
         if (!sessionStarted) return@LaunchedEffect
@@ -996,14 +1032,16 @@ private fun EmulationScreen(
     }
 
     // A quick Back tap (released before the hold-to-exit threshold) navigates the overlay: CLOSED
-    // opens the pause menu; MENU closes it; CONTROLLER_SETTINGS returns to MENU (never resumes
-    // gameplay — the core stays paused while on a subpage, see the LaunchedEffect below).
+    // opens the pause menu; MENU closes it; VIDEO_OPTIONS/CONTROLLER_SETTINGS return to MENU (never
+    // resumes gameplay — the core stays paused while on a subpage, see the LaunchedEffect below).
+    // A fresh CLOSED -> MENU transition resets focus to RESUME.
     LaunchedEffect(Unit) {
         quickBackTapEvents.collectLatest {
-            pauseOverlay.value = when (pauseOverlay.value) {
-                PauseOverlay.CLOSED -> PauseOverlay.MENU
-                PauseOverlay.MENU -> PauseOverlay.CLOSED
-                PauseOverlay.CONTROLLER_SETTINGS -> PauseOverlay.MENU
+            val current = pauseOverlay.value
+            val next = quickBackTransition(current)
+            pauseOverlay.value = next
+            if (current == PauseOverlay.CLOSED && next == PauseOverlay.MENU) {
+                pauseMenuFocusTarget = PauseMenuFocusTarget.RESUME
             }
         }
     }
@@ -1032,6 +1070,7 @@ private fun EmulationScreen(
                 host = host,
                 coreWidth = diagnostics[2].toInt(),
                 coreHeight = diagnostics[3].toInt(),
+                scanlinesEnabled = scanlinesOn,
                 modifier = Modifier.fillMaxSize()
             )
         } else {
@@ -1046,14 +1085,41 @@ private fun EmulationScreen(
         }
 
         if (sessionStarted) {
-            when (overlayState) {
-                PauseOverlay.CLOSED -> Unit
-                PauseOverlay.MENU -> PauseMenuOverlay(
+            if (overlayState == PauseOverlay.MENU || overlayState == PauseOverlay.VIDEO_OPTIONS) {
+                PauseMenuOverlay(
+                    enabled = overlayState == PauseOverlay.MENU,
+                    focusTarget = pauseMenuFocusTarget,
                     onResume = { pauseOverlay.value = PauseOverlay.CLOSED },
-                    onOpenControllerSettings = { pauseOverlay.value = PauseOverlay.CONTROLLER_SETTINGS },
+                    onOpenVideoOptions = {
+                        pauseMenuFocusTarget = PauseMenuFocusTarget.VIDEO_OPTIONS
+                        pauseOverlay.value = PauseOverlay.VIDEO_OPTIONS
+                    },
+                    onOpenControllerSettings = {
+                        pauseMenuFocusTarget = PauseMenuFocusTarget.CONTROLLER_SETTINGS
+                        pauseOverlay.value = PauseOverlay.CONTROLLER_SETTINGS
+                    },
                     onQuit = onStop,
                 )
-                PauseOverlay.CONTROLLER_SETTINGS -> ControllerSettingsSubpage(
+            }
+
+            if (overlayState == PauseOverlay.VIDEO_OPTIONS) {
+                VideoOptionsDialog(
+                    scanlinesEnabled = scanlinesOn,
+                    persistenceError = persistenceError,
+                    onScanlinesChanged = { requested ->
+                        val ok = onSetScanlinesEnabled(requested)
+                        persistenceError = !ok
+                        ok
+                    },
+                    onDismiss = {
+                        persistenceError = false
+                        pauseOverlay.value = PauseOverlay.MENU
+                    },
+                )
+            }
+
+            if (overlayState == PauseOverlay.CONTROLLER_SETTINGS) {
+                ControllerSettingsSubpage(
                     coreId = coreIdForMapping,
                     repository = controllerConfigRepository,
                     captureCoordinator = captureCoordinator,
@@ -1091,10 +1157,32 @@ enum class LaunchFailureCategory { NONE, CORE_LOAD, CONTENT_LOAD, UNKNOWN }
 enum class PauseOverlay {
     /** No overlay visible; native gameplay input is routed normally. */
     CLOSED,
-    /** The pause menu (Resume / Controller Settings / Quit) is visible. */
+    /** The pause menu (Resume / Video Options / Controller Settings / Quit) is visible. */
     MENU,
+    /** The shared video-options dialog is visible; the core stays paused. */
+    VIDEO_OPTIONS,
     /** The shared controller-settings subpage is visible; the core stays paused. */
     CONTROLLER_SETTINGS,
+}
+
+/**
+ * Which pause-menu item should receive D-pad focus on entry. The modal/subpage composables take
+ * focus while open; on Back to [PauseOverlay.MENU] the menu maps this target to a [FocusRequester]
+ * so focus is restored to the item the user launched from.
+ */
+enum class PauseMenuFocusTarget {
+    RESUME,
+    VIDEO_OPTIONS,
+    CONTROLLER_SETTINGS,
+    QUIT,
+}
+
+/** Pure transition for a quick Back tap: VIDEO_OPTIONS/CONTROLLER_SETTINGS return to MENU, never CLOSED. */
+internal fun quickBackTransition(current: PauseOverlay): PauseOverlay = when (current) {
+    PauseOverlay.CLOSED -> PauseOverlay.MENU
+    PauseOverlay.MENU -> PauseOverlay.CLOSED
+    PauseOverlay.VIDEO_OPTIONS -> PauseOverlay.MENU
+    PauseOverlay.CONTROLLER_SETTINGS -> PauseOverlay.MENU
 }
 
 /**
@@ -1188,53 +1276,89 @@ private fun SaveFailureOverlay(onRetry: () -> Unit, onQuitAnyway: () -> Unit) {
 }
 
 /**
- * Native pause-menu overlay (LIBRETRO_REFACTOR.md section 13, Phase 6): Resume, Controller
- * Settings, and Quit (with confirm) — the sole in-session menu, opened by a quick Back tap.
- * Emulation is frozen (native `paused_` flag) for the whole time this is visible; see
+ * Native pause-menu overlay (LIBRETRO_REFACTOR.md section 13, Phase 6): Resume, Video Options,
+ * Controller Settings, and Quit (with confirm) — the sole in-session menu, opened by a quick
+ * Back tap. Emulation is frozen (native `paused_` flag) for the whole time this is visible; see
  * [EmulationScreen]'s overlay LaunchedEffect, which also takes a silent local-only save
  * checkpoint on the CLOSED -> MENU transition (not surfaced here — see
  * [EmulationActivity.checkpointForPauseMenu]).
+ *
+ * When [enabled] is false (a modal like Video Options is open on top), the menu is removed from
+ * focus traversal and its activation is blocked via [Modifier.enabled]; visual dimming alone is
+ * insufficient because the menu must never intercept D-pad/Back input while the modal is active.
+ * Focus is restored to the item recorded in [focusTarget] whenever [enabled] flips true, so
+ * returning from a modal/subpage returns to the item the user launched from.
  */
 @Composable
 private fun PauseMenuOverlay(
+    enabled: Boolean,
+    focusTarget: PauseMenuFocusTarget,
     onResume: () -> Unit,
+    onOpenVideoOptions: () -> Unit,
     onOpenControllerSettings: () -> Unit,
     onQuit: () -> Unit,
 ) {
     var showQuitConfirm by remember { mutableStateOf(false) }
     val resumeFocusRequester = remember { FocusRequester() }
+    val videoOptionsFocusRequester = remember { FocusRequester() }
     val controllerSettingsFocusRequester = remember { FocusRequester() }
+    val quitFocusRequester = remember { FocusRequester() }
 
-    // Grab initial D-pad focus on the Controller Settings button (the middle entry of the
-    // Resume / Controller Settings / Quit order, per CONTROLLER_SETTINGS.md Phase 7) — with the
-    // emulation core's controller routing suppressed while paused (see
-    // EmulationActivity.dispatchKeyEvent), Compose's own focus system needs a starting focused
-    // node to move D-pad events between the menu buttons. This composable is recreated fresh on
-    // each return from the controller-settings subpage, so this request also restores focus to
-    // Controller Settings after Back (CONTROLLER_SETTINGS -> MENU).
-    LaunchedEffect(Unit) {
-        controllerSettingsFocusRequester.requestFocus()
+    // Explicit focus-target mapping: when the menu is enabled, request focus on the item the
+    // parent recorded (RESUME on a fresh CLOSED -> MENU, VIDEO_OPTIONS/CONTROLLER_SETTINGS on
+    // return from their modal/subpage). Re-running on [focusTarget]/[enabled] change restores
+    // focus to the launched-from item after Back.
+    LaunchedEffect(focusTarget, enabled) {
+        if (!enabled) return@LaunchedEffect
+        when (focusTarget) {
+            PauseMenuFocusTarget.RESUME -> resumeFocusRequester.requestFocus()
+            PauseMenuFocusTarget.VIDEO_OPTIONS -> videoOptionsFocusRequester.requestFocus()
+            PauseMenuFocusTarget.CONTROLLER_SETTINGS -> controllerSettingsFocusRequester.requestFocus()
+            PauseMenuFocusTarget.QUIT -> quitFocusRequester.requestFocus()
+        }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f)),
+        contentAlignment = Alignment.Center,
+    ) {
         Column(modifier = Modifier.padding(32.dp).width(420.dp)) {
-            Text(text = "Paused", color = Color.White, style = MaterialTheme.typography.headlineSmall)
+            Text(
+                text = stringResource(R.string.pause_menu_paused),
+                color = Color.White,
+                style = MaterialTheme.typography.headlineSmall,
+            )
             Spacer(modifier = Modifier.height(20.dp))
 
+            // Pass `enabled` through to each button: a disabled material Button is removed from
+            // focus traversal AND blocks activation (the equivalent of Modifier.enabled(enabled),
+            // which this Compose version does not expose). When a modal like Video Options is
+            // open on top, the menu stays dimmed but cannot receive focus or clicks.
             TvButton(
                 onClick = onResume,
+                enabled = enabled,
                 modifier = Modifier.fillMaxWidth().focusRequester(resumeFocusRequester),
-            ) { Text("Resume") }
+            ) { Text(stringResource(R.string.pause_menu_resume)) }
+            Spacer(modifier = Modifier.height(8.dp))
+            TvOutlinedButton(
+                onClick = onOpenVideoOptions,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth().focusRequester(videoOptionsFocusRequester),
+            ) { Text(stringResource(R.string.pause_menu_video_options)) }
             Spacer(modifier = Modifier.height(8.dp))
             TvOutlinedButton(
                 onClick = onOpenControllerSettings,
+                enabled = enabled,
                 modifier = Modifier.fillMaxWidth().focusRequester(controllerSettingsFocusRequester),
-            ) { Text("Controller Settings") }
+            ) { Text(stringResource(R.string.pause_menu_controller_settings)) }
             Spacer(modifier = Modifier.height(8.dp))
             TvOutlinedButton(
                 onClick = { showQuitConfirm = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Quit") }
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth().focusRequester(quitFocusRequester),
+            ) { Text(stringResource(R.string.pause_menu_quit)) }
         }
     }
 

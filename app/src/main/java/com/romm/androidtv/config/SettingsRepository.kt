@@ -97,6 +97,23 @@ class SettingsRepository(
     }
 
     /**
+     * CRT scanlines overlay (off by default): when true, a scanlines shader is
+     * applied over the emulator surface to simulate the look of a retro CRT
+     * display. Useful for users who prefer the classic arcade aesthetic.
+     */
+    fun scanlinesEnabled(): Boolean =
+        prefs.getBoolean(KEY_SCANLINES_ENABLED, false)
+
+    /**
+     * Persists the scanlines overlay toggle. Returns true only when the
+     * underlying SharedPreferences committed the write synchronously.
+     */
+    fun setScanlinesEnabled(enabled: Boolean): Boolean =
+        prefs.edit()
+            .putBoolean(KEY_SCANLINES_ENABLED, enabled)
+            .commit()
+
+    /**
      * Advanced save-cleanup toggle (on by default): when true, SRAM uploads ask
      * the server to auto-clean the "autosave" slot down to a short recent
      * history (5 files) right after each successful upload. When false, the
@@ -157,6 +174,7 @@ class SettingsRepository(
         private const val KEY_HIDE_UNSUPPORTED = "hide_unsupported_systems"
         private const val KEY_VERIFY_SHA1 = "verify_sha1_on_launch"
         private const val KEY_AUTOCLEAN_SAVES = "autoclean_saves_on_upload"
+        private const val KEY_SCANLINES_ENABLED = "video_scanlines_enabled"
         private const val KEY_SEGACD_BIOS_ID = "segacd_bios_id"
         private const val KEY_SEGACD_BIOS_FILE_NAME = "segacd_bios_file_name"
         private const val KEY_PSX_BIOS_ID = "psx_bios_id"
