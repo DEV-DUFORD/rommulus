@@ -412,11 +412,34 @@ class RomDetailViewModelTest {
     }
 
     @Test
-    fun `Already-member ordinary collection produces no add request`() {
+    fun `Selecting an already-member ordinary collection removes it (toggle off)`() {
+        val owned = coll(2, name = "Games", romIds = setOf(romId))
+        val removed = owned.copy(romIds = emptySet())
+        val repo = FakeRepo().apply {
+            detailResult = LibraryResult.Success(detail)
+            ownedResult = LibraryResult.Success(listOf(owned))
+            removeResult = LibraryResult.Success(removed)
+        }
+        var mutations = 0
+        val vm = makeVm(repo) { mutations++ }
+
+        vm.onCollectionPickerRequested()
+        vm.onCollectionSelected(owned.id)
+
+        assertThat(repo.addCount).isZero()
+        assertThat(repo.removeLog).containsExactly(owned.id to romId)
+        assertThat(vm.state.value.collectionDialog).isNull()
+        assertThat(loaded(vm.state.value).ownedWritable.single().romIds).doesNotContain(romId)
+        assertThat(mutations).isEqualTo(1)
+    }
+
+    @Test
+    fun `Failed toggle-off remove keeps the dialog open with a remove-specific alert`() {
         val owned = coll(2, name = "Games", romIds = setOf(romId))
         val repo = FakeRepo().apply {
             detailResult = LibraryResult.Success(detail)
             ownedResult = LibraryResult.Success(listOf(owned))
+            removeResult = LibraryResult.Failure(RommApiError.SERVER_ERROR)
         }
         val vm = makeVm(repo)
 
@@ -425,6 +448,9 @@ class RomDetailViewModelTest {
 
         assertThat(repo.addCount).isZero()
         assertThat(vm.state.value.collectionDialog).isEqualTo(CollectionDialogState.List)
+        assertThat(vm.state.value.alert).isEqualTo(GameDetailAlert.CollectionRemoveFailure(owned.id))
+        // Membership unchanged after a failed remove.
+        assertThat(loaded(vm.state.value).ownedWritable.single().romIds).contains(romId)
     }
 
     @Test

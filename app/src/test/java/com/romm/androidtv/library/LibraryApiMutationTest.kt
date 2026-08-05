@@ -41,6 +41,32 @@ class LibraryApiMutationTest {
 
     private fun baseUrl(): String = server.url("/").toString().removeSuffix("/")
 
+    /**
+     * A client whose cookie jar already holds a `romm_csrftoken` cookie (plus a session
+     * cookie), mirroring how the app's real cookie-jar client has it after browsing. All
+     * collection mutations are cookie-authenticated POST/DELETE calls that the backend
+     * CSRF-protects — they must echo the cookie back as `X-CSRFToken` or get a 403.
+     */
+    private fun csrfClient(): OkHttpClient {
+        val host = server.url("/").host
+        val cookieJar = object : okhttp3.CookieJar {
+            override fun saveFromResponse(url: okhttp3.HttpUrl, cookies: List<okhttp3.Cookie>) {}
+            override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> = listOf(
+                okhttp3.Cookie.Builder()
+                    .name("romm_csrftoken")
+                    .value("csrf-value-123")
+                    .domain(host)
+                    .build(),
+                okhttp3.Cookie.Builder()
+                    .name("romm_session")
+                    .value("session-value-456")
+                    .domain(host)
+                    .build(),
+            )
+        }
+        return OkHttpClient.Builder().cookieJar(cookieJar).build()
+    }
+
     private val collectionJson = """
         {
           "id": 5, "name": "My Collection", "rom_count": 2,
@@ -115,6 +141,27 @@ class LibraryApiMutationTest {
             assertThat((result as CollectionMutationResult.Failure).error).isEqualTo(RommApiError.ORIGIN_NOT_CONFIGURED)
             assertThat(server.requestCount).isEqualTo(0)
         }
+
+        @Test
+        fun `POST sends the csrf cookie as X-CSRFToken header`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(collectionJson))
+
+            val result = LibraryApi.createCollection(csrfClient(), baseUrl(), "My Collection", isFavorite = true)
+
+            assertThat(result).isInstanceOf(CollectionMutationResult.Success::class.java)
+            val recorded = server.takeRequest()
+            assertThat(recorded.getHeader("X-CSRFToken")).isEqualTo("csrf-value-123")
+        }
+
+        @Test
+        fun `omits X-CSRFToken header when no csrf cookie in jar`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(collectionJson))
+
+            LibraryApi.createCollection(client, baseUrl(), "X", isFavorite = false)
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.getHeader("X-CSRFToken")).isNull()
+        }
     }
 
     @Nested
@@ -161,6 +208,28 @@ class LibraryApiMutationTest {
             val removeRecorded = server.takeRequest()
             assertThat(removeRecorded.headers["Content-Type"]).contains("application/json")
             assertThat(removeRecorded.body.readUtf8()).isEqualTo("""{"rom_ids":[99]}""")
+        }
+
+        @Test
+        fun `POST add sends the csrf cookie as X-CSRFToken header`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(collectionJson))
+
+            val result = LibraryApi.addRomToCollection(csrfClient(), baseUrl(), collectionId = 5, romId = 99)
+
+            assertThat(result).isInstanceOf(CollectionMutationResult.Success::class.java)
+            val recorded = server.takeRequest()
+            assertThat(recorded.getHeader("X-CSRFToken")).isEqualTo("csrf-value-123")
+        }
+
+        @Test
+        fun `DELETE remove sends the csrf cookie as X-CSRFToken header`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(collectionJson))
+
+            val result = LibraryApi.removeRomFromCollection(csrfClient(), baseUrl(), collectionId = 5, romId = 99)
+
+            assertThat(result).isInstanceOf(CollectionMutationResult.Success::class.java)
+            val recorded = server.takeRequest()
+            assertThat(recorded.getHeader("X-CSRFToken")).isEqualTo("csrf-value-123")
         }
     }
 

@@ -54,6 +54,7 @@ enum class FavoriteOperation { ADD, REMOVE }
 sealed interface GameDetailAlert {
     data class FavoriteFailure(val operation: FavoriteOperation) : GameDetailAlert
     data class CollectionAddFailure(val collectionId: Long) : GameDetailAlert
+    data class CollectionRemoveFailure(val collectionId: Long) : GameDetailAlert
     data class CreatedButAddFailed(val collectionId: Long) : GameDetailAlert
 }
 
@@ -90,15 +91,39 @@ class RomDetailViewModel(
     private var mutationToken = 0
     private var detailJob: Job? = null
     private var collectionJob: Job? = null
-    private val inFlightCollectionAdds = mutableSetOf<Long>()
+    private val inFlightCollectionMutations = mutableSetOf<Long>()
+
+    /**
+     * Set immediately before this ViewModel emits into the shared [onLibraryMutated] refresh
+     * signal, so the very next event delivered back to this instance's own [refreshEvents]
+     * collector — which is the *same* shared flow, wired by `MainActivity` so favorite/platform
+     * shelves elsewhere in the app refresh too — is skipped. Without this, every successful
+     * favorite toggle or collection add triggered a full `refresh()` of this screen's own detail
+     * and collections (back to `SectionState.Loading`), even though the icon/list state here was
+     * already updated in place: a visible full-screen flash/reset for a change that only needed
+     * to flip one icon.
+     */
+    @Volatile private var suppressNextSelfRefresh = false
 
     init {
         refresh()
         refreshEvents?.let { events ->
             viewModelScope.launch {
-                events.collect { refresh() }
+                events.collect {
+                    if (suppressNextSelfRefresh) {
+                        suppressNextSelfRefresh = false
+                    } else {
+                        refresh()
+                    }
+                }
             }
         }
+    }
+
+    /** Notifies other screens (favorites/collection shelves) that library membership changed, without re-fetching this screen's own already-updated state. */
+    private fun notifyLibraryMutated() {
+        suppressNextSelfRefresh = true
+        onLibraryMutated()
     }
 
     /** Refetches BOTH the ROM detail and the owned collections. */
@@ -224,7 +249,7 @@ class RomDetailViewModel(
                         favorite = FavoriteUiState.Confirmed(true),
                     )
                 }
-                onLibraryMutated()
+                notifyLibraryMutated()
             }
             is LibraryResult.Failure -> failFavorite(token, previous, FavoriteOperation.ADD)
         }
@@ -244,7 +269,7 @@ class RomDetailViewModel(
                         favorite = FavoriteUiState.Confirmed(false),
                     )
                 }
-                onLibraryMutated()
+                notifyLibraryMutated()
             }
             is LibraryResult.Failure -> failFavorite(token, previous, FavoriteOperation.REMOVE)
         }
@@ -265,33 +290,51 @@ class RomDetailViewModel(
         _state.update { it.copy(collectionDialog = CollectionDialogState.List) }
     }
 
+    /**
+     * Toggles the ROM's membership in [collectionId]: adds it if absent, removes it if already
+     * a member (the checkmark shown in [AddToCollectionDialog] denotes current membership, so
+     * selecting a checked row is the natural "undo" gesture rather than a no-op).
+     */
     fun onCollectionSelected(collectionId: Long) {
         val current = _state.value
         val collections = current.collections as? CollectionLoadState.Loaded ?: return
         val collection = collections.ownedWritable.firstOrNull { it.id == collectionId } ?: return
-        if (collection.romIds.contains(romId)) return // already a member; no network call
-        if (!inFlightCollectionAdds.add(collectionId)) return // single-flight per row
+        val isMember = collection.romIds.contains(romId)
+        if (!inFlightCollectionMutations.add(collectionId)) return // single-flight per row
 
         val token = ++mutationToken
         viewModelScope.launch {
             try {
-                when (val added = repository.addRomToCollection(collectionId, romId)) {
+                val result = if (isMember) {
+                    repository.removeRomFromCollection(collectionId, romId)
+                } else {
+                    repository.addRomToCollection(collectionId, romId)
+                }
+                when (result) {
                     is LibraryResult.Success -> {
                         if (token != mutationToken) return@launch
                         _state.update {
                             val c = it.collections as? CollectionLoadState.Loaded
                             if (c == null) it
-                            else it.copy(collections = c.applyCollection(added.data), collectionDialog = null)
+                            else it.copy(collections = c.applyCollection(result.data), collectionDialog = null)
                         }
-                        onLibraryMutated()
+                        notifyLibraryMutated()
                     }
                     is LibraryResult.Failure -> {
                         if (token != mutationToken) return@launch
-                        _state.update { it.copy(alert = GameDetailAlert.CollectionAddFailure(collectionId)) }
+                        _state.update {
+                            it.copy(
+                                alert = if (isMember) {
+                                    GameDetailAlert.CollectionRemoveFailure(collectionId)
+                                } else {
+                                    GameDetailAlert.CollectionAddFailure(collectionId)
+                                },
+                            )
+                        }
                     }
                 }
             } finally {
-                inFlightCollectionAdds.remove(collectionId)
+                inFlightCollectionMutations.remove(collectionId)
             }
         }
     }
@@ -358,7 +401,7 @@ class RomDetailViewModel(
                                 val c = it.collections as? CollectionLoadState.Loaded
                                 if (c == null) it else it.copy(collections = c.applyCollection(added.data), collectionDialog = null)
                             }
-                            onLibraryMutated()
+                            notifyLibraryMutated()
                         }
                         is LibraryResult.Failure -> {
                             if (token != mutationToken) return@launch
@@ -366,7 +409,7 @@ class RomDetailViewModel(
                             _state.update {
                                 it.copy(collectionDialog = CollectionDialogState.List, alert = GameDetailAlert.CreatedButAddFailed(newId))
                             }
-                            onLibraryMutated()
+                            notifyLibraryMutated()
                         }
                     }
                 }

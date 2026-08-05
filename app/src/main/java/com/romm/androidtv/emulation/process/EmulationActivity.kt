@@ -1235,11 +1235,6 @@ private fun PauseMenuOverlay(
                 onClick = { showQuitConfirm = true },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Quit") }
-            Spacer(modifier = Modifier.height(8.dp))
-            TvOutlinedButton(
-                onClick = { showQuitConfirm = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Quit") }
         }
     }
 

@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +32,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +62,7 @@ import com.romm.androidtv.library.RomDetailViewModel
 import com.romm.androidtv.library.RomDetailUiState
 import com.romm.androidtv.library.SectionState
 import com.romm.androidtv.library.isPlatformNativelySupported
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -69,6 +73,25 @@ sealed interface RequiredBiosState {
     data object Missing : RequiredBiosState
     data object UnverifiedAvailable : RequiredBiosState
     data class Error(val message: String) : RequiredBiosState
+}
+
+/**
+ * [FocusRequester.requestFocus], swallowing the `IllegalStateException` Compose throws when no
+ * currently-composed node holds this requester. The rail's Add/Favorite buttons *are* normally
+ * always composed alongside this screen's content, but these focus-restore calls run one frame
+ * after a dialog/alert closes (via `LaunchedEffect`) — a real-device timing race (e.g. the rail
+ * momentarily detaching/reattaching mid-recomposition right as an add-to-collection mutation
+ * completes) can land the call in a frame where the requester isn't attached yet, which used to
+ * crash the whole screen even though the underlying action (e.g. adding the rom to the
+ * collection) had already succeeded. Losing the focus-restore in that rare case is harmless;
+ * crashing is not.
+ */
+private fun FocusRequester.requestFocusSafely() {
+    try {
+        requestFocus()
+    } catch (_: IllegalStateException) {
+        // Requester not attached to a composed node this frame — nothing to focus, ignore.
+    }
 }
 
 /**
@@ -120,6 +143,13 @@ fun GameDetailScreen(
     val favoriteFocusRequester = remember { FocusRequester() }
     val addFocusRequester = remember { FocusRequester() }
 
+    // Shared with the content's LazyColumn so the fixed rail overlay (which sits
+    // outside the scrollable list) can scroll the page back to the top on request.
+    // Focus navigation (up/down between rail, Play, screenshots, etc.) is untouched;
+    // this only drives the scroll position, never focus.
+    val contentListState = rememberLazyListState()
+    val contentScrollScope = rememberCoroutineScope()
+
     // Compose's Dialog does not automatically restore focus to whatever was
     // focused before it opened, so explicitly return focus to the rail's Add
     // button whenever the collection picker transitions from open → closed
@@ -129,7 +159,7 @@ fun GameDetailScreen(
     var wasDialogOpen by remember { mutableStateOf(false) }
     LaunchedEffect(state.collectionDialog) {
         if (state.collectionDialog == null && wasDialogOpen) {
-            addFocusRequester.requestFocus()
+            addFocusRequester.requestFocusSafely()
         }
         wasDialogOpen = state.collectionDialog != null
     }
@@ -141,7 +171,7 @@ fun GameDetailScreen(
     LaunchedEffect(state.alert) {
         val isFavoriteAlertOpen = state.alert is GameDetailAlert.FavoriteFailure
         if (!isFavoriteAlertOpen && wasFavoriteAlertOpen) {
-            favoriteFocusRequester.requestFocus()
+            favoriteFocusRequester.requestFocusSafely()
         }
         wasFavoriteAlertOpen = isFavoriteAlertOpen
     }
@@ -191,6 +221,7 @@ fun GameDetailScreen(
                 onOpenScreenshot = onOpenScreenshot,
                 playButtonFocusRequester = playButtonFocusRequester,
                 upFocusTarget = favoriteFocusRequester,
+                listState = contentListState,
             )
         }
 
@@ -207,6 +238,9 @@ fun GameDetailScreen(
                 favoriteFocusRequester = favoriteFocusRequester,
                 addFocusRequester = addFocusRequester,
                 downFocusTarget = playButtonFocusRequester,
+                onScrollToTop = {
+                    contentScrollScope.launch { contentListState.animateScrollToItem(0) }
+                },
             )
         }
 
@@ -224,6 +258,8 @@ fun GameDetailScreen(
                 alertMessage = when (state.alert) {
                     is GameDetailAlert.CollectionAddFailure ->
                         "Sorry, we are unable to add this game to that collection right now, please try again later"
+                    is GameDetailAlert.CollectionRemoveFailure ->
+                        "Sorry, we are unable to remove this game from that collection right now, please try again later"
                     is GameDetailAlert.CreatedButAddFailed ->
                         "The collection was created, but we could not add this game to it. Please try again."
                     else -> null
@@ -279,6 +315,7 @@ private fun GameDetailContent(
     onOpenScreenshot: (List<String>, Int) -> Unit,
     playButtonFocusRequester: FocusRequester,
     upFocusTarget: FocusRequester?,
+    listState: LazyListState,
 ) {
     LaunchedEffect(rom.id, rom.platformSlug) {
         if (rom.platformSlug == "segacd" || rom.platformSlug == "psx") {
@@ -286,6 +323,7 @@ private fun GameDetailContent(
         }
     }
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 32.dp, vertical = 24.dp),
@@ -680,7 +718,7 @@ private fun ChooseVersionButton(onClick: () -> Unit, enabled: Boolean = true) {
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(
-            text = "Choose Game File",
+            text = "Choose File",
             style = MaterialTheme.typography.titleMedium,
             color = if (enabled) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
         )

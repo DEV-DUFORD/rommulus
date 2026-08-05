@@ -505,7 +505,11 @@ object LibraryApi {
             .setType(MultipartBody.FORM)
             .addFormDataPart("name", name.trim())
             .build()
-        val request = Request.Builder().url(url).post(body).build()
+        val request = Request.Builder()
+            .url(url)
+            .apply { csrfTokenFor(client, url)?.let { header("X-CSRFToken", it) } }
+            .post(body)
+            .build()
         return executeMutation(client, request, origin)
     }
 
@@ -540,7 +544,10 @@ object LibraryApi {
         val body = jsonBody.toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url(url)
-            .apply { if (add) post(body) else delete(body) }
+            .apply {
+                csrfTokenFor(client, url)?.let { header("X-CSRFToken", it) }
+                if (add) post(body) else delete(body)
+            }
             .build()
         return executeMutation(client, request, origin)
     }
@@ -563,6 +570,17 @@ object LibraryApi {
         val normalizedOrigin = RommOrigin.parse(origin)?.toUrl() ?: origin.removeSuffix("/")
         return normalizedOrigin.toHttpUrlOrNull()
     }
+
+    /**
+     * Reads the `romm_csrftoken` cookie value for [url] out of [client]'s cookie jar, if
+     * present. Cookie-authenticated mutating requests (POST/DELETE/etc.) require this value
+     * echoed back as the `X-CSRFToken` header or the server rejects them with 403 — same
+     * contract as [com.romm.androidtv.romm.RommSyncApi]'s CSRF-protected endpoints.
+     */
+    private fun csrfTokenFor(client: OkHttpClient, url: HttpUrl): String? =
+        client.cookieJar.loadForRequest(url)
+            .firstOrNull { it.name == "romm_csrftoken" }
+            ?.value
 
     private fun classifyResponse(response: Response): RommApiError? {
         return when {

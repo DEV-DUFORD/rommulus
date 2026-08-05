@@ -21,7 +21,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -33,6 +36,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.*
@@ -201,6 +206,11 @@ class MainActivity : ComponentActivity() {
     // Pre-launch save sync overlay state (conflict/quarantine). Scoped to a single ROM/session;
     // survives recomposition because it lives on the Activity, not inside remember().
     private var preLaunchState by mutableStateOf<com.romm.androidtv.library.ui.SavePreLaunchState?>(null)
+
+    // Set when pre-launch preparation reports Ready. Rather than launching EmulationActivity
+    // immediately, we hold the launch params here so the Compose overlay can animate a fade-to-black
+    // first; once the fade completes the overlay performs the launch and clears this state.
+    private var pendingNativeLaunch by mutableStateOf<com.romm.androidtv.emulation.model.PendingNativeLaunch?>(null)
 
     // Native save-picker ("Choose Save") state. `savePickerStagedOutcome` holds the ROM already
     // staged while the list loads, so selecting an entry can adopt+launch without re-staging.
@@ -392,6 +402,8 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "RomMMainActivity"
         /** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
         private const val DIAG_TAG = "RommAuthDx"
+        /** Duration of the fade-to-black transition before EmulationActivity launches. */
+        private const val LAUNCH_FADE_MS = 400
     }
 
     /** Maps a sidebar destination to the [Screen] it opens; SETTINGS has no native screen yet (out of scope, UI_REFACTOR.md). */
@@ -966,6 +978,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+                // Input lock during game preparation + fade-to-black transition into emulation.
+                LaunchTransitionOverlay()
         }
     }
     }
@@ -1091,6 +1105,18 @@ class MainActivity : ComponentActivity() {
         if (appMode == OnboardingRoutingPolicy.AppMode.MAIN) {
             emulationResultHandler.recoverPendingSessions()
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // The fade-to-black overlay intentionally stays covering the UI until EmulationActivity
+        // actually takes over the screen (MainActivity -> onStop). Clearing it here — rather than
+        // right after the launch call — prevents the game detail screen from flashing between the
+        // fade completion and the emulator activity fully appearing. If we stopped for any other
+        // reason (e.g. user pressed Home mid-preparation), clearing is also the correct behavior.
+        pendingNativeLaunch = null
+        preLaunchState?.clear()
+        preLaunchState = null
     }
 
     private fun launchEmulationActivity(spec: com.romm.androidtv.emulation.model.LaunchSpec, savePath: String, candidateMetadata: CandidateSaveMetadata?) {
@@ -1528,8 +1554,13 @@ class MainActivity : ComponentActivity() {
     ) {
         when (preparation) {
             is SaveLaunchOrchestrator.PreparationResult.Ready -> {
-                preLaunchState = null
-                launchEmulationActivity(spec, savePath, preparation.candidateMetadata)
+                // Hold the launch until the fade-to-black transition completes (see
+                // LaunchTransitionOverlay), which performs the actual activity launch.
+                pendingNativeLaunch = com.romm.androidtv.emulation.model.PendingNativeLaunch(
+                    spec = spec,
+                    savePath = savePath,
+                    candidateMetadata = preparation.candidateMetadata,
+                )
             }
             is SaveLaunchOrchestrator.PreparationResult.Conflict -> {
                 handleConflictPreparation(preparation, spec)
@@ -1746,6 +1777,77 @@ class MainActivity : ComponentActivity() {
     }
 
     // ---- Pre-launch overlay rendering (conflict / quarantine / error) ----
+
+    /**
+     * Full-screen overlay covering everything while a game is being prepared and launched.
+     *
+     * 1. While [SavePreLaunchState.isStaging] is true ("Preparing…"), the overlay is
+     *    transparent but consumes ALL input (clicks and D-pad/back key events) so the user
+     *    cannot navigate away, back out, or re-trigger Play mid-preparation.
+     * 2. When [pendingNativeLaunch] is set, the overlay animates the screen to black over
+     *    [LAUNCH_FADE_MS], then performs the emulation activity launch and clears the state.
+     */
+    @Composable
+    private fun LaunchTransitionOverlay() {
+        val isPreparing = preLaunchState?.isStaging == true
+        val pending = pendingNativeLaunch
+        val focusRequester = remember { FocusRequester() }
+        val alpha = remember { Animatable(0f) }
+
+        // Keep the overlay transparent whenever there's no active fade-to-black. This composable
+        // stays composed permanently (it's invoked unconditionally in setContent), so the Animatable
+        // survives between games — without this reset, a stale alpha=1.0 from a previous launch would
+        // make the overlay instantly black during the next game's "Preparing…" phase.
+        LaunchedEffect(isPreparing, pending) {
+            if (pending == null) {
+                alpha.snapTo(0f)
+            }
+        }
+
+        // Fade to black when we're ready to launch, then start EmulationActivity. The overlay
+        // (and pendingNativeLaunch/preLaunchState) stays composed after launch so the black screen
+        // covers the activity transition without the detail screen flashing; MainActivity.onStop
+        // clears the state once EmulationActivity has fully taken over.
+        LaunchedEffect(pending) {
+            val target = pending != null
+            if (target) {
+                alpha.snapTo(0f)
+                alpha.animateTo(1f, animationSpec = tween(LAUNCH_FADE_MS))
+                val pendingLaunch = pending ?: return@LaunchedEffect
+                if (!pendingLaunch.launched) {
+                    pendingLaunch.launched = true
+                    launchEmulationActivity(
+                        pendingLaunch.spec,
+                        pendingLaunch.savePath,
+                        pendingLaunch.candidateMetadata,
+                    )
+                }
+            }
+        }
+
+        // Request focus while the lock overlay is visible so all key events route to it.
+        LaunchedEffect(isPreparing, pending != null) {
+            if (isPreparing || pending != null) {
+                focusRequester.requestFocus()
+            }
+        }
+
+        if (isPreparing || pending != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = alpha.value))
+                    .focusRequester(focusRequester)
+                    .focusable()
+                    .clickable(
+                        interactionSource = MutableInteractionSource(),
+                        indication = null,
+                        onClick = {},
+                    )
+                    .onPreviewKeyEvent { true },
+            )
+        }
+    }
 
     @Composable
     private fun renderPreLaunchOverlay(state: com.romm.androidtv.library.ui.SavePreLaunchState) {

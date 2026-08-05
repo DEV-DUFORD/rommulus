@@ -343,11 +343,11 @@ private fun CreateCollectionContent(
         }
         Spacer(modifier = Modifier.height(24.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TvOutlinedButton(onClick = onCreateCancel, modifier = Modifier.tvButtonFocus()) {
+            TvOutlinedButton(onClick = onCreateCancel) {
                 Text("Cancel", color = RommTvColors.TextSecondary)
             }
             Spacer(modifier = Modifier.width(12.dp))
-            TvButton(onClick = onCreateSubmit, enabled = !state.submitting, modifier = Modifier.tvButtonFocus()) {
+            TvButton(onClick = onCreateSubmit, enabled = !state.submitting) {
                 if (state.submitting) {
                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {

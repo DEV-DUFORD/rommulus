@@ -16,7 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -32,6 +32,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -135,22 +140,42 @@ fun GameDetailActionRail(
     favoriteFocusRequester: FocusRequester? = null,
     addFocusRequester: FocusRequester? = null,
     downFocusTarget: FocusRequester? = null,
+    onScrollToTop: (() -> Unit)? = null,
 ) {
     val favConfig = when (favoriteState) {
         FavoriteRailState.Loading ->
-            FavoriteButtonConfig(Icons.Outlined.Star, "Checking favorite status", true, false)
+            FavoriteButtonConfig(Icons.Filled.StarBorder, "Checking favorite status", true, false)
         is FavoriteRailState.Confirmed ->
             if (favoriteState.isFavorite) {
                 FavoriteButtonConfig(Icons.Filled.Star, "Remove from favorites", false, true)
             } else {
-                FavoriteButtonConfig(Icons.Outlined.Star, "Add to favorites", false, true)
+                FavoriteButtonConfig(Icons.Filled.StarBorder, "Add to favorites", false, true)
             }
         is FavoriteRailState.Updating ->
             FavoriteButtonConfig(Icons.Filled.Star, "Updating favorite status", true, false)
     }
 
     Row(
-        modifier = modifier.focusGroup(),
+        modifier = modifier
+            .focusGroup()
+            // The rail sits outside the content's LazyColumn (a fixed overlay), so
+            // when Play/screenshot focus has scrolled the page down, focus moving
+            // back up here doesn't naturally reveal the top of the page again. This
+            // only nudges the scroll position back to the top; it never consumes the
+            // event or touches focus, so normal up/down traversal (rail <-> Play <->
+            // screenshots, etc.) elsewhere on the page is unaffected.
+            .then(
+                if (onScrollToTop != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp) {
+                            onScrollToTop()
+                        }
+                        false
+                    }
+                } else {
+                    Modifier
+                },
+            ),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

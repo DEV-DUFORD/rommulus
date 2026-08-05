@@ -18,6 +18,13 @@ data class RomGridUiState(
     val section: SectionState<List<LibraryRom>> = SectionState.Loading,
     val total: Int = 0,
     val isLoadingMore: Boolean = false,
+    /**
+     * Raw count of roms fetched from the server so far (before any client-side de-dup),
+     * used as the next page's `offset`. Kept separate from the displayed list's size because
+     * that list is de-duplicated by id (see [loadMore]'s doc) and can be smaller than the raw
+     * fetch count.
+     */
+    val rawFetchedCount: Int = 0,
 )
 
 /**
@@ -85,6 +92,7 @@ class RomGridViewModel(
                 is LibraryResult.Success -> RomGridUiState(
                     section = SectionState.Loaded(result.data.roms.filterUnsupportedIfHidden(hideFlag)),
                     total = result.data.total,
+                    rawFetchedCount = result.data.roms.size,
                 )
                 is LibraryResult.Failure -> RomGridUiState(section = SectionState.Error(result.error))
             }
@@ -95,11 +103,19 @@ class RomGridViewModel(
         }
     }
 
-    /** Fetches the next page and appends it, unless already loaded in full or a load is already in flight. */
+    /**
+     * Fetches the next page and appends it, unless already loaded in full or a load is already
+     * in flight. The next page's `offset` is [RomGridUiState.rawFetchedCount] (raw server count),
+     * not `loadedRoms.size` — the appended result is de-duplicated by [LibraryRom.id] below since
+     * `group_by_meta_id` can shift which sibling rom represents a group across a page boundary,
+     * occasionally returning the same id on two consecutive pages. Without the de-dup, the grid's
+     * `items(..., key = { it.id })` would crash with a duplicate-key exception the moment the
+     * overlapping page renders (i.e. right when the user scrolls near the end of a collection).
+     */
     fun loadMore() {
         val current = _uiState.value
         val loadedRoms = (current.section as? SectionState.Loaded)?.data ?: return
-        if (current.isLoadingMore || loadedRoms.size >= current.total) return
+        if (current.isLoadingMore || current.rawFetchedCount >= current.total) return
 
         // Cancel any stale loadMore from a prior cycle.
         loadMoreJob?.cancel()
@@ -111,13 +127,16 @@ class RomGridViewModel(
         _uiState.value = current.copy(isLoadingMore = true)
         loadMoreJob = viewModelScope.launch {
             val hideFlag = hideUnsupportedSystems()
-            when (val result = repository.fetchRomsPage(query, PAGE_SIZE, offset = loadedRoms.size)) {
+            when (val result = repository.fetchRomsPage(query, PAGE_SIZE, offset = current.rawFetchedCount)) {
                 is LibraryResult.Success -> {
                     // Only append if no newer refresh has begun since we started.
                     if (generation == capturedGeneration) {
+                        val merged = (loadedRoms + result.data.roms.filterUnsupportedIfHidden(hideFlag))
+                            .distinctBy { it.id }
                         _uiState.value = _uiState.value.copy(
-                            section = SectionState.Loaded(loadedRoms + result.data.roms.filterUnsupportedIfHidden(hideFlag)),
+                            section = SectionState.Loaded(merged),
                             total = result.data.total,
+                            rawFetchedCount = current.rawFetchedCount + result.data.roms.size,
                             isLoadingMore = false,
                         )
                     }

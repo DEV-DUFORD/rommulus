@@ -155,8 +155,13 @@ class SearchViewModel(
                 is LibraryResult.Success -> {
                     // Discard if the generation changed while we were fetching (query changed or cleared).
                     if (generation == capturedGeneration) {
+                        // De-duped by id: group_by_meta_id can shift which sibling rom represents
+                        // a group across a page boundary, occasionally repeating an id across two
+                        // consecutive pages. Undeduped, SearchScreen's `items(..., key = { it.id })`
+                        // would crash with a duplicate-key exception as soon as that page renders.
                         _uiState.value = _uiState.value.copy(
-                            roms = current.roms + result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported),
+                            roms = (current.roms + result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported))
+                                .distinctBy { it.id },
                             rawFetchedCount = current.rawFetchedCount + result.data.roms.size,
                             total = result.data.total,
                             isLoading = false,
