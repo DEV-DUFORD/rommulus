@@ -10,8 +10,11 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.adapter
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 
@@ -50,6 +53,11 @@ sealed interface CollectionListResult {
 sealed interface RomDetailResult {
     data class Success(val rom: RomDetail) : RomDetailResult
     data class Failure(val error: RommApiError, val httpCode: Int? = null) : RomDetailResult
+}
+
+sealed interface CollectionMutationResult {
+    data class Success(val collection: CollectionSummary) : CollectionMutationResult
+    data class Failure(val error: RommApiError, val httpCode: Int?) : CollectionMutationResult
 }
 
 /** Selects which `GET /api/roms` shelf/query to run. */
@@ -114,6 +122,13 @@ internal data class CollectionJson(
     val id: Long = 0,
     val name: String = "",
     val rom_count: Int = 0,
+    val rom_ids: List<Long>? = null,
+    val is_public: Boolean = false,
+    val is_favorite: Boolean = false,
+    val is_virtual: Boolean = false,
+    val is_smart: Boolean = false,
+    val user_id: Long = 0,
+    val owner_username: String = "",
     val path_cover_large: String? = null,
     val path_covers_large: List<String>? = null,
 )
@@ -167,6 +182,7 @@ object LibraryApi {
     private val platformListAdapter = moshi.adapter<List<PlatformJson>>()
     private val romsPageAdapter = moshi.adapter<RomsPageJson>()
     private val collectionListAdapter = moshi.adapter<List<CollectionJson>>()
+    private val collectionAdapter = moshi.adapter<CollectionJson>()
     private val romDetailAdapter = moshi.adapter<RomDetailJson>()
 
     // ---- Pure JSON parsing (unit-testable without a live server) ----
@@ -249,21 +265,40 @@ object LibraryApi {
     fun parseCollectionList(body: String, origin: String): List<CollectionSummary>? {
         return try {
             val json = collectionListAdapter.fromJson(body.trim()) ?: return null
-            json.map {
-                CollectionSummary(
-                    id = it.id,
-                    name = it.name,
-                    romCount = it.rom_count,
-                    coverUrl = resolveCoverUrl(
-                        origin,
-                        it.path_cover_large ?: it.path_covers_large?.firstOrNull(),
-                        null,
-                    ),
-                )
-            }
+            json.map { mapCollection(it, origin) }
         } catch (_: Exception) {
             null
         }
+    }
+
+    /** Parses a single collection JSON object (e.g. the body returned by the mutation endpoints). Returns null on any malformed input. */
+    fun parseCollection(body: String, origin: String): CollectionSummary? {
+        return try {
+            collectionAdapter.fromJson(body.trim())?.let { mapCollection(it, origin) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Maps a raw [CollectionJson] into the domain [CollectionSummary], resolving cover paths against [origin]. */
+    private fun mapCollection(json: CollectionJson, origin: String): CollectionSummary {
+        return CollectionSummary(
+            id = json.id,
+            name = json.name,
+            romCount = json.rom_count,
+            coverUrl = resolveCoverUrl(
+                origin,
+                json.path_cover_large ?: json.path_covers_large?.firstOrNull(),
+                null,
+            ),
+            romIds = json.rom_ids.orEmpty().toSet(),
+            isPublic = json.is_public,
+            isFavorite = json.is_favorite,
+            isVirtual = json.is_virtual,
+            isSmart = json.is_smart,
+            userId = json.user_id,
+            ownerUsername = json.owner_username,
+        )
     }
 
     /**
@@ -455,6 +490,75 @@ object LibraryApi {
         }
     }
 
+    /** `POST /api/collections` — creates a new collection. */
+    fun createCollection(client: OkHttpClient, origin: String, name: String, isFavorite: Boolean): CollectionMutationResult {
+        if (origin.isBlank()) return CollectionMutationResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED, null)
+        val url = originUrl(origin)?.newBuilder()
+            ?.addPathSegment("api")
+            ?.addPathSegment("collections")
+            ?.addQueryParameter("is_public", "false")
+            ?.addQueryParameter("is_favorite", isFavorite.toString())
+            ?.build()
+            ?: return CollectionMutationResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED, null)
+
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("name", name.trim())
+            .build()
+        val request = Request.Builder().url(url).post(body).build()
+        return executeMutation(client, request, origin)
+    }
+
+    /** `POST /api/collections/{collectionId}/roms` — adds a rom to a collection. */
+    fun addRomToCollection(client: OkHttpClient, origin: String, collectionId: Long, romId: Long): CollectionMutationResult {
+        return membershipMutation(client, origin, collectionId, romId, add = true)
+    }
+
+    /** `DELETE /api/collections/{collectionId}/roms` — removes a rom from a collection. */
+    fun removeRomFromCollection(client: OkHttpClient, origin: String, collectionId: Long, romId: Long): CollectionMutationResult {
+        return membershipMutation(client, origin, collectionId, romId, add = false)
+    }
+
+    /** Shared implementation for add/remove rom membership (same path, same JSON body, different verb). */
+    private fun membershipMutation(
+        client: OkHttpClient,
+        origin: String,
+        collectionId: Long,
+        romId: Long,
+        add: Boolean,
+    ): CollectionMutationResult {
+        if (origin.isBlank()) return CollectionMutationResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED, null)
+        val url = originUrl(origin)?.newBuilder()
+            ?.addPathSegment("api")
+            ?.addPathSegment("collections")
+            ?.addPathSegment(collectionId.toString())
+            ?.addPathSegment("roms")
+            ?.build()
+            ?: return CollectionMutationResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED, null)
+
+        val jsonBody = """{"rom_ids":[$romId]}"""
+        val body = jsonBody.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(url)
+            .apply { if (add) post(body) else delete(body) }
+            .build()
+        return executeMutation(client, request, origin)
+    }
+
+    private fun executeMutation(client: OkHttpClient, request: Request, origin: String): CollectionMutationResult {
+        return try {
+            client.newCall(request).execute().use { response ->
+                classifyResponse(response)?.let { return CollectionMutationResult.Failure(it, response.code) }
+                val body = response.body?.string()
+                val collection = body?.let { parseCollection(it, origin) }
+                if (collection == null) CollectionMutationResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                else CollectionMutationResult.Success(collection)
+            }
+        } catch (e: IOException) {
+            CollectionMutationResult.Failure(classifyIOException(e), null)
+        }
+    }
+
     private fun originUrl(origin: String): HttpUrl? {
         val normalizedOrigin = RommOrigin.parse(origin)?.toUrl() ?: origin.removeSuffix("/")
         return normalizedOrigin.toHttpUrlOrNull()
@@ -471,7 +575,8 @@ object LibraryApi {
 
     private fun classifyIOException(e: IOException): RommApiError {
         val cause = e.cause ?: e
-        return if (cause is javax.net.ssl.SSLException ||
+        return if (e is javax.net.ssl.SSLException ||
+            cause is javax.net.ssl.SSLException ||
             cause.javaClass.name.contains("SSL", ignoreCase = true)
         ) {
             RommApiError.TLS_ERROR

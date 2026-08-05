@@ -277,7 +277,11 @@ class MainActivity : ComponentActivity() {
     // Native browsing UI (UI_REFACTOR.md) — independent of romRepository, which is
     // scoped to single-ROM launch/staging, not list browsing.
     private val libraryRepository: com.romm.androidtv.library.LibraryRepository by lazy {
-        com.romm.androidtv.library.LibraryRepositoryImpl(okHttpClient) { currentOrigin }
+        com.romm.androidtv.library.LibraryRepositoryImpl(
+            okHttpClient,
+            originProvider = { currentOrigin },
+            usernameProvider = { sessionStore.coherentRecord(currentOrigin)?.username },
+        )
     }
 
     /** The currently configured RomM origin: persisted override, or the BuildConfig default. */
@@ -646,11 +650,12 @@ class MainActivity : ComponentActivity() {
                                         if (romId != null) {
                                             val detailViewModel: com.romm.androidtv.library.RomDetailViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                                 key = "game-detail-$romId",
-                                                factory = com.romm.androidtv.library.RomDetailViewModel.Factory(
-                                                    libraryRepository,
-                                                    romId,
-                                                    refreshEvents = libraryRefreshEvents,
-                                                ),
+                                                    factory = com.romm.androidtv.library.RomDetailViewModel.Factory(
+                                                        libraryRepository,
+                                                        romId,
+                                                        refreshEvents = libraryRefreshEvents,
+                                                        onLibraryMutated = { libraryRefreshEvents.tryEmit(Unit) },
+                                                    ),
                                             )
                                             // Production overlay: only conflict/quarantine (blocking) overlays replace the game detail screen.
                                             // Error-only states render inline within GameDetailScreen.
@@ -658,9 +663,10 @@ class MainActivity : ComponentActivity() {
                                             if (state != null && state.matchesScope(romId, state.sessionId) && state.hasBlockingOverlay) {
                                                 renderPreLaunchOverlay(state)
                                             } else {
-                                                com.romm.androidtv.library.ui.GameDetailScreen(
-                                                        viewModel = detailViewModel,
-                                                        onPlay = { playRomId ->
+                                                    com.romm.androidtv.library.ui.GameDetailScreen(
+                                                            viewModel = detailViewModel,
+                                                            onBack = { currentScreen = gameDetailParent },
+                                                            onPlay = { playRomId ->
                                                             nativeLibraryOnPlay(playRomId)
                                                         },
                                                         onChooseSave = { chooseRomId ->
@@ -980,6 +986,7 @@ class MainActivity : ComponentActivity() {
                 validateRommServer = { origin -> authRepository.validateServer(origin) },
                 persistValidatedOrigin = { origin -> settingsRepository.persistValidatedOrigin(origin) },
                 loginToRomm = { origin, username, password -> authRepository.loginOnboarding(origin, username, password) },
+                removeOldestClientToken = { origin -> authRepository.removeOldestClientToken(origin) },
                 initialServerInput = settingsRepository.currentProfile().origin,
                 initialStep = onboardingStartStep,
                 initialUsername = onboardingStartUsername,
@@ -1011,6 +1018,7 @@ class MainActivity : ComponentActivity() {
             onUsernameChanged = onboardingViewModel::onUsernameChanged,
             onPasswordChanged = onboardingViewModel::onPasswordChanged,
             onLogin = onboardingViewModel::onLogin,
+            onRemoveOldestDeviceAndRetry = onboardingViewModel::onRemoveOldestDeviceAndRetry,
             onBack = ::handleOnboardingBack,
         )
 

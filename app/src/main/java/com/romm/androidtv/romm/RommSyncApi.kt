@@ -328,6 +328,26 @@ data class ClientTokenInfo(
 sealed interface ClientTokenAcquireResult {
     data class Success(val info: ClientTokenInfo) : ClientTokenAcquireResult
     data class Failure(val error: RommApiError, val httpCode: Int? = null) : ClientTokenAcquireResult
+    /**
+     * The server rejected creation specifically because the user has reached
+     * its cap on active client tokens (backend: `MAX_TOKENS_PER_USER`, HTTP 400
+     * with a "Maximum of N tokens..." detail). Kept distinct from generic
+     * [Failure] so callers can show an accurate, actionable message instead of
+     * a generic "server/device error".
+     */
+    data class TokenLimitReached(val detail: String?) : ClientTokenAcquireResult
+}
+
+/** A single entry from `GET /api/client-tokens`, trimmed to what callers need. */
+data class ClientTokenSummary(
+    val id: Long,
+    val name: String,
+    val createdAtEpochSeconds: Long?,
+)
+
+sealed interface ClientTokenListResult {
+    data class Success(val tokens: List<ClientTokenSummary>) : ClientTokenListResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : ClientTokenListResult
 }
 
 @JsonClass(generateAdapter = false)
@@ -344,6 +364,20 @@ internal data class ClientTokenResponseJson(
     val scopes: List<String> = emptyList(),
     val raw_token: String = "",
     val expires_at: String? = null,
+    val created_at: String? = null,
+)
+
+/** FastAPI's default HTTPException error shape: `{"detail": "..."}`. */
+@JsonClass(generateAdapter = false)
+internal data class ApiErrorDetailJson(
+    val detail: String? = null,
+)
+
+/** A single entry of `GET /api/client-tokens`'s response array. */
+@JsonClass(generateAdapter = false)
+internal data class ClientTokenListEntryJson(
+    val id: Long = 0,
+    val name: String = "",
     val created_at: String? = null,
 )
 
@@ -366,6 +400,10 @@ object RommSyncApi {
     )
     private val clientTokenPayloadAdapter = moshi.adapter<ClientTokenPayloadJson>()
     private val clientTokenResponseAdapter = moshi.adapter<ClientTokenResponseJson>()
+    private val apiErrorDetailAdapter = moshi.adapter<ApiErrorDetailJson>()
+    private val clientTokenListAdapter = moshi.adapter<List<ClientTokenListEntryJson>>(
+        com.squareup.moshi.Types.newParameterizedType(List::class.java, ClientTokenListEntryJson::class.java)
+    )
 
     // ---- Pure parse functions (unit-testable without a server) ----
 
@@ -558,10 +596,7 @@ object RommSyncApi {
             // Cookie-authenticated POST /api/client-tokens is CSRF-protected: the matching
             // romm_csrftoken cookie value must also be sent as X-CSRFToken. Presence-only diag.
             diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase csrfHeader")
-            val httpUrl = url.toHttpUrlOrNull()
-            val csrfToken = httpUrl?.let { client.cookieJar.loadForRequest(it) }
-                ?.firstOrNull { it.name == "romm_csrftoken" }
-                ?.value
+            val csrfToken = csrfTokenFor(client, url)
             if (csrfToken != null) {
                 builder.header("X-CSRFToken", csrfToken)
             }
@@ -578,6 +613,18 @@ object RommSyncApi {
                 val classification = classifyResponse(response)
                 if (classification != null) {
                     diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: failure error=${classification.name} httpCode=${response.code}")
+                    // A 400 from this endpoint is most commonly the backend's
+                    // `MAX_TOKENS_PER_USER` cap (see client_tokens.py:
+                    // "Maximum of N tokens per user reached"), NOT a local
+                    // device/persistence problem. Surface it distinctly so the
+                    // UI can point the user at the actual, actionable cause
+                    // instead of a generic "device could not save" message.
+                    if (response.code == 400) {
+                        val detail = readErrorDetail(response)
+                        if (detail != null && detail.contains("tokens per user", ignoreCase = true)) {
+                            return ClientTokenAcquireResult.TokenLimitReached(detail)
+                        }
+                    }
                     return ClientTokenAcquireResult.Failure(classification, response.code)
                 }
                 val responseBody = response.body?.string()
@@ -621,17 +668,55 @@ object RommSyncApi {
 
     /**
      * Best-effort server-side revocation of a client token (`DELETE /api/client-tokens/{id}`).
-     * Never throws; callers (onboarding cleanup) invoke this only to reduce orphaned
-     * tokens on the server and must not depend on its outcome.
+     * Returns whether the server confirmed the deletion (2xx); callers that only use this
+     * for cleanup (e.g. onboarding failure paths) may ignore the result, but callers acting
+     * on it (e.g. "remove oldest token to free a slot") must check it before proceeding.
+     *
+     * Like [acquireClientToken], this is a cookie-authenticated mutating request and must
+     * carry the `X-CSRFToken` header or the server rejects it with 403.
      */
-    fun revokeClientToken(client: okhttp3.OkHttpClient, origin: String, tokenId: Long) {
-        if (origin.isBlank() || tokenId <= 0) return
-        val url = apiUrl(origin, "client-tokens/$tokenId") ?: return
-        val request = okhttp3.Request.Builder().url(url).delete().build()
-        try {
-            client.newCall(request).execute().use { }
+    fun revokeClientToken(client: okhttp3.OkHttpClient, origin: String, tokenId: Long): Boolean {
+        if (origin.isBlank() || tokenId <= 0) return false
+        val url = apiUrl(origin, "client-tokens/$tokenId") ?: return false
+        val builder = okhttp3.Request.Builder().url(url).delete()
+        csrfTokenFor(client, url)?.let { builder.header("X-CSRFToken", it) }
+        return try {
+            client.newCall(builder.build()).execute().use { it.isSuccessful }
         } catch (e: IOException) {
             diagLog(android.util.Log.WARN, "RommSyncApi.revokeClientToken: failed ${e.javaClass.simpleName}")
+            false
+        }
+    }
+
+    /** `GET /api/client-tokens` — lists this user's active client tokens, oldest-first is NOT guaranteed by the server. */
+    fun listClientTokens(client: okhttp3.OkHttpClient, origin: String): ClientTokenListResult {
+        if (origin.isBlank()) return ClientTokenListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "client-tokens") ?: return ClientTokenListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val request = okhttp3.Request.Builder().url(url).get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    return ClientTokenListResult.Failure(classification, response.code)
+                }
+                val body = response.body?.string()
+                val entries = body?.let { runCatching { clientTokenListAdapter.fromJson(it) }.getOrNull() }
+                if (entries == null) {
+                    ClientTokenListResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    ClientTokenListResult.Success(
+                        entries.map {
+                            ClientTokenSummary(
+                                id = it.id,
+                                name = it.name,
+                                createdAtEpochSeconds = it.created_at?.let(::parseInstantOrNull)?.epochSecond,
+                            )
+                        },
+                    )
+                }
+            }
+        } catch (e: IOException) {
+            ClientTokenListResult.Failure(classifyIOException(e))
         }
     }
 
@@ -980,6 +1065,24 @@ object RommSyncApi {
             else -> RommApiError.SERVER_ERROR
         }
     }
+
+    /** Best-effort extraction of FastAPI's `{"detail": "..."}` error body. Never throws. */
+    private fun readErrorDetail(response: okhttp3.Response): String? = try {
+        response.peekBody(4096).string().let(apiErrorDetailAdapter::fromJson)?.detail
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Reads the `romm_csrftoken` cookie value for [url] out of [client]'s cookie jar, if
+     * present. Cookie-authenticated mutating requests (POST/DELETE/etc.) require this
+     * value echoed back as the `X-CSRFToken` header or the server rejects them with 403.
+     */
+    private fun csrfTokenFor(client: okhttp3.OkHttpClient, url: String): String? =
+        url.toHttpUrlOrNull()
+            ?.let { client.cookieJar.loadForRequest(it) }
+            ?.firstOrNull { it.name == "romm_csrftoken" }
+            ?.value
 
     private fun classifyIOException(e: IOException): RommApiError {
         val cause = e.cause ?: e

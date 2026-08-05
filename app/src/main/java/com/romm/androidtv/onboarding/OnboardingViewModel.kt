@@ -35,6 +35,14 @@ fun interface LoginToRomm {
 }
 
 /**
+ * User-confirmed remediation for [LoginCompletionResult.TokenLimitReached]: removes the
+ * account's single oldest client token to free a slot. Returns whether that succeeded.
+ */
+fun interface RemoveOldestClientToken {
+    suspend operator fun invoke(origin: String): Boolean
+}
+
+/**
  * Phase 3 onboarding state machine (spec sections 4.3, 4.4, 6).
  *
  * Owns the three-step WELCOME → SERVER → CREDENTIALS flow. All async work runs
@@ -55,6 +63,7 @@ class OnboardingViewModel(
     private val validateRommServer: ValidateRommServer,
     private val persistValidatedOrigin: PersistValidatedOrigin,
     private val loginToRomm: LoginToRomm,
+    private val removeOldestClientToken: RemoveOldestClientToken,
     initialServerInput: String,
     private val initialStep: OnboardingStep = OnboardingStep.WELCOME,
     private val initialUsername: String = "",
@@ -167,6 +176,50 @@ class OnboardingViewModel(
         _uiState.update { it.copy(loginAction = AsyncActionState.Loading, loginError = null) }
 
         viewModelScope.launch {
+            val passwordChars = state.password.toCharArray()
+            val result = loginToRomm(origin, trimmedUsername, passwordChars)
+            handleLoginResult(generation, result)
+        }
+    }
+
+    /**
+     * User-confirmed action offered alongside [OnboardingLoginError.TokenLimitReached]:
+     * removes the account's oldest client token to free a slot, then retries the exact same
+     * login the user just attempted (username/password are still held in state — they are
+     * only cleared on success or on navigating back). Never invoked automatically; the user
+     * must explicitly tap this, since revoking a token can sign out another device.
+     */
+    fun onRemoveOldestDeviceAndRetry() {
+        val state = _uiState.value
+        if (state.step != OnboardingStep.CREDENTIALS) return
+        if (state.loginError !is OnboardingLoginError.TokenLimitReached) return
+        if (state.loginAction == AsyncActionState.Loading) return // single-flight
+
+        val origin = state.normalizedOrigin
+        val trimmedUsername = state.username.trim()
+        if (origin == null || trimmedUsername.isBlank() || state.password.isBlank()) {
+            _uiState.update {
+                it.copy(loginError = OnboardingLoginError.RequiredFields, loginAction = AsyncActionState.Idle)
+            }
+            return
+        }
+
+        val generation = loginGeneration
+        _uiState.update { it.copy(loginAction = AsyncActionState.Loading, loginError = null) }
+
+        viewModelScope.launch {
+            val removed = removeOldestClientToken(origin)
+            if (generation != loginGeneration) return@launch // edited meanwhile — ignore
+
+            if (!removed) {
+                // Couldn't free a slot automatically — restore the same error so the user can
+                // retry the removal, or back out and manage devices manually on the server.
+                _uiState.update {
+                    it.copy(loginError = OnboardingLoginError.TokenLimitReached, loginAction = AsyncActionState.Idle)
+                }
+                return@launch
+            }
+
             val passwordChars = state.password.toCharArray()
             val result = loginToRomm(origin, trimmedUsername, passwordChars)
             handleLoginResult(generation, result)
@@ -305,6 +358,9 @@ class OnboardingViewModel(
             LoginCompletionResult.TokenVerificationFailure,
             LoginCompletionResult.PersistenceFailure ->
                 setLoginError(OnboardingLoginError.DeviceCredentialFailure)
+
+            LoginCompletionResult.TokenLimitReached ->
+                setLoginError(OnboardingLoginError.TokenLimitReached)
         }
     }
 

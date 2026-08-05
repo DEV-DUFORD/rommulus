@@ -27,6 +27,7 @@ class OnboardingViewModelFactoryTest {
     }
     private val persist = PersistValidatedOrigin { true }
     private val login = LoginToRomm { _, _, _ -> error("login should not be called for initial-state assertions") }
+    private val removeOldestClientToken = RemoveOldestClientToken { error("removeOldestClientToken should not be called for initial-state assertions") }
 
     private fun make(
         initialServerInput: String = "",
@@ -37,6 +38,7 @@ class OnboardingViewModelFactoryTest {
             validateRommServer = validate,
             persistValidatedOrigin = persist,
             loginToRomm = login,
+            removeOldestClientToken = removeOldestClientToken,
             initialServerInput = initialServerInput,
             initialStep = initialStep,
             initialUsername = initialUsername,

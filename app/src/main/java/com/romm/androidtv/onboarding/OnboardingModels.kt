@@ -40,6 +40,8 @@ sealed interface OnboardingLoginError {
     data object ServerFailure : OnboardingLoginError
     data object VerificationFailure : OnboardingLoginError
     data object DeviceCredentialFailure : OnboardingLoginError
+    /** Server rejected new token creation because the account is at its device/token cap. */
+    data object TokenLimitReached : OnboardingLoginError
     data object RequiredFields : OnboardingLoginError
 }
 

@@ -664,6 +664,25 @@ class AuthRepositoryTest {
         }
 
         @Test
+        fun `token limit reached maps to TokenLimitReached and clears partial state`() {
+            runBlocking {
+                enqueueAuthSuccess()
+                // POST /api/client-tokens fails with the backend's MAX_TOKENS_PER_USER 400.
+                server.enqueue(
+                    MockResponse().setResponseCode(400).setBody(
+                        """{"detail": "Maximum of 25 tokens per user reached"}"""
+                    )
+                )
+
+                val result = repo.loginOnboarding(baseUrl(), "root", "hunter2".toCharArray())
+
+                assertThat(result).isEqualTo(LoginCompletionResult.TokenLimitReached)
+                assertThat(sessionStore.current()).isNull()
+                assertThat(tokenStorage.storedKeys).isEmpty()
+            }
+        }
+
+        @Test
         fun `token verification failure clears partial state`() {
             runBlocking {
                 enqueueAuthSuccess()

@@ -73,6 +73,9 @@
     <string name="onboarding_login_error_server">RomM returned an error while signing in. Please try again.</string>
     <string name="onboarding_login_error_verification">Login succeeded, but the RomM user could not be verified</string>
     <string name="onboarding_login_error_persist">Login succeeded, but this device could not save your sign-in. Please try again.</string>
+    <string name="onboarding_login_error_token_limit">This RomM account has reached its limit of signed-in devices. Remove an old device from your account\'s settings on the server, then try signing in again.</string>
+    <string name="onboarding_remove_oldest_device">Remove Oldest Device &amp; Retry</string>
+    <string name="onboarding_remove_oldest_device_loading">Removing device…</string>
     <string name="onboarding_login_error_empty">Username and password are required</string>
     <string name="onboarding_server_error_persistence">Could not save this server address. Please try again.</string>
 </resources>

@@ -209,6 +209,8 @@ dependencies {
     // WorkManager test harness requires real Android Context; moved from testImplementation
     // per p5-workmanager plan (no Robolectric in this repo).
     androidTestImplementation("androidx.work:work-testing:2.9.1")
+    // Provides a controllable Dispatchers.Main for ViewModel instrumented tests.
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 

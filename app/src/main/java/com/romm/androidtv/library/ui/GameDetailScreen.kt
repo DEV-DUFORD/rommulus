@@ -35,8 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -44,12 +44,19 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.tv.foundation.lazy.list.TvLazyRow
 import androidx.tv.foundation.lazy.list.itemsIndexed
 import coil.compose.AsyncImage
+import com.romm.androidtv.library.CollectionDialogState
+import com.romm.androidtv.library.CollectionLoadState
+import com.romm.androidtv.library.FavoriteOperation
+import com.romm.androidtv.library.FavoriteUiState
+import com.romm.androidtv.library.GameDetailAlert
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.library.RomDetailViewModel
+import com.romm.androidtv.library.RomDetailUiState
 import com.romm.androidtv.library.SectionState
 import com.romm.androidtv.library.isPlatformNativelySupported
 import java.text.SimpleDateFormat
@@ -66,10 +73,11 @@ sealed interface RequiredBiosState {
 
 /**
  * Native game detail screen (UI_REFACTOR.md section 7.2): hero cover, title
- * and platform, metadata chips, summary, a screenshot shelf, and a Play
- * button. The Play button invokes [onPlay] with the RomM ROM ID; the caller
- * is responsible for staging, sync negotiation, conflict/quarantine handling,
- * and native launch (LIBRETRO_REFACTOR.md sections 10–13).
+ * and platform, metadata chips, summary, a screenshot shelf, a fixed action
+ * rail (Favorite / Add-to-collection / Back), and a Play button. The Play
+ * button invokes [onPlay] with the RomM ROM ID; the caller is responsible for
+ * staging, sync negotiation, conflict/quarantine handling, and native launch
+ * (LIBRETRO_REFACTOR.md sections 10–13).
  *
  * @param isStaging When true, the Play button shows "Preparing…" and is disabled.
  * @param errorMessage Transient error message rendered inline below the Play button;
@@ -86,6 +94,7 @@ sealed interface RequiredBiosState {
  * @param onOpenScreenshot Called when the user selects a screenshot from the shelf, with the full
  *   list of screenshot URLs and the tapped index — the caller opens a full-screen viewer
  *   ([ScreenshotViewerScreen]) seeded at that index.
+ * @param onBack Called when the user selects the Back icon in the action rail.
  */
 @Composable
 fun GameDetailScreen(
@@ -102,16 +111,56 @@ fun GameDetailScreen(
     biosState: RequiredBiosState = RequiredBiosState.Ready,
     onCheckBios: (String) -> Unit = {},
     onOpenScreenshot: (List<String>, Int) -> Unit = { _, _ -> },
+    onBack: () -> Unit,
 ) {
-    val state by viewModel.state.collectAsState()
+    val state: RomDetailUiState by viewModel.state.collectAsState()
+
+    // Shared focus requesters for the rail ↔ Play focus link.
+    val playButtonFocusRequester = remember { FocusRequester() }
+    val favoriteFocusRequester = remember { FocusRequester() }
+    val addFocusRequester = remember { FocusRequester() }
+
+    // Compose's Dialog does not automatically restore focus to whatever was
+    // focused before it opened, so explicitly return focus to the rail's Add
+    // button whenever the collection picker transitions from open → closed
+    // (dismiss, cancel, or a successful add). Guarded by `wasDialogOpen` so
+    // this never fires on first composition (there's nothing to "return" to
+    // yet — Play owns initial focus at that point).
+    var wasDialogOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(state.collectionDialog) {
+        if (state.collectionDialog == null && wasDialogOpen) {
+            addFocusRequester.requestFocus()
+        }
+        wasDialogOpen = state.collectionDialog != null
+    }
+
+    // Same rationale for the standalone Favorite-failure alert: return focus
+    // to the rail's Favorite button once the alert transitions from open →
+    // closed (its own OK/back dismissal).
+    var wasFavoriteAlertOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(state.alert) {
+        val isFavoriteAlertOpen = state.alert is GameDetailAlert.FavoriteFailure
+        if (!isFavoriteAlertOpen && wasFavoriteAlertOpen) {
+            favoriteFocusRequester.requestFocus()
+        }
+        wasFavoriteAlertOpen = isFavoriteAlertOpen
+    }
+
+    // Safe extraction for the collection dialog; dialog only opens when detail is loaded.
+    val loadedDetail = (state.detail as? SectionState.Loaded)?.data
+    val collectionsList = (state.collections as? CollectionLoadState.Loaded)?.ownedWritable ?: emptyList()
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(RommTvColors.NightHi),
     ) {
-        when (val section = state) {
-            is SectionState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // ── Main scrollable content ──────────────────────────────────────
+        when (val section = state.detail) {
+            is SectionState.Loading -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
                 CircularProgressIndicator(color = RommTvColors.Romm500)
             }
             is SectionState.Error -> Column(
@@ -140,9 +189,78 @@ fun GameDetailScreen(
                 biosState = biosState,
                 onCheckBios = onCheckBios,
                 onOpenScreenshot = onOpenScreenshot,
+                playButtonFocusRequester = playButtonFocusRequester,
+                upFocusTarget = favoriteFocusRequester,
+            )
+        }
+
+        // ── Fixed action rail overlay ────────────────────────────────────
+        if (state.detail is SectionState.Loaded) {
+            GameDetailActionRail(
+                favoriteState = mapFavoriteRailState(state.favorite),
+                onFavoriteClick = viewModel::onFavoriteSelected,
+                onAddClick = viewModel::onCollectionPickerRequested,
+                onBackClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 32.dp, top = 24.dp),
+                favoriteFocusRequester = favoriteFocusRequester,
+                addFocusRequester = addFocusRequester,
+                downFocusTarget = playButtonFocusRequester,
+            )
+        }
+
+        // ── Collection picker dialog ─────────────────────────────────────
+        if (state.collectionDialog != null && loadedDetail != null) {
+            AddToCollectionDialog(
+                gameTitle = loadedDetail.title,
+                collections = collectionsList,
+                currentRomId = loadedDetail.id,
+                isLoading = state.collections is CollectionLoadState.Loading,
+                loadError = (state.collections as? CollectionLoadState.Error)?.error,
+                createState = (state.collectionDialog as? CollectionDialogState.Creating)?.let {
+                    CreateCollectionUiState(it.name, it.validationError, it.submitting)
+                },
+                alertMessage = when (state.alert) {
+                    is GameDetailAlert.CollectionAddFailure ->
+                        "Sorry, we are unable to add this game to that collection right now, please try again later"
+                    is GameDetailAlert.CreatedButAddFailed ->
+                        "The collection was created, but we could not add this game to it. Please try again."
+                    else -> null
+                },
+                onCreateNew = viewModel::onCreateCollectionRequested,
+                onSelectCollection = viewModel::onCollectionSelected,
+                onNameChange = viewModel::onCollectionNameChanged,
+                onCreateSubmit = viewModel::onCreateCollectionSubmitted,
+                onCreateCancel = viewModel::onCreateCollectionCancelled,
+                onAlertDismissed = viewModel::onAlertDismissed,
+                onRetry = viewModel::onCollectionRetry,
+                onDismiss = viewModel::onDialogDismissed,
+            )
+        }
+
+        // ── Favorite failure alert (rendered outside the dialog) ─────────
+        if (state.alert is GameDetailAlert.FavoriteFailure) {
+            val operation = (state.alert as GameDetailAlert.FavoriteFailure).operation
+            GameDetailErrorAlert(
+                message = when (operation) {
+                    FavoriteOperation.ADD ->
+                        "Sorry, we are unable to add this game to your favorites right now, please try again later"
+                    FavoriteOperation.REMOVE ->
+                        "Sorry, we are unable to remove this game from your favorites right now, please try again later"
+                },
+                onOk = viewModel::onAlertDismissed,
             )
         }
     }
+}
+
+/** Maps the ViewModel's [FavoriteUiState] to the rail's [FavoriteRailState]. */
+@Composable
+private fun mapFavoriteRailState(state: FavoriteUiState): FavoriteRailState = when (state) {
+    is FavoriteUiState.Loading -> FavoriteRailState.Loading
+    is FavoriteUiState.Confirmed -> FavoriteRailState.Confirmed(state.isFavorite)
+    is FavoriteUiState.Updating -> FavoriteRailState.Updating(state.previous, state.target)
 }
 
 @Composable
@@ -159,17 +277,13 @@ private fun GameDetailContent(
     biosState: RequiredBiosState,
     onCheckBios: (String) -> Unit,
     onOpenScreenshot: (List<String>, Int) -> Unit,
+    playButtonFocusRequester: FocusRequester,
+    upFocusTarget: FocusRequester?,
 ) {
     LaunchedEffect(rom.id, rom.platformSlug) {
         if (rom.platformSlug == "segacd" || rom.platformSlug == "psx") {
             onCheckBios(rom.platformSlug)
         }
-    }
-    val playButtonFocusRequester = remember { FocusRequester() }
-    val focusManager = LocalFocusManager.current
-    LaunchedEffect(Unit) {
-        focusManager.clearFocus()
-        playButtonFocusRequester.requestFocus()
     }
     LazyColumn(
         modifier = Modifier
@@ -186,12 +300,22 @@ private fun GameDetailContent(
                         .background(RommTvColors.NightLo),
                 ) {
                     if (rom.coverUrl != null) {
-                        AsyncImage(model = rom.coverUrl, contentDescription = rom.title, modifier = Modifier.fillMaxSize())
+                        AsyncImage(
+                            model = rom.coverUrl,
+                            contentDescription = rom.title,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.width(24.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = rom.title, style = MaterialTheme.typography.headlineMedium, color = RommTvColors.TextPrimary)
+                // 192.dp end padding = rail width (168.dp) + 24.dp separation so title/
+                // metadata text never renders under the fixed overlay rail.
+                Column(modifier = Modifier.weight(1f).padding(end = 192.dp)) {
+                    Text(
+                        text = rom.title,
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = RommTvColors.TextPrimary,
+                    )
                     Text(
                         text = rom.platformDisplayName,
                         style = MaterialTheme.typography.titleSmall,
@@ -219,7 +343,12 @@ private fun GameDetailContent(
                         RequiredBiosUnavailableState(biosState)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            PlayButton(onPlay = { onPlay(rom.id) }, isStaging = isStaging, focusRequester = playButtonFocusRequester)
+                            PlayButton(
+                                onPlay = { onPlay(rom.id) },
+                                isStaging = isStaging,
+                                focusRequester = playButtonFocusRequester,
+                                upFocusTarget = upFocusTarget,
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
                             ChooseSaveButton(onClick = { onChooseSave(rom.id) }, enabled = !isStaging)
                             if (rom.siblingRoms.isNotEmpty()) {
@@ -421,18 +550,36 @@ private fun AuthExpiredState(onLogin: () -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun PlayButton(onPlay: () -> Unit, isStaging: Boolean = false, focusRequester: FocusRequester) {
+private fun PlayButton(
+    onPlay: () -> Unit,
+    isStaging: Boolean = false,
+    focusRequester: FocusRequester,
+    upFocusTarget: FocusRequester? = null,
+) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    var initialFocusRequested by remember { mutableStateOf(false) }
+
+    // Request initial focus only once the button is actually attached and laid
+    // out (it lives in a LazyColumn item, so requesting focus during the first
+    // composition frame can race lazy composition and throw "FocusRequester is
+    // not initialized"). Deferred via a LaunchedEffect so it never runs mid-layout.
+    LaunchedEffect(initialFocusRequested) {
+        if (initialFocusRequested) {
+            focusRequester.requestFocus()
+        }
+    }
 
     Box(
         modifier = Modifier
             .focusRequester(focusRequester)
+            .onGloballyPositioned { initialFocusRequested = true }
+            .then(upFocusTarget?.let { Modifier.focusProperties { up = it } } ?: Modifier)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (isStaging) RommTvColors.NightLo
                 else if (isFocused) RommTvColors.Romm500
-                else RommTvColors.Romm600.copy(alpha = 0.6f)
+                else RommTvColors.Romm600.copy(alpha = 0.6f),
             )
             .tvFocusRing(isFocused && !isStaging)
             .then(
@@ -467,7 +614,7 @@ private fun ChooseSaveButton(onClick: () -> Unit, enabled: Boolean = true) {
             .background(
                 if (!enabled) RommTvColors.NightLo
                 else if (isFocused) RommTvColors.NightHi
-                else RommTvColors.NightLo
+                else RommTvColors.NightLo,
             )
             .border(
                 width = if (isFocused && enabled) 3.dp else 1.dp,
@@ -512,7 +659,7 @@ private fun ChooseVersionButton(onClick: () -> Unit, enabled: Boolean = true) {
             .background(
                 if (!enabled) RommTvColors.NightLo
                 else if (isFocused) RommTvColors.NightHi
-                else RommTvColors.NightLo
+                else RommTvColors.NightLo,
             )
             .border(
                 width = if (isFocused && enabled) 3.dp else 1.dp,

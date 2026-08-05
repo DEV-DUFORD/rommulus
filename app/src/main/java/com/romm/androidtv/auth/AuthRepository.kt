@@ -14,6 +14,7 @@ import com.romm.androidtv.network.verifyExistingSession
 import com.romm.androidtv.romm.ClientToken
 import com.romm.androidtv.romm.ClientTokenAcquireResult
 import com.romm.androidtv.romm.ClientTokenInfo
+import com.romm.androidtv.romm.ClientTokenListResult
 import com.romm.androidtv.romm.RommSyncApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -163,6 +164,10 @@ class AuthRepository(
                     diagLog(android.util.Log.DEBUG, "forceReconcileClientToken: reconciled=true persist=${persist::class.simpleName}")
                     true
                 }
+                is ClientTokenAcquireResult.TokenLimitReached -> {
+                    diagLog(android.util.Log.WARN, "forceReconcileClientToken: reconciled=false tokenLimitReached detail=${result.detail}")
+                    false
+                }
                 is ClientTokenAcquireResult.Failure -> {
                     val httpCode = result.httpCode ?: -1
                     diagLog(android.util.Log.WARN, "forceReconcileClientToken: reconciled=false error=${result.error.name} httpCode=$httpCode")
@@ -300,6 +305,11 @@ class AuthRepository(
             scopes = RommClientTokenScopes.FOREGROUND_NATIVE,
         )) {
             is ClientTokenAcquireResult.Success -> acquire.info
+            is ClientTokenAcquireResult.TokenLimitReached -> {
+                diagLog(android.util.Log.WARN, "loginOnboarding: tokenLimitReached detail=${acquire.detail}")
+                cleanupPartialOnboarding(origin, uname, tokenInfo = null)
+                return LoginCompletionResult.TokenLimitReached
+            }
             is ClientTokenAcquireResult.Failure -> {
                 diagLog(android.util.Log.WARN, "loginOnboarding: tokenCreationFailed error=${acquire.error.name} httpCode=${acquire.httpCode}")
                 cleanupPartialOnboarding(origin, uname, tokenInfo = null)
@@ -331,6 +341,37 @@ class AuthRepository(
         clientTokenStorage?.clearToken(origin, username)
         tokenInfo?.let { info ->
             runCatching { RommSyncApi.revokeClientToken(client, origin, info.id) }
+        }
+    }
+
+    /**
+     * User-confirmed remediation for [LoginCompletionResult.TokenLimitReached]: lists this
+     * account's client tokens, deletes the single oldest one (by `created_at`) to free a slot,
+     * and reports whether that succeeded. Requires the cookie session established by the
+     * just-completed username/password login step still be valid (it is — this is only ever
+     * called immediately after a [LoginCompletionResult.TokenLimitReached] from the same flow).
+     *
+     * Deliberately explicit/user-initiated (never called automatically): revoking a token can
+     * sign out whatever device/integration was using it, so this must be a decision the user
+     * makes, not one the app makes silently on their behalf.
+     */
+    suspend fun removeOldestClientToken(origin: String): Boolean = withContext(Dispatchers.IO) {
+        when (val list = RommSyncApi.listClientTokens(client, origin)) {
+            is ClientTokenListResult.Failure -> {
+                diagLog(android.util.Log.WARN, "removeOldestClientToken: listFailed error=${list.error.name}")
+                false
+            }
+            is ClientTokenListResult.Success -> {
+                val oldest = list.tokens.minByOrNull { it.createdAtEpochSeconds ?: Long.MAX_VALUE }
+                if (oldest == null) {
+                    diagLog(android.util.Log.WARN, "removeOldestClientToken: noTokensToRemove")
+                    false
+                } else {
+                    val revoked = RommSyncApi.revokeClientToken(client, origin, oldest.id)
+                    diagLog(android.util.Log.WARN, "removeOldestClientToken: removedId=${oldest.id} success=$revoked")
+                    revoked
+                }
+            }
         }
     }
 
@@ -449,6 +490,9 @@ class AuthRepository(
                 is ClientTokenAcquireResult.Success -> {
                     val persist = storage.setToken(origin, uname, result.info.token)
                     diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: acquired+persisted scopes=${RommClientTokenScopes.FOREGROUND_NATIVE} persist=${persist::class.simpleName}")
+                }
+                is ClientTokenAcquireResult.TokenLimitReached -> {
+                    diagLog(android.util.Log.WARN, "acquireAndPersistClientToken: tokenLimitReached detail=${result.detail}")
                 }
                 is ClientTokenAcquireResult.Failure -> {
                     val httpCode = result.httpCode ?: -1

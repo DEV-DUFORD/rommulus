@@ -245,6 +245,130 @@ class LibraryApiTest {
     }
 
     @Nested
+    @DisplayName("parseCollection / parseCollectionList — expanded fields")
+    inner class ParseCollection {
+
+        @Test
+        fun `parses rom_ids into a Set of Long`() {
+            val body = """
+                [{"id": 5, "name": "Metroidvania", "rom_count": 3,
+                  "rom_ids": [10, 20, 30], "is_public": true, "is_favorite": true}]
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollectionList(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!![0].romIds).containsExactly(10L, 20L, 30L)
+        }
+
+        @Test
+        fun `parses is_favorite is_public is_virtual and is_smart flags`() {
+            val body = """
+                {"id": 9, "name": "Fav", "rom_count": 0,
+                  "rom_ids": [], "is_public": true, "is_favorite": true,
+                  "is_virtual": true, "is_smart": true}
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollection(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.isPublic).isTrue
+            assertThat(result.isFavorite).isTrue
+            assertThat(result.isVirtual).isTrue
+            assertThat(result.isSmart).isTrue
+        }
+
+        @Test
+        fun `parses user_id and owner_username`() {
+            val body = """
+                {"id": 9, "name": "Shared", "rom_count": 0, "rom_ids": [],
+                  "user_id": 42, "owner_username": "zack"}
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollection(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.userId).isEqualTo(42)
+            assertThat(result.ownerUsername).isEqualTo("zack")
+        }
+
+        @Test
+        fun `preserves existing cover fallback behavior with new fields present`() {
+            val body = """
+                {"id": 1, "name": "Duf", "rom_count": 17,
+                  "path_cover_large": "/assets/romm/resources/collections/1/cover/big.png",
+                  "path_covers_large": ["/assets/romm/resources/roms/1/cover/big.png"],
+                  "rom_ids": [1, 2], "is_favorite": true}
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollection(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.coverUrl).isEqualTo("$origin/assets/romm/resources/collections/1/cover/big.png")
+            assertThat(result.romIds).containsExactly(1L, 2L)
+            assertThat(result.isFavorite).isTrue
+        }
+
+        @Test
+        fun `handles empty rom_ids as an empty set`() {
+            val body = """
+                {"id": 3, "name": "Empty", "rom_count": 0, "rom_ids": []}
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollection(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.romIds).isEmpty()
+        }
+
+        @Test
+        fun `missing rom_ids defaults to an empty set`() {
+            val result = LibraryApi.parseCollection("""{"id": 3, "name": "NoIds", "rom_count": 0}""", origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!!.romIds).isEmpty()
+        }
+
+        @Test
+        fun `fails predictably on malformed json`() {
+            assertThat(LibraryApi.parseCollection("not json", origin)).isNull()
+        }
+
+        @Test
+        fun `returns null when rom_ids contains a non-numeric entry`() {
+            val body = """
+                {"id": 3, "name": "Bad", "rom_count": 0, "rom_ids": [1, "nope"]}
+            """.trimIndent()
+
+            assertThat(LibraryApi.parseCollection(body, origin)).isNull()
+        }
+
+        @Test
+        fun `defaults flags false when omitted, matching pre-expansion behavior`() {
+            val body = """
+                [{"id": 1, "name": "Duf", "rom_count": 17,
+                  "path_cover_large": "/assets/romm/resources/collections/1/cover/big.png",
+                  "path_covers_large": ["/assets/romm/resources/roms/1/cover/big.png"]}]
+            """.trimIndent()
+
+            val result = LibraryApi.parseCollectionList(body, origin)
+
+            assertThat(result).isNotNull
+            assertThat(result!![0]).isEqualTo(
+                CollectionSummary(
+                    id = 1,
+                    name = "Duf",
+                    romCount = 17,
+                    coverUrl = "$origin/assets/romm/resources/collections/1/cover/big.png",
+                )
+            )
+            assertThat(result[0].romIds).isEmpty()
+            assertThat(result[0].isFavorite).isFalse
+            assertThat(result[0].isVirtual).isFalse
+        }
+    }
+
+    @Nested
     @DisplayName("parseRomDetail")
     inner class ParseRomDetail {
 

@@ -52,6 +52,15 @@ sealed interface LoginCompletionResult {
     data object TokenCreationFailure : LoginCompletionResult
     data object TokenVerificationFailure : LoginCompletionResult
     data object PersistenceFailure : LoginCompletionResult
+
+    /**
+     * The server refused to create a new client token specifically because
+     * this account already has the maximum number of active device tokens
+     * (backend `MAX_TOKENS_PER_USER`). Distinct from [TokenCreationFailure]
+     * so the UI can tell the user exactly what to do (remove an old device)
+     * instead of implying a local device problem.
+     */
+    data object TokenLimitReached : LoginCompletionResult
 }
 
 /**

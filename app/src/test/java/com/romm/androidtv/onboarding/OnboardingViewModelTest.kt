@@ -79,10 +79,25 @@ class OnboardingViewModelTest {
         }
     }
 
+    private class RemoveOldestClientTokenFake : RemoveOldestClientToken {
+        var calls = 0
+        val origins = mutableListOf<String>()
+        val pending = mutableListOf<CompletableDeferred<Boolean>>()
+
+        override suspend fun invoke(origin: String): Boolean {
+            calls++
+            origins.add(origin)
+            val deferred = CompletableDeferred<Boolean>()
+            pending.add(deferred)
+            return deferred.await()
+        }
+    }
+
     private class Harness(
         val validate: ValidateFake = ValidateFake(),
         val persist: PersistFake = PersistFake(),
         val login: LoginFake = LoginFake(),
+        val removeOldestClientToken: RemoveOldestClientTokenFake = RemoveOldestClientTokenFake(),
         initialServerInput: String = "",
         initialStep: OnboardingStep = OnboardingStep.WELCOME,
         initialUsername: String = "",
@@ -91,6 +106,7 @@ class OnboardingViewModelTest {
             validateRommServer = validate,
             persistValidatedOrigin = persist,
             loginToRomm = login,
+            removeOldestClientToken = removeOldestClientToken,
             initialServerInput = initialServerInput,
             initialStep = initialStep,
             initialUsername = initialUsername,
@@ -457,6 +473,69 @@ class OnboardingViewModelTest {
         typeCredentialsAndLogin(h)
         h.login.pending[0].complete(LoginCompletionResult.PersistenceFailure)
         assertLoginError(h, OnboardingLoginError.DeviceCredentialFailure)
+    }
+
+    @Test
+    fun `TokenLimitReached maps to its own distinct error, not DeviceCredentialFailure`() = runTest {
+        val h = make()
+        goToCredentials(h)
+        typeCredentialsAndLogin(h)
+        h.login.pending[0].complete(LoginCompletionResult.TokenLimitReached)
+        assertLoginError(h, OnboardingLoginError.TokenLimitReached)
+    }
+
+    @Test
+    fun `remove oldest device succeeds then retries login and completes`() = runTest {
+        val h = make()
+        goToCredentials(h)
+        typeCredentialsAndLogin(h)
+        h.login.pending[0].complete(LoginCompletionResult.TokenLimitReached)
+        assertLoginError(h, OnboardingLoginError.TokenLimitReached)
+
+        val collected = mutableListOf<OnboardingEffect>()
+        val collector = launch { h.vm.effects.collect { collected.add(it) } }
+        runCurrent()
+
+        h.vm.onRemoveOldestDeviceAndRetry()
+        assertThat(h.vm.uiState.value.loginAction).isEqualTo(AsyncActionState.Loading)
+        assertThat(h.vm.uiState.value.loginError).isNull()
+
+        h.removeOldestClientToken.pending[0].complete(true)
+        runCurrent()
+        assertThat(h.login.calls).isEqualTo(2) // original attempt + retry
+        assertThat(h.login.args[1].second).isEqualTo("zack") // retried with same credentials
+
+        h.login.pending[1].complete(LoginCompletionResult.Success(verifiedUser(), durableToken()))
+        advanceUntilIdle()
+        assertThat(collected).containsExactly(OnboardingEffect.Completed)
+        collector.cancel()
+    }
+
+    @Test
+    fun `remove oldest device fails and re-shows TokenLimitReached without retrying login`() = runTest {
+        val h = make()
+        goToCredentials(h)
+        typeCredentialsAndLogin(h)
+        h.login.pending[0].complete(LoginCompletionResult.TokenLimitReached)
+
+        h.vm.onRemoveOldestDeviceAndRetry()
+        h.removeOldestClientToken.pending[0].complete(false)
+        runCurrent()
+
+        assertThat(h.login.calls).isEqualTo(1) // no retry attempted
+        assertThat(h.vm.uiState.value.loginError).isEqualTo(OnboardingLoginError.TokenLimitReached)
+        assertThat(h.vm.uiState.value.loginAction).isEqualTo(AsyncActionState.Idle)
+    }
+
+    @Test
+    fun `remove oldest device is a no-op unless a TokenLimitReached error is showing`() = runTest {
+        val h = make()
+        goToCredentials(h)
+        typeCredentialsAndLogin(h)
+        h.login.pending[0].complete(LoginCompletionResult.InvalidCredentials)
+
+        h.vm.onRemoveOldestDeviceAndRetry()
+        assertThat(h.removeOldestClientToken.calls).isZero()
     }
 
     @Test

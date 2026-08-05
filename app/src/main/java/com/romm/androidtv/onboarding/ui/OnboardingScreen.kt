@@ -65,6 +65,7 @@ fun OnboardingScreen(
     onUsernameChanged: (String) -> Unit,
     onPasswordChanged: (String) -> Unit,
     onLogin: () -> Unit,
+    onRemoveOldestDeviceAndRetry: () -> Unit,
     onBack: () -> Unit,
 ) {
     val content: @Composable () -> Unit = when (state.step) {
@@ -85,6 +86,7 @@ fun OnboardingScreen(
                     onUsernameChanged = onUsernameChanged,
                     onPasswordChanged = onPasswordChanged,
                     onLogin = onLogin,
+                    onRemoveOldestDeviceAndRetry = onRemoveOldestDeviceAndRetry,
                 )
             }
         }
@@ -289,13 +291,23 @@ private fun CredentialsStep(
     onUsernameChanged: (String) -> Unit,
     onPasswordChanged: (String) -> Unit,
     onLogin: () -> Unit,
+    onRemoveOldestDeviceAndRetry: () -> Unit,
 ) {
     val usernameFocus = remember { FocusRequester() }
+    val removeOldestFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
     LaunchedEffect(Unit) {
         focusManager.clearFocus()
         usernameFocus.requestFocus()
+    }
+
+    // When the token-limit error first appears, the remediation button becomes the
+    // recommended next action — move focus to it so the user doesn't have to hunt for it.
+    LaunchedEffect(state.loginError) {
+        if (state.loginError is OnboardingLoginError.TokenLimitReached) {
+            removeOldestFocus.requestFocus()
+        }
     }
 
     Column(
@@ -397,6 +409,8 @@ private fun CredentialsStep(
                     stringResource(R.string.onboarding_login_error_verification)
                 OnboardingLoginError.DeviceCredentialFailure ->
                     stringResource(R.string.onboarding_login_error_persist)
+                OnboardingLoginError.TokenLimitReached ->
+                    stringResource(R.string.onboarding_login_error_token_limit)
                 OnboardingLoginError.RequiredFields ->
                     stringResource(R.string.onboarding_login_error_empty)
             }
@@ -417,5 +431,18 @@ private fun CredentialsStep(
             onClick = onLogin,
             testTag = "onboarding_login",
         )
+
+        if (state.loginError is OnboardingLoginError.TokenLimitReached) {
+            Spacer(modifier = Modifier.height(12.dp))
+            OnboardingPrimaryButton(
+                text = stringResource(R.string.onboarding_remove_oldest_device),
+                loadingText = stringResource(R.string.onboarding_remove_oldest_device_loading),
+                loading = loading,
+                enabled = true,
+                onClick = onRemoveOldestDeviceAndRetry,
+                testTag = "onboarding_remove_oldest_device",
+                focusRequester = removeOldestFocus,
+            )
+        }
     }
 }

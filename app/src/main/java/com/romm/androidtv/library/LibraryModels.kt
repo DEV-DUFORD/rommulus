@@ -48,13 +48,27 @@ data class LibraryRom(
     val nowPlaying: Boolean,
 )
 
-/** One entry in a `GET /api/collections` listing. */
+/** One entry in a `GET /api/collections` listing, or the result of a collection mutation. */
 data class CollectionSummary(
     val id: Long,
     val name: String,
     val romCount: Int,
     /** Absolute cover-art URL, already resolved against the RomM origin. Null if none available. */
     val coverUrl: String?,
+    /** IDs of the roms currently in the collection (from RomM's `rom_ids`). */
+    val romIds: Set<Long> = emptySet(),
+    /** True if the collection is shared publicly (RomM's `is_public`). */
+    val isPublic: Boolean = false,
+    /** True if the current user has marked the collection as a favorite (RomM's `is_favorite`). */
+    val isFavorite: Boolean = false,
+    /** True for RomM's built-in virtual collections (e.g. "All" or "Favorites"). */
+    val isVirtual: Boolean = false,
+    /** True for smart collections whose membership is rule-driven rather than explicit. */
+    val isSmart: Boolean = false,
+    /** Server-side id of the collection's owner. */
+    val userId: Long = 0L,
+    /** Username of the collection's owner (RomM's `owner_username`). */
+    val ownerUsername: String = "",
 )
 
 /**
