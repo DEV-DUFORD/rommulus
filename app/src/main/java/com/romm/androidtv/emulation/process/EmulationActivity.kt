@@ -880,6 +880,20 @@ class EmulationActivity : ComponentActivity() {
                 return true
             }
         }
+        // Non-remote Back while a pause overlay is open: the gamepad B (delivered as
+        // KEYCODE_BACK on this device) must dismiss the current overlay and return to gameplay —
+        // never fall through to the platform default Back, which would finish() the whole game.
+        // The remote's Back is fully handled (quick-tap navigation + hold-to-exit) in the
+        // isRemoteSource block above, so it never reaches here. The gamepad has no hold-to-exit;
+        // it simply emits a quick click that advances the overlay (CLOSED never used from here).
+        if (event.keyCode == KeyEvent.KEYCODE_BACK &&
+            pauseOverlay.value != PauseOverlay.CLOSED
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                quickBackTapEvents.tryEmit(Unit)
+            }
+            return true
+        }
         if (shouldRouteGameplayInput(
                 sessionStarted = sessionStarted,
                 pauseOverlay = pauseOverlay.value,
