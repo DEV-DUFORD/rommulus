@@ -114,4 +114,22 @@ class CacheDatabaseTest {
         assertThat(db.all()).hasSize(2)
         assertThat(db.all().map { it.key }).containsExactlyInAnyOrder("k1", "k2")
     }
+
+    @Test
+    fun `a persist failure is non-fatal and in-memory state stays authoritative`() {
+        // Block the index file's parent directory so the temp-write/rename can't succeed,
+        // exactly like a flaky/unwritable filesystem (issue: "Save" picker failing with
+        // "failed to atomically persist cache index" during a ROM download).
+        val blocker = File(root, "index.json")
+        blocker.mkdirs()
+        val indexFile = File(blocker, "nested.json")
+
+        val db = CacheDatabase(indexFile)
+
+        // Must not throw, and must keep serving the entry this process, even though
+        // the disk index could not be written.
+        db.upsert(entry(key = "k1"))
+
+        assertThat(db.find("k1")).isEqualTo(entry(key = "k1"))
+    }
 }

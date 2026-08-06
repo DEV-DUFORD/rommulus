@@ -2,12 +2,14 @@
 
 package com.romm.androidtv.cache
 
+import android.util.Log
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.KotlinJsonAdapterFactory
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.adapter
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 
 /** Distinguishes the two kinds of evictable content this cache ever holds. */
 enum class CacheEntryKind { ROM, FIRMWARE }
@@ -57,6 +59,10 @@ internal data class CacheIndexJson(val entries: List<CacheEntry> = emptyList())
  */
 class CacheDatabase(private val indexFile: File) {
 
+    private companion object {
+        const val TAG = "CacheDatabase"
+    }
+
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val adapter = moshi.adapter<CacheIndexJson>()
 
@@ -78,15 +84,27 @@ class CacheDatabase(private val indexFile: File) {
     private fun persist() {
         val json = adapter.toJson(CacheIndexJson(entriesByKey.values.toList()))
         val dir = indexFile.parentFile
+        // Best-effort: a transient write/rename failure here must never abort an
+        // otherwise-successful content download or launch. The downloaded bytes are
+        // already verified and on disk; this index is only LRU bookkeeping over them.
+        // loadFromDisk() already treats a missing/corrupt index as empty, so a swallowed
+        // failure simply means the entry is re-derived (content re-verified/re-downloaded)
+        // after a process restart. The in-memory entriesByKey map stays authoritative for
+        // the life of this process.
         dir?.mkdirs()
         val tempFile = File(dir, "${indexFile.name}${AtomicFileStore.TEMP_SUFFIX}")
-        FileOutputStream(tempFile).use { out ->
-            out.write(json.toByteArray(Charsets.UTF_8))
-            out.fd.sync()
-        }
-        if (!tempFile.renameTo(indexFile)) {
+        try {
+            FileOutputStream(tempFile).use { out ->
+                out.write(json.toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+            }
+            if (!tempFile.renameTo(indexFile)) {
+                tempFile.delete()
+                Log.e(TAG, "cache index persist: atomic rename failed; keeping in-memory state")
+            }
+        } catch (e: IOException) {
             tempFile.delete()
-            throw java.io.IOException("failed to atomically persist cache index")
+            Log.e(TAG, "cache index persist failed; keeping in-memory state", e)
         }
     }
 
