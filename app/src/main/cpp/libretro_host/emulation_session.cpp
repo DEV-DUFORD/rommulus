@@ -93,6 +93,13 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     if (isMupen64PlusNext) {
         // The libretro threaded path keeps GL commands on this EGL-owning
         // frontend thread while moving N64 emulation to a worker thread.
+        // The app's N64 controller profile targets the core's independent
+        // C-button layout (C-Right=RetroPad R, R Shoulder=RetroPad R2, etc.).
+        // That layout only applies with "Independent C-button Controls"
+        // (mupen64plus-alt-map) enabled; the default (False) map instead wires
+        // RetroPad R to the N64 R trigger and RetroPad R2 to a C-buttons mode
+        // toggle, so user mappings would fire the wrong control.
+        environment_.setCoreOptionOverride("mupen64plus-alt-map", "True");
         environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "True");
         environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
         environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");

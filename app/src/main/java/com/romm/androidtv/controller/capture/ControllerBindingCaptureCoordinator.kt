@@ -101,6 +101,13 @@ class ControllerBindingCaptureCoordinator(
     private val eligibleDeviceIds = mutableSetOf<Int>()
     private var target: CaptureTarget = CaptureTarget.Digital
 
+    /**
+     * True once a key press has been observed during a Digital (button-row)
+     * capture. When set, stick deflections are ignored so a button row can never
+     * be silently captured by a stick; the intended key press takes priority.
+     */
+    private var keyPressedDuringCapture = false
+
     /** Device/key pairs currently held down across eligible devices (for neutral gating). */
     private val pressedKeys = mutableSetOf<Pair<Int, Int>>()
 
@@ -149,6 +156,7 @@ class ControllerBindingCaptureCoordinator(
         pressedKeys.clear()
         axisValues.clear()
         axisSeenNeutral.clear()
+        keyPressedDuringCapture = false
         _state.value = ControllerBindingCaptureState.AwaitingNeutral
         // The row-opening ACTION_DOWN has already passed through Activity dispatch.
         // Arm on the next coroutine turn when no eligible-device input was observed;
@@ -206,12 +214,75 @@ class ControllerBindingCaptureCoordinator(
 
         val axisConstants = InputDevice.getDevice(deviceId)?.motionRanges?.map { it.axis }.orEmpty()
         for (h in 0 until event.historySize) {
-            for (axis in axisConstants) {
-                onAxisSample(deviceId, axis, event.getHistoricalAxisValue(axis, h))
-            }
+            onAxisSamples(
+                deviceId,
+                axisConstants.map { it to event.getHistoricalAxisValue(it, h) },
+            )
         }
-        for (axis in axisConstants) {
-            onAxisSample(deviceId, axis, event.getAxisValue(axis))
+        onAxisSamples(deviceId, axisConstants.map { it to event.getAxisValue(it) })
+        return true
+    }
+
+    /**
+     * Pure batch-axis-sample seam. [onMotionEvent] delegates here for each
+     * history sample and the current event, feeding every device axis together.
+     *
+     * Neutral gating is preserved: every sample is recorded so
+     * [checkNeutralAndAdvance] and the noisy-axis guard see current state.
+     * For analog targets (and single-axis sample sets) each axis is forwarded
+     * to [onAxisSample], preserving the existing "first axis that crosses the
+     * enter threshold wins" behavior.
+     *
+     * For digital targets with more than one axis in the sample, a dominant-axis
+     * selection is applied instead: among the axes that have returned to neutral
+     * and now cross [ENTER_THRESHOLD], only the one with the largest |value| is
+     * captured. This guarantees a stick deflection is attributed to its dominant
+     * axis (e.g. a right push on a non-standard Xbox layout attributes to AXIS_Z,
+     * not an incidental AXIS_RZ component), so two directions can never share a
+     * captured (axis, polarity) key.
+     */
+    internal fun onAxisSamples(deviceId: Int, samples: List<Pair<Int, Float>>): Boolean? {
+        if (!isActive) return null
+        if (deviceId !in eligibleDeviceIds) return null
+        if (!isGamepadSource(sourceProvider(deviceId))) return null
+
+        // Record every sample so neutral-gating / checkNeutralAndAdvance see it.
+        for ((axis, value) in samples) {
+            val deviceAxis = deviceId to axis
+            axisValues[deviceAxis] = value
+            if (abs(value) < NEUTRAL_THRESHOLD) axisSeenNeutral.add(deviceAxis)
+        }
+
+        if (_state.value == ControllerBindingCaptureState.AwaitingNeutral) {
+            checkNeutralAndAdvance()
+            return true
+        }
+
+        // Capturing phase.
+        if (target == CaptureTarget.Analog || samples.size <= 1) {
+            for ((axis, value) in samples) {
+                onAxisSample(deviceId, axis, value)
+            }
+            return true
+        }
+
+        // Digital multi-axis: capture only the dominant qualifying deflection.
+        // A prior/armed key press takes priority over a stick deflection so a
+        // button row is never silently captured by a stick (see onAxisSample).
+        if (keyPressedDuringCapture) return true
+        val dominant = samples
+            .filter { (axis, value) ->
+                (deviceId to axis) in axisSeenNeutral && abs(value) >= ENTER_THRESHOLD
+            }
+            .maxByOrNull { abs(it.second) }
+        if (dominant != null) {
+            val (axis, value) = dominant
+            finishWith(
+                PhysicalBinding.AxisDirection(
+                    axis = axis,
+                    polarity = if (value > 0f) 1 else -1,
+                ),
+            )
         }
         return true
     }
@@ -229,7 +300,12 @@ class ControllerBindingCaptureCoordinator(
         if (_state.value == ControllerBindingCaptureState.AwaitingNeutral) {
             when (action) {
                 KeyEvent.ACTION_DOWN -> {
-                    if (repeatCount == 0) pressedKeys.add(deviceId to keyCode)
+                    if (repeatCount == 0) {
+                        pressedKeys.add(deviceId to keyCode)
+                        // An armed button press indicates the user intends a button;
+                        // stick deflections must not capture this button row instead.
+                        if (target == CaptureTarget.Digital) keyPressedDuringCapture = true
+                    }
                     // A held button keeps us non-neutral; never capture it here.
                     return true
                 }
@@ -270,6 +346,12 @@ class ControllerBindingCaptureCoordinator(
         // Capturing phase.
         if (deviceAxis !in axisSeenNeutral) return true // noisy axis that never returned to neutral
         if (abs(value) < ENTER_THRESHOLD) return true // not yet crossing the enter threshold
+
+        // Digital (button-row) targets: once a key press has been observed during
+        // the capture, the user intends to press a button, so a stick deflection
+        // must not silently capture the row. Stick-to-button binding is still
+        // allowed when no key press has been seen (see digitalStickPolarity).
+        if (target == CaptureTarget.Digital && keyPressedDuringCapture) return true
 
         val binding = when (target) {
             CaptureTarget.Analog -> PhysicalBinding.Axis(axis)

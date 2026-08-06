@@ -169,6 +169,79 @@ class ControllerMappingConverterTest {
     }
 
     @Test
+    fun `non-standard right stick axes are stored under their raw physical axis`() {
+        val n64Profile = CoreControllerProfiles.byCoreId("mupen64plus_next")!!
+        val stickConfig = CoreControllerConfig(
+            coreId = "mupen64plus_next",
+            players = mapOf(
+                0 to PlayerControllerConfig(
+                    mapOf(
+                        CoreControlId.N64_C_RIGHT to ControlBindings(
+                            primary = PhysicalBinding.AxisDirection(
+                                android.view.MotionEvent.AXIS_Z,
+                                1,
+                            ),
+                        ),
+                        CoreControlId.N64_C_DOWN to ControlBindings(
+                            primary = PhysicalBinding.AxisDirection(
+                                android.view.MotionEvent.AXIS_RZ,
+                                1,
+                            ),
+                        ),
+                        CoreControlId.N64_C_LEFT to ControlBindings(
+                            primary = PhysicalBinding.AxisDirection(
+                                android.view.MotionEvent.AXIS_Z,
+                                -1,
+                            ),
+                        ),
+                        CoreControlId.N64_C_UP to ControlBindings(
+                            primary = PhysicalBinding.AxisDirection(
+                                android.view.MotionEvent.AXIS_RZ,
+                                -1,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val mapping = stickConfig.toRouterMappings(n64Profile).getValue(0)
+
+        // C-Right -> BUTTON_RB on (AXIS_Z,+1), C-Down -> BUTTON_A on (AXIS_RZ,+1).
+        // These are distinct keys, matching how playback populates axisValues with
+        // the raw physical axes (AXIS_Z / AXIS_RZ) — so both fire correctly.
+        assertThat(mapping.axisDirections)
+            .containsEntry(
+                AxisDirection(android.view.MotionEvent.AXIS_Z, 1),
+                LogicalControl.BUTTON_RB,
+            )
+        assertThat(mapping.axisDirections)
+            .containsEntry(
+                AxisDirection(android.view.MotionEvent.AXIS_RZ, 1),
+                LogicalControl.BUTTON_A,
+            )
+        assertThat(mapping.axisDirections)
+            .containsEntry(
+                AxisDirection(android.view.MotionEvent.AXIS_Z, -1),
+                LogicalControl.BUTTON_LB,
+            )
+        assertThat(mapping.axisDirections)
+            .containsEntry(
+                AxisDirection(android.view.MotionEvent.AXIS_RZ, -1),
+                LogicalControl.BUTTON_X,
+            )
+
+        // All four directions are stored under distinct (axis, polarity) keys, so
+        // C-Right and C-Down can never collide (the dominant-axis capture fix).
+        assertThat(mapping.axisDirections).hasSize(4)
+        // No canonical RX/RY keys are produced.
+        assertThat(mapping.axisDirections.keys)
+            .doesNotContain(AxisDirection(android.view.MotionEvent.AXIS_RX, 1))
+        assertThat(mapping.axisDirections.keys)
+            .doesNotContain(AxisDirection(android.view.MotionEvent.AXIS_RY, 1))
+    }
+
+    @Test
     fun `unknown control id is skipped`() {
         val unknownConfig = CoreControllerConfig(
             coreId = "snes9x",

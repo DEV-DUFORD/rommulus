@@ -210,6 +210,144 @@ class ControllerBindingCaptureCoordinatorTest {
         }
 
         @Test
+        @DisplayName("digital capture ignores a stick deflection once a key press is armed")
+        fun `stickIgnoredWhenKeyArmed`() = runTest {
+            val c = coordinator()
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Digital)
+
+            // Arm a key press (held during AwaitingNeutral) and observe the stick
+            // at neutral so it would qualify for capture later.
+            assertThat(c.onKeySample(gamepadDevice, ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_R1)).isEqualTo(true)
+            assertThat(c.onAxisSample(gamepadDevice, android.view.MotionEvent.AXIS_RZ, 0f)).isEqualTo(true)
+            assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.AwaitingNeutral)
+
+            // Release the key -> capturing, with the key press now "armed".
+            assertThat(c.onKeySample(gamepadDevice, ACTION_UP, KeyEvent.KEYCODE_BUTTON_R1)).isEqualTo(true)
+            assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.Capturing)
+
+            // A coincidental stick deflection must NOT capture the button row.
+            assertThat(c.onAxisSample(gamepadDevice, android.view.MotionEvent.AXIS_RZ, 0.9f)).isEqualTo(true)
+            assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.Capturing)
+
+            // The bumper press captures the key.
+            assertThat(c.onKeySample(gamepadDevice, ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_R1)).isEqualTo(true)
+            assertThat(c.state.value)
+                .isEqualTo(ControllerBindingCaptureState.Result(PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_R1)))
+        }
+
+        @Test
+        @DisplayName("digital multi-axis capture ignores a stick deflection once a key is armed")
+        fun `multiAxisStickIgnoredWhenKeyArmed`() = runTest {
+            val c = coordinator()
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Digital)
+
+            // Arm a key press and observe both right-stick axes at neutral.
+            c.onKeySample(gamepadDevice, ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_R1)
+            c.onAxisSamples(
+                gamepadDevice,
+                listOf(
+                    android.view.MotionEvent.AXIS_Z to 0f,
+                    android.view.MotionEvent.AXIS_RZ to 0f,
+                ),
+            )
+            c.onKeySample(gamepadDevice, ACTION_UP, KeyEvent.KEYCODE_BUTTON_R1)
+            assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.Capturing)
+
+            // A strong multi-axis stick deflection must not capture the row.
+            c.onAxisSamples(
+                gamepadDevice,
+                listOf(
+                    android.view.MotionEvent.AXIS_Z to 0.95f,
+                    android.view.MotionEvent.AXIS_RZ to 0.9f,
+                ),
+            )
+            assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.Capturing)
+
+            // The bumper press captures the key.
+            c.onKeySample(gamepadDevice, ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_R1)
+            assertThat(c.state.value)
+                .isEqualTo(ControllerBindingCaptureState.Result(PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_R1)))
+        }
+
+        @Test
+        @DisplayName("digital multi-axis capture picks the dominant (largest |value|) axis")
+        fun `dominantAxisWinsOnMultiAxisCapture`() = runTest {
+            val c = coordinator()
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Digital)
+            // Return both axes to neutral -> capturing.
+            c.onAxisSamples(
+                gamepadDevice,
+                listOf(
+                    android.view.MotionEvent.AXIS_Z to 0f,
+                    android.view.MotionEvent.AXIS_RZ to 0f,
+                ),
+            )
+            assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.Capturing)
+
+            // Both right-stick axes cross the enter threshold; AXIS_RZ has the
+            // larger magnitude, so it must win even though AXIS_Z is listed first.
+            c.onAxisSamples(
+                gamepadDevice,
+                listOf(
+                    android.view.MotionEvent.AXIS_Z to 0.8f,
+                    android.view.MotionEvent.AXIS_RZ to 0.95f,
+                ),
+            )
+            assertThat(c.state.value)
+                .isEqualTo(
+                    ControllerBindingCaptureState.Result(
+                        PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_RZ, 1),
+                    ),
+                )
+        }
+
+        @Test
+        @DisplayName("digital multi-axis capture picks the dominant axis regardless of order")
+        fun `dominantAxisSelectedRegardlessOfOrder`() = runTest {
+            val c = coordinator()
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Digital)
+            // Return both axes to neutral -> capturing.
+            c.onAxisSamples(
+                gamepadDevice,
+                listOf(
+                    android.view.MotionEvent.AXIS_Z to 0f,
+                    android.view.MotionEvent.AXIS_RZ to 0f,
+                ),
+            )
+            assertThat(c.state.value).isEqualTo(ControllerBindingCaptureState.Capturing)
+
+            // AXIS_Z crosses after AXIS_RZ but has the larger magnitude.
+            c.onAxisSamples(
+                gamepadDevice,
+                listOf(
+                    android.view.MotionEvent.AXIS_RZ to 0.7f,
+                    android.view.MotionEvent.AXIS_Z to 0.9f,
+                ),
+            )
+            assertThat(c.state.value)
+                .isEqualTo(
+                    ControllerBindingCaptureState.Result(
+                        PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_Z, 1),
+                    ),
+                )
+        }
+
+        @Test
+        @DisplayName("digital single-axis capture still captures the crossing axis")
+        fun `singleAxisDigitalCaptureUnchanged`() = runTest {
+            val c = coordinator()
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Digital)
+            c.onAxisSample(gamepadDevice, android.view.MotionEvent.AXIS_X, 0f)
+            assertThat(c.onAxisSample(gamepadDevice, android.view.MotionEvent.AXIS_X, -0.8f)).isEqualTo(true)
+            assertThat(c.state.value)
+                .isEqualTo(
+                    ControllerBindingCaptureState.Result(
+                        PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_X, -1),
+                    ),
+                )
+        }
+
+        @Test
         @DisplayName("trigger axis captures as a full unidirectional Axis")
         fun `triggerCapturesAsUnidirectionalAxis`() = runTest {
             val c = coordinator()
