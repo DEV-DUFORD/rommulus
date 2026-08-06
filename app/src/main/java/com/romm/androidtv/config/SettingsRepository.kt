@@ -125,6 +125,25 @@ class SettingsRepository(
         prefs.edit().putBoolean(KEY_AUTOCLEAN_SAVES, enabled).apply()
     }
 
+    /**
+     * Currently active UI theme, stored by id string ("RomMulus"/"RomM").
+     * Defaults to the local-appearance "RomMulus" (logo teal) theme.
+     */
+    fun theme(): String = prefs.getString(KEY_THEME, DEFAULT_THEME) ?: DEFAULT_THEME
+
+    /**
+     * Reactive source-of-truth for the active theme. Emits the current value
+     * on subscription and updates whenever [setTheme] is called, so the app
+     * root can swap the palette live without a restart.
+     */
+    private val _themeFlow = MutableStateFlow(theme())
+    val themeFlow: StateFlow<String> = _themeFlow.asStateFlow()
+
+    fun setTheme(theme: String) {
+        prefs.edit().putString(KEY_THEME, theme).apply()
+        _themeFlow.value = theme
+    }
+
     data class BiosSelection(
         val firmwareId: Long,
         val fileName: String,
@@ -170,6 +189,8 @@ class SettingsRepository(
 
     companion object {
         const val PREFS_NAME = "romm_settings"
+        private const val DEFAULT_THEME = "RomMulus"
+        private const val KEY_THEME = "theme"
         private const val KEY_ORIGIN = "romm_origin"
         private const val KEY_HIDE_UNSUPPORTED = "hide_unsupported_systems"
         private const val KEY_VERIFY_SHA1 = "verify_sha1_on_launch"

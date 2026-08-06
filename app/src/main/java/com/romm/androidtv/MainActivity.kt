@@ -86,6 +86,7 @@ import com.romm.androidtv.gamepad.GamepadInjectionBridge
 import com.romm.androidtv.gamepad.GamepadInjectionDiagnostics
 import com.romm.androidtv.model.*
 import com.romm.androidtv.library.ui.tvButtonFocus
+import com.romm.androidtv.library.ui.applyTheme
 import com.romm.androidtv.network.*
 import com.romm.androidtv.romm.DeviceRepositoryImpl
 import com.romm.androidtv.romm.RomRepositoryImpl
@@ -576,7 +577,15 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 snapshotFlow { currentScreen }.collect { captureCoordinator.cancel() }
             }
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            // Keep the active theme in sync with the persisted preference so a
+            // saved selection survives process restarts (it also live-updates
+            // when changed from the Settings screen).
+            LaunchedEffect(Unit) {
+                settingsRepository.themeFlow.collect {
+                    applyTheme(com.romm.androidtv.library.ui.RommTheme.fromStorage(it))
+                }
+            }
+            com.romm.androidtv.library.ui.RommTvTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Black

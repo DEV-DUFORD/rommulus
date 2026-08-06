@@ -36,7 +36,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -87,6 +86,7 @@ import com.romm.androidtv.emulation.video.VideoOptionsDialog
 import com.romm.androidtv.library.ui.tvButtonFocus
 import com.romm.androidtv.library.ui.TvButton
 import com.romm.androidtv.library.ui.TvOutlinedButton
+import com.romm.androidtv.library.ui.RommTvTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -556,7 +556,7 @@ class EmulationActivity : ComponentActivity() {
         this.savePath = savePath
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            RommTvTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
                     EmulationScreen(
                         host = host,

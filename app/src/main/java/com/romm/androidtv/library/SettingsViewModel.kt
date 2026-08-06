@@ -8,6 +8,8 @@ import com.romm.androidtv.auth.AuthRepository
 import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.config.ServerProfile
 import com.romm.androidtv.config.SettingsRepository
+import com.romm.androidtv.library.ui.RommTheme
+import com.romm.androidtv.library.ui.applyTheme
 import com.romm.androidtv.model.HeartbeatError as NetworkHeartbeatError
 import com.romm.androidtv.network.HeartbeatCallResult
 import com.romm.androidtv.network.InvalidReason
@@ -81,6 +83,8 @@ data class SettingsUiState(
      * false, every uploaded copy is kept on the server.
      */
     val autocleanSavesOnUpload: Boolean = true,
+    /** Currently active theme chosen from the Settings screen. */
+    val activeTheme: RommTheme = RommTheme.RomMulus,
 )
 
 /**
@@ -115,6 +119,8 @@ class SettingsViewModel(
     private val setVerifySha1OnLaunchFn: (Boolean) -> Unit = {},
     private val getAutocleanSavesOnUpload: () -> Boolean = { true },
     private val setAutocleanSavesOnUploadFn: (Boolean) -> Unit = {},
+    private val getTheme: () -> String = { RommTheme.RomMulus.name },
+    private val setThemeFn: (String) -> Unit = {},
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -135,6 +141,7 @@ class SettingsViewModel(
             hideUnsupportedSystems = getHideUnsupportedSystems(),
             verifySha1OnLaunch = getVerifySha1OnLaunch(),
             autocleanSavesOnUpload = getAutocleanSavesOnUpload(),
+            activeTheme = RommTheme.fromStorage(getTheme()),
         )
     }
 
@@ -154,6 +161,17 @@ class SettingsViewModel(
     fun onAutocleanSavesOnUploadChanged(enabled: Boolean) {
         setAutocleanSavesOnUploadFn(enabled)
         _uiState.value = _uiState.value.copy(autocleanSavesOnUpload = enabled)
+    }
+
+    /**
+     * Applies a newly chosen theme: persists it, updates the global active
+     * palette (recomposing the whole app via [applyTheme]) and the local
+     * Settings UI state.
+     */
+    fun onThemeSelected(theme: RommTheme) {
+        setThemeFn(theme.name)
+        applyTheme(theme)
+        _uiState.value = _uiState.value.copy(activeTheme = theme)
     }
 
     /** Called on every TextField [onValueChange]. Validates and tracks dirty state. */
@@ -415,6 +433,8 @@ class SettingsViewModel(
                 setVerifySha1OnLaunchFn = { verify -> settingsRepository.setVerifySha1OnLaunch(verify) },
                 getAutocleanSavesOnUpload = { settingsRepository.autocleanSavesOnUpload() },
                 setAutocleanSavesOnUploadFn = { enabled -> settingsRepository.setAutocleanSavesOnUpload(enabled) },
+                getTheme = { settingsRepository.theme() },
+                setThemeFn = { theme -> settingsRepository.setTheme(theme) },
             ) as T
         }
     }

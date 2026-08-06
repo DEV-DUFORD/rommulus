@@ -1,15 +1,20 @@
 package com.romm.androidtv.library.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -24,17 +29,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.romm.androidtv.library.ConnectionCheckState
 import com.romm.androidtv.library.SettingsLoginState
@@ -76,6 +87,8 @@ fun SettingsScreen(
     val playStationFocusRequester = remember { FocusRequester() }
     val verifySha1FocusRequester = remember { FocusRequester() }
     val autocleanFocusRequester = remember { FocusRequester() }
+    val themeFocusRequester = remember { FocusRequester() }
+    var showThemeDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         focusManager.clearFocus()
@@ -374,8 +387,54 @@ fun SettingsScreen(
                     .focusRequester(filterToggleFocusRequester)
                     .focusProperties {
                         up = loginFocusRequester
-                        down = controllerSettingsFocusRequester
+                        down = themeFocusRequester
                     },
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ---- Theme section ----
+        Text(
+            text = "Theme",
+            style = MaterialTheme.typography.titleLarge,
+            color = RommTvColors.Romm300,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Text(
+            text = "Choose the look and feel of the app.",
+            style = MaterialTheme.typography.bodySmall,
+            color = RommTvColors.TextSecondary,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+        TvButton(
+            onClick = { showThemeDialog = true },
+            modifier = Modifier
+                .focusRequester(themeFocusRequester)
+                .focusProperties {
+                    up = filterToggleFocusRequester
+                    down = controllerSettingsFocusRequester
+                },
+        ) {
+            Text("Change Theme")
+        }
+
+        Text(
+            text = "Current: ${uiState.activeTheme.displayName}",
+            style = MaterialTheme.typography.bodySmall,
+            color = RommTvColors.TextSecondary,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+
+        if (showThemeDialog) {
+            ThemePickerDialog(
+                current = uiState.activeTheme,
+                themes = RommTheme.entries,
+                onSelect = { theme ->
+                    viewModel.onThemeSelected(theme)
+                    showThemeDialog = false
+                },
+                onDismiss = { showThemeDialog = false },
             )
         }
 
@@ -398,7 +457,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .focusRequester(controllerSettingsFocusRequester)
                 .focusProperties {
-                    up = filterToggleFocusRequester
+                    up = themeFocusRequester
                     down = segaCdFocusRequester
                 },
         ) {
@@ -555,5 +614,90 @@ private fun SettingsInfoRow(label: String, value: String) {
     ) {
         Text(text = label, color = RommTvColors.TextSecondary, modifier = Modifier.weight(1f))
         Text(text = value, color = RommTvColors.TextPrimary, modifier = Modifier.weight(1f))
+    }
+}
+
+/**
+ * Dialog listing the selectable [themes]. Selecting one applies it immediately
+ * (theme updates in place) and dismisses the dialog. Mirrors the focus/back
+ * handling of GameDetailErrorAlert in CollectionPickerDialog.kt.
+ */
+@Composable
+private fun ThemePickerDialog(
+    current: RommTheme,
+    themes: List<RommTheme>,
+    onSelect: (RommTheme) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val firstFocusRequester = remember { FocusRequester() }
+    var ready by remember { mutableStateOf(false) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+    ) {
+        BackHandler { onDismiss() }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(RommTvColors.NightHi)
+                .padding(24.dp),
+        ) {
+            Text(
+                text = "Theme",
+                style = MaterialTheme.typography.titleLarge,
+                color = RommTvColors.Romm300,
+                modifier = Modifier.padding(bottom = 16.dp),
+            )
+            themes.forEachIndexed { index, theme ->
+                val isSelected = theme == current
+                val button: @Composable RowScope.() -> Unit = {
+                    Text(theme.displayName)
+                    if (isSelected) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,
+                            contentDescription = "Current theme",
+                            tint = RommTvColors.Romm300,
+                        )
+                    }
+                }
+                if (isSelected) {
+                    TvButton(
+                        onClick = { onSelect(theme) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                            .then(
+                                if (index == 0) Modifier.focusRequester(firstFocusRequester)
+                                    .onGloballyPositioned { ready = true }
+                                else Modifier,
+                            ),
+                        content = button,
+                    )
+                } else {
+                    TvOutlinedButton(
+                        onClick = { onSelect(theme) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                            .then(
+                                if (index == 0) Modifier.focusRequester(firstFocusRequester)
+                                    .onGloballyPositioned { ready = true }
+                                else Modifier,
+                            ),
+                        content = button,
+                    )
+                }
+            }
+            Text(
+                text = "The theme updates immediately.",
+                style = MaterialTheme.typography.bodySmall,
+                color = RommTvColors.TextSecondary,
+            )
+        }
+    }
+    LaunchedEffect(ready) {
+        if (ready) firstFocusRequester.requestFocus()
     }
 }
