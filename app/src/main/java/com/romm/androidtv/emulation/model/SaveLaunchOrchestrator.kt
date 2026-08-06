@@ -171,6 +171,10 @@ class SaveLaunchOrchestrator(
                 quarantinedPath = outcome.quarantinedPath,
             )
         }
+        is SaveSyncOutcome.PlayOfflineLocal -> {
+            Log.w(logTag, "prepare: sync offline, launching with local save (${outcome.error})")
+            PreparationResult.OfflineLocal(outcome.error.name)
+        }
         is SaveSyncOutcome.Failure -> {
             Log.w(logTag, "prepare: pre-launch sync failed (${outcome.error})")
             // Preserve typed AUTH_EXPIRED so caller can attempt reconciliation.
@@ -228,6 +232,13 @@ class SaveLaunchOrchestrator(
 
         /** Bearer-authenticated sync returned AUTH_EXPIRED (401/403). Caller should reconcile or prompt login. */
         data object AuthExpired : PreparationResult
+
+        /**
+         * Pre-launch sync failed with a transient server outage but a valid durable local save
+         * exists. Caller should launch the game with the local copy (the pending save remains
+         * queued for later upload). [reason] is the underlying error name, informational only.
+         */
+        data class OfflineLocal(val reason: String) : PreparationResult
 
         /** Launch blocked with an actionable error message (non-auth failure). */
         data class Failed(val reason: String) : PreparationResult

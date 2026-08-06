@@ -82,15 +82,27 @@ class SaveSyncCoordinatorImpl(
         val serverKey = extractServerKey(origin)
         val userKey = username
 
+        // Read the durable local copy BEFORE any network work so a transient server outage can
+        // fall back to it (see saveOutcomeForFailure), even though `ensureRegistered` needs no result from it.
+        val existingReplica = saveReplicaDao.findByScope(serverKey, userKey, request.romId, request.romHash, request.slot)
+        val localBytes = saveContentStore.readLocal(serverKey, userKey, request.romId, request.romHash, request.slot)
+
+        // A valid offline fallback needs a real local baseline: a replica that records a write
+        // event AND the durable bytes on disk (guards against a half-populated record path).
+        fun saveOutcomeForFailure(error: RommApiError, httpCode: Int?): SaveSyncOutcome =
+            if (isTransientServerOutage(error, httpCode) && existingReplica?.localWrittenAtEpochMs != null && localBytes != null) {
+                Log.info("syncBeforeLaunch: $error — launching offline with a valid local save")
+                SaveSyncOutcome.PlayOfflineLocal(error, httpCode)
+            } else {
+                SaveSyncOutcome.Failure(error, httpCode)
+            }
+
         val registration = deviceRepository.ensureRegistered(origin, username)
         val deviceId = when (registration) {
             is DeviceRegistrationResult.Success -> registration.identity.rommDeviceId
             is DeviceRegistrationResult.Failure ->
-                return@withContext SaveSyncOutcome.Failure(registration.error, registration.httpCode)
+                return@withContext saveOutcomeForFailure(registration.error, registration.httpCode)
         }
-
-        val existingReplica = saveReplicaDao.findByScope(serverKey, userKey, request.romId, request.romHash, request.slot)
-        val localBytes = saveContentStore.readLocal(serverKey, userKey, request.romId, request.romHash, request.slot)
 
         val clientSaves = if (existingReplica?.localWrittenAtEpochMs != null && localBytes != null) {
             listOf(
@@ -112,7 +124,8 @@ class SaveSyncCoordinatorImpl(
             val result = RommSyncApi.negotiateSync(client, origin, SyncNegotiateRequest(deviceId, clientSaves))
         ) {
             is SyncNegotiateResult.Success -> result.negotiation
-            is SyncNegotiateResult.Failure -> return@withContext SaveSyncOutcome.Failure(result.error, result.httpCode)
+            is SyncNegotiateResult.Failure ->
+                return@withContext saveOutcomeForFailure(result.error, result.httpCode)
         }
 
         val operation = negotiation.operations.firstOrNull { op ->
@@ -695,6 +708,17 @@ class SaveSyncCoordinatorImpl(
             syncStatus = SaveSyncStatus.SYNCED,
             lastError = null,
         )
+    }
+
+    /**
+     * True when the server is unreachable/unhealthy rather than the launch being blocked by a
+     * definitive protocol/parse/auth outcome — i.e. the failure class that should fall back to
+     * playing offline with a local save. Mirrors the upload executor's retry classification.
+     */
+    private fun isTransientServerOutage(error: RommApiError, httpCode: Int?): Boolean = when (error) {
+        RommApiError.NETWORK_ERROR, RommApiError.TLS_ERROR -> true
+        RommApiError.SERVER_ERROR -> httpCode == null || httpCode in 500..599
+        else -> false
     }
 
     private fun newReplica(request: SaveSyncRequest, serverKey: String, userKey: String) = SaveReplicaEntity(

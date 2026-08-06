@@ -1604,6 +1604,16 @@ class MainActivity : ComponentActivity() {
                         .apply { isAuthExpired = true }
                 }
             }
+            is SaveLaunchOrchestrator.PreparationResult.OfflineLocal -> {
+                // Server unreachable/unhealthy but a valid durable local save exists — launch with it.
+                // The save stays queued (NEGOTIATE_AND_SYNC PENDING) and will sync when the server is back.
+                Log.d(DIAG_TAG, "MainActivity.dispatchPrepResult: offline-local launch (${preparation.reason})")
+                pendingNativeLaunch = com.romm.androidtv.emulation.model.PendingNativeLaunch(
+                    spec = spec,
+                    savePath = savePath,
+                    candidateMetadata = null,
+                )
+            }
             is SaveLaunchOrchestrator.PreparationResult.Failed -> {
                 withContext(Dispatchers.Main) {
                     preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(romId = spec.romId, romHash = spec.romHash)

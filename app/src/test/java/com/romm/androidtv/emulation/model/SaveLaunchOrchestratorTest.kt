@@ -63,6 +63,12 @@ class SaveLaunchOrchestratorTest {
         }
 
         @Test
+        fun `OfflineLocal carries informational reason`() {
+            val o = SaveLaunchOrchestrator.PreparationResult.OfflineLocal("NETWORK_ERROR")
+            assertThat(o.reason).isEqualTo("NETWORK_ERROR")
+        }
+
+        @Test
         fun `all PreparationResult variants are exhaustible`() {
             val results: List<SaveLaunchOrchestrator.PreparationResult> = listOf(
                 SaveLaunchOrchestrator.PreparationResult.Ready(null),
@@ -76,6 +82,7 @@ class SaveLaunchOrchestratorTest {
                 ),
                 SaveLaunchOrchestrator.PreparationResult.Quarantined(reason = "x", quarantinedPath = "/tmp/x"),
                 SaveLaunchOrchestrator.PreparationResult.AuthExpired,
+                SaveLaunchOrchestrator.PreparationResult.OfflineLocal("NETWORK_ERROR"),
                 SaveLaunchOrchestrator.PreparationResult.Failed("error"),
             )
             // Exhaustive when compiles only if all variants are covered.
@@ -85,6 +92,7 @@ class SaveLaunchOrchestratorTest {
                     is SaveLaunchOrchestrator.PreparationResult.Conflict -> "conflict"
                     is SaveLaunchOrchestrator.PreparationResult.Quarantined -> "quarantined"
                     SaveLaunchOrchestrator.PreparationResult.AuthExpired -> "auth-expired"
+                    is SaveLaunchOrchestrator.PreparationResult.OfflineLocal -> "offline-local"
                     is SaveLaunchOrchestrator.PreparationResult.Failed -> "failed"
                 }
                 assertThat(classified).`as`("variant $result").isNotNull

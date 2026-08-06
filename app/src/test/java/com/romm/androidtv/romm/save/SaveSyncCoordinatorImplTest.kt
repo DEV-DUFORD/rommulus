@@ -8,6 +8,7 @@ import com.romm.androidtv.romm.RommApiError
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -98,6 +99,66 @@ class SaveSyncCoordinatorImplTest {
             assertThat(outcome).isInstanceOf(SaveSyncOutcome.Failure::class.java)
             assertThat((outcome as SaveSyncOutcome.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
             assertThat(server.requestCount).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `negotiate transport failure with a valid local save returns PlayOfflineLocal and keeps local bytes`() {
+        runBlocking {
+            saveContentStore.seedLocal("localhost", "alice", 1L, "hash-a", "autosave", byteArrayOf(9, 9, 9))
+            saveReplicaDao.upsert(
+                SaveReplicaEntity(
+                    serverKey = "localhost", userKey = "alice", romId = 1L, romHash = "hash-a", slot = "autosave",
+                    coreId = "sameboy", coreBuildRevision = "v1.0.3-libretro", expectedSramSizeBytes = 3L,
+                    localHash = "local-hash", localSizeBytes = 3L, localWrittenAtEpochMs = 5_000L,
+                )
+            )
+            enqueueDeviceRegistered()
+            // Negotiate fails at the transport layer (server unreachable).
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+
+            val outcome = coordinator.syncBeforeLaunch(request())
+
+            assertThat(outcome).isInstanceOf(SaveSyncOutcome.PlayOfflineLocal::class.java)
+            assertThat((outcome as SaveSyncOutcome.PlayOfflineLocal).error).isEqualTo(RommApiError.NETWORK_ERROR)
+            // The prior locale baseline is left intact for offline play.
+            assertThat(saveContentStore.readLocal("localhost", "alice", 1L, "hash-a", "autosave"))
+                .isEqualTo(byteArrayOf(9, 9, 9))
+        }
+    }
+
+    @Test
+    fun `negotiate transport failure without a local save still returns Failure`() {
+        runBlocking {
+            enqueueDeviceRegistered()
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+
+            val outcome = coordinator.syncBeforeLaunch(request())
+
+            assertThat(outcome).isInstanceOf(SaveSyncOutcome.Failure::class.java)
+            assertThat((outcome as SaveSyncOutcome.Failure).error).isEqualTo(RommApiError.NETWORK_ERROR)
+        }
+    }
+
+    @Test
+    fun `device registration auth failure with a local save still returns Failure (not offline)`() {
+        // AUTH_EXPIRED is a definitive auth outcome, not a transient outage — it must never
+        // silently fall back to offline play; the caller should re-authenticate instead.
+        runBlocking {
+            saveContentStore.seedLocal("localhost", "alice", 1L, "hash-a", "autosave", byteArrayOf(9, 9, 9))
+            saveReplicaDao.upsert(
+                SaveReplicaEntity(
+                    serverKey = "localhost", userKey = "alice", romId = 1L, romHash = "hash-a", slot = "autosave",
+                    coreId = "sameboy", coreBuildRevision = "v1.0.3-libretro", expectedSramSizeBytes = 3L,
+                    localHash = "local-hash", localSizeBytes = 3L, localWrittenAtEpochMs = 5_000L,
+                )
+            )
+            server.enqueue(MockResponse().setResponseCode(401))
+
+            val outcome = coordinator.syncBeforeLaunch(request())
+
+            assertThat(outcome).isInstanceOf(SaveSyncOutcome.Failure::class.java)
+            assertThat((outcome as SaveSyncOutcome.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
         }
     }
 

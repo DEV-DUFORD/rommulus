@@ -218,6 +218,14 @@ sealed interface SaveSyncOutcome {
 
     /** Device registration, negotiate, download, or an underlying network/API call failed outright. */
     data class Failure(val error: RommApiError, val httpCode: Int? = null) : SaveSyncOutcome
+
+    /**
+     * Pre-launch sync failed with a transient network/server error (server unreachable or
+     * unhealthy), but a valid durable local save exists on this device. The game may launch
+     * offline using the local copy; the save remains queued (`PendingOperationEntity`, retried
+     * with backoff) and will reconcile with the server once connectivity returns.
+     */
+    data class PlayOfflineLocal(val error: RommApiError, val httpCode: Int? = null) : SaveSyncOutcome
 }
 
 /**
