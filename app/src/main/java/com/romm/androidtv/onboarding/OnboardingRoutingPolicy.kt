@@ -36,7 +36,6 @@ object OnboardingRoutingPolicy {
         profileOrigin: String?,
         hasMatchingToken: Boolean,
     ): AppMode {
-        if (!hasMatchingToken) return AppMode.ONBOARDING
         if (record == null) return AppMode.ONBOARDING
         if (record.origin.isBlank()) return AppMode.ONBOARDING
         if (record.username.isNullOrBlank()) return AppMode.ONBOARDING
@@ -44,9 +43,14 @@ object OnboardingRoutingPolicy {
 
         val recordParsed = RommOrigin.parse(record.origin) ?: return AppMode.ONBOARDING
         val profileParsed = RommOrigin.parse(profileOrigin) ?: return AppMode.ONBOARDING
-
         val sameOrigin = recordParsed.isSameOrigin(profileParsed) &&
             recordParsed.path == profileParsed.path
-        return if (sameOrigin) AppMode.MAIN else AppMode.ONBOARDING
+        if (!sameOrigin) return AppMode.ONBOARDING
+
+        // A kiosk (anonymous read-only) session is coherent without a durable client token —
+        // kiosk servers never issue tokens, so MAIN must not require one here.
+        if (record.kioskMode) return AppMode.MAIN
+
+        return if (hasMatchingToken) AppMode.MAIN else AppMode.ONBOARDING
     }
 }

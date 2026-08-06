@@ -15,10 +15,12 @@ class OnboardingRoutingPolicyTest {
     private fun record(
         origin: String,
         username: String? = "zack",
+        kioskMode: Boolean = false,
     ) = SessionStore.Record(
         origin = origin,
         username = username,
         verifiedAtEpochMillis = 123L,
+        kioskMode = kioskMode,
     )
 
     private fun decide(
@@ -41,6 +43,30 @@ class OnboardingRoutingPolicyTest {
     fun `coherent record but no token - onboarding`() {
         assertThat(decide(record = record("https://romm.example.com"), hasMatchingToken = false))
             .isEqualTo(AppMode.ONBOARDING)
+    }
+
+    @Test
+    fun `coherent kiosk record enters main even without a token`() {
+        assertThat(decide(
+            record = record("https://demo.romm.app", kioskMode = true),
+            profileOrigin = "https://demo.romm.app",
+            hasMatchingToken = false,
+        )).isEqualTo(AppMode.MAIN)
+    }
+
+    @Test
+    fun `kiosk record with mismatched origin - onboarding`() {
+        assertThat(decide(
+            record = record("https://demo.romm.app", kioskMode = true),
+            profileOrigin = "https://romm.example.com",
+        )).isEqualTo(AppMode.ONBOARDING)
+    }
+
+    @Test
+    fun `kiosk record with blank username - onboarding`() {
+        assertThat(decide(
+            record = record("https://demo.romm.app", username = "", kioskMode = true),
+        )).isEqualTo(AppMode.ONBOARDING)
     }
 
     @Test

@@ -6,6 +6,7 @@ import androidx.work.ListenableWorker
 import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
+import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.romm.save.SaveUploadExecutor
 import com.romm.androidtv.romm.save.SaveUploadExecutor.DrainResult
 import kotlinx.coroutines.runBlocking
@@ -34,7 +35,10 @@ class SaveUploadWorkerInstrumentedTest {
                 val fakeExecutor = object : SaveUploadExecutor {
                     override suspend fun drainBatch(): DrainResult = drainBehavior()
                 }
-                SaveUploadWorker(appContext, workerParameters, fakeExecutor)
+                val sessionStore = SessionStore(
+                    appContext.getSharedPreferences(SessionStore.PREFS_NAME, Context.MODE_PRIVATE),
+                )
+                SaveUploadWorker(appContext, workerParameters, fakeExecutor, sessionStore)
             }
             else -> null
         }

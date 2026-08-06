@@ -93,11 +93,24 @@ class OnboardingViewModelTest {
         }
     }
 
+    private class EstablishKioskSessionFake : EstablishKioskSession {
+        var calls = 0
+        var result = true
+        val origins = mutableListOf<String>()
+
+        override suspend fun invoke(origin: String): Boolean {
+            calls++
+            origins.add(origin)
+            return result
+        }
+    }
+
     private class Harness(
         val validate: ValidateFake = ValidateFake(),
         val persist: PersistFake = PersistFake(),
         val login: LoginFake = LoginFake(),
         val removeOldestClientToken: RemoveOldestClientTokenFake = RemoveOldestClientTokenFake(),
+        val establishKioskSession: EstablishKioskSessionFake = EstablishKioskSessionFake(),
         initialServerInput: String = "",
         initialStep: OnboardingStep = OnboardingStep.WELCOME,
         initialUsername: String = "",
@@ -107,6 +120,7 @@ class OnboardingViewModelTest {
             persistValidatedOrigin = persist,
             loginToRomm = login,
             removeOldestClientToken = removeOldestClientToken,
+            establishKioskSession = establishKioskSession,
             initialServerInput = initialServerInput,
             initialStep = initialStep,
             initialUsername = initialUsername,
@@ -232,6 +246,86 @@ class OnboardingViewModelTest {
         assertThat(s.serverError).isNull()
         assertThat(h.persist.calls).isEqualTo(1)
         assertThat(h.persist.origins).containsExactly(canonical)
+        assertThat(h.establishKioskSession.calls).isZero()
+        assertThat(h.login.calls).isZero()
+    }
+
+    @Test
+    fun `kiosk valid server persists, establishes kiosk session, and completes skipping credentials`() = runTest {
+        val h = make()
+        val collected = mutableListOf<OnboardingEffect>()
+        val collector = launch { h.vm.effects.collect { collected.add(it) } }
+        h.vm.onContinue()
+        h.vm.onServerChanged("https://demo.romm.app")
+        h.vm.onValidateServer()
+        runCurrent()
+
+        h.validate.pending[0].complete(ServerValidationResult.Valid(canonical, heartbeat, kioskMode = true))
+        advanceUntilIdle()
+
+        val s = h.vm.uiState.value
+        // Never advances to CREDENTIALS — kiosk is anonymous; login impossible.
+        assertThat(s.step).isEqualTo(OnboardingStep.SERVER)
+        assertThat(h.persist.calls).isEqualTo(1)
+        assertThat(h.persist.origins).containsExactly(canonical)
+        assertThat(h.establishKioskSession.calls).isEqualTo(1)
+        assertThat(h.establishKioskSession.origins).containsExactly(canonical)
+        assertThat(h.login.calls).isZero()
+        assertThat(collected).containsExactly(OnboardingEffect.Completed)
+        collector.cancel()
+    }
+
+    @Test
+    fun `kiosk valid server with failed kiosk session shows persistence error and does not complete`() = runTest {
+        val h = make()
+        val collected = mutableListOf<OnboardingEffect>()
+        val collector = launch { h.vm.effects.collect { collected.add(it) } }
+        h.establishKioskSession.result = false
+        h.vm.onContinue()
+        h.vm.onServerChanged("https://demo.romm.app")
+        h.vm.onValidateServer()
+        runCurrent()
+
+        h.validate.pending[0].complete(ServerValidationResult.Valid(canonical, heartbeat, kioskMode = true))
+        advanceUntilIdle()
+
+        assertThat(h.vm.uiState.value.serverError).isEqualTo(OnboardingServerError.PersistenceFailure)
+        assertThat(h.establishKioskSession.calls).isEqualTo(1)
+        assertThat(collected).isEmpty()
+        collector.cancel()
+    }
+
+    @Test
+    fun `kiosk valid server with failed origin persistence does not establish session nor complete`() = runTest {
+        val h = make()
+        val collected = mutableListOf<OnboardingEffect>()
+        val collector = launch { h.vm.effects.collect { collected.add(it) } }
+        h.persist.result = false
+        h.vm.onContinue()
+        h.vm.onServerChanged("https://demo.romm.app")
+        h.vm.onValidateServer()
+        runCurrent()
+
+        h.validate.pending[0].complete(ServerValidationResult.Valid(canonical, heartbeat, kioskMode = true))
+        advanceUntilIdle()
+
+        assertThat(h.vm.uiState.value.serverError).isEqualTo(OnboardingServerError.PersistenceFailure)
+        assertThat(h.establishKioskSession.calls).isZero()
+        assertThat(collected).isEmpty()
+        collector.cancel()
+    }
+
+    @Test
+    fun `non-kiosk valid server does not establish kiosk session`() = runTest {
+        val h = make()
+        h.vm.onContinue()
+        h.vm.onServerChanged("https://romm.example.com")
+        h.vm.onValidateServer()
+
+        h.validate.pending[0].complete(ServerValidationResult.Valid(canonical, heartbeat, kioskMode = false))
+
+        assertThat(h.vm.uiState.value.step).isEqualTo(OnboardingStep.CREDENTIALS)
+        assertThat(h.establishKioskSession.calls).isZero()
     }
 
     @Test

@@ -356,22 +356,18 @@ class MainActivity : ComponentActivity() {
      * Builds a cookie-free, bearer-authenticated OkHttp client backed by [ClientTokenStore].
      * Used exclusively for foreground device registration and save-sync write operations.
      * Never imports WebView cookies — follows the durable credential rule from RommWorkerFactory.
+     *
+     * The same-origin target is resolved PER REQUEST from the current profile origin (and the
+     * token from the current session), so this cached client safely adapts when the app
+     * reconnects to a different origin in-process — e.g. after "restore to defaults" followed
+     * by logging into another instance — instead of remaining pinned to the first origin it
+     * saw. When there is no valid profile origin the interceptor attaches no credential.
      */
     private fun buildBearerAuthClient(tokenStore: com.romm.androidtv.romm.ClientTokenStore): okhttp3.OkHttpClient {
-        // Phase 5a: origin-scoped bearer auth (spec section 5.2, 7.4). The interceptor attaches
-        // the stored client token ONLY to same-origin native API requests, so third-party cover
-        // URLs never receive the credential. Cookie import/verification is compatibility
-        // maintenance, NOT the native auth gate.
-        //
-        // Non-throwing by design: with empty/fresh app data the profile origin is blank. We must
-        // NOT crash the UI or construct a bearer client for an invalid origin — fall back to a
-        // plain token-less shared client instead (the "never attach a token to a non-origin"
-        // invariant holds because there is no interceptor at all). A valid bearer client is only
-        // built once a canonical origin exists (i.e. in MAIN mode after onboarding).
-        val origin = RommServerAddress.parseAndNormalize(currentOrigin) as? ServerAddressResult.Valid
-            ?: return RommOkHttpClient.build()
         return RommOkHttpClient.nativeClient(
-            origin = origin,
+            originProvider = {
+                RommServerAddress.parseAndNormalize(currentOrigin) as? ServerAddressResult.Valid
+            },
             tokenProvider = {
                 sessionStore.current()?.let { s ->
                     tokenStore.getToken(s.origin, s.username ?: "")?.raw
@@ -1011,6 +1007,7 @@ class MainActivity : ComponentActivity() {
                 persistValidatedOrigin = { origin -> settingsRepository.persistValidatedOrigin(origin) },
                 loginToRomm = { origin, username, password -> authRepository.loginOnboarding(origin, username, password) },
                 removeOldestClientToken = { origin -> authRepository.removeOldestClientToken(origin) },
+                establishKioskSession = { origin -> authRepository.establishKioskSession(origin) },
                 initialServerInput = settingsRepository.currentProfile().origin,
                 initialStep = onboardingStartStep,
                 initialUsername = onboardingStartUsername,

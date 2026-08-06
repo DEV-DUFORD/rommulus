@@ -711,7 +711,7 @@ class RommSyncApiTest {
             val bearerClient = when (parsedOrigin) {
                 is ServerAddressResult.Valid ->
                     OkHttpClient.Builder()
-                        .addInterceptor(BearerAuthInterceptor(parsedOrigin, { acquiredToken.raw }))
+                        .addInterceptor(BearerAuthInterceptor({ parsedOrigin }, { acquiredToken.raw }))
                         .build()
                 is ServerAddressResult.Invalid ->
                     OkHttpClient.Builder().build()
@@ -752,7 +752,7 @@ class RommSyncApiTest {
             val bearerClientNoToken = when (parsedOriginNoToken) {
                 is ServerAddressResult.Valid ->
                     OkHttpClient.Builder()
-                        .addInterceptor(BearerAuthInterceptor(parsedOriginNoToken, { null }))
+                        .addInterceptor(BearerAuthInterceptor({ parsedOriginNoToken }, { null }))
                         .build()
                 is ServerAddressResult.Invalid ->
                     OkHttpClient.Builder().build()

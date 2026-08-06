@@ -75,6 +75,8 @@ class SaveSyncCoordinatorImpl(
 
     override suspend fun syncBeforeLaunch(request: SaveSyncRequest): SaveSyncOutcome = withContext(Dispatchers.IO) {
         val session = sessionStore.current() ?: return@withContext SaveSyncOutcome.Failure(RommApiError.AUTH_EXPIRED)
+        // Kiosk (anonymous read-only demo) sessions never sync saves — play locally only.
+        if (session.kioskMode) return@withContext SaveSyncOutcome.NoOpSynced(0L)
         val username = session.username ?: return@withContext SaveSyncOutcome.Failure(RommApiError.AUTH_EXPIRED)
         val origin = session.origin
         val serverKey = extractServerKey(origin)
@@ -152,6 +154,8 @@ class SaveSyncCoordinatorImpl(
 
     override suspend fun adoptChosenSave(request: AdoptSaveRequest): SaveSyncOutcome = withContext(Dispatchers.IO) {
         val session = sessionStore.current() ?: return@withContext SaveSyncOutcome.Failure(RommApiError.AUTH_EXPIRED)
+        // Kiosk demos never offer/adopt server saves — no-op to launch locally only.
+        if (session.kioskMode) return@withContext SaveSyncOutcome.NoOpSynced(0L)
         val username = session.username ?: return@withContext SaveSyncOutcome.Failure(RommApiError.AUTH_EXPIRED)
         val origin = session.origin
         val serverKey = extractServerKey(origin)
@@ -252,6 +256,8 @@ class SaveSyncCoordinatorImpl(
     override suspend fun listSavesForRom(romId: Long): com.romm.androidtv.romm.SaveListResult = withContext(Dispatchers.IO) {
         val session = sessionStore.current()
             ?: return@withContext com.romm.androidtv.romm.SaveListResult.Failure(RommApiError.AUTH_EXPIRED)
+        // Kiosk demos expose no server saves to adopt.
+        if (session.kioskMode) return@withContext com.romm.androidtv.romm.SaveListResult.Success(emptyList())
         val username = session.username
             ?: return@withContext com.romm.androidtv.romm.SaveListResult.Failure(RommApiError.AUTH_EXPIRED)
         val origin = session.origin
@@ -268,6 +274,10 @@ class SaveSyncCoordinatorImpl(
 
     override suspend fun syncPostPlay(request: PostPlayCheckpointRequest): PostPlayCheckpointResult =
         withContext(Dispatchers.IO) {
+            // Kiosk demos never enqueue uploads — drop the checkpoint without any sync work.
+            if (sessionStore.current()?.kioskMode == true) {
+                return@withContext PostPlayCheckpointResult.Unchanged
+            }
             val existingReplica = saveReplicaDao.findByScope(
                 request.serverKey, request.userKey, request.romId, request.romHash, request.slot,
             )
@@ -334,6 +344,8 @@ class SaveSyncCoordinatorImpl(
     override suspend fun finalizeAdoption(request: FinalizeAdoptionRequest): FinalizeAdoptionResult =
         withContext(Dispatchers.IO) {
             val session = sessionStore.current() ?: return@withContext FinalizeAdoptionResult.Failure(RommApiError.AUTH_EXPIRED)
+            // Kiosk demos never confirm downloads or complete sessions.
+            if (session.kioskMode) return@withContext FinalizeAdoptionResult.Success(confirmed = false)
             val username = session.username ?: return@withContext FinalizeAdoptionResult.Failure(RommApiError.AUTH_EXPIRED)
             val origin = session.origin
 
@@ -388,6 +400,8 @@ class SaveSyncCoordinatorImpl(
             }
 
             val session = sessionStore.current() ?: return@withContext PlaySessionRecordResult.Failure(RommApiError.AUTH_EXPIRED)
+            // Kiosk demos skip play-session telemetry (no writes).
+            if (session.kioskMode) return@withContext PlaySessionRecordResult.Success(createdCount = 0, skippedCount = 0)
             val username = session.username ?: return@withContext PlaySessionRecordResult.Failure(RommApiError.AUTH_EXPIRED)
             val origin = session.origin
 
@@ -613,6 +627,10 @@ class SaveSyncCoordinatorImpl(
     ): SaveReplicaEntity? = saveReplicaDao.findByScope(serverKey, userKey, romId, romHash, slot)
 
     override suspend fun resolveConflict(request: ResolveConflictRequest): ConflictResolutionResult {
+        // Kiosk demos never upload/download saves; resolve to a benign no-op.
+        if (sessionStore.isKioskSession(request.serverOrigin)) {
+            return ConflictResolutionResult.Success(request.choice, null, null, null)
+        }
         // Use the original domain SyncOperation when available (preserves full serverContentHash
         // and serverUpdatedAt end-to-end). Fall back to reconstructed operation for backward compat.
         val operation = request.operation ?: SyncOperation(

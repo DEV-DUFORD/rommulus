@@ -68,6 +68,19 @@ class AuthRepositoryTest {
     }
 
     @Test
+    fun `establishKioskSession persists an anonymous read-only session`() {
+        runBlocking {
+            val saved = repository.establishKioskSession(baseUrl())
+
+            assertThat(saved).isTrue()
+            val record = sessionStore.current()
+            assertThat(record).isNotNull
+            assertThat(record!!.username).isEqualTo("kiosk")
+            assertThat(record.kioskMode).isTrue()
+        }
+    }
+
+    @Test
     fun `login does not record a session on failure`() {
         runBlocking {
             server.enqueue(MockResponse().setResponseCode(401))
@@ -392,6 +405,8 @@ class AuthRepositoryTest {
         fun `valid heartbeat at root origin returns Valid with origin and heartbeat`() {
             runBlocking {
                 server.enqueue(MockResponse().setResponseCode(200).setBody(validHeartbeat()))
+                // Unauthenticated demo probe (401 => normal login server, not kiosk).
+                server.enqueue(MockResponse().setResponseCode(401))
 
                 val result = repository.validateServer(baseUrl())
 
@@ -400,7 +415,23 @@ class AuthRepositoryTest {
                 assertThat(valid.origin).isEqualTo(baseUrl())
                 assertThat(valid.heartbeat.version).isEqualTo("5.0.0")
                 assertThat(valid.heartbeat.canLogin()).isTrue()
+                assertThat(valid.kioskMode).isFalse()
                 assertThat(server.takeRequest().path).isEqualTo("/api/heartbeat")
+            }
+        }
+
+        @Test
+        fun `valid heartbeat at root origin probes users me and detects kiosk on 200`() {
+            runBlocking {
+                server.enqueue(MockResponse().setResponseCode(200).setBody(validHeartbeat()))
+                // Kiosk mode: anonymous read succeeds (200).
+                server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"kiosk"}"""))
+
+                val result = repository.validateServer(baseUrl()) as ServerValidationResult.Valid
+
+                assertThat(result.kioskMode).isTrue()
+                assertThat(server.takeRequest().path).isEqualTo("/api/heartbeat")
+                assertThat(server.takeRequest().path).isEqualTo("/api/users/me")
             }
         }
 
@@ -408,6 +439,7 @@ class AuthRepositoryTest {
         fun `valid heartbeat under a base path preserves the base path`() {
             runBlocking {
                 server.enqueue(MockResponse().setResponseCode(200).setBody(validHeartbeat()))
+                server.enqueue(MockResponse().setResponseCode(401))
                 val basePathOrigin = baseUrl() + "/romm"
 
                 val result = repository.validateServer(basePathOrigin)

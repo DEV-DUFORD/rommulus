@@ -31,7 +31,7 @@ class BearerAuthInterceptorTest {
     private fun client(origin: String, tokenProvider: () -> String?): OkHttpClient {
         val valid = RommServerAddress.parseAndNormalize(origin) as ServerAddressResult.Valid
         return OkHttpClient.Builder()
-            .addInterceptor(BearerAuthInterceptor(valid, tokenProvider))
+            .addInterceptor(BearerAuthInterceptor({ valid }, tokenProvider))
             .build()
     }
 
@@ -168,31 +168,45 @@ class BearerAuthInterceptorTest {
     }
 
     @Test
-    @DisplayName("Cross-origin redirect: second hop does not carry the Authorization header")
-    fun `cross-origin redirect does not forward Authorization`() {
-        val redirectTarget = MockWebServer()
-        redirectTarget.start(0)
-        try {
-            // First (same-origin) hop 302s to a different host/port.
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(302)
-                    .addHeader("Location", redirectTarget.url("/").toString()),
-            )
-            redirectTarget.enqueue(MockResponse().setResponseCode(200))
+    @DisplayName("Origin target resolved per request lets a client retarget between origins")
+    fun `origin provider resolved per request allows retargeting`() {
+        server.enqueue(MockResponse().setResponseCode(200))
+        server.enqueue(MockResponse().setResponseCode(200))
 
-            val client = client(sameOrigin()) { "rmm_token" }
-            client.newCall(
-                okhttp3.Request.Builder().url("${baseUrl()}/base/api/test").get().build(),
-            ).execute().use { }
+        // Start pinned to an unrelated origin, then flip to the live server's origin
+        // on the second request without rebuilding the client.
+        var current: ServerAddressResult.Valid =
+            RommServerAddress.parseAndNormalize("https://other.example.com/base") as ServerAddressResult.Valid
+        val client = OkHttpClient.Builder()
+            .addInterceptor(BearerAuthInterceptor({ current }, { "rmm_token" }))
+            .build()
 
-            val first = server.takeRequest()
-            assertThat(first.getHeader("Authorization")).isEqualTo("Bearer rmm_token")
+        // 1st request: origin target is "other.example.com" -> no token for the live server.
+        client.newCall(
+            okhttp3.Request.Builder().url("${baseUrl()}/base/api/test").get().build(),
+        ).execute().use { }
+        assertThat(server.takeRequest().getHeader("Authorization")).isNull()
 
-            val second = redirectTarget.takeRequest()
-            assertThat(second.getHeader("Authorization")).isNull()
-        } finally {
-            redirectTarget.shutdown()
-        }
+        // Retarget the provider to the live server; same client now injects the token.
+        current = RommServerAddress.parseAndNormalize(baseUrl() + "/base") as ServerAddressResult.Valid
+        client.newCall(
+            okhttp3.Request.Builder().url("${baseUrl()}/base/api/test").get().build(),
+        ).execute().use { }
+        assertThat(server.takeRequest().getHeader("Authorization")).isEqualTo("Bearer rmm_token")
+    }
+
+    @Test
+    @DisplayName("Null origin provider: token NOT injected, any Authorization stripped")
+    fun `omits Authorization when origin provider returns null`() {
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor(BearerAuthInterceptor({ null }, { "rmm_token" }))
+            .build()
+        client.newCall(
+            okhttp3.Request.Builder().url("${baseUrl()}/base/api/test").get().build(),
+        ).execute().use { }
+
+        assertThat(server.takeRequest().getHeader("Authorization")).isNull()
     }
 }

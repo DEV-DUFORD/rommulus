@@ -89,21 +89,27 @@ object RommOkHttpClient {
      * Builds an origin-scoped, bearer-authenticated OkHttpClient for the
      * foreground native client. Shares the shared client's cookie jar, trust
      * anchors, and strict hostname verification, but adds a
-     * [com.romm.androidtv.romm.BearerAuthInterceptor] scoped to [origin].
+     * [com.romm.androidtv.romm.BearerAuthInterceptor] whose same-origin target
+     * is resolved per request via [originProvider].
      *
-     * The token is attached ONLY to requests under [origin] (scheme + host +
-     * effective port + base path). Requests to any other host — e.g. third-party
-     * cover image URLs — never receive the credential, and any `Authorization`
-     * a cross-origin redirect would carry is stripped.
+     * The token is attached ONLY to requests under the currently-resolved origin
+     * (scheme + host + effective port + base path). Requests to any other host —
+     * e.g. third-party cover image URLs — never receive the credential, and any
+     * `Authorization` a cross-origin redirect would carry is stripped.
+     *
+     * Resolving the origin per request (rather than pinning it at construction)
+     * lets a single client survive an in-process origin change (e.g. logging out
+     * of a demo/kiosk server and into one's own instance without a process
+     * restart). When [originProvider] resolves to null, no credential is attached.
      *
      * Deliberately NOT added to [build]: the shared client must remain token-free.
      */
     fun nativeClient(
-        origin: ServerAddressResult.Valid,
+        originProvider: () -> ServerAddressResult.Valid?,
         tokenProvider: () -> String?,
     ): okhttp3.OkHttpClient =
         build().newBuilder()
-            .addInterceptor(com.romm.androidtv.romm.BearerAuthInterceptor(origin, tokenProvider))
+            .addInterceptor(com.romm.androidtv.romm.BearerAuthInterceptor(originProvider, tokenProvider))
             .build()
 }
 

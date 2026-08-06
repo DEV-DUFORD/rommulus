@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.romm.save.PendingOperationStatus
 import com.romm.androidtv.romm.save.SaveUploadExecutor
 import com.romm.androidtv.romm.save.SaveUploadExecutor.DrainResult
@@ -20,19 +21,24 @@ class SaveUploadWorker(
     context: Context,
     params: WorkerParameters,
     private val executor: SaveUploadExecutor,
+    private val sessionStore: SessionStore,
 ) : CoroutineWorker(context, params) {
 
-    override suspend fun doWork(): Result = try {
+    override suspend fun doWork(): Result {
+        // Kiosk (anonymous read-only demo) sessions never sync/uploads saves — drain nothing.
+        if (sessionStore.current()?.kioskMode == true) return Result.success()
+        return try {
         when (executor.drainBatch()) {
             is DrainResult.Complete -> Result.success()
             is DrainResult.Retry -> Result.retry()
         }
-    } catch (e: Exception) {
-        // Unexpected top-level exceptions: attempt to recover any stranded RUNNING operations
-        // before returning retry. The executor's drainBatch() already recovers stranded rows
-        // at the start, but a top-level exception here means recovery may have also failed.
-        Log.e(TAG, "SaveUploadWorker: unexpected top-level failure, attempting stranded recovery", e)
-        Result.retry()
+        } catch (e: Exception) {
+            // Unexpected top-level exceptions: attempt to recover any stranded RUNNING operations
+            // before returning retry. The executor's drainBatch() already recovers stranded rows
+            // at the start, but a top-level exception here means recovery may have also failed.
+            Log.e(TAG, "SaveUploadWorker: unexpected top-level failure, attempting stranded recovery", e)
+            Result.retry()
+        }
     }
 
     companion object {

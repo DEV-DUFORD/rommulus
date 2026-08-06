@@ -31,6 +31,8 @@ class SessionStore(private val prefs: SharedPreferences) {
         val origin: String,
         val username: String?,
         val verifiedAtEpochMillis: Long,
+        /** True when this is an anonymous read-only (kiosk/demo) session, not a full login. */
+        val kioskMode: Boolean = false,
     )
 
     /**
@@ -45,14 +47,20 @@ class SessionStore(private val prefs: SharedPreferences) {
      * This replaces the previous fire-and-forget `apply()` write so onboarding
      * can verify durability before creating a client token scoped to this session.
      */
-    fun save(origin: String, username: String?, verifiedAtEpochMillis: Long = System.currentTimeMillis()): Boolean {
+    fun save(
+        origin: String,
+        username: String?,
+        verifiedAtEpochMillis: Long = System.currentTimeMillis(),
+        kioskMode: Boolean = false,
+    ): Boolean {
         val committed = prefs.edit()
             .putString(KEY_ORIGIN, origin)
             .putString(KEY_USERNAME, username)
             .putLong(KEY_VERIFIED_AT, verifiedAtEpochMillis)
+            .putBoolean(KEY_KIOSK_MODE, kioskMode)
             .commit()
         val usernamePresent = username != null
-        diagLog(android.util.Log.DEBUG, "SessionStore.save: completed usernamePresent=$usernamePresent committed=$committed")
+        diagLog(android.util.Log.DEBUG, "SessionStore.save: completed usernamePresent=$usernamePresent kiosk=$kioskMode committed=$committed")
         return committed
     }
 
@@ -63,9 +71,20 @@ class SessionStore(private val prefs: SharedPreferences) {
         }
         val username = prefs.getString(KEY_USERNAME, null)
         val verifiedAt = prefs.getLong(KEY_VERIFIED_AT, 0L)
-        val record = Record(origin, username, verifiedAt)
-        diagLog(android.util.Log.DEBUG, "SessionStore.current: present=true")
+        val kioskMode = prefs.getBoolean(KEY_KIOSK_MODE, false)
+        val record = Record(origin, username, verifiedAt, kioskMode)
+        diagLog(android.util.Log.DEBUG, "SessionStore.current: present=true kiosk=$kioskMode")
         return record
+    }
+
+    /**
+     * True when the currently-persisted session is a kiosk (anonymous read-only)
+     * session coherent with [origin]. Used by save-sync paths to short-circuit all
+     * upload/download work for demo sessions.
+     */
+    fun isKioskSession(origin: String): Boolean {
+        val record = current() ?: return false
+        return record.kioskMode && record.origin == origin
     }
 
     /**
@@ -101,6 +120,7 @@ class SessionStore(private val prefs: SharedPreferences) {
             .remove(KEY_ORIGIN)
             .remove(KEY_USERNAME)
             .remove(KEY_VERIFIED_AT)
+            .remove(KEY_KIOSK_MODE)
             .apply()
         val after = current()
         val keysAbsent = after == null
@@ -112,5 +132,6 @@ class SessionStore(private val prefs: SharedPreferences) {
         private const val KEY_ORIGIN = "last_origin"
         private const val KEY_USERNAME = "last_username"
         private const val KEY_VERIFIED_AT = "last_verified_at"
+        private const val KEY_KIOSK_MODE = "last_kiosk_mode"
     }
 }

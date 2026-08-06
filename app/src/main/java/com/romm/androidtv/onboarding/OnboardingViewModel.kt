@@ -35,6 +35,14 @@ fun interface LoginToRomm {
 }
 
 /**
+ * Establishes a durable anonymous read-only (kiosk/demo) session for [origin],
+ * bypassing username/password login entirely. Returns whether the session persisted.
+ */
+fun interface EstablishKioskSession {
+    suspend operator fun invoke(origin: String): Boolean
+}
+
+/**
  * User-confirmed remediation for [LoginCompletionResult.TokenLimitReached]: removes the
  * account's single oldest client token to free a slot. Returns whether that succeeded.
  */
@@ -64,6 +72,7 @@ class OnboardingViewModel(
     private val persistValidatedOrigin: PersistValidatedOrigin,
     private val loginToRomm: LoginToRomm,
     private val removeOldestClientToken: RemoveOldestClientToken,
+    private val establishKioskSession: EstablishKioskSession,
     initialServerInput: String,
     private val initialStep: OnboardingStep = OnboardingStep.WELCOME,
     private val initialUsername: String = "",
@@ -268,27 +277,12 @@ class OnboardingViewModel(
     ) {
         if (generation != serverValidationGeneration) return // stale — ignore
         when (result) {
-            is ServerValidationResult.Valid -> {
-                val persisted = persistValidatedOrigin(origin)
-                if (generation != serverValidationGeneration) return // edited meanwhile
-                if (!persisted) {
-                    _uiState.update {
-                        it.copy(
-                            serverError = OnboardingServerError.PersistenceFailure,
-                            serverAction = AsyncActionState.Idle,
-                        )
-                    }
+            is ServerValidationResult.Valid ->
+                if (result.kioskMode) {
+                    handleKioskValid(result.origin, generation)
                 } else {
-                    _uiState.update {
-                        it.copy(
-                            normalizedOrigin = origin,
-                            step = OnboardingStep.CREDENTIALS,
-                            serverError = null,
-                            serverAction = AsyncActionState.Idle,
-                        )
-                    }
+                    handleAuthenticatedValid(result.origin, generation)
                 }
-            }
 
             ServerValidationResult.InvalidAddress ->
                 setServerError(OnboardingServerError.InvalidAddress)
@@ -310,6 +304,58 @@ class OnboardingViewModel(
 
             ServerValidationResult.InsecurePublicHttp ->
                 setServerError(OnboardingServerError.InsecurePublicHttp)
+        }
+    }
+
+    /**
+     * Kiosk (anonymous read-only demo) server: no username/password login exists, so
+     * persist the origin, establish the anonymous session, and complete onboarding —
+     * skipping the CREDENTIALS step entirely.
+     */
+    private suspend fun handleKioskValid(origin: String, generation: Int) {
+        val persistedOrigin = persistValidatedOrigin(origin)
+        if (generation != serverValidationGeneration) return // edited meanwhile
+        if (!persistedOrigin) {
+            setServerError(OnboardingServerError.PersistenceFailure)
+            return
+        }
+        val established = establishKioskSession(origin)
+        if (generation != serverValidationGeneration) return // edited meanwhile
+        if (!established) {
+            setServerError(OnboardingServerError.PersistenceFailure)
+            return
+        }
+        if (completedEmitted) return
+        completedEmitted = true
+        _effects.emit(OnboardingEffect.Completed)
+        _uiState.update {
+            it.copy(
+                normalizedOrigin = origin,
+                serverError = null,
+                serverAction = AsyncActionState.Idle,
+            )
+        }
+    }
+
+    private suspend fun handleAuthenticatedValid(origin: String, generation: Int) {
+        val persisted = persistValidatedOrigin(origin)
+        if (generation != serverValidationGeneration) return // edited meanwhile
+        if (!persisted) {
+            _uiState.update {
+                it.copy(
+                    serverError = OnboardingServerError.PersistenceFailure,
+                    serverAction = AsyncActionState.Idle,
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    normalizedOrigin = origin,
+                    step = OnboardingStep.CREDENTIALS,
+                    serverError = null,
+                    serverAction = AsyncActionState.Idle,
+                )
+            }
         }
     }
 

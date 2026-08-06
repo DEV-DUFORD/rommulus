@@ -44,7 +44,10 @@ class RommWorkerFactory(
         workerParameters: WorkerParameters,
     ): ListenableWorker? = when (workerClassName) {
         SaveUploadWorker::class.java.name -> {
-            SaveUploadWorker(appContext, workerParameters, executorProvider())
+            val sessionStore = SessionStore(
+                appContext.getSharedPreferences(SessionStore.PREFS_NAME, Context.MODE_PRIVATE),
+            )
+            SaveUploadWorker(appContext, workerParameters, executorProvider(), sessionStore)
         }
         else -> null
     }
@@ -80,23 +83,22 @@ class RommWorkerFactory(
             val deviceIdentityStore = DeviceIdentityStore(devicePrefs)
 
             // Cookie-independent OkHttp client for worker execution.
-            // Origin-scoped bearer auth: derives origin from the current session;
-            // falls back to a token-free client if session is absent or origin is invalid.
-            val session = sessionStore.current()
-            val workerClient: OkHttpClient = when {
-                session != null -> {
-                    val parsedOrigin = RommServerAddress.parseAndNormalize(session.origin)
-                    when (parsedOrigin) {
-                        is ServerAddressResult.Valid ->
-                            RommOkHttpClient.nativeClient(parsedOrigin, tokenProvider = {
-                                tokenStore.getToken(session.origin, session.username ?: "")?.raw
-                            })
-                        is ServerAddressResult.Invalid ->
-                            RommOkHttpClient.build()
+            // Origin-scoped bearer auth: same-origin target AND token are both resolved from
+            // the current session per request, so a worker built once adapts if the persisted
+            // session later points at a different origin. Falls back to no credential (token-free
+            // behavior) when the session is absent or the origin is invalid.
+            val workerClient: OkHttpClient = RommOkHttpClient.nativeClient(
+                originProvider = {
+                    sessionStore.current()?.let { s ->
+                        RommServerAddress.parseAndNormalize(s.origin) as? ServerAddressResult.Valid
                     }
-                }
-                else -> RommOkHttpClient.build()
-            }
+                },
+                tokenProvider = {
+                    sessionStore.current()?.let { s ->
+                        tokenStore.getToken(s.origin, s.username ?: "")?.raw
+                    }
+                },
+            )
 
             val deviceRepo: DeviceRepository = DeviceRepositoryImpl(workerClient, deviceIdentityStore)
 

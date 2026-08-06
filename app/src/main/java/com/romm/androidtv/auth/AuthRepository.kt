@@ -256,7 +256,60 @@ class AuthRepository(
 
         val request = Request.Builder().url(url).get().build()
         return withContext(Dispatchers.IO) {
-            executeValidationCall(validationClient, request, valid.origin)
+            val heartbeatResult = executeValidationCall(validationClient, request, valid.origin)
+            when (heartbeatResult) {
+                is ServerValidationResult.Valid ->
+                    // Probe anonymous read access to detect RomM kiosk mode: 200 => the
+                    // server is an anonymous read-only demo; 401/403 => normal login server.
+                    heartbeatResult.copy(kioskMode = probeAnonymousRead(validationClient, valid.origin))
+                else -> heartbeatResult
+            }
+        }
+    }
+
+    /**
+     * Detects RomM kiosk mode by probing an unauthenticated read endpoint
+     * (`GET {origin}/api/users/me`). A kiosk-mode server (anonymous read-only,
+     * e.g. the public demo) returns 2xx; a normal login-required server returns
+     * 401/403 to this unauthenticated call. See [isKioskMode].
+     */
+    suspend fun probeKioskMode(
+        origin: String,
+        connectTimeoutSeconds: Long = VALIDATE_CONNECT_TIMEOUT_SECONDS,
+        readTimeoutSeconds: Long = VALIDATE_READ_TIMEOUT_SECONDS,
+        callTimeoutSeconds: Long = VALIDATE_CALL_TIMEOUT_SECONDS,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val ok = RommServerAddress.parseAndNormalize(origin) as? ServerAddressResult.Valid
+            ?: return@withContext false
+        val probeClient = client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .connectTimeout(connectTimeoutSeconds, TimeUnit.SECONDS)
+            .readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
+            .build()
+        probeAnonymousRead(probeClient, ok.origin)
+    }
+
+    /**
+     * Establishes a durable anonymous read-only (kiosk/demo) session for [origin]
+     * without a username/password login. Returns whether the session persisted.
+     * The kiosk pseudo-user name is recorded so session-scoped lookup stays coherent.
+     */
+    suspend fun establishKioskSession(origin: String): Boolean = withContext(Dispatchers.IO) {
+        val persisted = sessionStore.save(origin, KIOSK_USERNAME, kioskMode = true)
+        diagLog(android.util.Log.DEBUG, "establishKioskSession: origin=$origin persisted=$persisted")
+        persisted
+    }
+
+    private fun probeAnonymousRead(validationClient: OkHttpClient, origin: String): Boolean {
+        val probeUrl = "$origin/api/users/me"
+        val probeRequest = Request.Builder().url(probeUrl).get().build()
+        return try {
+            validationClient.newCall(probeRequest).execute().use { response -> response.isSuccessful }
+        } catch (e: IOException) {
+            diagLog(android.util.Log.WARN, "validateServer: probeAnonymousRead failed ${e.javaClass.simpleName}")
+            false
         }
     }
 
@@ -510,5 +563,8 @@ class AuthRepository(
         internal const val VALIDATE_CONNECT_TIMEOUT_SECONDS = 5L
         internal const val VALIDATE_READ_TIMEOUT_SECONDS = 10L
         internal const val VALIDATE_CALL_TIMEOUT_SECONDS = 15L
+
+        /** Pseudo-user name recorded for anonymous read-only (kiosk/demo) sessions. */
+        internal const val KIOSK_USERNAME = "kiosk"
     }
 }

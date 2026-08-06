@@ -16,8 +16,18 @@ import com.romm.androidtv.romm.ClientToken
  * later ViewModel can consume them without leaking network internals.
  */
 sealed interface ServerValidationResult {
-    /** The server answered a structurally valid heartbeat at [origin]. */
-    data class Valid(val origin: String, val heartbeat: HeartbeatResponse) : ServerValidationResult
+    /**
+     * The server answered a structurally valid heartbeat at [origin].
+     *
+     * [kioskMode] is true when an unauthenticated read probe succeeded, meaning the
+     * server runs in RomM's anonymous read-only kiosk mode (e.g. the public demo).
+     * In kiosk mode no username/password login exists and all reads are anonymous.
+     */
+    data class Valid(
+        val origin: String,
+        val heartbeat: HeartbeatResponse,
+        val kioskMode: Boolean = false,
+    ) : ServerValidationResult
 
     /** Origin could not be parsed into a usable address (blank/missing scheme/bad port/etc.). */
     data object InvalidAddress : ServerValidationResult

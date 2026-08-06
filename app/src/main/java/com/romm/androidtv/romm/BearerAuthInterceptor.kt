@@ -21,26 +21,30 @@ private fun diagLog(priority: Int, message: String) {
  * Used exclusively by the foreground native client — never imports WebView
  * cookies or session state into background execution.
  *
+ * The same-origin target is resolved PER REQUEST via [originProvider] rather
+ * than pinned at construction, so a single client can safely serve a session
+ * that reconnects to a different origin (e.g. switching from a demo/kiosk
+ * server to one's own instance) without being rebuilt.
+ *
  * Credential-leak guard: requests to any other host (e.g. third-party cover
  * image URLs) never receive the token. Any `Authorization` header already
  * present on such a request (e.g. carried over by a cross-origin redirect) is
  * STRIPPED so the credential is never forwarded cross-origin.
  */
 class BearerAuthInterceptor(
-    private val origin: ServerAddressResult.Valid,
+    private val originProvider: () -> ServerAddressResult.Valid?,
     private val tokenProvider: () -> String?,
 ) : Interceptor {
-
-    /** Resolved origin scope for the same-origin guard. */
-    private val rommOrigin: RommOrigin =
-        requireNotNull(RommOrigin.parse(origin.origin)) { "Invalid origin: ${origin.origin}" }
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val token = tokenProvider()
         val tokenPresent = token != null
-        // Only requests under the configured RomM origin carry the credential.
-        val matchesOrigin = rommOrigin.containsUri(request.url.toUri())
+        // Resolve the current same-origin target per request; null when there is
+        // no valid profile origin (no credential should be attached).
+        val currentOrigin = originProvider()?.let { RommOrigin.parse(it.origin) }
+        // Only requests under the resolved RomM origin carry the credential.
+        val matchesOrigin = currentOrigin != null && currentOrigin.containsUri(request.url.toUri())
         diagLog(
             android.util.Log.DEBUG,
             "BearerAuthInterceptor: tokenPresent=$tokenPresent matchesOrigin=$matchesOrigin",

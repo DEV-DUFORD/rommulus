@@ -28,6 +28,30 @@ class SessionStoreTest {
         assertThat(record).isNotNull
         assertThat(record!!.origin).isEqualTo("https://romm.example.com")
         assertThat(record.username).isEqualTo("root")
+        assertThat(record.kioskMode).isFalse()
+    }
+
+    @Test
+    fun `kiosk save persists kioskMode and isKioskSession matches the origin`() {
+        val store = SessionStore(FakeSharedPreferences())
+
+        val saved = store.save("https://demo.romm.app", "kiosk", kioskMode = true)
+
+        assertThat(saved).isTrue()
+        assertThat(store.current()!!.kioskMode).isTrue()
+        assertThat(store.isKioskSession("https://demo.romm.app")).isTrue()
+        assertThat(store.isKioskSession("https://romm.example.com")).isFalse()
+    }
+
+    @Test
+    fun `clear removes kiosk session`() {
+        val store = SessionStore(FakeSharedPreferences())
+        store.save("https://demo.romm.app", "kiosk", kioskMode = true)
+
+        store.clear()
+
+        assertThat(store.current()).isNull()
+        assertThat(store.isKioskSession("https://demo.romm.app")).isFalse()
     }
 
     @Test
