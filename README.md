@@ -5,6 +5,8 @@ self-hosted game library and ROM manager. It browses your RomM library, download
 cartridge/disc images, and plays them locally through vendored libretro emulator cores — fully
 client-side, no cloud gaming.
 
+![RomMulus home screen](docs/images/home-page.png)
+
 ## Features
 
 - Browse your RomM library by **platforms**, **collections**, and **search**.
