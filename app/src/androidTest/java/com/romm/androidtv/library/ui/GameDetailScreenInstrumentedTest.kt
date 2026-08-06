@@ -765,7 +765,7 @@ class GameDetailScreenInstrumentedTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Preparing\u2026", useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithText("Preparing.", useUnmergedTree = true).assertExists()
         composeTestRule.onNodeWithText("▶  Play", useUnmergedTree = true).assertDoesNotExist()
     }
 }

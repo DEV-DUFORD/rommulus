@@ -1,5 +1,11 @@
 package com.romm.androidtv.library.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +19,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,6 +55,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.foundation.lazy.list.TvLazyRow
 import androidx.tv.foundation.lazy.list.itemsIndexed
@@ -608,11 +619,32 @@ private fun PlayButton(
         }
     }
 
+    val style = MaterialTheme.typography.titleMedium
+
+    // When staging, the "Preparing..." text animates its dots, so the button width
+    // must be locked to the widest variant ("Preparing...") to avoid jittering as
+    // the dots grow/shrink. The horizontal button padding is added because it is
+    // applied inside the min-width constraint below.
+    val horizontalPadding = 56.dp
+    val preparingMinWidth = if (isStaging) {
+        val textMeasurer = rememberTextMeasurer()
+        with(LocalDensity.current) {
+            remember {
+                listOf("Preparing.", "Preparing..", "Preparing...")
+                    .maxOf { textMeasurer.measure(AnnotatedString(it), style).size.width }
+                    .toDp() + horizontalPadding
+            }
+        }
+    } else {
+        Dp.Unspecified
+    }
+
     Box(
         modifier = Modifier
             .focusRequester(focusRequester)
             .onGloballyPositioned { initialFocusRequested = true }
             .then(upFocusTarget?.let { Modifier.focusProperties { up = it } } ?: Modifier)
+            .defaultMinSize(minWidth = preparingMinWidth)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (isStaging) RommTvColors.NightLo
@@ -634,11 +666,30 @@ private fun PlayButton(
             .padding(horizontal = 28.dp, vertical = 12.dp),
     ) {
         Text(
-            text = if (isStaging) "Preparing…" else "▶  Play",
-            style = MaterialTheme.typography.titleMedium,
+            text = if (isStaging) "Preparing${PreparingDots()}" else "▶  Play",
+            style = style,
             color = if (isStaging) RommTvColors.TextSecondary else Color.White,
         )
     }
+}
+
+/**
+ * Cycles the trailing dots of the "Preparing" label between 1, 2 and 3 dots so
+ * users can see the app is still working while a game is being staged.
+ */
+@Composable
+private fun PreparingDots(): String {
+    val transition = rememberInfiniteTransition(label = "preparing")
+    val dots by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "preparingDots",
+    )
+    return ".".repeat(dots.roundToInt())
 }
 
 @Composable
