@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    // Auto-generates third-party notices for all Gradle/transitive deps (Settings "View Licenses").
+    id("com.google.android.gms.oss-licenses-plugin")
 }
 
 /** Read a property from local.properties (root project). */
@@ -19,7 +21,7 @@ fun localProp(name: String, fallback: String = ""): String {
 
 android {
     namespace = "com.romm.androidtv"
-    compileSdk = 34
+    compileSdk = 35
     // Pinned per LIBRETRO_REFACTOR.md section 7.1: build approved cores as pinned
     // shared libraries for armeabi-v7a and arm64-v8a. Keep this version pinned and
     // bump it deliberately, not implicitly via SDK manager updates.
@@ -28,7 +30,7 @@ android {
     defaultConfig {
         applicationId = "com.romm.androidtv"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "0.0.1-dev"
 

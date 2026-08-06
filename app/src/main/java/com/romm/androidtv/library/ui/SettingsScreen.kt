@@ -88,7 +88,9 @@ fun SettingsScreen(
     val verifySha1FocusRequester = remember { FocusRequester() }
     val autocleanFocusRequester = remember { FocusRequester() }
     val themeFocusRequester = remember { FocusRequester() }
+    val licensesFocusRequester = remember { FocusRequester() }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showLicensesDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         focusManager.clearFocus()
@@ -576,6 +578,24 @@ fun SettingsScreen(
             label = "Version",
             value = uiState.appVersion,
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Open-source licenses: a fused list of Google's auto-generated notices for every
+        // Gradle/transitive dependency plus the vendored libretro core notices (assets),
+        // rendered in a single "Open Source Licenses" dialog (Play Store attribution).
+        TvButton(
+            onClick = { showLicensesDialog = true },
+            modifier = Modifier
+                .focusRequester(licensesFocusRequester)
+                .focusProperties { up = autocleanFocusRequester },
+        ) {
+            Text("View Licenses")
+        }
+
+        if (showLicensesDialog) {
+            LicensesDialog(onDismiss = { showLicensesDialog = false })
+        }
     }
 }
 
