@@ -22,8 +22,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,6 +36,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -64,11 +67,17 @@ fun ControllerConsoleListScreen(
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
     val firstItemFocusRequester = remember { FocusRequester() }
+    var firstCardReady by remember { mutableStateOf(false) }
+    var initialFocusRequested by remember { mutableStateOf(false) }
 
-    // Request initial focus on the first list item.
-    LaunchedEffect(Unit) {
-        focusManager.clearFocus()
-        firstItemFocusRequester.requestFocus()
+    // Request initial focus on the first list item only once it has actually been
+    // laid out, so its FocusRequester node is attached before requestFocus() runs.
+    LaunchedEffect(firstCardReady, profiles.isNotEmpty()) {
+        if (firstCardReady && profiles.isNotEmpty() && !initialFocusRequested) {
+            initialFocusRequested = true
+            focusManager.clearFocus()
+            firstItemFocusRequester.requestFocus()
+        }
     }
 
     // Stable reference to the latest onSelectCore lambda.
@@ -111,6 +120,7 @@ fun ControllerConsoleListScreen(
                     profile = profile,
                     isFirst = profile == profiles.firstOrNull(),
                     firstItemFocusRequester = firstItemFocusRequester,
+                    onFirstCardLaidOut = { firstCardReady = true },
                     onClick = { currentOnSelectCore(profile.coreId) },
                 )
             }
@@ -129,6 +139,7 @@ private fun ConsoleCard(
     profile: CoreControllerProfile,
     isFirst: Boolean,
     firstItemFocusRequester: FocusRequester,
+    onFirstCardLaidOut: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -147,6 +158,7 @@ private fun ConsoleCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .then(if (isFirst) Modifier.onGloballyPositioned { onFirstCardLaidOut() } else Modifier)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (isFocused) RommTvColors.Romm500.copy(alpha = 0.15f)

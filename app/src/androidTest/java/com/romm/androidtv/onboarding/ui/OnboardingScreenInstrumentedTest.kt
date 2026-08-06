@@ -5,6 +5,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -46,6 +47,7 @@ class OnboardingScreenInstrumentedTest {
         var validateCount = 0
         var loginCount = 0
         var backCount = 0
+        var removeOldestDeviceAndRetryCount = 0
         var serverChanged = ""
         var usernameChanged = ""
         var passwordChanged = ""
@@ -67,6 +69,7 @@ class OnboardingScreenInstrumentedTest {
                     onUsernameChanged = { callbacks.usernameChanged = it },
                     onPasswordChanged = { callbacks.passwordChanged = it },
                     onLogin = { callbacks.loginCount++ },
+                    onRemoveOldestDeviceAndRetry = { callbacks.removeOldestDeviceAndRetryCount++ },
                     onBack = { callbacks.backCount++ },
                 )
             }
@@ -80,13 +83,13 @@ class OnboardingScreenInstrumentedTest {
     fun welcomeStep_rendersExactCopyLogoAndContinue() {
         setContent(OnboardingUiState(step = OnboardingStep.WELCOME))
 
-        composeTestRule.onNodeWithText("Welcome to RomM", useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithText("Welcome to RomMulus", useUnmergedTree = true).assertExists()
         composeTestRule.onNodeWithText(
-            "Welcome to the RomM Android TV app. Let\u2019s get you set up!",
+            "Welcome to RomMulus, a companion app to RomM. Let\u2019s get you setup!",
             useUnmergedTree = true,
         ).assertExists()
         composeTestRule.onNodeWithText("Continue", useUnmergedTree = true).assertExists()
-        composeTestRule.onNodeWithContentDescription("RomM", useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithContentDescription("RomMulus", useUnmergedTree = true).assertExists()
     }
 
     @Test
@@ -130,7 +133,10 @@ class OnboardingScreenInstrumentedTest {
             .performKeyInput { pressKey(Key.DirectionCenter) }
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithTag("onboarding_server_field", useUnmergedTree = true)
+        // The field is a controller-friendly TextField: the tagged node is the outer
+        // focus wrapper, which doesn't expose SetText. The real editable node does —
+        // type into that one.
+        composeTestRule.onNode(hasSetTextAction(), useUnmergedTree = true)
             .performTextInput("http://192.168.1.50:8080")
         composeTestRule.waitForIdle()
         assert(cb.serverChanged == "http://192.168.1.50:8080") {

@@ -22,8 +22,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -96,8 +98,10 @@ fun OnboardingScreen(
         modifier = modifier.onKeyEvent { event ->
             // Preview dispatch is handled by the editing field (Back while editing
             // is consumed there). This bubbling handler fires only when nothing
-            // else consumed Back — i.e. not editing.
-            if (event.key == Key.Back) {
+            // else consumed Back — i.e. not editing. Guard on KeyDown so an
+            // ACTION_UP doesn't fire onBack a second time (a single Back press
+            // produces both a KeyDown and a KeyUp key event).
+            if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {
                 onBack()
                 true
             } else {

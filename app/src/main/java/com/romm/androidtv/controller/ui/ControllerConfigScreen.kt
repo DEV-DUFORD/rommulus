@@ -24,6 +24,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -454,6 +455,9 @@ private fun BindingList(
                         rowFocusRequesters.value =
                             rowFocusRequesters.value + ((index to slot) to requester)
                     },
+                    onFocusRequesterDisposed = { slot ->
+                        rowFocusRequesters.value = rowFocusRequesters.value - (index to slot)
+                    },
                     onFocusChanged = { slot, focused -> onFocusChanged(index, slot, focused) },
                     onMappingSelected = { slot -> onRowSelected(row.controlId, slot) },
                 )
@@ -469,6 +473,7 @@ private fun BindingList(
 private fun BindingRow(
     row: ControllerBindingRow,
     onFocusRequesterCreated: (BindingSlot, FocusRequester) -> Unit,
+    onFocusRequesterDisposed: (BindingSlot) -> Unit,
     onFocusChanged: (BindingSlot, Boolean) -> Unit,
     onMappingSelected: (BindingSlot) -> Unit,
     modifier: Modifier = Modifier,
@@ -476,9 +481,13 @@ private fun BindingRow(
     val primaryFocusRequester = remember { FocusRequester() }
     val secondaryFocusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(primaryFocusRequester, secondaryFocusRequester) {
+    DisposableEffect(primaryFocusRequester, secondaryFocusRequester) {
         onFocusRequesterCreated(BindingSlot.PRIMARY, primaryFocusRequester)
         onFocusRequesterCreated(BindingSlot.SECONDARY, secondaryFocusRequester)
+        onDispose {
+            onFocusRequesterDisposed(BindingSlot.PRIMARY)
+            onFocusRequesterDisposed(BindingSlot.SECONDARY)
+        }
     }
 
     Row(

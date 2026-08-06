@@ -72,13 +72,9 @@ class ControllerConsoleListScreenInstrumentedTest {
             }
         }
 
-        // Sega Systems has a subtitle
-        composeTestRule.onNodeWithText("Genesis, Master System, Game Gear, and Sega CD", useUnmergedTree = true)
-            .assertExists()
-
-        // Super Nintendo has no subtitle — should not appear
-        composeTestRule.onNodeWithText("Genesis, Master System", useUnmergedTree = true)
-            .assertExists() // Confirms the subtitle text is present
+        // Sega Systems has a subtitle — confirm the full subtitle text is rendered once.
+        composeTestRule.onAllNodesWithText("Genesis, Master System, Game Gear, and Sega CD", useUnmergedTree = true)
+            .assertCountEquals(1)
     }
 
     @Test

@@ -87,19 +87,19 @@ class ControllerBindingDaoInstrumentedTest {
             assertEquals(3, loaded.size)
             assertTrue(loaded.containsAll(rows))
         }
+    }
 
-        @Test
-        fun primaryAndSecondaryRowsCoexistForOneControl() {
-            runBlocking {
-                dao.upsert(entity(bindingSlot = BindingSlot.PRIMARY.index, inputCode = 96))
-                dao.upsert(entity(bindingSlot = BindingSlot.SECONDARY.index, inputCode = 100))
+    @Test
+    fun primaryAndSecondaryRowsCoexistForOneControl() {
+        runBlocking {
+            dao.upsert(entity(bindingSlot = BindingSlot.PRIMARY.index, inputCode = 96))
+            dao.upsert(entity(bindingSlot = BindingSlot.SECONDARY.index, inputCode = 100))
 
-                val rows = dao.loadForCore("snes9x")
+            val rows = dao.loadForCore("snes9x")
 
-                assertEquals(2, rows.size)
-                assertTrue(rows.any { it.bindingSlot == BindingSlot.PRIMARY.index && it.inputCode == 96 })
-                assertTrue(rows.any { it.bindingSlot == BindingSlot.SECONDARY.index && it.inputCode == 100 })
-            }
+            assertEquals(2, rows.size)
+            assertTrue(rows.any { it.bindingSlot == BindingSlot.PRIMARY.index && it.inputCode == 96 })
+            assertTrue(rows.any { it.bindingSlot == BindingSlot.SECONDARY.index && it.inputCode == 100 })
         }
     }
 

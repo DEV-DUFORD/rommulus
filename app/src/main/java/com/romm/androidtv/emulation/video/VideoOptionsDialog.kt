@@ -25,12 +25,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
@@ -54,6 +57,7 @@ internal fun VideoOptionsDialog(
     onDismiss: () -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
+    var toggleReady by remember { mutableStateOf(false) }
     val toggleInteractionSource = remember { MutableInteractionSource() }
     val toggleIsFocused by toggleInteractionSource.collectIsFocusedAsState()
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.7f
@@ -113,6 +117,7 @@ internal fun VideoOptionsDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 80.dp)
+                        .onGloballyPositioned { toggleReady = true }
                         .focusRequester(focusRequester)
                         .toggleable(
                             value = scanlinesEnabled,
@@ -187,7 +192,9 @@ internal fun VideoOptionsDialog(
         }
     }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+    LaunchedEffect(toggleReady) {
+        if (toggleReady) {
+            focusRequester.requestFocus()
+        }
     }
 }
