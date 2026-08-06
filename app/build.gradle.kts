@@ -19,6 +19,18 @@ fun localProp(name: String, fallback: String = ""): String {
     return fallback
 }
 
+val releaseSigningEnvironment = mapOf(
+    "storeFile" to System.getenv("RELEASE_STORE_FILE"),
+    "storePassword" to System.getenv("RELEASE_STORE_PASSWORD"),
+    "keyAlias" to System.getenv("RELEASE_KEY_ALIAS"),
+    "keyPassword" to System.getenv("RELEASE_KEY_PASSWORD"),
+)
+val hasReleaseSigning = releaseSigningEnvironment.values.all { !it.isNullOrBlank() }
+require(hasReleaseSigning || releaseSigningEnvironment.values.none { !it.isNullOrBlank() }) {
+    "Release signing requires RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, " +
+        "RELEASE_KEY_ALIAS, and RELEASE_KEY_PASSWORD"
+}
+
 android {
     namespace = "com.romm.androidtv"
     compileSdk = 35
@@ -83,6 +95,17 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseSigningEnvironment.getValue("storeFile")!!)
+                storePassword = releaseSigningEnvironment.getValue("storePassword")
+                keyAlias = releaseSigningEnvironment.getValue("keyAlias")
+                keyPassword = releaseSigningEnvironment.getValue("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -90,6 +113,9 @@ android {
         }
         release {
             isMinifyEnabled = true
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

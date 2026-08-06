@@ -1,0 +1,140 @@
+name: Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (for example, 1.2.3)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      INPUT_VERSION: ${{ inputs.version }}
+      RELEASE_STORE_FILE: ${{ github.workspace }}/rommulus-release.jks
+      RELEASE_STORE_PASSWORD: ${{ secrets.ROMMULUS_RELEASE_STORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.ROMMULUS_RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.ROMMULUS_RELEASE_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install native build tools
+        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Validate and apply version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$INPUT_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Version must use X.Y.Z format without a leading v."
+            exit 1
+          fi
+
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+          if (( ${#major} > 4 || ${#minor} > 3 || ${#patch} > 3 )); then
+            echo "::error::Version components are too large."
+            exit 1
+          fi
+          if (( major > 2100 || minor > 999 || patch > 999 )); then
+            echo "::error::Major must be 2100 or lower; minor and patch must be 999 or lower."
+            exit 1
+          fi
+
+          version_code=$((major * 1000000 + minor * 1000 + patch))
+          if (( version_code < 1 || version_code > 2100000000 )); then
+            echo "::error::Version produces an Android versionCode outside 1..2100000000."
+            exit 1
+          fi
+
+          tag="v$INPUT_VERSION"
+          if git rev-parse --verify --quiet "refs/tags/$tag"; then
+            echo "::error::Tag $tag already exists."
+            exit 1
+          fi
+
+          sed -i -E \
+            "s/^([[:space:]]*)versionCode = [0-9]+$/\\1versionCode = $version_code/" \
+            app/build.gradle.kts
+          sed -i -E \
+            "s/^([[:space:]]*)versionName = \"[^\"]+\"$/\\1versionName = \"$INPUT_VERSION\"/" \
+            app/build.gradle.kts
+
+          grep -q "versionCode = $version_code" app/build.gradle.kts
+          grep -q "versionName = \"$INPUT_VERSION\"" app/build.gradle.kts
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Restore release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ROMMULUS_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "::error::The release keystore secret is not configured."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RELEASE_STORE_FILE"
+
+      - name: Build signed release APK
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Prepare release artifact
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/release/app-release.apk"
+          if [[ ! -f "$apk" ]]; then
+            echo "::error::Signed release APK was not produced at $apk."
+            exit 1
+          fi
+          cp "$apk" "rommulus-$INPUT_VERSION.apk"
+
+      - name: Commit and tag release
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "Release $TAG"
+          git tag --annotate "$TAG" --message "RomMulus $TAG"
+          git push --atomic origin HEAD:main "$TAG"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            "rommulus-$INPUT_VERSION.apk" \
+            --title "RomMulus $TAG" \
+            --generate-notes \
+            --verify-tag

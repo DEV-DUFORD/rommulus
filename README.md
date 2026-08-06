@@ -39,6 +39,13 @@ Neo Geo Pocket·Color (Beetle NeoPop) · WonderSwan·Color (Beetle WonderSwan) �
 A RomM server URL is read from `local.properties` (`romm.origin`) for local debug only; release
 builds always use an empty origin and connect via the in-app onboarding flow.
 
+## Releases
+
+Maintainers can run the **Release APK** workflow from the repository's Actions tab with a new
+`X.Y.Z` version. The workflow updates the app version, builds and signs the release APK, commits
+and tags the version, and publishes the APK with release notes generated from commits since the
+previous release.
+
 ## Permissions
 
 - `android.permission.INTERNET` — communicate with your RomM server and download content.

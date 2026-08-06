@@ -38,8 +38,8 @@ screenshots/
 *.apk
 **/*.aab
 
-# Deepwork session state (persistent but untracked per deepwork skill)
-.slim/deepwork/
+# Local planning/session state
+.slim/
 
 # Planning/spec docs (private; excluded from public repo)
 plans/
