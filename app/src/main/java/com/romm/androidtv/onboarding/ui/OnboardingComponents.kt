@@ -1,15 +1,19 @@
 package com.romm.androidtv.onboarding.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,7 +42,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.library.ui.RommTvColors
-import com.romm.androidtv.library.ui.tvFocusRing
 
 /** Error text color with WCAG AA contrast against the NightHi background. */
 private val OnboardingErrorColor = Color(0xFFF87171)
@@ -76,9 +79,10 @@ fun OnboardingScreenShell(
 /**
  * Primary CTA button for the onboarding flow.
  *
- * - Min 48.dp height, stable width between idle and loading so layout doesn't
+ * - Fixed 240 x 48.dp dimensions between idle and loading so layout doesn't
  *   jump.
- * - Focused/pressed/disabled states use the RomM accent treatment.
+ * - Enabled buttons retain the RomM accent treatment even when focus is on a
+ *   form field; the focus ring still distinguishes controller focus.
  * - While [loading], shows [loadingText] plus an indeterminate progress
  *   indicator, exposes [ProgressBarRangeInfo.Indeterminate] semantics, and
  *   ignores activation (no double-submit).
@@ -101,8 +105,7 @@ fun OnboardingPrimaryButton(
     val containerColor = when {
         !enabled || loading -> RommTvColors.NightLo
         isPressed -> RommTvColors.Romm600
-        isFocused -> RommTvColors.Romm500
-        else -> RommTvColors.StageLo
+        else -> RommTvColors.Romm500
     }
 
     Box(
@@ -121,10 +124,16 @@ fun OnboardingPrimaryButton(
                     Modifier
                 },
             )
-            .widthIn(min = 240.dp)
-            .heightIn(min = 48.dp)
+            .width(240.dp)
+            .height(48.dp)
             .background(containerColor, RoundedCornerShape(8.dp))
-            .tvFocusRing(isFocused && enabled && !loading)
+            .then(
+                if (isFocused && enabled && !loading) {
+                    Modifier.border(3.dp, RommTvColors.Romm300, RoundedCornerShape(8.dp))
+                } else {
+                    Modifier
+                },
+            )
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -144,8 +153,9 @@ fun OnboardingPrimaryButton(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(
                     color = RommTvColors.Romm500,
-                    modifier = Modifier.padding(end = 8.dp),
+                    modifier = Modifier.size(20.dp),
                 )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = loadingText,
                     color = RommTvColors.TextPrimary,
