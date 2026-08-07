@@ -108,10 +108,10 @@ class HomeViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(continuePlaying = SectionState.Loading) }
             val hideFlag = hideUnsupportedSystems()
-            val state = when (val result = repository.fetchContinuePlaying()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideFlag))
-                is LibraryResult.Failure -> SectionState.Error(result.error)
-            }
+            val state = repository.fetchContinuePlaying().toSection(
+                keySelector = LibraryRom::id,
+                transform = { it.filterUnsupportedIfHidden(hideFlag) },
+            )
             if (generation == gen) {
                 _uiState.update { it.copy(continuePlaying = state) }
                 if (state is SectionState.Loaded) onRetrySucceeded()
@@ -124,10 +124,10 @@ class HomeViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(recentlyAdded = SectionState.Loading) }
             val hideFlag = hideUnsupportedSystems()
-            val state = when (val result = repository.fetchRecentlyAdded()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideFlag))
-                is LibraryResult.Failure -> SectionState.Error(result.error)
-            }
+            val state = repository.fetchRecentlyAdded().toSection(
+                keySelector = LibraryRom::id,
+                transform = { it.filterUnsupportedIfHidden(hideFlag) },
+            )
             if (generation == gen) {
                 _uiState.update { it.copy(recentlyAdded = state) }
                 if (state is SectionState.Loaded) onRetrySucceeded()
@@ -140,10 +140,10 @@ class HomeViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(favorites = SectionState.Loading) }
             val hideFlag = hideUnsupportedSystems()
-            val state = when (val result = repository.fetchFavorites()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideFlag))
-                is LibraryResult.Failure -> SectionState.Error(result.error)
-            }
+            val state = repository.fetchFavorites().toSection(
+                keySelector = LibraryRom::id,
+                transform = { it.filterUnsupportedIfHidden(hideFlag) },
+            )
             if (generation == gen) {
                 _uiState.update { it.copy(favorites = state) }
                 if (state is SectionState.Loaded) onRetrySucceeded()
@@ -156,10 +156,10 @@ class HomeViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(platforms = SectionState.Loading) }
             val hideFlag = hideUnsupportedSystems()
-            val state = when (val result = repository.fetchPlatforms()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedPlatformsIfHidden(hideFlag))
-                is LibraryResult.Failure -> SectionState.Error(result.error)
-            }
+            val state = repository.fetchPlatforms().toSection(
+                keySelector = PlatformSummary::id,
+                transform = { it.filterUnsupportedPlatformsIfHidden(hideFlag) },
+            )
             if (generation == gen) {
                 _uiState.update { it.copy(platforms = state) }
                 if (state is SectionState.Loaded) onRetrySucceeded()
@@ -171,10 +171,7 @@ class HomeViewModel(
         val gen = generation
         viewModelScope.launch {
             _uiState.update { it.copy(collections = SectionState.Loading) }
-            val state = when (val result = repository.fetchCollections()) {
-                is LibraryResult.Success -> SectionState.Loaded(result.data)
-                is LibraryResult.Failure -> SectionState.Error(result.error)
-            }
+            val state = repository.fetchCollections().toSection(CollectionSummary::id)
             if (generation == gen) {
                 _uiState.update { it.copy(collections = state) }
                 if (state is SectionState.Loaded) onRetrySucceeded()
@@ -189,10 +186,10 @@ class HomeViewModel(
     private suspend fun loadContinuePlayingInternal(gen: Int) {
         _uiState.update { it.copy(continuePlaying = SectionState.Loading) }
         val hideFlag = hideUnsupportedSystems()
-        val state = when (val result = repository.fetchContinuePlaying()) {
-            is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideFlag))
-            is LibraryResult.Failure -> SectionState.Error(result.error)
-        }
+        val state = repository.fetchContinuePlaying().toSection(
+            keySelector = LibraryRom::id,
+            transform = { it.filterUnsupportedIfHidden(hideFlag) },
+        )
         if (generation == gen) {
             _uiState.update { it.copy(continuePlaying = state) }
         }
@@ -201,10 +198,10 @@ class HomeViewModel(
     private suspend fun loadRecentlyAddedInternal(gen: Int) {
         _uiState.update { it.copy(recentlyAdded = SectionState.Loading) }
         val hideFlag = hideUnsupportedSystems()
-        val state = when (val result = repository.fetchRecentlyAdded()) {
-            is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideFlag))
-            is LibraryResult.Failure -> SectionState.Error(result.error)
-        }
+        val state = repository.fetchRecentlyAdded().toSection(
+            keySelector = LibraryRom::id,
+            transform = { it.filterUnsupportedIfHidden(hideFlag) },
+        )
         if (generation == gen) {
             _uiState.update { it.copy(recentlyAdded = state) }
         }
@@ -213,10 +210,10 @@ class HomeViewModel(
     private suspend fun loadFavoritesInternal(gen: Int) {
         _uiState.update { it.copy(favorites = SectionState.Loading) }
         val hideFlag = hideUnsupportedSystems()
-        val state = when (val result = repository.fetchFavorites()) {
-            is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedIfHidden(hideFlag))
-            is LibraryResult.Failure -> SectionState.Error(result.error)
-        }
+        val state = repository.fetchFavorites().toSection(
+            keySelector = LibraryRom::id,
+            transform = { it.filterUnsupportedIfHidden(hideFlag) },
+        )
         if (generation == gen) {
             _uiState.update { it.copy(favorites = state) }
         }
@@ -225,10 +222,10 @@ class HomeViewModel(
     private suspend fun loadPlatformsInternal(gen: Int) {
         _uiState.update { it.copy(platforms = SectionState.Loading) }
         val hideFlag = hideUnsupportedSystems()
-        val state = when (val result = repository.fetchPlatforms()) {
-            is LibraryResult.Success -> SectionState.Loaded(result.data.filterUnsupportedPlatformsIfHidden(hideFlag))
-            is LibraryResult.Failure -> SectionState.Error(result.error)
-        }
+        val state = repository.fetchPlatforms().toSection(
+            keySelector = PlatformSummary::id,
+            transform = { it.filterUnsupportedPlatformsIfHidden(hideFlag) },
+        )
         if (generation == gen) {
             _uiState.update { it.copy(platforms = state) }
         }
@@ -236,13 +233,22 @@ class HomeViewModel(
 
     private suspend fun loadCollectionsInternal(gen: Int) {
         _uiState.update { it.copy(collections = SectionState.Loading) }
-        val state = when (val result = repository.fetchCollections()) {
-            is LibraryResult.Success -> SectionState.Loaded(result.data)
-            is LibraryResult.Failure -> SectionState.Error(result.error)
-        }
+        val state = repository.fetchCollections().toSection(CollectionSummary::id)
         if (generation == gen) {
             _uiState.update { it.copy(collections = state) }
         }
+    }
+
+    /**
+     * Compose lazy layouts require unique keys. RomM can return duplicate rows for
+     * some libraries, so normalize every Home section before it reaches the UI.
+     */
+    private inline fun <T, K> LibraryResult<List<T>>.toSection(
+        keySelector: (T) -> K,
+        transform: (List<T>) -> List<T> = { it },
+    ): SectionState<List<T>> = when (this) {
+        is LibraryResult.Success -> SectionState.Loaded(transform(data).distinctBy(keySelector))
+        is LibraryResult.Failure -> SectionState.Error(error)
     }
 
     private inline fun MutableStateFlow<HomeUiState>.update(transform: (HomeUiState) -> HomeUiState) {

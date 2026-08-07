@@ -378,8 +378,18 @@ class AuthRepository(
             return LoginCompletionResult.PersistenceFailure
         }
 
-        // 4. Verify the stored token with an authenticated bearer request.
-        if (!RommSyncApi.verifyBearerToken(client, origin, tokenInfo.token)) {
+        // 4. Read the token back from durable storage before completing onboarding.
+        // A successful preference commit does not prove that this device's Keystore
+        // implementation can decrypt the value after a process restart.
+        val persistedToken = storage.getToken(origin, uname)
+        if (persistedToken?.raw != tokenInfo.token.raw) {
+            diagLog(android.util.Log.WARN, "loginOnboarding: tokenReadBackFailed")
+            cleanupPartialOnboarding(origin, uname, tokenInfo)
+            return LoginCompletionResult.PersistenceFailure
+        }
+
+        // 5. Verify the read-back token with an authenticated bearer request.
+        if (!RommSyncApi.verifyBearerToken(client, origin, persistedToken)) {
             diagLog(android.util.Log.WARN, "loginOnboarding: tokenVerificationFailed")
             cleanupPartialOnboarding(origin, uname, tokenInfo)
             return LoginCompletionResult.TokenVerificationFailure

@@ -755,6 +755,24 @@ class AuthRepositoryTest {
         }
 
         @Test
+        fun `unreadable persisted token returns PersistenceFailure and clears state`() {
+            runBlocking {
+                enqueueAuthSuccess()
+                enqueueClientToken()
+                // best-effort revoke DELETE /api/client-tokens/1 during cleanup
+                server.enqueue(MockResponse().setResponseCode(204))
+                tokenStorage.failReadBack = true
+
+                val result = repo.loginOnboarding(baseUrl(), "root", "hunter2".toCharArray())
+
+                assertThat(result).isEqualTo(LoginCompletionResult.PersistenceFailure)
+                assertThat(sessionStore.current()).isNull()
+                assertThat(tokenStorage.storedKeys).isEmpty()
+                assertThat(server.requestCount).isEqualTo(5)
+            }
+        }
+
+        @Test
         fun `password CharArray is zeroed after terminal outcomes`() {
             runBlocking {
                 server.enqueue(MockResponse().setResponseCode(401))
@@ -784,8 +802,10 @@ class AuthRepositoryTest {
     private class FakeClientTokenStorage : ClientTokenStorage {
         private val tokens = mutableMapOf<List<String>, String>()
         var failPersist: Boolean = false
+        var failReadBack: Boolean = false
 
         override fun getToken(origin: String, username: String): ClientToken? {
+            if (failReadBack) return null
             return tokens[listOf(origin, username)]?.let { ClientToken(it) }
         }
 
