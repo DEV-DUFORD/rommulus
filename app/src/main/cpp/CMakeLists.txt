@@ -5,6 +5,15 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# NDK r27 does not enable flexible 16 KiB ELF alignment by default. Apply the
+# Android TV requirement to every shared library, including vendored cores.
+if(ANDROID)
+    add_link_options(
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384"
+    )
+endif()
+
 # Treat warnings seriously in native code that will run in a dedicated,
 # crash-isolated process (LIBRETRO_REFACTOR.md section 5). Applied per-target
 # below (not via directory-wide add_compile_options) so it does not also

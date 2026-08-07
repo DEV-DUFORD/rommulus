@@ -1,4 +1,4 @@
-name: Release APK
+name: Release Android build
 
 on:
   workflow_dispatch:
@@ -103,18 +103,24 @@ jobs:
           fi
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RELEASE_STORE_FILE"
 
-      - name: Build signed release APK
-        run: ./gradlew --no-daemon :app:assembleRelease
+      - name: Build signed release artifacts
+        run: ./gradlew --no-daemon :app:bundleRelease :app:assembleRelease
 
-      - name: Prepare release artifact
+      - name: Prepare release artifacts
         run: |
           set -euo pipefail
           apk="app/build/outputs/apk/release/app-release.apk"
+          aab="app/build/outputs/bundle/release/app-release.aab"
           if [[ ! -f "$apk" ]]; then
             echo "::error::Signed release APK was not produced at $apk."
             exit 1
           fi
-          cp "$apk" "rommulus-$INPUT_VERSION.apk"
+          if [[ ! -f "$aab" ]]; then
+            echo "::error::Signed release AAB was not produced at $aab."
+            exit 1
+          fi
+          cp "$apk" "rommulus-$INPUT_VERSION-arm.apk"
+          cp "$aab" "rommulus-$INPUT_VERSION-arm.aab"
 
       - name: Commit and tag release
         env:
@@ -134,7 +140,8 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           gh release create "$TAG" \
-            "rommulus-$INPUT_VERSION.apk" \
+            "rommulus-$INPUT_VERSION-arm.apk" \
+            "rommulus-$INPUT_VERSION-arm.aab" \
             --title "RomMulus $TAG" \
             --generate-notes \
             --verify-tag

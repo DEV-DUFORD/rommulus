@@ -40,7 +40,7 @@ android {
     ndkVersion = "27.2.12479018"
 
     defaultConfig {
-        applicationId = "com.romm.androidtv"
+        applicationId = "com.devduford.rommulus"
         minSdk = 26
         targetSdk = 35
         versionCode = 1000

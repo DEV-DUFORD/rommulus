@@ -5,6 +5,10 @@ self-hosted game library and ROM manager. It browses your RomM library, download
 cartridge/disc images, and plays them locally through vendored libretro emulator cores — fully
 client-side, no cloud gaming.
 
+> [!NOTE]
+> RomMulus currently supports ARM-based Android TV devices only. Release APKs include
+> `armeabi-v7a` and `arm64-v8a`; x86 and x86_64 devices are not supported.
+
 ![RomMulus home screen](docs/images/home-page.png)
 
 ## Features
@@ -43,10 +47,11 @@ builds always use an empty origin and connect via the in-app onboarding flow.
 
 ## Releases
 
-Maintainers can run the **Release APK** workflow from the repository's Actions tab with a new
-`X.Y.Z` version. The workflow updates the app version, builds and signs the release APK, commits
-and tags the version, and publishes the APK with release notes generated from commits since the
-previous release.
+Maintainers can run the **Release Android build** workflow from the repository's Actions tab with
+a new `X.Y.Z` version. The workflow updates the app version, builds and signs the release APK and
+Android App Bundle, commits and tags the version, and publishes them as
+`rommulus-X.Y.Z-arm.apk` and `rommulus-X.Y.Z-arm.aab` with release notes generated from commits
+since the previous release. Upload the AAB to Google Play; use the APK for direct installation.
 
 ## Permissions
 
