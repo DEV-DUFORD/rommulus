@@ -32,10 +32,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.romm.androidtv.library.LibraryRepository
 import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.SearchUiState
 import com.romm.androidtv.library.SearchViewModel
@@ -43,25 +43,25 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * Full search screen for the native browsing UI (UI_REFACTOR.md section 4).
- * Zero-arg entry point: constructs its own [SearchViewModel] via [LocalContext],
- * mirroring MainActivity's [LibraryRepositoryImpl](okHttpClient) { currentOrigin } pattern.
+ * Uses the host-provided authenticated [LibraryRepository], matching the rest of
+ * the native library screens.
  *
  * Features: debounced query input, loading/error/empty/results states, pagination,
  * retry, D-pad/focus-friendly UX, GameCard grid reuse.
  */
 @Composable
 fun SearchScreen(
+    repository: LibraryRepository,
     modifier: Modifier = Modifier,
     onGameSelected: (Long) -> Unit = {},
     hideUnsupportedSystems: () -> Boolean = { false },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
 ) {
-    val context = LocalContext.current
     val viewModel: SearchViewModel = viewModel(
-        factory = remember(context, refreshEvents) {
+        factory = remember(repository, refreshEvents) {
             SearchViewModel.Factory(
-                context,
+                repository,
                 hideUnsupportedSystems,
                 hideUnsupportedSystemsFlow,
                 refreshEvents,

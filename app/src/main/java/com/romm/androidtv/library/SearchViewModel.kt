@@ -1,16 +1,10 @@
 package com.romm.androidtv.library
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import com.romm.androidtv.BuildConfig
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.romm.androidtv.config.SettingsRepository
-import com.romm.androidtv.network.RommOkHttpClient
 import com.romm.androidtv.romm.RommApiError
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -245,18 +239,13 @@ class SearchViewModel(
 
     /** Factory — used by [com.romm.androidtv.library.ui.SearchScreen] to construct the ViewModel. */
     class Factory(
-        private val context: Context,
+        private val repository: LibraryRepository,
         private val hideUnsupportedSystems: () -> Boolean = { false },
         private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
         private val refreshEvents: Flow<Unit>? = null,
-        private val dispatcher: CoroutineDispatcher = Dispatchers.Main,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            val prefs = context.getSharedPreferences(SettingsRepository.PREFS_NAME, Context.MODE_PRIVATE)
-            val settings = SettingsRepository(prefs, BuildConfig.ROMM_ORIGIN)
-            val originProvider: () -> String = { settings.currentProfile().origin }
-            val repository = LibraryRepositoryImpl(RommOkHttpClient.build(), originProvider)
             return SearchViewModel(
                 repository,
                 null,

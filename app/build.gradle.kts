@@ -153,9 +153,9 @@ android {
 
 dependencies {
     // Compose BOM pins all androidx.compose.* versions
-    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-    implementation("androidx.compose.ui:ui:1.7.0-beta01")
-    implementation("androidx.compose.foundation:foundation:1.7.0-beta01")
+    implementation(platform("androidx.compose:compose-bom:2025.02.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
