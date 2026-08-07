@@ -2,6 +2,7 @@ package com.romm.androidtv.library.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,7 +16,11 @@ import androidx.compose.ui.graphics.Color
  */
 enum class RommTheme(val displayName: String) {
     RomMulus("RomMulus"),
-    RomM("RomM");
+    RomM("RomM"),
+    Crimson("Crimson"),
+    Mono("Monochrome"),
+    Light("Light"),
+    Olive("Olive Drab");
 
     companion object {
         /** Maps a persisted storage id back to a theme, defaulting to [RomMulus]. */
@@ -43,6 +48,8 @@ data class RommPalette(
     val stageLo: Color,
     val textPrimary: Color,
     val textSecondary: Color,
+    /** When true, this palette is light and uses a light Material color scheme. */
+    val light: Boolean = false,
 )
 
 object RommTvPalettes {
@@ -85,9 +92,91 @@ object RommTvPalettes {
         textSecondary = Color(0xFFB6B0C6),
     )
 
+    /**
+     * "Crimson": deep red palette with dark blood-red night/stage backgrounds
+     * and muted rose accents.
+     */
+    val Crimson = RommPalette(
+        romm200 = Color(0xFFF0C4C4),
+        romm300 = Color(0xFFE39A9A),
+        romm400 = Color(0xFFD16969),
+        romm500 = Color(0xFFB23A3A),
+        romm600 = Color(0xFF8E2C2C),
+        ink = Color(0xFF2B1111),
+        nightHi = Color(0xFF1A0A0A),
+        nightLo = Color(0xFF221010),
+        stageHi = Color(0xFF1B0B0B),
+        stageLo = Color(0xFF4A1C1C),
+        textPrimary = Color.White,
+        textSecondary = Color(0xFFD9B3B3),
+    )
+
+    /**
+     * "Monochrome": grayscale palette with neutral charcoal backgrounds and
+     * steel-gray accents.
+     */
+    val Mono = RommPalette(
+        romm200 = Color(0xFFE0E0E0),
+        romm300 = Color(0xFFBDBDBD),
+        romm400 = Color(0xFF9E9E9E),
+        romm500 = Color(0xFF757575),
+        romm600 = Color(0xFF616161),
+        ink = Color(0xFF111111),
+        nightHi = Color(0xFF0A0A0A),
+        nightLo = Color(0xFF141414),
+        stageHi = Color(0xFF0B0B0B),
+        stageLo = Color(0xFF2E2E2E),
+        textPrimary = Color.White,
+        textSecondary = Color(0xFFBDBDBD),
+    )
+
+    /**
+     * "Light": light mode palette with soft blue accents on near-white
+     * backgrounds. Unlike the dark themes, this uses dark text and a light
+     * Material color scheme.
+     */
+    val Light = RommPalette(
+        romm200 = Color(0xFFD6E6F2),
+        romm300 = Color(0xFFAFCEE3),
+        romm400 = Color(0xFF5E9CC9),
+        romm500 = Color(0xFF2F7DB4),
+        romm600 = Color(0xFF1F5F8C),
+        ink = Color(0xFF0F2434),
+        nightHi = Color(0xFFF4F6F8),
+        nightLo = Color(0xFFE6EBF0),
+        stageHi = Color(0xFFFDFDFE),
+        stageLo = Color(0xFFC9D9E6),
+        textPrimary = Color(0xFF1A2733),
+        textSecondary = Color(0xFF5A6B7A),
+        light = true,
+    )
+
+    /**
+     * "Olive Drab": military olive palette with dark olive-tinted night/stage
+     * backgrounds and muted olive accents.
+     */
+    val Olive = RommPalette(
+        romm200 = Color(0xFFD9D6B3),
+        romm300 = Color(0xFFBDB97F),
+        romm400 = Color(0xFFA09A55),
+        romm500 = Color(0xFF7C7836),
+        romm600 = Color(0xFF5E5B29),
+        ink = Color(0xFF1E1E10),
+        nightHi = Color(0xFF0F100A),
+        nightLo = Color(0xFF181910),
+        stageHi = Color(0xFF101109),
+        stageLo = Color(0xFF34351B),
+        textPrimary = Color.White,
+        textSecondary = Color(0xFFB8B89A),
+    )
+
     fun forTheme(theme: RommTheme): RommPalette = when (theme) {
         RommTheme.RomMulus -> RomMulus
         RommTheme.RomM -> RomM
+        RommTheme.Crimson -> Crimson
+        RommTheme.Mono -> Mono
+        RommTheme.Light -> Light
+        RommTheme.Olive -> Olive
     }
 }
 
@@ -144,18 +233,33 @@ object RommTvColors {
 
 /** Material color scheme derived from [palette]. */
 private fun rommTvColorScheme(palette: RommPalette) =
-    darkColorScheme(
-        primary = palette.romm500,
-        onPrimary = Color.White,
-        secondary = palette.romm400,
-        onSecondary = Color.White,
-        background = palette.nightHi,
-        onBackground = palette.textPrimary,
-        surface = palette.nightLo,
-        onSurface = palette.textPrimary,
-        surfaceVariant = palette.stageLo,
-        onSurfaceVariant = palette.textSecondary,
-    )
+    if (palette.light) {
+        lightColorScheme(
+            primary = palette.romm500,
+            onPrimary = Color.White,
+            secondary = palette.romm400,
+            onSecondary = Color.White,
+            background = palette.nightHi,
+            onBackground = palette.textPrimary,
+            surface = palette.nightLo,
+            onSurface = palette.textPrimary,
+            surfaceVariant = palette.stageLo,
+            onSurfaceVariant = palette.textSecondary,
+        )
+    } else {
+        darkColorScheme(
+            primary = palette.romm500,
+            onPrimary = Color.White,
+            secondary = palette.romm400,
+            onSecondary = Color.White,
+            background = palette.nightHi,
+            onBackground = palette.textPrimary,
+            surface = palette.nightLo,
+            onSurface = palette.textPrimary,
+            surfaceVariant = palette.stageLo,
+            onSurfaceVariant = palette.textSecondary,
+        )
+    }
 
 @Composable
 fun RommTvTheme(content: @Composable () -> Unit) {
