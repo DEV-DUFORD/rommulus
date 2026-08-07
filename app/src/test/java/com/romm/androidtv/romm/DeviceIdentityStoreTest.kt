@@ -8,10 +8,12 @@ import org.junit.jupiter.api.Test
 class DeviceIdentityStoreTest {
 
     private lateinit var store: DeviceIdentityStore
+    private lateinit var prefs: FakeSharedPreferences
 
     @BeforeEach
     fun setUp() {
-        store = DeviceIdentityStore(FakeSharedPreferences())
+        prefs = FakeSharedPreferences()
+        store = DeviceIdentityStore(prefs)
     }
 
     @Test
@@ -68,5 +70,30 @@ class DeviceIdentityStoreTest {
         store.forgetDeviceId("https://romm.example", "root")
 
         assertThat(store.cachedDeviceId("https://romm.example", "other")).isEqualTo("device-2")
+    }
+
+    @Test
+    fun `paired identity is stable before username and adopted afterward`() {
+        val pairingId = store.pairingInstallationId("https://romm.example")
+
+        assertThat(pairingId).isNotNull
+        assertThat(store.pairingInstallationId("https://romm.example")).isEqualTo(pairingId)
+        assertThat(
+            store.savePairedIdentity(
+                "https://romm.example",
+                "root",
+                pairingId!!,
+                "device-qr",
+            ),
+        ).isTrue()
+        assertThat(store.installationId("https://romm.example", "root")).isEqualTo(pairingId)
+        assertThat(store.cachedDeviceId("https://romm.example", "root")).isEqualTo("device-qr")
+    }
+
+    @Test
+    fun `pairing identifier reports persistence failure`() {
+        prefs.commitResult = false
+
+        assertThat(store.pairingInstallationId("https://romm.example")).isNull()
     }
 }

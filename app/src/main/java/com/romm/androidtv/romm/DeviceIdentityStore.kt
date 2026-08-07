@@ -32,6 +32,30 @@ class DeviceIdentityStore(private val prefs: SharedPreferences) {
         return generated
     }
 
+    /**
+     * Returns a stable identifier usable before the paired account's username is
+     * known. QR device authorization starts anonymously, then copies this value
+     * into the normal origin+username scope after bearer verification.
+     */
+    fun pairingInstallationId(origin: String): String? {
+        val key = pairingInstallationKey(origin)
+        prefs.getString(key, null)?.let { return it }
+
+        val generated = UUID.randomUUID().toString()
+        return if (prefs.edit().putString(key, generated).commit()) generated else null
+    }
+
+    /** Durably adopts the identity returned by RomM's device authorization flow. */
+    fun savePairedIdentity(
+        origin: String,
+        username: String,
+        installationId: String,
+        rommDeviceId: String,
+    ): Boolean = prefs.edit()
+        .putString(installationKey(origin, username), installationId)
+        .putString(deviceIdKey(origin, username), rommDeviceId)
+        .commit()
+
     /** Returns the cached RomM device identity for this scope, if one was previously registered. */
     fun cachedDeviceId(origin: String, username: String): String? =
         prefs.getString(deviceIdKey(origin, username), null)
@@ -53,6 +77,7 @@ class DeviceIdentityStore(private val prefs: SharedPreferences) {
 
     private fun installationKey(origin: String, username: String) = "install_id:${scopeKey(origin, username)}"
     private fun deviceIdKey(origin: String, username: String) = "device_id:${scopeKey(origin, username)}"
+    private fun pairingInstallationKey(origin: String) = "pair_install_id:${sanitize(origin)}"
 
     private fun scopeKey(origin: String, username: String) =
         "${sanitize(origin)}|${sanitize(username)}"

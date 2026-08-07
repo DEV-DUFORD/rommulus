@@ -21,6 +21,8 @@ client-side, no cloud gaming.
 - **Controller configuration**: remap inputs per console, with per-core default profiles and a
   D-pad-first capture flow.
 - **BIOS management** for systems that require it (e.g. Sega CD, PlayStation).
+- **Phone-assisted QR sign-in** with device-bound tokens on RomM 5.1 and newer, while retaining
+  username/password sign-in for older servers.
 - 7z/disc archive extraction, cover art and platform icons from your RomM server.
 - A minimal permission surface: only `INTERNET` and `ACCESS_NETWORK_STATE`.
 

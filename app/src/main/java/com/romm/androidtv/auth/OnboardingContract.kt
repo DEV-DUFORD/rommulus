@@ -107,3 +107,31 @@ object RommClientTokenScopes {
         "collections.read",
     )
 }
+
+data class QrLoginSession(
+    val deviceCode: String,
+    val userCode: String,
+    val verificationUrl: String,
+    val expiresInSeconds: Int,
+    val pollIntervalSeconds: Int,
+    val installationId: String,
+)
+
+sealed interface QrLoginStartResult {
+    data class Ready(val session: QrLoginSession) : QrLoginStartResult
+    data object Unsupported : QrLoginStartResult
+    data object NetworkFailure : QrLoginStartResult
+    data object PersistenceFailure : QrLoginStartResult
+}
+
+sealed interface QrLoginPollResult {
+    data object Pending : QrLoginPollResult
+    data object SlowDown : QrLoginPollResult
+    data class Success(val verifiedUser: VerifiedUser) : QrLoginPollResult
+    data object Denied : QrLoginPollResult
+    data object Expired : QrLoginPollResult
+    data object InsufficientScopes : QrLoginPollResult
+    data object VerificationFailure : QrLoginPollResult
+    data object PersistenceFailure : QrLoginPollResult
+    data object NetworkFailure : QrLoginPollResult
+}

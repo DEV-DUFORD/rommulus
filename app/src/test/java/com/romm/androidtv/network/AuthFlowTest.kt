@@ -433,6 +433,22 @@ class AuthFlowTest {
         }
 
         @Test
+        fun `bearer session sends token and returns success`() {
+            server.enqueue(MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"username":"paired","admin":false}"""))
+            server.enqueue(MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"version":"5.1.0","setup_complete":true,"userpass_enabled":true}"""))
+
+            val result = verifyBearerSession(client, baseUrl(), "paired-token")
+
+            assertThat(result).isInstanceOf(AuthFlowResult.Success::class.java)
+            assertThat(server.takeRequest().getHeader("Authorization"))
+                .isEqualTo("Bearer paired-token")
+        }
+
+        @Test
         @DisplayName("expired session (401) returns VERIFICATION_FAILED")
         fun `expired session`() {
             server.enqueue(MockResponse().setResponseCode(401))

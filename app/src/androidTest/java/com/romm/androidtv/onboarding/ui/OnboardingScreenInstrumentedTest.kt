@@ -22,6 +22,8 @@ import com.romm.androidtv.onboarding.OnboardingLoginError
 import com.romm.androidtv.onboarding.OnboardingServerError
 import com.romm.androidtv.onboarding.OnboardingStep
 import com.romm.androidtv.onboarding.OnboardingUiState
+import com.romm.androidtv.onboarding.QrLoginUiState
+import com.romm.androidtv.auth.QrLoginSession
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,6 +72,7 @@ class OnboardingScreenInstrumentedTest {
                     onPasswordChanged = { callbacks.passwordChanged = it },
                     onLogin = { callbacks.loginCount++ },
                     onRemoveOldestDeviceAndRetry = { callbacks.removeOldestDeviceAndRetryCount++ },
+                    onRetryQrLogin = {},
                     onBack = { callbacks.backCount++ },
                 )
             }
@@ -236,6 +239,29 @@ class OnboardingScreenInstrumentedTest {
         composeTestRule.onNodeWithText("Connecting to http://192.168.1.50:8080", useUnmergedTree = true)
             .assertExists()
         composeTestRule.onNodeWithText("Login", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun credentialsStep_readyQrLoginRendersCodeAndPairingCode() {
+        setContent(
+            OnboardingUiState(
+                step = OnboardingStep.CREDENTIALS,
+                normalizedOrigin = "https://romm.example.com",
+                qrLoginState = QrLoginUiState.Ready(
+                    QrLoginSession(
+                        deviceCode = "secret",
+                        userCode = "ABCD1234",
+                        verificationUrl = "https://romm.example.com/pair/device?user_code=ABCD1234",
+                        expiresInSeconds = 600,
+                        pollIntervalSeconds = 5,
+                        installationId = "install-1",
+                    ),
+                ),
+            ),
+        )
+
+        composeTestRule.onNodeWithTag("onboarding_qr_code", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Pairing code: ABCD-1234", useUnmergedTree = true).assertExists()
     }
 
     @Test

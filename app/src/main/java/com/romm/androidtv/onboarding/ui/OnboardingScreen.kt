@@ -3,6 +3,7 @@ package com.romm.androidtv.onboarding.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -68,6 +69,7 @@ fun OnboardingScreen(
     onPasswordChanged: (String) -> Unit,
     onLogin: () -> Unit,
     onRemoveOldestDeviceAndRetry: () -> Unit,
+    onRetryQrLogin: () -> Unit,
     onBack: () -> Unit,
 ) {
     val content: @Composable () -> Unit = when (state.step) {
@@ -89,12 +91,14 @@ fun OnboardingScreen(
                     onPasswordChanged = onPasswordChanged,
                     onLogin = onLogin,
                     onRemoveOldestDeviceAndRetry = onRemoveOldestDeviceAndRetry,
+                    onRetryQrLogin = onRetryQrLogin,
                 )
             }
         }
     }
 
     OnboardingScreenShell(
+        maxContentWidth = if (state.step == OnboardingStep.CREDENTIALS) 960.dp else 640.dp,
         modifier = modifier.onKeyEvent { event ->
             // Preview dispatch is handled by the editing field (Back while editing
             // is consumed there). This bubbling handler fires only when nothing
@@ -296,6 +300,7 @@ private fun CredentialsStep(
     onPasswordChanged: (String) -> Unit,
     onLogin: () -> Unit,
     onRemoveOldestDeviceAndRetry: () -> Unit,
+    onRetryQrLogin: () -> Unit,
 ) {
     val usernameFocus = remember { FocusRequester() }
     val removeOldestFocus = remember { FocusRequester() }
@@ -314,10 +319,15 @@ private fun CredentialsStep(
         }
     }
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("onboarding_credentials"),
+        horizontalArrangement = Arrangement.spacedBy(48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+    Column(
+        modifier = Modifier.weight(2f),
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
@@ -448,5 +458,11 @@ private fun CredentialsStep(
                 focusRequester = removeOldestFocus,
             )
         }
+    }
+        QrLoginPanel(
+            state = state.qrLoginState,
+            onRetry = onRetryQrLogin,
+            modifier = Modifier.weight(1f),
+        )
     }
 }

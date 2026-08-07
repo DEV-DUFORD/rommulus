@@ -253,10 +253,35 @@ class MainActivity : ComponentActivity() {
         com.romm.androidtv.romm.ClientTokenStore(this)
     }
 
+    private val nativeOkHttpClient by lazy {
+        buildBearerAuthClient(clientTokenStore)
+    }
+
+    private val deviceIdentityStore: com.romm.androidtv.romm.DeviceIdentityStore by lazy {
+        com.romm.androidtv.romm.DeviceIdentityStore(
+            getSharedPreferences(com.romm.androidtv.romm.DeviceIdentityStore.PREFS_NAME, MODE_PRIVATE),
+        )
+    }
+
     // Auth repository — owns login/session-verification/cookie-sync network calls so
     // MainActivity coordinates navigation rather than owning network internals.
     private val authRepository: AuthRepository by lazy {
         AuthRepository(okHttpClient, RommOkHttpClient.cookieSyncJar, sessionStore, clientTokenStore)
+    }
+
+    private val qrLoginRepository: com.romm.androidtv.auth.QrLoginRepository by lazy {
+        val deviceName = listOf(android.os.Build.MANUFACTURER, android.os.Build.MODEL)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .ifBlank { "Android TV" }
+        com.romm.androidtv.auth.QrLoginRepository(
+            client = okHttpClient,
+            sessionStore = sessionStore,
+            tokenStorage = clientTokenStore,
+            identityStore = deviceIdentityStore,
+            deviceName = deviceName,
+            clientVersion = BuildConfig.VERSION_NAME,
+        )
     }
 
     // Phase 3/4 native content pipeline — quota-limited, identity-keyed cache of
@@ -269,14 +294,14 @@ class MainActivity : ComponentActivity() {
     }
     private val romRepository: RomRepositoryImpl by lazy {
         RomRepositoryImpl(
-            okHttpClient,
+            nativeOkHttpClient,
             sessionStore,
             contentCache,
             verifySha1OnLaunch = { settingsRepository.verifySha1OnLaunch() },
         )
     }
     private val firmwareRepository by lazy {
-        com.romm.androidtv.romm.FirmwareRepositoryImpl(okHttpClient, sessionStore, contentCache)
+        com.romm.androidtv.romm.FirmwareRepositoryImpl(nativeOkHttpClient, sessionStore, contentCache)
     }
     private val segaCdBiosManager by lazy {
         com.romm.androidtv.romm.SegaCdBiosManager(firmwareRepository, settingsRepository)
@@ -289,7 +314,7 @@ class MainActivity : ComponentActivity() {
     // scoped to single-ROM launch/staging, not list browsing.
     private val libraryRepository: com.romm.androidtv.library.LibraryRepository by lazy {
         com.romm.androidtv.library.LibraryRepositoryImpl(
-            okHttpClient,
+            nativeOkHttpClient,
             originProvider = { currentOrigin },
             usernameProvider = { sessionStore.coherentRecord(currentOrigin)?.username },
         )
@@ -525,12 +550,10 @@ class MainActivity : ComponentActivity() {
             val sessionPresent = sessionBefore != null
             Log.d(DIAG_TAG, "MainActivity.startup: sessionPresent=$sessionPresent")
             if (origin.isNotBlank()) {
-                // Step 1: Import cookies from Android CookieManager into OkHttp store
-                authRepository.importCookiesFromWebView(origin)
-
-                // Step 2: Check existing session using imported cookies
-                Log.d(TAG, "Startup: verifying existing session")
-                val result = authRepository.verifySession(origin)
+                // Native startup is authenticated by the durable client token. Browser
+                // cookies are optional and remain scoped to the settings WebView.
+                Log.d(TAG, "Startup: verifying durable session")
+                val result = authRepository.verifyDurableSession(origin)
                 Log.d(TAG, "Startup: verify success=${result is AuthFlowResult.Success}")
 
                 when (result) {
@@ -1008,6 +1031,8 @@ class MainActivity : ComponentActivity() {
                 loginToRomm = { origin, username, password -> authRepository.loginOnboarding(origin, username, password) },
                 removeOldestClientToken = { origin -> authRepository.removeOldestClientToken(origin) },
                 establishKioskSession = { origin -> authRepository.establishKioskSession(origin) },
+                beginQrLogin = { origin -> qrLoginRepository.start(origin) },
+                pollQrLogin = { origin, session -> qrLoginRepository.poll(origin, session) },
                 initialServerInput = settingsRepository.currentProfile().origin,
                 initialStep = onboardingStartStep,
                 initialUsername = onboardingStartUsername,
@@ -1040,6 +1065,7 @@ class MainActivity : ComponentActivity() {
             onPasswordChanged = onboardingViewModel::onPasswordChanged,
             onLogin = onboardingViewModel::onLogin,
             onRemoveOldestDeviceAndRetry = onboardingViewModel::onRemoveOldestDeviceAndRetry,
+            onRetryQrLogin = onboardingViewModel::onRetryQrLogin,
             onBack = ::handleOnboardingBack,
         )
 

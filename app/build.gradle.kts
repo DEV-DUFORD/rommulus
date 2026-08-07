@@ -182,6 +182,7 @@ dependencies {
     // Moshi for robust JSON parsing (replaces hand-parsers)
     implementation("com.squareup.moshi:moshi:1.15.1")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
+    implementation("com.google.zxing:core:3.5.3")
 
     // 7z archive extraction (LIBRETRO_REFACTOR.md section 10: RomM single-file ROM entries are
     // commonly .7z, needing extraction before raw bytes can reach a libretro core). Both are

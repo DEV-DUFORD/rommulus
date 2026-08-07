@@ -1,5 +1,7 @@
 package com.romm.androidtv.onboarding
 
+import com.romm.androidtv.auth.QrLoginSession
+
 /**
  * Phase 3 onboarding state machine models (spec section 6).
  *
@@ -45,6 +47,23 @@ sealed interface OnboardingLoginError {
     data object RequiredFields : OnboardingLoginError
 }
 
+sealed interface QrLoginUiState {
+    data object Idle : QrLoginUiState
+    data object Loading : QrLoginUiState
+    data class Ready(val session: QrLoginSession) : QrLoginUiState
+    data object Unsupported : QrLoginUiState
+    data object Denied : QrLoginUiState
+    data object Expired : QrLoginUiState
+    data class Error(val reason: QrLoginError) : QrLoginUiState
+}
+
+enum class QrLoginError {
+    NETWORK,
+    INSUFFICIENT_SCOPES,
+    VERIFICATION,
+    PERSISTENCE,
+}
+
 /**
  * Full, immutable snapshot of the onboarding screen state.
  *
@@ -63,6 +82,7 @@ data class OnboardingUiState(
     val password: String = "",
     val loginError: OnboardingLoginError? = null,
     val loginAction: AsyncActionState = AsyncActionState.Idle,
+    val qrLoginState: QrLoginUiState = QrLoginUiState.Idle,
 )
 
 /**

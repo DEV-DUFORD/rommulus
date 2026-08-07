@@ -11,6 +11,7 @@ import com.romm.androidtv.network.ServerAddressResult
 import com.romm.androidtv.network.executeAuthFlow
 import com.romm.androidtv.network.executeHeartbeat
 import com.romm.androidtv.network.verifyExistingSession
+import com.romm.androidtv.network.verifyBearerSession
 import com.romm.androidtv.romm.ClientToken
 import com.romm.androidtv.romm.ClientTokenAcquireResult
 import com.romm.androidtv.romm.ClientTokenInfo
@@ -96,6 +97,17 @@ class AuthRepository(
             recordIfSuccessful(origin, result, forceReplaceToken = false)
         }
         return result
+    }
+
+    /**
+     * Verifies the durable native credential recorded for [origin], independent of cookies.
+     */
+    suspend fun verifyDurableSession(origin: String): AuthFlowResult = withContext(Dispatchers.IO) {
+        val record = sessionStore.coherentRecord(origin)
+            ?: return@withContext AuthFlowResult.Failure(AuthError.VERIFICATION_FAILED, 401)
+        val token = clientTokenStorage?.getToken(record.origin, record.username.orEmpty())
+            ?: return@withContext AuthFlowResult.Failure(AuthError.VERIFICATION_FAILED, 401)
+        verifyBearerSession(client, origin, token.raw)
     }
 
     /** Runs a heartbeat check against the configured origin. */

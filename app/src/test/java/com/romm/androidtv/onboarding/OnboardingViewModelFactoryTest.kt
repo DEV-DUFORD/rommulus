@@ -3,7 +3,14 @@ package com.romm.androidtv.onboarding
 import com.romm.androidtv.auth.LoginCompletionResult
 import com.romm.androidtv.auth.ServerValidationResult
 import com.romm.androidtv.model.HeartbeatResponse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
@@ -12,6 +19,7 @@ import org.junit.jupiter.api.Test
  * prefill into the created [OnboardingViewModel]'s starting UI state.
  */
 @DisplayName("OnboardingViewModelFactory — initial step + username wiring")
+@OptIn(ExperimentalCoroutinesApi::class)
 class OnboardingViewModelFactoryTest {
 
     private val heartbeat = HeartbeatResponse(
@@ -29,6 +37,18 @@ class OnboardingViewModelFactoryTest {
     private val login = LoginToRomm { _, _, _ -> error("login should not be called for initial-state assertions") }
     private val removeOldestClientToken = RemoveOldestClientToken { error("removeOldestClientToken should not be called for initial-state assertions") }
     private val establishKioskSession = EstablishKioskSession { error("establishKioskSession should not be called for initial-state assertions") }
+    private val beginQrLogin = BeginQrLogin { com.romm.androidtv.auth.QrLoginStartResult.Unsupported }
+    private val pollQrLogin = PollQrLogin { _, _ -> com.romm.androidtv.auth.QrLoginPollResult.Pending }
+
+    @BeforeEach
+    fun setUp() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+    }
+
+    @AfterEach
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
 
     private fun make(
         initialServerInput: String = "",
@@ -41,6 +61,8 @@ class OnboardingViewModelFactoryTest {
             loginToRomm = login,
             removeOldestClientToken = removeOldestClientToken,
             establishKioskSession = establishKioskSession,
+            beginQrLogin = beginQrLogin,
+            pollQrLogin = pollQrLogin,
             initialServerInput = initialServerInput,
             initialStep = initialStep,
             initialUsername = initialUsername,

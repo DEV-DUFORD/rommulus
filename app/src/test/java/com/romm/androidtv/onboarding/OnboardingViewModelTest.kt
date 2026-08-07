@@ -1,9 +1,13 @@
 package com.romm.androidtv.onboarding
 
 import com.romm.androidtv.auth.LoginCompletionResult
+import com.romm.androidtv.auth.QrLoginPollResult
+import com.romm.androidtv.auth.QrLoginSession
+import com.romm.androidtv.auth.QrLoginStartResult
 import com.romm.androidtv.auth.ServerValidationResult
 import com.romm.androidtv.model.HeartbeatResponse
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -105,12 +109,42 @@ class OnboardingViewModelTest {
         }
     }
 
+    private class BeginQrLoginFake : BeginQrLogin {
+        var calls = 0
+        var result: QrLoginStartResult = QrLoginStartResult.Unsupported
+
+        override suspend fun invoke(origin: String): QrLoginStartResult {
+            calls++
+            return result
+        }
+    }
+
+    private class PollQrLoginFake : PollQrLogin {
+        var calls = 0
+        var cancelledCalls = 0
+        val pending = mutableListOf<CompletableDeferred<QrLoginPollResult>>()
+
+        override suspend fun invoke(origin: String, session: QrLoginSession): QrLoginPollResult {
+            calls++
+            val deferred = CompletableDeferred<QrLoginPollResult>()
+            pending.add(deferred)
+            return try {
+                deferred.await()
+            } catch (error: CancellationException) {
+                cancelledCalls++
+                throw error
+            }
+        }
+    }
+
     private class Harness(
         val validate: ValidateFake = ValidateFake(),
         val persist: PersistFake = PersistFake(),
         val login: LoginFake = LoginFake(),
         val removeOldestClientToken: RemoveOldestClientTokenFake = RemoveOldestClientTokenFake(),
         val establishKioskSession: EstablishKioskSessionFake = EstablishKioskSessionFake(),
+        val beginQrLogin: BeginQrLoginFake = BeginQrLoginFake(),
+        val pollQrLogin: PollQrLoginFake = PollQrLoginFake(),
         initialServerInput: String = "",
         initialStep: OnboardingStep = OnboardingStep.WELCOME,
         initialUsername: String = "",
@@ -121,6 +155,8 @@ class OnboardingViewModelTest {
             loginToRomm = login,
             removeOldestClientToken = removeOldestClientToken,
             establishKioskSession = establishKioskSession,
+            beginQrLogin = beginQrLogin,
+            pollQrLogin = pollQrLogin,
             initialServerInput = initialServerInput,
             initialStep = initialStep,
             initialUsername = initialUsername,
@@ -682,6 +718,68 @@ class OnboardingViewModelTest {
         assertThat(password).isEqualTo("s3cret pass".toCharArray())
     }
 
+    // --------------------------------------------------------------- QR login
+
+    @Test
+    fun `valid server starts QR login and polls while code is displayed`() = runTest {
+        val h = make()
+        h.beginQrLogin.result = QrLoginStartResult.Ready(qrSession())
+
+        goToCredentials(h)
+        runCurrent()
+
+        assertThat(h.beginQrLogin.calls).isEqualTo(1)
+        assertThat(h.vm.uiState.value.qrLoginState)
+            .isEqualTo(QrLoginUiState.Ready(qrSession()))
+        assertThat(h.pollQrLogin.calls).isEqualTo(1)
+    }
+
+    @Test
+    fun `approved QR login emits completion and records verified username`() = runTest {
+        val h = make()
+        h.beginQrLogin.result = QrLoginStartResult.Ready(qrSession())
+        val collected = mutableListOf<OnboardingEffect>()
+        val collector = launch { h.vm.effects.collect { collected.add(it) } }
+
+        goToCredentials(h)
+        runCurrent()
+        h.pollQrLogin.pending.single().complete(
+            QrLoginPollResult.Success(verifiedUser()),
+        )
+        advanceUntilIdle()
+
+        assertThat(collected).containsExactly(OnboardingEffect.Completed)
+        assertThat(h.vm.uiState.value.username).isEqualTo("zack")
+        collector.cancel()
+    }
+
+    @Test
+    fun `unsupported QR endpoint leaves password login available`() = runTest {
+        val h = make()
+
+        goToCredentials(h)
+        runCurrent()
+
+        assertThat(h.vm.uiState.value.qrLoginState).isEqualTo(QrLoginUiState.Unsupported)
+        assertThat(h.vm.uiState.value.step).isEqualTo(OnboardingStep.CREDENTIALS)
+        assertThat(h.vm.uiState.value.loginAction).isEqualTo(AsyncActionState.Idle)
+    }
+
+    @Test
+    fun `password login cancels QR polling before credential request starts`() = runTest {
+        val h = make()
+        h.beginQrLogin.result = QrLoginStartResult.Ready(qrSession())
+        goToCredentials(h)
+        runCurrent()
+
+        typeCredentialsAndLogin(h)
+        runCurrent()
+
+        assertThat(h.pollQrLogin.cancelledCalls).isEqualTo(1)
+        assertThat(h.login.calls).isEqualTo(1)
+        assertThat(h.vm.uiState.value.qrLoginState).isEqualTo(QrLoginUiState.Idle)
+    }
+
     // -------------------------------------------------------- Completion effect
 
     @Test
@@ -776,6 +874,15 @@ class OnboardingViewModelTest {
         h.vm.onPasswordChanged("secret")
         h.vm.onLogin()
     }
+
+    private fun qrSession() = QrLoginSession(
+        deviceCode = "device-code",
+        userCode = "ABCD1234",
+        verificationUrl = "$canonical/pair/device?user_code=ABCD1234",
+        expiresInSeconds = 600,
+        pollIntervalSeconds = 5,
+        installationId = "install-1",
+    )
 
     private fun assertError(h: Harness, expected: OnboardingServerError) {
         val s = h.vm.uiState.value

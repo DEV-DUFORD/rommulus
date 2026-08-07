@@ -153,6 +153,24 @@ class AuthRepositoryTest {
         }
 
         @Test
+        fun `durable session verification uses persisted client token`() = runBlocking {
+            sessionStore.save(baseUrl(), "root")
+            tokenStorage.setToken(baseUrl(), "root", ClientToken("paired-token"))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"version":"5.1.0","setup_complete":true,"userpass_enabled":true}"""
+                )
+            )
+
+            val result = repoWithTokens.verifyDurableSession(baseUrl())
+
+            assertThat(result).isInstanceOf(AuthFlowResult.Success::class.java)
+            assertThat(server.takeRequest().getHeader("Authorization"))
+                .isEqualTo("Bearer paired-token")
+        }
+
+        @Test
         fun `login acquires and persists client token on success`() {
             runBlocking {
                 // POST /api/login

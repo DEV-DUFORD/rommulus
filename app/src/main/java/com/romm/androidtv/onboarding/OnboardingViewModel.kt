@@ -3,10 +3,15 @@ package com.romm.androidtv.onboarding
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.romm.androidtv.auth.LoginCompletionResult
+import com.romm.androidtv.auth.QrLoginPollResult
+import com.romm.androidtv.auth.QrLoginSession
+import com.romm.androidtv.auth.QrLoginStartResult
 import com.romm.androidtv.auth.ServerValidationResult
 import com.romm.androidtv.network.InvalidReason
 import com.romm.androidtv.network.RommServerAddress
 import com.romm.androidtv.network.ServerAddressResult
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -50,6 +55,14 @@ fun interface RemoveOldestClientToken {
     suspend operator fun invoke(origin: String): Boolean
 }
 
+fun interface BeginQrLogin {
+    suspend operator fun invoke(origin: String): QrLoginStartResult
+}
+
+fun interface PollQrLogin {
+    suspend operator fun invoke(origin: String, session: QrLoginSession): QrLoginPollResult
+}
+
 /**
  * Phase 3 onboarding state machine (spec sections 4.3, 4.4, 6).
  *
@@ -73,15 +86,24 @@ class OnboardingViewModel(
     private val loginToRomm: LoginToRomm,
     private val removeOldestClientToken: RemoveOldestClientToken,
     private val establishKioskSession: EstablishKioskSession,
+    private val beginQrLogin: BeginQrLogin,
+    private val pollQrLogin: PollQrLogin,
     initialServerInput: String,
     private val initialStep: OnboardingStep = OnboardingStep.WELCOME,
     private val initialUsername: String = "",
 ) : ViewModel() {
 
+    private val initialNormalizedOrigin = if (initialStep == OnboardingStep.CREDENTIALS) {
+        (RommServerAddress.parseAndNormalize(initialServerInput) as? ServerAddressResult.Valid)?.origin
+    } else {
+        null
+    }
+
     private val _uiState = MutableStateFlow(
         OnboardingUiState(
             step = initialStep,
             serverInput = initialServerInput,
+            normalizedOrigin = initialNormalizedOrigin,
             username = initialUsername,
         ),
     )
@@ -98,6 +120,11 @@ class OnboardingViewModel(
 
     /** Guards one-shot completion emission. */
     private var completedEmitted = false
+    private var qrLoginJob: Job? = null
+
+    init {
+        initialNormalizedOrigin?.let(::startQrLogin)
+    }
 
     // ------------------------------------------------------------------ Events
 
@@ -146,7 +173,7 @@ class OnboardingViewModel(
                 }
                 viewModelScope.launch {
                     val result = validateRommServer(origin)
-                    handleServerValidationResult(origin, generation, result)
+                    handleServerValidationResult(generation, result)
                 }
             }
         }
@@ -182,9 +209,14 @@ class OnboardingViewModel(
         }
 
         val generation = loginGeneration
+        val activeQrLogin = qrLoginJob
+        activeQrLogin?.cancel()
+        qrLoginJob = null
+        _uiState.update { it.copy(qrLoginState = QrLoginUiState.Idle) }
         _uiState.update { it.copy(loginAction = AsyncActionState.Loading, loginError = null) }
 
         viewModelScope.launch {
+            activeQrLogin?.join()
             val passwordChars = state.password.toCharArray()
             val result = loginToRomm(origin, trimmedUsername, passwordChars)
             handleLoginResult(generation, result)
@@ -214,9 +246,14 @@ class OnboardingViewModel(
         }
 
         val generation = loginGeneration
+        val activeQrLogin = qrLoginJob
+        activeQrLogin?.cancel()
+        qrLoginJob = null
         _uiState.update { it.copy(loginAction = AsyncActionState.Loading, loginError = null) }
+        _uiState.update { it.copy(qrLoginState = QrLoginUiState.Idle) }
 
         viewModelScope.launch {
+            activeQrLogin?.join()
             val removed = removeOldestClientToken(origin)
             if (generation != loginGeneration) return@launch // edited meanwhile — ignore
 
@@ -226,6 +263,7 @@ class OnboardingViewModel(
                 _uiState.update {
                     it.copy(loginError = OnboardingLoginError.TokenLimitReached, loginAction = AsyncActionState.Idle)
                 }
+                startQrLogin(origin)
                 return@launch
             }
 
@@ -240,12 +278,14 @@ class OnboardingViewModel(
         when (state.step) {
             OnboardingStep.CREDENTIALS -> {
                 loginGeneration++
+                qrLoginJob?.cancel()
                 _uiState.update {
                     it.copy(
                         step = OnboardingStep.SERVER,
                         password = "",
                         loginError = null,
                         loginAction = AsyncActionState.Idle,
+                        qrLoginState = QrLoginUiState.Idle,
                     )
                 }
             }
@@ -268,10 +308,14 @@ class OnboardingViewModel(
         }
     }
 
+    fun onRetryQrLogin() {
+        val origin = _uiState.value.normalizedOrigin ?: return
+        startQrLogin(origin)
+    }
+
     // ------------------------------------------------------------- Async mapping
 
     private suspend fun handleServerValidationResult(
-        origin: String,
         generation: Int,
         result: ServerValidationResult,
     ) {
@@ -356,6 +400,7 @@ class OnboardingViewModel(
                     serverAction = AsyncActionState.Idle,
                 )
             }
+            startQrLogin(origin)
         }
     }
 
@@ -386,27 +431,113 @@ class OnboardingViewModel(
             }
 
             LoginCompletionResult.InvalidCredentials ->
-                setLoginError(OnboardingLoginError.InvalidCredentials)
+                setLoginErrorAndRestartQr(OnboardingLoginError.InvalidCredentials)
 
             LoginCompletionResult.NetworkFailure ->
-                setLoginError(OnboardingLoginError.NetworkFailure)
+                setLoginErrorAndRestartQr(OnboardingLoginError.NetworkFailure)
 
             LoginCompletionResult.TlsFailure ->
-                setLoginError(OnboardingLoginError.TlsFailure)
+                setLoginErrorAndRestartQr(OnboardingLoginError.TlsFailure)
 
             LoginCompletionResult.ServerFailure ->
-                setLoginError(OnboardingLoginError.ServerFailure)
+                setLoginErrorAndRestartQr(OnboardingLoginError.ServerFailure)
 
             LoginCompletionResult.VerificationFailure ->
-                setLoginError(OnboardingLoginError.VerificationFailure)
+                setLoginErrorAndRestartQr(OnboardingLoginError.VerificationFailure)
 
             LoginCompletionResult.TokenCreationFailure,
             LoginCompletionResult.TokenVerificationFailure,
             LoginCompletionResult.PersistenceFailure ->
-                setLoginError(OnboardingLoginError.DeviceCredentialFailure)
+                setLoginErrorAndRestartQr(OnboardingLoginError.DeviceCredentialFailure)
 
             LoginCompletionResult.TokenLimitReached ->
-                setLoginError(OnboardingLoginError.TokenLimitReached)
+                setLoginErrorAndRestartQr(OnboardingLoginError.TokenLimitReached)
+        }
+    }
+
+    private fun setLoginErrorAndRestartQr(error: OnboardingLoginError) {
+        setLoginError(error)
+        _uiState.value.normalizedOrigin?.let(::startQrLogin)
+    }
+
+    private fun startQrLogin(origin: String) {
+        qrLoginJob?.cancel()
+        _uiState.update { it.copy(qrLoginState = QrLoginUiState.Loading) }
+        qrLoginJob = viewModelScope.launch {
+            when (val start = beginQrLogin(origin)) {
+                QrLoginStartResult.Unsupported ->
+                    _uiState.update { it.copy(qrLoginState = QrLoginUiState.Unsupported) }
+                QrLoginStartResult.NetworkFailure ->
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.NETWORK))
+                    }
+                QrLoginStartResult.PersistenceFailure ->
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.PERSISTENCE))
+                    }
+                is QrLoginStartResult.Ready -> pollQrSession(origin, start.session)
+            }
+        }
+    }
+
+    private suspend fun pollQrSession(origin: String, session: QrLoginSession) {
+        _uiState.update { it.copy(qrLoginState = QrLoginUiState.Ready(session)) }
+        var intervalSeconds = session.pollIntervalSeconds
+        while (true) {
+            when (val result = pollQrLogin(origin, session)) {
+                QrLoginPollResult.Pending -> delay(intervalSeconds * 1_000L)
+                QrLoginPollResult.SlowDown -> {
+                    intervalSeconds += 5
+                    delay(intervalSeconds * 1_000L)
+                }
+                QrLoginPollResult.Denied -> {
+                    _uiState.update { it.copy(qrLoginState = QrLoginUiState.Denied) }
+                    return
+                }
+                QrLoginPollResult.Expired -> {
+                    _uiState.update { it.copy(qrLoginState = QrLoginUiState.Expired) }
+                    return
+                }
+                QrLoginPollResult.NetworkFailure -> {
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.NETWORK))
+                    }
+                    return
+                }
+                QrLoginPollResult.InsufficientScopes -> {
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.INSUFFICIENT_SCOPES))
+                    }
+                    return
+                }
+                QrLoginPollResult.VerificationFailure -> {
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.VERIFICATION))
+                    }
+                    return
+                }
+                QrLoginPollResult.PersistenceFailure -> {
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.PERSISTENCE))
+                    }
+                    return
+                }
+                is QrLoginPollResult.Success -> {
+                    if (!completedEmitted) {
+                        completedEmitted = true
+                        _effects.emit(OnboardingEffect.Completed)
+                    }
+                    _uiState.update {
+                        it.copy(
+                            username = result.verifiedUser.username.orEmpty(),
+                            password = "",
+                            loginError = null,
+                            loginAction = AsyncActionState.Idle,
+                        )
+                    }
+                    return
+                }
+            }
         }
     }
 

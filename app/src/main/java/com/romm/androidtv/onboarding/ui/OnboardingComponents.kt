@@ -51,6 +51,7 @@ private val OnboardingErrorColor = Color(0xFFF87171)
 @Composable
 fun OnboardingScreenShell(
     modifier: Modifier = Modifier,
+    maxContentWidth: androidx.compose.ui.unit.Dp = 640.dp,
     content: @Composable () -> Unit,
 ) {
     Box(
@@ -66,7 +67,7 @@ fun OnboardingScreenShell(
             .padding(56.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Box(modifier = Modifier.widthIn(max = 640.dp)) {
+        Box(modifier = Modifier.widthIn(max = maxContentWidth)) {
             content()
         }
     }

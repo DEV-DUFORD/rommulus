@@ -78,6 +78,20 @@
     <string name="onboarding_remove_oldest_device_loading">Removing device…</string>
     <string name="onboarding_login_error_empty">Username and password are required</string>
     <string name="onboarding_server_error_persistence">Could not save this server address. Please try again.</string>
+    <string name="onboarding_qr_heading">Or sign in with your phone</string>
+    <string name="onboarding_qr_loading">Preparing secure sign-in…</string>
+    <string name="onboarding_qr_instruction">Scan this code, sign in to RomM, then approve this TV.</string>
+    <string name="onboarding_qr_code_label">Pairing code: %1$s</string>
+    <string name="onboarding_qr_expires">Code expires in %1$d minutes</string>
+    <string name="onboarding_qr_description">QR code for signing in to RomM</string>
+    <string name="onboarding_qr_unsupported">QR sign-in requires RomM 5.1 or newer. You can still sign in with your username and password.</string>
+    <string name="onboarding_qr_denied">Sign-in was denied on your phone.</string>
+    <string name="onboarding_qr_expired">This pairing code expired.</string>
+    <string name="onboarding_qr_network_error">Could not start QR sign-in. Check the connection and try again.</string>
+    <string name="onboarding_qr_scope_error">Required permissions were not approved. Try again and keep all requested permissions selected.</string>
+    <string name="onboarding_qr_verification_error">RomM approved this TV, but the account could not be verified.</string>
+    <string name="onboarding_qr_persistence_error">RomM approved this TV, but the sign-in could not be saved securely.</string>
+    <string name="onboarding_qr_retry">New QR Code</string>
 
     <!-- Pause Menu -->
     <string name="pause_menu_paused">Paused</string>

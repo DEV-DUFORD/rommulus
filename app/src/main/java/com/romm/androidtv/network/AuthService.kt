@@ -249,19 +249,38 @@ fun parseVerifiedUser(json: String): VerifiedUser {
 fun verifyExistingSession(
     client: okhttp3.OkHttpClient,
     origin: String
+): AuthFlowResult = verifySession(client, origin, authorization = null)
+
+/**
+ * Checks a durable client token without depending on browser-session cookies.
+ */
+fun verifyBearerSession(
+    client: okhttp3.OkHttpClient,
+    origin: String,
+    token: String,
+): AuthFlowResult {
+    if (token.isBlank()) return AuthFlowResult.Failure(AuthError.VERIFICATION_FAILED, 401)
+    return verifySession(client, origin, authorization = "Bearer $token")
+}
+
+private fun verifySession(
+    client: okhttp3.OkHttpClient,
+    origin: String,
+    authorization: String?,
 ): AuthFlowResult {
     if (origin.isBlank()) return AuthFlowResult.Failure(AuthError.ORIGIN_NOT_CONFIGURED)
 
     val normalizedOrigin = RommOrigin.parse(origin)?.toUrl() ?: origin.removeSuffix("/")
 
-    // Try /api/users/me with existing cookies
-    val verifyRequest = okhttp3.Request.Builder()
+    val verifyRequestBuilder = okhttp3.Request.Builder()
         .url("$normalizedOrigin/api/users/me")
         .get()
-        .build()
+    if (authorization != null) {
+        verifyRequestBuilder.header("Authorization", authorization)
+    }
 
     return try {
-        client.newCall(verifyRequest).execute().use { response ->
+        client.newCall(verifyRequestBuilder.build()).execute().use { response ->
             when {
                 response.isSuccessful -> {
                     val body = response.body?.string()
