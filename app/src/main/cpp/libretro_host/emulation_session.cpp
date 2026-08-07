@@ -180,7 +180,8 @@ void EmulationSession::runLoop() {
     // current on this thread. Create it now and make it current before
     // entering the loop. The SurfaceView may attach its ANativeWindow
     // slightly after the thread starts, so spin-wait briefly.
-    bool hwRender = environment_.isHardwareRendering();
+    const bool hwRender = environment_.isHardwareRendering();
+    bool coreContextInitialized = false;
     if (hwRender) {
         if (!glContext_.createDisplay()) {
             LOGE("HW render: failed to create EGL display");
@@ -210,17 +211,20 @@ void EmulationSession::runLoop() {
             if (cb.context_reset) {
                 cb.context_reset();
             }
+            coreContextInitialized = true;
         }
     }
 
     while (threadShouldRun_.load()) {
         if (hwRender) {
             const auto update = glContext_.applyPendingWindowUpdate();
-            if (update == GlContextManager::WindowUpdateResult::kAttached) {
+            if (update == GlContextManager::WindowUpdateResult::kAttached &&
+                !coreContextInitialized) {
                 auto& cb = environment_.hwRenderCallbackMutable();
                 if (cb.context_reset) {
                     cb.context_reset();
                 }
+                coreContextInitialized = true;
             }
             if (!glContext_.hasSurface()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
