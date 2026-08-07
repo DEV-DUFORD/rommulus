@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,8 +62,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.tv.foundation.lazy.list.TvLazyRow
-import androidx.tv.foundation.lazy.list.itemsIndexed
 import coil.compose.AsyncImage
 import com.romm.androidtv.library.CollectionDialogState
 import com.romm.androidtv.library.CollectionLoadState
@@ -437,7 +437,7 @@ private fun GameDetailContent(
                     color = RommTvColors.TextPrimary,
                     modifier = Modifier.padding(top = 32.dp, bottom = 12.dp),
                 )
-                TvLazyRow(
+                LazyRow(
                     contentPadding = PaddingValues(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {

@@ -1,6 +1,5 @@
 package com.romm.androidtv.library.ui
 
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,13 +23,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+
+private val GameCardShape = RoundedCornerShape(8.dp)
 
 /**
  * A poster-style cover-art card for a Home shelf, styled after standard
@@ -50,8 +49,6 @@ fun GameCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (isFocused) 1.1f else 1f, label = "gameCardScale")
-    val elevation by animateFloatAsState(if (isFocused) 12f else 0f, label = "gameCardElevation")
 
     Column(
         modifier = modifier
@@ -71,14 +68,19 @@ fun GameCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .scale(scale)
-                .shadow(elevation.dp, RoundedCornerShape(8.dp))
-                .clip(RoundedCornerShape(8.dp))
+                .graphicsLayer {
+                    val focusedScale = if (isFocused) 1.1f else 1f
+                    scaleX = focusedScale
+                    scaleY = focusedScale
+                    shadowElevation = if (isFocused) 12.dp.toPx() else 0f
+                    shape = GameCardShape
+                    clip = true
+                }
                 .background(RommTvColors.NightLo)
                 .border(
                     width = if (isFocused) 3.dp else 0.dp,
                     color = if (isFocused) RommTvColors.Romm500 else Color.Transparent,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = GameCardShape,
                 ),
             contentAlignment = Alignment.Center,
         ) {

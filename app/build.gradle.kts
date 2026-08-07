@@ -154,7 +154,8 @@ android {
 dependencies {
     // Compose BOM pins all androidx.compose.* versions
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui:1.7.0-beta01")
+    implementation("androidx.compose.foundation:foundation:1.7.0-beta01")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
@@ -213,9 +214,7 @@ dependencies {
     // Decodes RomM's bundled platform icons, which are SVGs (/assets/platforms/{slug}.svg).
     implementation("io.coil-kt:coil-svg:2.6.0")
 
-    // Jetpack Compose for TV: focus-aware lazy lists/rows and D-pad focus restoration,
-    // used by the native browsing UI (UI_REFACTOR.md) instead of hand-rolled focus plumbing.
-    implementation("androidx.tv:tv-foundation:1.0.0-alpha10")
+    // Material components optimized for TV.
     implementation("androidx.tv:tv-material:1.0.0")
 
     // Unit testing

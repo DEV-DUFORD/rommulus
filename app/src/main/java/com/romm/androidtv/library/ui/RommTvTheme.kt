@@ -5,6 +5,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
@@ -141,25 +142,29 @@ object RommTvColors {
     val TextSecondary: Color get() = activePalette.textSecondary
 }
 
-/** Material color scheme derived from the active [RommTvColors] palette. */
-private val RommTvColorScheme
-    get() = darkColorScheme(
-        primary = RommTvColors.Romm500,
+/** Material color scheme derived from [palette]. */
+private fun rommTvColorScheme(palette: RommPalette) =
+    darkColorScheme(
+        primary = palette.romm500,
         onPrimary = Color.White,
-        secondary = RommTvColors.Romm400,
+        secondary = palette.romm400,
         onSecondary = Color.White,
-        background = RommTvColors.NightHi,
-        onBackground = RommTvColors.TextPrimary,
-        surface = RommTvColors.NightLo,
-        onSurface = RommTvColors.TextPrimary,
-        surfaceVariant = RommTvColors.StageLo,
-        onSurfaceVariant = RommTvColors.TextSecondary,
+        background = palette.nightHi,
+        onBackground = palette.textPrimary,
+        surface = palette.nightLo,
+        onSurface = palette.textPrimary,
+        surfaceVariant = palette.stageLo,
+        onSurfaceVariant = palette.textSecondary,
     )
 
 @Composable
 fun RommTvTheme(content: @Composable () -> Unit) {
+    val theme = activeTheme
+    val colorScheme = remember(theme) {
+        rommTvColorScheme(RommTvPalettes.forTheme(theme))
+    }
     MaterialTheme(
-        colorScheme = RommTvColorScheme,
+        colorScheme = colorScheme,
         content = content,
     )
 }

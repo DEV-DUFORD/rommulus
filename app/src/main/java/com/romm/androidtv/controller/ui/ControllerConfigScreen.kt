@@ -100,7 +100,7 @@ fun ControllerConfigScreen(
     val tabFocusRequesters = remember(state.consoleName) { Array(4) { FocusRequester() } }
     val rowFocusRequesters =
         remember(state.consoleName) {
-            mutableStateOf<Map<Pair<Int, BindingSlot>, FocusRequester>>(emptyMap())
+            mutableMapOf<Pair<Int, BindingSlot>, FocusRequester>()
         }
     val lastFocusedRowByPlayer = remember(state.consoleName) { IntArray(4) }
     val lastFocusedSlotByPlayer = remember(state.consoleName) {
@@ -125,9 +125,9 @@ fun ControllerConfigScreen(
     }
 
     // Initial focus goes to the first binding row; tab changes still restore that tab's last row.
-    LaunchedEffect(currentPlayer, rowFocusRequesters.value.size, initialListPositioned, listLaidOut) {
+    LaunchedEffect(currentPlayer, initialListPositioned, listLaidOut) {
         if (!initialListPositioned || !listLaidOut) return@LaunchedEffect
-        val requester = rowFocusRequesters.value[
+        val requester = rowFocusRequesters[
             lastFocusedRowByPlayer[currentPlayer] to lastFocusedSlotByPlayer[currentPlayer]
         ]
         if (requester != null) {
@@ -141,7 +141,7 @@ fun ControllerConfigScreen(
     var wasCapturing by remember { mutableStateOf(false) }
     LaunchedEffect(state.capture) {
         if (state.capture == null && wasCapturing) {
-            val requester = rowFocusRequesters.value[
+            val requester = rowFocusRequesters[
                 lastFocusedRowByPlayer[currentPlayer] to lastFocusedSlotByPlayer[currentPlayer]
             ]
             if (requester != null) {
@@ -167,7 +167,7 @@ fun ControllerConfigScreen(
                         if (focusedTabIndex.value == currentPlayer) {
                             val idx = lastFocusedRowByPlayer[currentPlayer]
                             val slot = lastFocusedSlotByPlayer[currentPlayer]
-                            rowFocusRequesters.value[idx to slot]?.requestFocus()
+                            rowFocusRequesters[idx to slot]?.requestFocus()
                             focusedTabIndex.value = null
                             true
                         } else false
@@ -238,7 +238,9 @@ fun ControllerConfigScreen(
                         focusedRowIndex.value = index
                         lastFocusedRowByPlayer[currentPlayer] = index
                         lastFocusedSlotByPlayer[currentPlayer] = slot
-                        state.rows.getOrNull(index)?.controlId?.let(onRowFocused)
+                        if (BuildConfig.CONTROLLER_HIGHLIGHTING_ENABLED) {
+                            state.rows.getOrNull(index)?.controlId?.let(onRowFocused)
+                        }
                     }
                 },
                 onRowSelected = { controlId, slot -> currentOnRowSelected(controlId, slot) },
@@ -418,8 +420,7 @@ private fun PlayerTabRow(
 private fun BindingList(
     rows: List<ControllerBindingRow>,
     listState: androidx.compose.foundation.lazy.LazyListState,
-    rowFocusRequesters:
-        androidx.compose.runtime.MutableState<Map<Pair<Int, BindingSlot>, FocusRequester>>,
+    rowFocusRequesters: MutableMap<Pair<Int, BindingSlot>, FocusRequester>,
     onFocusChanged: (index: Int, slot: BindingSlot, isFocused: Boolean) -> Unit,
     onRowSelected: (CoreControlId, BindingSlot) -> Unit,
     onResetAllRequest: () -> Unit,
@@ -447,16 +448,18 @@ private fun BindingList(
             modifier = Modifier.fillMaxWidth().weight(1f).onGloballyPositioned { onListLaidOut() },
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(rows.size) { index ->
+            items(
+                count = rows.size,
+                key = { index -> rows[index].controlId.id },
+            ) { index ->
                 val row = rows[index]
                 BindingRow(
                     row = row,
                     onFocusRequesterCreated = { slot, requester ->
-                        rowFocusRequesters.value =
-                            rowFocusRequesters.value + ((index to slot) to requester)
+                        rowFocusRequesters[index to slot] = requester
                     },
                     onFocusRequesterDisposed = { slot ->
-                        rowFocusRequesters.value = rowFocusRequesters.value - (index to slot)
+                        rowFocusRequesters.remove(index to slot)
                     },
                     onFocusChanged = { slot, focused -> onFocusChanged(index, slot, focused) },
                     onMappingSelected = { slot -> onRowSelected(row.controlId, slot) },

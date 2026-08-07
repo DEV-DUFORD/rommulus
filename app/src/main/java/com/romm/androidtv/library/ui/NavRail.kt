@@ -1,5 +1,8 @@
 package com.romm.androidtv.library.ui
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,12 +28,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Collections
@@ -54,6 +69,9 @@ private val navIcons: Map<NavDestination, ImageVector> = mapOf(
     NavDestination.SETTINGS to Icons.Filled.Settings,
 )
 
+private val CollapsedRailWidth = 72.dp
+private val ExpandedRailWidth = 200.dp
+
 /**
  * Shared top-level scaffold for the four sidebar-navigable native screens
  * (Home/Platforms/Collections/Search). Fixes two bugs found on-device
@@ -73,19 +91,35 @@ fun LibraryScaffold(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    Row(
+    var railHasFocus by remember { mutableStateOf(false) }
+    val railWidth by animateDpAsState(
+        targetValue = if (railHasFocus) ExpandedRailWidth else CollapsedRailWidth,
+        animationSpec = tween(durationMillis = 160),
+        label = "navRailWidth",
+    )
+    val contentOffset = railWidth - CollapsedRailWidth
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(RommTvColors.NightHi),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = CollapsedRailWidth)
+                .offset(x = contentOffset),
+        ) {
+            content()
+        }
         NavRail(
             selected = current,
             icons = navIcons,
             onSelect = onNavigate,
+            expanded = railHasFocus,
+            width = railWidth,
+            onExpandedChange = { railHasFocus = it },
         )
-        Box(modifier = Modifier.fillMaxSize()) {
-            content()
-        }
     }
 }
 
@@ -101,17 +135,37 @@ fun NavRail(
     selected: NavDestination,
     onSelect: (NavDestination) -> Unit,
     icons: Map<NavDestination, ImageVector>,
+    expanded: Boolean,
+    width: androidx.compose.ui.unit.Dp,
+    onExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var railHasFocus by remember { mutableStateOf(false) }
-    val railWidth = if (railHasFocus) 200.dp else 72.dp
+    val focusManager = LocalFocusManager.current
+    val view = LocalView.current
+    val labelAlpha by animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = tween(durationMillis = 120),
+        label = "navRailLabelAlpha",
+    )
 
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .width(railWidth)
+            .width(width)
+            .zIndex(1f)
+            .clipToBounds()
             .background(RommTvColors.StageHi)
-            .onFocusChanged { railHasFocus = it.hasFocus }
+            .onFocusChanged { onExpandedChange(it.hasFocus) }
+            .onPreviewKeyEvent { event ->
+                if (expanded && event.key == Key.Back && event.type == KeyEventType.KeyDown) {
+                    if (!focusManager.moveFocus(FocusDirection.Right)) {
+                        focusManager.clearFocus()
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
             .padding(vertical = 24.dp),
         horizontalAlignment = Alignment.Start,
     ) {
@@ -119,9 +173,19 @@ fun NavRail(
             NavRailItem(
                 destination = destination,
                 icon = icons.getValue(destination),
-                expanded = railHasFocus,
+                labelAlpha = labelAlpha,
                 isSelected = destination == selected,
-                onClick = { onSelect(destination) },
+                onClick = {
+                    onSelect(destination)
+                    if (destination != NavDestination.SETTINGS) {
+                        view.postOnAnimation {
+                            view.postOnAnimation {
+                                focusManager.clearFocus(force = true)
+                                focusManager.moveFocus(FocusDirection.Next)
+                            }
+                        }
+                    }
+                },
             )
         }
     }
@@ -131,7 +195,7 @@ fun NavRail(
 private fun NavRailItem(
     destination: NavDestination,
     icon: ImageVector,
-    expanded: Boolean,
+    labelAlpha: Float,
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -159,15 +223,15 @@ private fun NavRailItem(
             contentDescription = destination.label,
             tint = if (accent) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
         )
-        if (expanded) {
-            Text(
-                text = destination.label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (accent) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 12.dp),
-            )
-        }
+        Text(
+            text = destination.label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (accent) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .padding(start = 12.dp)
+                .alpha(labelAlpha),
+        )
     }
 }
