@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="320"
+     height="180"
+     viewBox="0 0 320 180">
+  <defs>
+    <clipPath id="logo-clip">
+      <circle cx="250" cy="90" r="58"/>
+    </clipPath>
+  </defs>
+  <rect width="320" height="180" fill="#102a33"/>
+  <text x="24"
+        y="103"
+        fill="#e4eff1"
+        font-family="sans-serif"
+        font-size="38"
+        font-weight="700">RomMulus</text>
+  <g clip-path="url(#logo-clip)">
+    <circle cx="250" cy="90" r="58" fill="#3f9099"/>
+    <path d="M192 148 308 32v116z" fill="#28616a"/>
+    <path d="M192 32h34l18 11h64v-11z" fill="#e4eff1"/>
+    <path d="M192 148h50l35 22h31v-22z" fill="#a5c8cf"/>
+  </g>
+  <circle cx="250" cy="62" r="8" fill="#e5c7a7"/>
+  <circle cx="231" cy="81" r="8" fill="#e5c7a7"/>
+  <circle cx="269" cy="81" r="8" fill="#e1a38e"/>
+  <circle cx="250" cy="100" r="8" fill="#e1a38e"/>
+</svg>

@@ -348,7 +348,7 @@ class NativeLibretroHost {
          * [resolveBundledMgbaCorePath], [resolveBundledStellaCorePath], and
          * [resolveBundledGambatteCorePath]:
          * every bundled core is a normal JNI
-         * library shipped in the APK, extracted to app-private storage under
+         * library shipped in the installed APK set, extracted to app-private storage under
          * a name derived from [soFileName] so multiple cores never collide.
          * The APK entry CRC is checked on every resolution so an app update
          * cannot keep loading a stale previously extracted core.
@@ -359,9 +359,16 @@ class NativeLibretroHost {
 
             val abi = Build.SUPPORTED_ABIS.first()
             val entryName = "lib/$abi/$soFileName"
-            ZipFile(context.applicationInfo.sourceDir).use { zip ->
-                val entry = zip.getEntry(entryName)
-                    ?: error("$entryName not found in APK (${context.applicationInfo.sourceDir})")
+            val installedApks = buildList {
+                add(context.applicationInfo.sourceDir)
+                context.applicationInfo.splitSourceDirs?.let(::addAll)
+            }.distinct()
+            val coreApk = findApkContainingEntry(installedApks, entryName)
+
+            ZipFile(coreApk).use { zip ->
+                val entry = checkNotNull(zip.getEntry(entryName)) {
+                    "$entryName disappeared from APK ($coreApk)"
+                }
                 if (destination.isFile && destination.length() == entry.size && crc32(destination) == entry.crc) {
                     return destination.absolutePath
                 }
@@ -377,6 +384,15 @@ class NativeLibretroHost {
                 }
             }
             return destination.absolutePath
+        }
+
+        internal fun findApkContainingEntry(apkPaths: List<String>, entryName: String): String {
+            for (apkPath in apkPaths) {
+                ZipFile(apkPath).use { zip ->
+                    if (zip.getEntry(entryName) != null) return apkPath
+                }
+            }
+            error("$entryName not found in installed APKs: ${apkPaths.joinToString()}")
         }
 
         private fun crc32(file: File): Long {
