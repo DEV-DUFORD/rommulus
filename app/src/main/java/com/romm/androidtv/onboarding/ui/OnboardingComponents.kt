@@ -7,14 +7,20 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -42,6 +48,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.library.ui.RommTvColors
+import com.romm.androidtv.platform.WindowWidthClass
+import com.romm.androidtv.platform.currentDeviceProfile
 
 /** Error text color with WCAG AA contrast against the NightHi background. */
 private val OnboardingErrorColor = Color(0xFFF87171)
@@ -57,6 +65,13 @@ fun OnboardingScreenShell(
     maxContentWidth: androidx.compose.ui.unit.Dp = 640.dp,
     content: @Composable () -> Unit,
 ) {
+    val profile = currentDeviceProfile()
+    val horizontalPadding = when (profile.windowWidthClass) {
+        WindowWidthClass.COMPACT -> 16.dp
+        WindowWidthClass.MEDIUM -> 32.dp
+        WindowWidthClass.EXPANDED -> 56.dp
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -67,11 +82,15 @@ fun OnboardingScreenShell(
                     end = Offset(1400f, 1400f),
                 ),
             )
-            .padding(56.dp),
+            .safeDrawingPadding()
+            .imePadding()
+            .padding(horizontal = horizontalPadding),
         contentAlignment = Alignment.Center,
     ) {
         Box(modifier = Modifier.widthIn(max = maxContentWidth)) {
-            content()
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                content()
+            }
         }
     }
 }
@@ -97,6 +116,7 @@ fun OnboardingPrimaryButton(
     modifier: Modifier = Modifier,
     testTag: String? = null,
     focusRequester: FocusRequester? = null,
+    isCompact: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -124,7 +144,13 @@ fun OnboardingPrimaryButton(
                     Modifier
                 },
             )
-            .width(240.dp)
+            .then(
+                if (isCompact) {
+                    Modifier.fillMaxWidth().widthIn(max = 240.dp)
+                } else {
+                    Modifier.width(240.dp)
+                },
+            )
             .height(48.dp)
             .background(containerColor, RoundedCornerShape(8.dp))
             .then(

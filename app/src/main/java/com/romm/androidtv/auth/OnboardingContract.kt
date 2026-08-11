@@ -105,6 +105,7 @@ object RommClientTokenScopes {
         "devices.write",
         "firmware.read",
         "collections.read",
+        "collections.write",
     )
 }
 

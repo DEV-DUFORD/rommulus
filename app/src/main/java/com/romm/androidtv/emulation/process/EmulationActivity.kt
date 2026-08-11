@@ -1,6 +1,7 @@
 package com.romm.androidtv.emulation.process
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.input.InputManager
 import android.os.Bundle
 import android.os.SystemClock
@@ -11,6 +12,9 @@ import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.Animatable
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -62,6 +66,7 @@ import com.romm.androidtv.controller.LibretroInputAdapter
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
 import com.romm.androidtv.controller.config.ControllerConfigDatabase
 import com.romm.androidtv.controller.config.ControllerConfigRepository
+import com.romm.androidtv.controller.config.CoreControlDescriptor
 import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.controller.config.RoomControllerConfigRepository
 import com.romm.androidtv.controller.config.toRouterMappings
@@ -81,6 +86,8 @@ import com.romm.androidtv.emulation.model.SaveBackupStore
 import com.romm.androidtv.emulation.model.SessionDescriptorPatch
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
+import com.romm.androidtv.emulation.touch.TouchControllerOverlay
+import com.romm.androidtv.emulation.touch.TouchInputCoordinator
 import com.romm.androidtv.emulation.video.EmulationSurface
 import com.romm.androidtv.emulation.video.VideoOptionsDialog
 import com.romm.androidtv.library.ui.tvButtonFocus
@@ -173,18 +180,21 @@ class EmulationActivity : ComponentActivity() {
 
     // Translates the router's four-slot snapshots into Libretro RetroPad
     // input and pushes them to the native input_state callback.
+    /**
+     * Phase 6B touch coordinator. Sits between the physical [onPortUpdated] path
+     * (below) and [host.nativeUpdateInputState] so the two input producers (physical
+     * controller + on-screen touch overlay) merge instead of overwriting each other.
+     * Touch is merged into port 0 only; ports 1-3 pass through unchanged.
+     */
+    private val touchCoordinator: TouchInputCoordinator by lazy {
+        TouchInputCoordinator { buttonMasks, analogValues ->
+            host.nativeUpdateInputState(buttonMasks, analogValues)
+        }
+    }
+
     private val inputAdapter: LibretroInputAdapter by lazy {
         LibretroInputAdapter(controllerRouter) { ports ->
-            val buttonMasks = IntArray(ControllerSlot.SLOT_COUNT)
-            val analogValues = IntArray(ControllerSlot.SLOT_COUNT * 4)
-            ports.forEachIndexed { port, state ->
-                buttonMasks[port] = state.buttonsMask
-                analogValues[port * 4 + 0] = state.leftX
-                analogValues[port * 4 + 1] = state.leftY
-                analogValues[port * 4 + 2] = state.rightX
-                analogValues[port * 4 + 3] = state.rightY
-            }
-            host.nativeUpdateInputState(buttonMasks, analogValues)
+            touchCoordinator.onPhysicalPorts(ports)
         }
     }
 
@@ -555,37 +565,68 @@ class EmulationActivity : ComponentActivity() {
 
         this.savePath = savePath
 
-        setContent {
-            RommTvTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
-                    EmulationScreen(
-                        host = host,
-                        sessionStarted = sessionStarted,
-                        lastError = host.nativeGetLastError(),
-                        failureCategory = if (!sessionStarted) classifyLaunchFailure(host.nativeGetLastError()) else LaunchFailureCategory.NONE,
-                        keyActivityEvents = keyActivityEvents,
-                        backKeyHeld = backKeyHeld,
-                        quickBackTapEvents = quickBackTapEvents,
-                        pauseOverlay = pauseOverlay,
-                        coreIdForMapping = coreIdForMapping,
-                        controllerConfigRepository = controllerConfigRepository,
-                        captureCoordinator = captureCoordinator,
-                        controllerRouter = controllerRouter,
-                        saveFailureVisible = saveFailureVisible,
-                        scanlinesEnabled = scanlinesEnabled,
-                        onSetScanlinesEnabled = ::setScanlinesEnabled,
-                        onStop = { finishAndDeliverResult() },
-                        onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
-                        onSetNativePaused = { paused -> host.nativeSetPaused(paused) },
-                        onOpenPauseMenuCheckpoint = { checkpointForPauseMenu() },
-                        // Phase 4: opening the pause menu must cancel any in-progress capture
-                        // ("Entering controller settings from a paused game must never resume
-                        // gameplay" — capture must not survive the pause menu).
-                        onCaptureCancel = { captureCoordinator.cancel() },
-                    )
+        // Phase 6B: effective on-screen touch controls = device reports a touchscreen AND the
+        // persisted setting arrived enabled. An intent extra must NEVER force touch UI onto a
+        // device that reports no touchscreen, so the touchscreen check is authoritative here
+        // regardless of what the caller passed.
+        val touchControlsEnabled = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) &&
+            intent.getBooleanExtra("on_screen_controls_enabled", false)
+
+            setContent {
+                RommTvTheme {
+                    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+                        EmulationScreen(
+                            host = host,
+                            sessionStarted = sessionStarted,
+                            lastError = host.nativeGetLastError(),
+                            failureCategory = if (!sessionStarted) classifyLaunchFailure(host.nativeGetLastError()) else LaunchFailureCategory.NONE,
+                            keyActivityEvents = keyActivityEvents,
+                            backKeyHeld = backKeyHeld,
+                            quickBackTapEvents = quickBackTapEvents,
+                            pauseOverlay = pauseOverlay,
+                            coreIdForMapping = coreIdForMapping,
+                            controllerConfigRepository = controllerConfigRepository,
+                            captureCoordinator = captureCoordinator,
+                            controllerRouter = controllerRouter,
+                            saveFailureVisible = saveFailureVisible,
+                            scanlinesEnabled = scanlinesEnabled,
+                            touchControlsEnabled = touchControlsEnabled,
+                            touchCoordinator = touchCoordinator,
+                            touchControls = CoreControllerProfiles.byCoreId(coreId ?: "")?.controls.orEmpty(),
+                            onSetScanlinesEnabled = ::setScanlinesEnabled,
+                            onStop = { finishAndDeliverResult() },
+                            onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
+                            onSetNativePaused = { paused -> host.nativeSetPaused(paused) },
+                            onOpenPauseMenuCheckpoint = { checkpointForPauseMenu() },
+                            // Phase 4: opening the pause menu must cancel any in-progress capture
+                            // ("Entering controller settings from a paused game must never resume
+                            // gameplay" — capture must not survive the pause menu).
+                            onCaptureCancel = { captureCoordinator.cancel() },
+                        )
+
+                        // Phase 7: hide system bars during active gameplay (sessionStarted,
+                        // pauseOverlay == CLOSED, no save-failure UI) so the emulation is
+                        // fully immersive on phone/tablet. Restored to normal (bars shown)
+                        // whenever gameplay is no longer "active" (overlay open, session ends,
+                        // or save-failure dialog visible). Phase 6B: the same gameplay-active
+                        // policy gates touch input routing — paused/configuration overlays must
+                        // never leak touch into the core, so routing is disabled (and any held
+                        // touch state released) the moment gameplay is no longer active.
+                        val overlayState by pauseOverlay.collectAsState()
+                        val saveFailureShown by saveFailureVisible.collectAsState(initial = false)
+                        LaunchedEffect(sessionStarted, overlayState, saveFailureShown) {
+                            val routingActive = shouldRouteGameplayInput(
+                                sessionStarted = sessionStarted,
+                                pauseOverlay = overlayState,
+                                saveFailureVisible = saveFailureShown,
+                            )
+                            applyImmersiveMode(routingActive)
+                            touchCoordinator.setRoutingEnabled(routingActive)
+                            if (!routingActive) touchCoordinator.resetTouch()
+                        }
+                    }
                 }
             }
-        }
     }
 
     /**
@@ -673,6 +714,9 @@ class EmulationActivity : ComponentActivity() {
         checkpointIfRunning()
         // Phase 4: capture must not survive activity stop (spec rule 8).
         captureCoordinator.cancel()
+        // Phase 6B: release any held touch buttons when the activity loses foreground, so a
+        // stuck touch input can't leak into the core on resume.
+        touchCoordinator.resetTouch()
         super.onPause()
     }
 
@@ -812,6 +856,57 @@ class EmulationActivity : ComponentActivity() {
             if (result.endEpochMs > 0L) putExtra("play_session_end_epoch_ms", result.endEpochMs)
             if (stageRomId > 0L) putExtra("rom_id", stageRomId)
             if (stageRomHash.isNotBlank()) putExtra("rom_hash", stageRomHash)
+        }
+    }
+
+    /**
+     * Phase 7: applies or restores edge-to-edge immersive mode using
+     * [WindowInsetsControllerCompat]. Called from the Compose [LaunchedEffect]
+     * whenever the gameplay-active state flips, and from [onWindowFocusChanged]
+     * to re-apply after IME/diaglog/task-switch reveals the bars.
+     */
+    private fun applyImmersiveMode(active: Boolean) {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (active) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    override fun onStop() {
+        // When gameplay leaves the foreground (returned to launcher, or finishing
+        // the activity), restore normal system-bar visibility so the user sees
+        // status/navigation chrome again on the next screen. The Compose
+        // LaunchedEffect above also handles the case where the pause overlay
+        // opens or the session ends, but onStop covers activity-level lifecycle
+        // transitions (home, task switch).
+        applyImmersiveMode(active = false)
+        // Phase 6B: release any held touch state on activity stop.
+        touchCoordinator.resetTouch()
+        super.onStop()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && sessionStarted) {
+            // Re-apply immersive after IME, system dialog, or task switch that may
+            // have revealed the status/navigation bars. The 2-state check mirrors
+            // the Compose-side hook, so the bars stay hidden as long as gameplay
+            // is the active foreground experience.
+            applyImmersiveMode(
+                shouldRouteGameplayInput(
+                    sessionStarted = sessionStarted,
+                    pauseOverlay = pauseOverlay.value,
+                    saveFailureVisible = saveFailureVisible.value,
+                ),
+            )
+        } else {
+            // Phase 6B: releasing focus (IME, system dialog, task switch) must release any held
+            // touch state so it never lingers in the core.
+            touchCoordinator.resetTouch()
         }
     }
 
@@ -979,6 +1074,9 @@ private fun EmulationScreen(
     controllerRouter: ControllerEventRouter,
     saveFailureVisible: Flow<Boolean>,
     scanlinesEnabled: StateFlow<Boolean>,
+    touchControlsEnabled: Boolean,
+    touchCoordinator: TouchInputCoordinator,
+    touchControls: List<CoreControlDescriptor>,
     onSetScanlinesEnabled: (Boolean) -> Boolean,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
@@ -1095,6 +1193,22 @@ private fun EmulationScreen(
             BackHintIcon(
                 progress = backHoldProgress.value,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)
+            )
+        }
+
+        // Phase 6B: on-screen touch controller for touchscreen devices, rendered above the
+        // video surface and below the pause/error dialogs. Shown only when touch controls are
+        // enabled (touchscreen present + persisted setting) AND gameplay is active — pausing or
+        // opening a configuration overlay hides the overlay so touch input never leaks into the
+        // core (the coordinator's routing gate is toggled in the activity's LaunchedEffect).
+        if (touchControlsEnabled &&
+            shouldRouteGameplayInput(sessionStarted, overlayState, saveFailureShown)
+        ) {
+            TouchControllerOverlay(
+                controls = touchControls,
+                onButtonChange = touchCoordinator::onTouchButton,
+                onAxisChange = touchCoordinator::onTouchAxis,
+                onPause = { pauseOverlay.value = PauseOverlay.MENU },
             )
         }
 

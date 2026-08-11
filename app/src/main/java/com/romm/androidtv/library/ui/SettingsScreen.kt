@@ -50,6 +50,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.romm.androidtv.library.ConnectionCheckState
 import com.romm.androidtv.library.SettingsLoginState
 import com.romm.androidtv.library.SettingsViewModel
+import com.romm.androidtv.library.ui.TvSwitch
+import com.romm.androidtv.platform.currentDeviceProfile
 
 /**
  * Native Settings screen for the LibraryScaffold sidebar (SETTINGS destination).
@@ -87,10 +89,13 @@ fun SettingsScreen(
     val playStationFocusRequester = remember { FocusRequester() }
     val verifySha1FocusRequester = remember { FocusRequester() }
     val autocleanFocusRequester = remember { FocusRequester() }
+    val onScreenControlsFocusRequester = remember { FocusRequester() }
     val themeFocusRequester = remember { FocusRequester() }
     val licensesFocusRequester = remember { FocusRequester() }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showLicensesDialog by remember { mutableStateOf(false) }
+
+    val profile = currentDeviceProfile()
 
     LaunchedEffect(Unit) {
         focusManager.clearFocus()
@@ -141,6 +146,7 @@ fun SettingsScreen(
                     Color(0xFFf44336) else RommTvColors.Romm500,
                 unfocusedIndicatorColor = RommTvColors.TextSecondary.copy(alpha = 0.3f),
             ),
+            touchEditEnabled = profile.hasTouchscreen,
         )
 
         // Validation error
@@ -296,6 +302,7 @@ fun SettingsScreen(
                 focusedIndicatorColor = RommTvColors.Romm500,
                 unfocusedIndicatorColor = RommTvColors.TextSecondary.copy(alpha = 0.3f),
             ),
+            touchEditEnabled = profile.hasTouchscreen,
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -319,6 +326,7 @@ fun SettingsScreen(
                 focusedIndicatorColor = RommTvColors.Romm500,
                 unfocusedIndicatorColor = RommTvColors.TextSecondary.copy(alpha = 0.3f),
             ),
+            touchEditEnabled = profile.hasTouchscreen,
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -560,8 +568,44 @@ fun SettingsScreen(
                 onCheckedChange = viewModel::onAutocleanSavesOnUploadChanged,
                 modifier = Modifier
                     .focusRequester(autocleanFocusRequester)
-                    .focusProperties { up = verifySha1FocusRequester },
+                    .focusProperties {
+                        up = verifySha1FocusRequester
+                        down = if (profile.hasTouchscreen) {
+                            onScreenControlsFocusRequester
+                        } else {
+                            licensesFocusRequester
+                        }
+                    },
             )
+        }
+
+        if (profile.hasTouchscreen) {
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "On-screen game controls", color = RommTvColors.TextPrimary)
+                    Text(
+                        text = "Show touch controls during gameplay. Disable if you use a Bluetooth or USB controller.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RommTvColors.TextSecondary,
+                    )
+                }
+                TvSwitch(
+                    checked = uiState.onScreenGameControlsEnabled,
+                    onCheckedChange = viewModel::onOnScreenGameControlsChanged,
+                    modifier = Modifier
+                        .focusRequester(onScreenControlsFocusRequester)
+                        .focusProperties {
+                            up = autocleanFocusRequester
+                            down = licensesFocusRequester
+                        },
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -584,12 +628,18 @@ fun SettingsScreen(
         // Open-source licenses: a fused list of Google's auto-generated notices for every
         // Gradle/transitive dependency plus the vendored libretro core notices (assets),
         // rendered in a single "Open Source Licenses" dialog (Play Store attribution).
-        TvButton(
-            onClick = { showLicensesDialog = true },
-            modifier = Modifier
-                .focusRequester(licensesFocusRequester)
-                .focusProperties { up = autocleanFocusRequester },
-        ) {
+            TvButton(
+                onClick = { showLicensesDialog = true },
+                modifier = Modifier
+                    .focusRequester(licensesFocusRequester)
+                    .focusProperties {
+                        up = if (profile.hasTouchscreen) {
+                            onScreenControlsFocusRequester
+                        } else {
+                            autocleanFocusRequester
+                        }
+                    },
+            ) {
             Text("View Licenses")
         }
 

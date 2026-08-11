@@ -162,6 +162,9 @@ dependencies {
     // Extended icon set (SportsEsports, Collections, etc.) used by the native browsing UI
     implementation("androidx.compose.material:material-icons-extended")
 
+    // Jetpack WindowManager for window metrics and folding features (phone/tablet support)
+    implementation("androidx.window:window:1.3.0")
+
     // AndroidX Leanback (TV support library) for leanback feature declaration
     implementation("androidx.leanback:leanback:1.0.0")
 

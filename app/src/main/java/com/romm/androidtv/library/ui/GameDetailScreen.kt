@@ -15,6 +15,8 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,7 +26,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -73,6 +77,7 @@ import com.romm.androidtv.library.RomDetailViewModel
 import com.romm.androidtv.library.RomDetailUiState
 import com.romm.androidtv.library.SectionState
 import com.romm.androidtv.library.isPlatformNativelySupported
+import com.romm.androidtv.platform.currentDeviceProfile
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -194,7 +199,8 @@ fun GameDetailScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(RommTvColors.NightHi),
+            .background(RommTvColors.NightHi)
+            .safeDrawingPadding(),
     ) {
         // ── Main scrollable content ──────────────────────────────────────
         when (val section = state.detail) {
@@ -311,6 +317,7 @@ private fun mapFavoriteRailState(state: FavoriteUiState): FavoriteRailState = wh
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun GameDetailContent(
     rom: RomDetail,
     onPlay: (Long) -> Unit,
@@ -328,6 +335,8 @@ private fun GameDetailContent(
     upFocusTarget: FocusRequester?,
     listState: LazyListState,
 ) {
+    val profile = currentDeviceProfile()
+
     LaunchedEffect(rom.id, rom.platformSlug) {
         if (rom.platformSlug == "segacd" || rom.platformSlug == "psx") {
             onCheckBios(rom.platformSlug)
@@ -340,10 +349,10 @@ private fun GameDetailContent(
             .padding(horizontal = 32.dp, vertical = 24.dp),
     ) {
         item {
-            Row(modifier = Modifier.fillMaxWidth()) {
+            val cover: @Composable () -> Unit = {
                 Box(
                     modifier = Modifier
-                        .width(220.dp)
+                        .width(if (profile.isCompactWidth) 160.dp else 220.dp)
                         .aspectRatio(2f / 3f)
                         .clip(RoundedCornerShape(12.dp))
                         .background(RommTvColors.NightLo),
@@ -356,21 +365,28 @@ private fun GameDetailContent(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.width(24.dp))
-                // 192.dp end padding = rail width (168.dp) + 24.dp separation so title/
-                // metadata text never renders under the fixed overlay rail.
-                Column(modifier = Modifier.weight(1f).padding(end = 192.dp)) {
-                    Text(
-                        text = rom.title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = RommTvColors.TextPrimary,
-                    )
-                    Text(
-                        text = rom.platformDisplayName,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = RommTvColors.Romm300,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
-                    )
+            }
+            val details: @Composable (Modifier) -> Unit = { detailsModifier ->
+                Column(modifier = detailsModifier) {
+                    Column(
+                        modifier = if (profile.isCompactWidth) {
+                            Modifier
+                        } else {
+                            Modifier.padding(end = 192.dp)
+                        },
+                    ) {
+                        Text(
+                            text = rom.title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = RommTvColors.TextPrimary,
+                        )
+                        Text(
+                            text = rom.platformDisplayName,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = RommTvColors.Romm300,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                        )
+                    }
                     MetadataChips(rom)
                     if (rom.summary != null) {
                         Text(
@@ -391,17 +407,18 @@ private fun GameDetailContent(
                     } else if (rom.platformSlug == "segacd" && biosState !is RequiredBiosState.Ready) {
                         RequiredBiosUnavailableState(biosState)
                     } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
                             PlayButton(
                                 onPlay = { onPlay(rom.id) },
                                 isStaging = isStaging,
                                 focusRequester = playButtonFocusRequester,
                                 upFocusTarget = upFocusTarget,
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
                             ChooseSaveButton(onClick = { onChooseSave(rom.id) }, enabled = !isStaging)
                             if (rom.siblingRoms.isNotEmpty()) {
-                                Spacer(modifier = Modifier.width(12.dp))
                                 ChooseVersionButton(onClick = { onChooseVersion(rom.id) }, enabled = !isStaging)
                             }
                         }
@@ -425,6 +442,20 @@ private fun GameDetailContent(
                             }
                         }
                     }
+                }
+            }
+
+            if (profile.isCompactWidth) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    cover()
+                    Spacer(modifier = Modifier.height(20.dp))
+                    details(Modifier.fillMaxWidth())
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    cover()
+                    Spacer(modifier = Modifier.width(24.dp))
+                    details(Modifier.weight(1f))
                 }
             }
         }

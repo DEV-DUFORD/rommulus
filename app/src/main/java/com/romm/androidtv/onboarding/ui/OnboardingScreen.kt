@@ -34,10 +34,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.romm.androidtv.library.ui.ControllerFriendlyTextField
 import com.romm.androidtv.library.ui.RommTvColors
+import com.romm.androidtv.platform.WindowWidthClass
+import com.romm.androidtv.platform.currentDeviceProfile
 import com.romm.androidtv.network.RommServerAddress
 import com.romm.androidtv.network.ServerAddressResult
 import com.romm.androidtv.onboarding.AsyncActionState
@@ -121,6 +124,13 @@ fun OnboardingScreen(
 private fun WelcomeStep(
     onContinue: () -> Unit,
 ) {
+    val profile = currentDeviceProfile()
+    val logoSize = if (profile.isCompactHeight) 96.dp else 160.dp
+    val afterLogoSpacer = if (profile.isCompactHeight) 16.dp else 24.dp
+    val afterHeadlineSpacer = if (profile.isCompactHeight) 8.dp else 12.dp
+    val beforeButtonSpacer = if (profile.isCompactHeight) 24.dp else 32.dp
+    val isCompact = profile.isCompactWidth
+
     val continueFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
@@ -134,26 +144,28 @@ private fun WelcomeStep(
             .fillMaxWidth()
             .testTag("onboarding_welcome"),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         AsyncImage(
             model = R.raw.romm_logo,
             contentDescription = stringResource(R.string.onboarding_logo_description),
             contentScale = ContentScale.Fit,
-            modifier = Modifier.size(160.dp),
+            modifier = Modifier.size(logoSize),
         )
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(afterLogoSpacer))
         Text(
             text = stringResource(R.string.onboarding_welcome_headline),
             style = MaterialTheme.typography.headlineLarge,
             color = RommTvColors.TextPrimary,
+            textAlign = TextAlign.Center,
         )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(afterHeadlineSpacer))
         Text(
             text = stringResource(R.string.onboarding_welcome_body),
             style = MaterialTheme.typography.bodyLarge,
             color = RommTvColors.TextSecondary,
         )
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(beforeButtonSpacer))
         OnboardingPrimaryButton(
             text = stringResource(R.string.onboarding_continue),
             loadingText = "",
@@ -162,6 +174,7 @@ private fun WelcomeStep(
             onClick = onContinue,
             testTag = "onboarding_continue",
             focusRequester = continueFocus,
+            isCompact = isCompact,
         )
     }
 }
@@ -172,6 +185,10 @@ private fun ServerStep(
     onServerChanged: (String) -> Unit,
     onValidateServer: () -> Unit,
 ) {
+    val profile = currentDeviceProfile()
+    val hasTouch = profile.hasTouchscreen
+    val isCompact = profile.isCompactWidth
+
     val fieldFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
@@ -222,6 +239,7 @@ private fun ServerStep(
                 )
             },
             isError = state.serverError != null,
+            touchEditEnabled = hasTouch,
             singleLine = true,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Uri,
@@ -289,6 +307,7 @@ private fun ServerStep(
             enabled = true,
             onClick = onValidateServer,
             testTag = "onboarding_next",
+            isCompact = isCompact,
         )
     }
 }
@@ -302,6 +321,11 @@ private fun CredentialsStep(
     onRemoveOldestDeviceAndRetry: () -> Unit,
     onRetryQrLogin: () -> Unit,
 ) {
+    val profile = currentDeviceProfile()
+    val useSingleColumn = profile.windowWidthClass != WindowWidthClass.EXPANDED || profile.foldingFeature != null
+    val isCompact = profile.isCompactWidth
+    val hasTouch = profile.hasTouchscreen
+
     val usernameFocus = remember { FocusRequester() }
     val removeOldestFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -319,17 +343,8 @@ private fun CredentialsStep(
         }
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("onboarding_credentials"),
-        horizontalArrangement = Arrangement.spacedBy(48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-    Column(
-        modifier = Modifier.weight(2f),
-        verticalArrangement = Arrangement.Center,
-    ) {
+    @Composable
+    fun LoginFormContent() {
         Text(
             text = stringResource(R.string.onboarding_credentials_headline),
             style = MaterialTheme.typography.headlineMedium,
@@ -361,6 +376,7 @@ private fun CredentialsStep(
                     color = RommTvColors.TextSecondary,
                 )
             },
+            touchEditEnabled = hasTouch,
             singleLine = true,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
@@ -389,6 +405,7 @@ private fun CredentialsStep(
                     color = RommTvColors.TextSecondary,
                 )
             },
+            touchEditEnabled = hasTouch,
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
@@ -444,6 +461,7 @@ private fun CredentialsStep(
             enabled = true,
             onClick = onLogin,
             testTag = "onboarding_login",
+            isCompact = isCompact,
         )
 
         if (state.loginError is OnboardingLoginError.TokenLimitReached) {
@@ -456,13 +474,44 @@ private fun CredentialsStep(
                 onClick = onRemoveOldestDeviceAndRetry,
                 testTag = "onboarding_remove_oldest_device",
                 focusRequester = removeOldestFocus,
+                isCompact = isCompact,
             )
         }
     }
-        QrLoginPanel(
-            state = state.qrLoginState,
-            onRetry = onRetryQrLogin,
-            modifier = Modifier.weight(1f),
-        )
+
+    if (useSingleColumn) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("onboarding_credentials"),
+        ) {
+            LoginFormContent()
+            Spacer(modifier = Modifier.height(24.dp))
+            QrLoginPanel(
+                state = state.qrLoginState,
+                onRetry = onRetryQrLogin,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("onboarding_credentials"),
+            horizontalArrangement = Arrangement.spacedBy(48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(2f),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                LoginFormContent()
+            }
+            QrLoginPanel(
+                state = state.qrLoginState,
+                onRetry = onRetryQrLogin,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
