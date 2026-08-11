@@ -241,6 +241,12 @@ class EmulationActivity : ComponentActivity() {
         )
     }
 
+    private val touchLayoutRepository by lazy {
+        com.romm.androidtv.emulation.touch.TouchLayoutRepository(
+            getSharedPreferences(SettingsRepository.PREFS_NAME, MODE_PRIVATE),
+        )
+    }
+
     /** Scanlines toggle state, initialized from persistence; Compose observes this flow. */
     private val scanlinesEnabled by lazy { MutableStateFlow(settingsRepository.scanlinesEnabled()) }
 
@@ -288,6 +294,7 @@ class EmulationActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         sessionStartEpochMs = System.currentTimeMillis()
 
@@ -591,6 +598,8 @@ class EmulationActivity : ComponentActivity() {
                             scanlinesEnabled = scanlinesEnabled,
                             touchControlsEnabled = touchControlsEnabled,
                             touchCoordinator = touchCoordinator,
+                            touchLayoutOverride = coreIdForMapping?.let(touchLayoutRepository::load),
+                            touchLayoutRepository = touchLayoutRepository,
                             onSetScanlinesEnabled = ::setScanlinesEnabled,
                             onStop = { finishAndDeliverResult() },
                             onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
@@ -618,7 +627,9 @@ class EmulationActivity : ComponentActivity() {
                                 pauseOverlay = overlayState,
                                 saveFailureVisible = saveFailureShown,
                             )
-                            applyImmersiveMode(routingActive)
+                            applyImmersiveMode(
+                                routingActive || overlayState == PauseOverlay.TOUCH_CONTROLLER_SETTINGS,
+                            )
                             touchCoordinator.setRoutingEnabled(routingActive)
                             if (!routingActive) touchCoordinator.resetTouch()
                         }
@@ -1037,7 +1048,8 @@ internal fun pauseOverlayOnBackground(current: PauseOverlay): PauseOverlay = whe
     PauseOverlay.CLOSED -> PauseOverlay.MENU
     PauseOverlay.MENU,
     PauseOverlay.VIDEO_OPTIONS,
-    PauseOverlay.CONTROLLER_SETTINGS -> current
+    PauseOverlay.CONTROLLER_SETTINGS,
+    PauseOverlay.TOUCH_CONTROLLER_SETTINGS -> current
 }
 
 internal enum class CheckpointOutcome {
@@ -1074,6 +1086,8 @@ private fun EmulationScreen(
     scanlinesEnabled: StateFlow<Boolean>,
     touchControlsEnabled: Boolean,
     touchCoordinator: TouchInputCoordinator,
+    touchLayoutOverride: com.romm.androidtv.emulation.touch.TouchLayoutOverrideDocument?,
+    touchLayoutRepository: com.romm.androidtv.emulation.touch.TouchLayoutRepository,
     onSetScanlinesEnabled: (Boolean) -> Boolean,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
@@ -1097,6 +1111,9 @@ private fun EmulationScreen(
     val scanlinesOn by scanlinesEnabled.collectAsState()
     var persistenceError by remember { mutableStateOf(false) }
     var pauseMenuFocusTarget by remember { mutableStateOf(PauseMenuFocusTarget.RESUME) }
+    var activeTouchLayoutOverride by remember(coreIdForMapping) {
+        mutableStateOf(touchLayoutOverride)
+    }
 
     LaunchedEffect(sessionStarted) {
         if (!sessionStarted) return@LaunchedEffect
@@ -1207,6 +1224,7 @@ private fun EmulationScreen(
                     onButtonChange = touchCoordinator::onTouchButton,
                     onAxisChange = touchCoordinator::onTouchAxis,
                     onPause = { pauseOverlay.value = PauseOverlay.MENU },
+                    layoutOverride = activeTouchLayoutOverride,
                 )
             }
         }
@@ -1224,6 +1242,11 @@ private fun EmulationScreen(
                     onOpenControllerSettings = {
                         pauseMenuFocusTarget = PauseMenuFocusTarget.CONTROLLER_SETTINGS
                         pauseOverlay.value = PauseOverlay.CONTROLLER_SETTINGS
+                    },
+                    showOnScreenControllerSettings = touchControlsEnabled,
+                    onOpenOnScreenControllerSettings = {
+                        pauseMenuFocusTarget = PauseMenuFocusTarget.TOUCH_CONTROLLER_SETTINGS
+                        pauseOverlay.value = PauseOverlay.TOUCH_CONTROLLER_SETTINGS
                     },
                     onQuit = onStop,
                 )
@@ -1253,6 +1276,17 @@ private fun EmulationScreen(
                     controllerRouter = controllerRouter,
                     onBack = { pauseOverlay.value = PauseOverlay.MENU },
                 )
+            }
+
+            if (overlayState == PauseOverlay.TOUCH_CONTROLLER_SETTINGS) {
+                CoreControllerProfiles.byCoreId(coreIdForMapping ?: "")?.let { profile ->
+                    com.romm.androidtv.emulation.touch.TouchLayoutEditorScreen(
+                        profile = profile,
+                        repository = touchLayoutRepository,
+                        onBack = { pauseOverlay.value = PauseOverlay.MENU },
+                        onLayoutChanged = { activeTouchLayoutOverride = it },
+                    )
+                }
             }
         }
 
@@ -1290,6 +1324,8 @@ enum class PauseOverlay {
     VIDEO_OPTIONS,
     /** The shared controller-settings subpage is visible; the core stays paused. */
     CONTROLLER_SETTINGS,
+    /** The active core's on-screen controller layout editor is visible; the core stays paused. */
+    TOUCH_CONTROLLER_SETTINGS,
 }
 
 /**
@@ -1301,6 +1337,7 @@ enum class PauseMenuFocusTarget {
     RESUME,
     VIDEO_OPTIONS,
     CONTROLLER_SETTINGS,
+    TOUCH_CONTROLLER_SETTINGS,
     QUIT,
 }
 
@@ -1310,6 +1347,7 @@ internal fun quickBackTransition(current: PauseOverlay): PauseOverlay = when (cu
     PauseOverlay.MENU -> PauseOverlay.CLOSED
     PauseOverlay.VIDEO_OPTIONS -> PauseOverlay.MENU
     PauseOverlay.CONTROLLER_SETTINGS -> PauseOverlay.MENU
+    PauseOverlay.TOUCH_CONTROLLER_SETTINGS -> PauseOverlay.MENU
 }
 
 /**
@@ -1423,12 +1461,15 @@ private fun PauseMenuOverlay(
     onResume: () -> Unit,
     onOpenVideoOptions: () -> Unit,
     onOpenControllerSettings: () -> Unit,
+    showOnScreenControllerSettings: Boolean,
+    onOpenOnScreenControllerSettings: () -> Unit,
     onQuit: () -> Unit,
 ) {
     var showQuitConfirm by remember { mutableStateOf(false) }
     val resumeFocusRequester = remember { FocusRequester() }
     val videoOptionsFocusRequester = remember { FocusRequester() }
     val controllerSettingsFocusRequester = remember { FocusRequester() }
+    val touchControllerSettingsFocusRequester = remember { FocusRequester() }
     val quitFocusRequester = remember { FocusRequester() }
 
     // Explicit focus-target mapping: when the menu is enabled, request focus on the item the
@@ -1441,6 +1482,8 @@ private fun PauseMenuOverlay(
             PauseMenuFocusTarget.RESUME -> resumeFocusRequester.requestFocus()
             PauseMenuFocusTarget.VIDEO_OPTIONS -> videoOptionsFocusRequester.requestFocus()
             PauseMenuFocusTarget.CONTROLLER_SETTINGS -> controllerSettingsFocusRequester.requestFocus()
+            PauseMenuFocusTarget.TOUCH_CONTROLLER_SETTINGS ->
+                touchControllerSettingsFocusRequester.requestFocus()
             PauseMenuFocusTarget.QUIT -> quitFocusRequester.requestFocus()
         }
     }
@@ -1481,6 +1524,18 @@ private fun PauseMenuOverlay(
                 modifier = Modifier.fillMaxWidth().focusRequester(controllerSettingsFocusRequester),
             ) { Text(stringResource(R.string.pause_menu_controller_settings)) }
             Spacer(modifier = Modifier.height(8.dp))
+            if (showOnScreenControllerSettings) {
+                TvOutlinedButton(
+                    onClick = onOpenOnScreenControllerSettings,
+                    enabled = enabled,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(touchControllerSettingsFocusRequester),
+                ) {
+                    Text(stringResource(R.string.pause_menu_on_screen_controller_settings))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             TvOutlinedButton(
                 onClick = { showQuitConfirm = true },
                 enabled = enabled,

@@ -36,6 +36,8 @@ fun TouchDpad(
     onDirectionChange: (LogicalControl, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     opacity: Float = 0.72f,
+    inputEnabled: Boolean = true,
+    pressedDirections: Set<LogicalControl> = emptySet(),
 ) {
     val dpadColor = MaterialTheme.colorScheme.surface.copy(alpha = opacity * 0.45f)
 
@@ -68,6 +70,8 @@ fun TouchDpad(
                     modifier = Modifier.fillMaxSize(),
                     backgroundColor = Color.Transparent,
                     borderColor = Color.Transparent,
+                    inputEnabled = inputEnabled,
+                    pressedOverride = if (inputEnabled) null else directions.up in pressedDirections,
                 )
             }
 
@@ -96,6 +100,8 @@ fun TouchDpad(
                     modifier = Modifier.fillMaxSize(),
                     backgroundColor = Color.Transparent,
                     borderColor = Color.Transparent,
+                    inputEnabled = inputEnabled,
+                    pressedOverride = if (inputEnabled) null else directions.down in pressedDirections,
                 )
             }
         }
@@ -124,6 +130,8 @@ fun TouchDpad(
                     modifier = Modifier.fillMaxSize(),
                     backgroundColor = Color.Transparent,
                     borderColor = Color.Transparent,
+                    inputEnabled = inputEnabled,
+                    pressedOverride = if (inputEnabled) null else directions.left in pressedDirections,
                 )
             }
 
@@ -144,6 +152,8 @@ fun TouchDpad(
                     modifier = Modifier.fillMaxSize(),
                     backgroundColor = Color.Transparent,
                     borderColor = Color.Transparent,
+                    inputEnabled = inputEnabled,
+                    pressedOverride = if (inputEnabled) null else directions.right in pressedDirections,
                 )
             }
         }

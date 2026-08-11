@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -157,6 +158,7 @@ fun ControllerConfigScreen(
             modifier = modifier
                 .fillMaxSize()
                 .background(RommTvColors.NightHi)
+                .safeDrawingPadding()
                 .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.nativeKeyEvent.action != android.view.KeyEvent.ACTION_DOWN) {
                     return@onPreviewKeyEvent false

@@ -40,19 +40,22 @@ fun TouchButton(
     modifier: Modifier = Modifier,
     shape: TouchControlShape = TouchControlShape.CIRCLE,
     opacity: Float = 0.72f,
+    inputEnabled: Boolean = true,
+    pressedOverride: Boolean? = null,
 ) {
     var isPressed by remember { mutableStateOf(false) }
+    val effectivePressed = pressedOverride ?: isPressed
 
     val buttonShape = when (shape) {
         TouchControlShape.CIRCLE -> CircleShape
         TouchControlShape.ROUNDED_RECT -> RoundedCornerShape(18.dp)
     }
     val backgroundColor = when {
-        isPressed -> MaterialTheme.colorScheme.primary.copy(alpha = opacity)
+        effectivePressed -> MaterialTheme.colorScheme.primary.copy(alpha = opacity)
         else -> MaterialTheme.colorScheme.surface.copy(alpha = opacity * 0.52f)
     }
 
-    val borderColor = if (isPressed) {
+    val borderColor = if (effectivePressed) {
         MaterialTheme.colorScheme.onPrimary
     } else {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
@@ -64,23 +67,29 @@ fun TouchButton(
             .clip(buttonShape)
             .background(backgroundColor)
             .border(2.dp, borderColor, buttonShape)
-            .pointerInput(label) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
-                        isPressed = true
-                        onPressChange(true)
+            .then(
+                if (inputEnabled) {
+                    Modifier.pointerInput(label) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                down.consume()
+                                isPressed = true
+                                onPressChange(true)
 
-                        val up = waitForUpOrCancellation()
-                        if (up != null) {
-                            up.consume()
+                                val up = waitForUpOrCancellation()
+                                if (up != null) {
+                                    up.consume()
+                                }
+                                isPressed = false
+                                onPressChange(false)
+                            }
                         }
-                        isPressed = false
-                        onPressChange(false)
                     }
-                }
-            },
+                } else {
+                    Modifier
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -102,8 +111,11 @@ internal fun TouchZone(
     modifier: Modifier = Modifier,
     backgroundColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.25f),
     borderColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+    inputEnabled: Boolean = true,
+    pressedOverride: Boolean? = null,
 ) {
     var isPressed by remember { mutableStateOf(false) }
+    val effectivePressed = pressedOverride ?: isPressed
 
     val activeBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
     val activeBorder = MaterialTheme.colorScheme.onPrimary
@@ -111,25 +123,31 @@ internal fun TouchZone(
     Box(
         modifier = modifier
             .clip(CircleShape)
-            .background(if (isPressed) activeBg else backgroundColor)
-            .border(2.dp, if (isPressed) activeBorder else borderColor, CircleShape)
-            .pointerInput(logicalControl) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
-                        isPressed = true
-                        onButtonChange(logicalControl, true)
+            .background(if (effectivePressed) activeBg else backgroundColor)
+            .border(2.dp, if (effectivePressed) activeBorder else borderColor, CircleShape)
+            .then(
+                if (inputEnabled) {
+                    Modifier.pointerInput(logicalControl) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                down.consume()
+                                isPressed = true
+                                onButtonChange(logicalControl, true)
 
-                        val up = waitForUpOrCancellation()
-                        if (up != null) {
-                            up.consume()
+                                val up = waitForUpOrCancellation()
+                                if (up != null) {
+                                    up.consume()
+                                }
+                                isPressed = false
+                                onButtonChange(logicalControl, false)
+                            }
                         }
-                        isPressed = false
-                        onButtonChange(logicalControl, false)
                     }
-                }
-            },
+                } else {
+                    Modifier
+                },
+            ),
     )
 }
 

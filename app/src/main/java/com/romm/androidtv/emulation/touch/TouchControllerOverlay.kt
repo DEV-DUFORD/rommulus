@@ -2,17 +2,20 @@ package com.romm.androidtv.emulation.touch
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemGestures
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.controller.config.CoreControllerProfile
@@ -42,13 +45,94 @@ fun TouchControllerOverlay(
     val resolvedControls = remember(profile, layout) {
         layout.controls.filter { it.visible }.map { it.resolve(profile) }
     }
+    val density = LocalDensity.current
+    var visualFrame by remember {
+        mutableStateOf(TouchGestureFrame(emptySet(), emptyMap(), menuPressed = false))
+    }
 
     BoxWithConstraints(
-        modifier = modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .windowInsetsPadding(WindowInsets.systemGestures),
+        modifier = modifier.fillMaxSize().displayCutoutPadding(),
     ) {
+        val hitRegions = remember(
+            resolvedControls,
+            maxWidth,
+            maxHeight,
+            density,
+            deviceProfile.foldingFeature,
+        ) {
+            resolvedControls.map { resolved ->
+                val definition = resolved.definition
+                val center = avoidFold(definition.center, deviceProfile.foldingFeature)
+                val size = renderedSize(definition, maxWidth, maxHeight)
+                val bounds = with(density) {
+                    TouchBounds(
+                        centerX = (maxWidth * center.x).toPx(),
+                        centerY = (maxHeight * center.y).toPx(),
+                        width = size.width.toPx(),
+                        height = size.height.toPx(),
+                    )
+                }
+                when (resolved) {
+                    is ResolvedTouchControl.Button -> TouchHitRegion.Button(
+                        bounds = bounds,
+                        target = resolved.descriptor.target,
+                        shape = resolved.definition.shape,
+                    )
+                    is ResolvedTouchControl.Dpad -> TouchHitRegion.Dpad(
+                        bounds = bounds,
+                        up = resolved.up.target,
+                        down = resolved.down.target,
+                        left = resolved.left.target,
+                        right = resolved.right.target,
+                    )
+                    is ResolvedTouchControl.Stick -> TouchHitRegion.Stick(
+                        bounds = bounds,
+                        xAxis = resolved.xAxis.target,
+                        yAxis = resolved.yAxis.target,
+                    )
+                    is ResolvedTouchControl.Menu -> TouchHitRegion.Menu(bounds)
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(hitRegions) {
+                    awaitPointerEventScope {
+                        var previousButtons = emptySet<LogicalControl>()
+                        var previousAxes = emptyMap<LogicalControl, Float>()
+                        var previousMenuPressed = false
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pointers = event.changes
+                                .filter { it.pressed }
+                                .map { TouchPoint(it.position.x, it.position.y) }
+                            val frame = resolveTouchGestureFrame(hitRegions, pointers)
+                            visualFrame = frame
+
+                            (previousButtons - frame.buttons).forEach {
+                                onButtonChange(it, false)
+                            }
+                            (frame.buttons - previousButtons).forEach {
+                                onButtonChange(it, true)
+                            }
+                            (previousAxes.keys + frame.axes.keys).forEach { axis ->
+                                val previous = previousAxes[axis] ?: 0f
+                                val current = frame.axes[axis] ?: 0f
+                                if (previous != current) onAxisChange(axis, current)
+                            }
+                            if (frame.menuPressed && !previousMenuPressed) onPause()
+
+                            previousButtons = frame.buttons
+                            previousAxes = frame.axes
+                            previousMenuPressed = frame.menuPressed
+                            event.changes.forEach { if (it.pressed) it.consume() }
+                        }
+                    }
+                },
+        )
+
         resolvedControls.forEach { resolved ->
             key(resolved.definition.visualId) {
                 val definition = resolved.definition
@@ -72,6 +156,8 @@ fun TouchControllerOverlay(
                             },
                             shape = resolved.definition.shape,
                             opacity = resolved.definition.opacity,
+                            inputEnabled = false,
+                            pressedOverride = resolved.descriptor.target in visualFrame.buttons,
                         )
                         is ResolvedTouchControl.Dpad -> TouchDpad(
                             directions = DpadLogicalControls(
@@ -82,18 +168,25 @@ fun TouchControllerOverlay(
                             ),
                             onDirectionChange = onButtonChange,
                             opacity = resolved.definition.opacity,
+                            inputEnabled = false,
+                            pressedDirections = visualFrame.buttons,
                         )
                         is ResolvedTouchControl.Stick -> TouchAnalogStick(
                             onAxisChange = onAxisChange,
                             xAxis = resolved.xAxis.target,
                             yAxis = resolved.yAxis.target,
                             opacity = resolved.definition.opacity,
+                            inputEnabled = false,
+                            xValueOverride = visualFrame.axes[resolved.xAxis.target] ?: 0f,
+                            yValueOverride = visualFrame.axes[resolved.yAxis.target] ?: 0f,
                         )
                         is ResolvedTouchControl.Menu -> TouchButton(
                             label = "Menu",
                             onPressChange = { pressed -> if (pressed) onPause() },
                             shape = TouchControlShape.ROUNDED_RECT,
                             opacity = resolved.definition.opacity,
+                            inputEnabled = false,
+                            pressedOverride = visualFrame.menuPressed,
                         )
                     }
                 }
@@ -112,10 +205,10 @@ internal fun renderedSize(
     val requestedWidth = availableWidth * definition.size.width
     val requestedHeight = availableHeight * definition.size.height
     return when (definition) {
-        is TouchControlDefinition.Dpad -> RenderedTouchSize(
-            requestedWidth.coerceIn(144.dp, 220.dp),
-            requestedHeight.coerceIn(144.dp, 220.dp),
-        )
+        is TouchControlDefinition.Dpad -> {
+            val side = minOf(requestedWidth, requestedHeight).coerceIn(144.dp, 220.dp)
+            RenderedTouchSize(side, side)
+        }
         is TouchControlDefinition.Stick -> {
             val side = minOf(requestedWidth, requestedHeight).coerceIn(112.dp, 156.dp)
             RenderedTouchSize(side, side)

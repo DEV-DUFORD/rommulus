@@ -45,6 +45,9 @@ fun TouchAnalogStick(
     yAxis: LogicalControl = LogicalControl.AXIS_LY,
     modifier: Modifier = Modifier,
     opacity: Float = 0.72f,
+    inputEnabled: Boolean = true,
+    xValueOverride: Float? = null,
+    yValueOverride: Float? = null,
 ) {
     var knobOffset by remember { mutableStateOf(Offset.Zero) }
     var baseWidthPx by remember { mutableStateOf(0f) }
@@ -70,14 +73,22 @@ fun TouchAnalogStick(
         val centerX = baseWidthPx / 2f
         val centerY = baseHeightPx / 2f
         val maxDisplacement = (baseWidthPx / 2f) - (knobPx / 2f)
+        val displayedOffset = if (xValueOverride != null && yValueOverride != null) {
+            Offset(
+                x = xValueOverride.coerceIn(-1f, 1f) * maxDisplacement,
+                y = yValueOverride.coerceIn(-1f, 1f) * maxDisplacement,
+            )
+        } else {
+            knobOffset
+        }
 
         Box(
             modifier = Modifier
                 .fillMaxSize(0.42f)
                 .offset {
                     IntOffset(
-                        (centerX + knobOffset.x - knobPx / 2f).toInt(),
-                        (centerY + knobOffset.y - knobPx / 2f).toInt(),
+                        (centerX + displayedOffset.x - knobPx / 2f).toInt(),
+                        (centerY + displayedOffset.y - knobPx / 2f).toInt(),
                     )
                 }
                 .clip(CircleShape)
@@ -89,17 +100,23 @@ fun TouchAnalogStick(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(centerX, centerY, maxDisplacement, xAxis, yAxis) {
-                    trackStick(
-                        centerX = centerX,
-                        centerY = centerY,
-                        maxDisplacement = maxDisplacement,
-                        xAxis = xAxis,
-                        yAxis = yAxis,
-                        onOffsetChange = { offset -> knobOffset = offset },
-                        onAxisChange = onAxisChange,
-                    )
-                },
+                .then(
+                    if (inputEnabled) {
+                        Modifier.pointerInput(centerX, centerY, maxDisplacement, xAxis, yAxis) {
+                            trackStick(
+                                centerX = centerX,
+                                centerY = centerY,
+                                maxDisplacement = maxDisplacement,
+                                xAxis = xAxis,
+                                yAxis = yAxis,
+                                onOffsetChange = { offset -> knobOffset = offset },
+                                onAxisChange = onAxisChange,
+                            )
+                        }
+                    } else {
+                        Modifier
+                    },
+                ),
         )
     }
 }

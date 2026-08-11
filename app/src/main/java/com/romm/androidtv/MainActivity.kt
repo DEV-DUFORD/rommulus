@@ -143,7 +143,9 @@ class MainActivity : ComponentActivity() {
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
         NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
         NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_VERSION_PICKER, NATIVE_BIOS_CONFIGURATION,
-        NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG, NATIVE_SCREENSHOT_VIEWER
+        NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG,
+        NATIVE_TOUCH_CONTROLLER_LIST, NATIVE_TOUCH_CONTROLLER_EDITOR,
+        NATIVE_SCREENSHOT_VIEWER
     }
 
     private var currentScreen by mutableStateOf(Screen.NATIVE_HOME)
@@ -241,6 +243,12 @@ class MainActivity : ComponentActivity() {
         SettingsRepository(
             getSharedPreferences(SettingsRepository.PREFS_NAME, MODE_PRIVATE),
             defaultOrigin = BuildConfig.ROMM_ORIGIN
+        )
+    }
+
+    private val touchLayoutRepository by lazy {
+        com.romm.androidtv.emulation.touch.TouchLayoutRepository(
+            getSharedPreferences(SettingsRepository.PREFS_NAME, MODE_PRIVATE),
         )
     }
 
@@ -495,6 +503,8 @@ class MainActivity : ComponentActivity() {
                 }
             Screen.NATIVE_CONTROLLER_CONFIG ->
                 if (selectedControllerCoreId != null) restoredScreen else Screen.NATIVE_CONTROLLER_LIST
+            Screen.NATIVE_TOUCH_CONTROLLER_EDITOR ->
+                if (selectedControllerCoreId != null) restoredScreen else Screen.NATIVE_TOUCH_CONTROLLER_LIST
             Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
             Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_VERSION_PICKER ->
                 if (selectedRomId != null) Screen.NATIVE_GAME_DETAIL else Screen.NATIVE_HOME
@@ -562,6 +572,9 @@ class MainActivity : ComponentActivity() {
                     Screen.NATIVE_BIOS_CONFIGURATION -> currentScreen = Screen.NATIVE_SETTINGS
                     Screen.NATIVE_CONTROLLER_LIST -> currentScreen = Screen.NATIVE_SETTINGS
                     Screen.NATIVE_CONTROLLER_CONFIG -> currentScreen = Screen.NATIVE_CONTROLLER_LIST
+                    Screen.NATIVE_TOUCH_CONTROLLER_LIST -> currentScreen = Screen.NATIVE_SETTINGS
+                    Screen.NATIVE_TOUCH_CONTROLLER_EDITOR ->
+                        currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
                     Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
@@ -688,6 +701,7 @@ class MainActivity : ComponentActivity() {
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
                         Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_VERSION_PICKER, Screen.NATIVE_BIOS_CONFIGURATION,
                         Screen.NATIVE_CONTROLLER_LIST, Screen.NATIVE_CONTROLLER_CONFIG,
+                        Screen.NATIVE_TOUCH_CONTROLLER_LIST, Screen.NATIVE_TOUCH_CONTROLLER_EDITOR,
                         Screen.NATIVE_SCREENSHOT_VIEWER -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(
@@ -970,6 +984,9 @@ class MainActivity : ComponentActivity() {
                                                 onOpenControllerSettings = {
                                                     currentScreen = Screen.NATIVE_CONTROLLER_LIST
                                                 },
+                                                onOpenOnScreenControllerSettings = {
+                                                    currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
+                                                },
                                             )
                                         }
                                     }
@@ -1039,6 +1056,50 @@ class MainActivity : ComponentActivity() {
                                                 onResetAllConfirm = controllerViewModel::confirmResetAll,
                                                 onResetAllRequest = controllerViewModel::requestResetAll,
                                                 onResetAllCancel = controllerViewModel::cancelResetAll,
+                                            )
+                                        }
+                                    }
+                                    Screen.NATIVE_TOUCH_CONTROLLER_LIST -> {
+                                        com.romm.androidtv.controller.ui.ControllerConsoleListScreen(
+                                            profiles = com.romm.androidtv.controller.config.CoreControllerProfiles.forApprovedCores(),
+                                            title = "On-Screen Controller Settings",
+                                            onSelectCore = { coreId ->
+                                                selectedControllerCoreId = coreId
+                                                currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_EDITOR
+                                            },
+                                            onBack = { currentScreen = Screen.NATIVE_SETTINGS },
+                                        )
+                                    }
+                                    Screen.NATIVE_TOUCH_CONTROLLER_EDITOR -> {
+                                        androidx.compose.runtime.DisposableEffect(Unit) {
+                                            val controller = androidx.core.view.WindowCompat.getInsetsController(
+                                                window,
+                                                window.decorView,
+                                            )
+                                            controller.systemBarsBehavior =
+                                                androidx.core.view.WindowInsetsControllerCompat
+                                                    .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                                            controller.hide(
+                                                androidx.core.view.WindowInsetsCompat.Type.systemBars(),
+                                            )
+                                            onDispose {
+                                                controller.show(
+                                                    androidx.core.view.WindowInsetsCompat.Type.systemBars(),
+                                                )
+                                            }
+                                        }
+                                        val profile = selectedControllerCoreId?.let {
+                                            com.romm.androidtv.controller.config.CoreControllerProfiles.byCoreId(it)
+                                        }
+                                        if (profile == null) {
+                                            currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
+                                        } else {
+                                            com.romm.androidtv.emulation.touch.TouchLayoutEditorScreen(
+                                                profile = profile,
+                                                repository = touchLayoutRepository,
+                                                onBack = {
+                                                    currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
+                                                },
                                             )
                                         }
                                     }

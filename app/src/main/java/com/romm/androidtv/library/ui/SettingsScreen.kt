@@ -70,6 +70,7 @@ fun SettingsScreen(
     onOpenSegaCdBios: () -> Unit = {},
     onOpenPlayStationBios: () -> Unit = {},
     onOpenControllerSettings: () -> Unit = {},
+    onOpenOnScreenControllerSettings: () -> Unit = {},
 ) {
     val viewModel: SettingsViewModel = viewModel(factory = viewModelFactory)
 
@@ -85,6 +86,7 @@ fun SettingsScreen(
     val loginFocusRequester = remember { FocusRequester() }
     val filterToggleFocusRequester = remember { FocusRequester() }
     val controllerSettingsFocusRequester = remember { FocusRequester() }
+    val onScreenControllerSettingsFocusRequester = remember { FocusRequester() }
     val segaCdFocusRequester = remember { FocusRequester() }
     val playStationFocusRequester = remember { FocusRequester() }
     val verifySha1FocusRequester = remember { FocusRequester() }
@@ -468,10 +470,29 @@ fun SettingsScreen(
                 .focusRequester(controllerSettingsFocusRequester)
                 .focusProperties {
                     up = themeFocusRequester
-                    down = segaCdFocusRequester
+                    down = if (profile.hasTouchscreen) {
+                        onScreenControllerSettingsFocusRequester
+                    } else {
+                        segaCdFocusRequester
+                    }
                 },
         ) {
             Text("Controller Settings")
+        }
+
+        if (profile.hasTouchscreen) {
+            Spacer(modifier = Modifier.height(8.dp))
+            TvButton(
+                onClick = onOpenOnScreenControllerSettings,
+                modifier = Modifier
+                    .focusRequester(onScreenControllerSettingsFocusRequester)
+                    .focusProperties {
+                        up = controllerSettingsFocusRequester
+                        down = segaCdFocusRequester
+                    },
+            ) {
+                Text("On-Screen Controller Settings")
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -493,7 +514,11 @@ fun SettingsScreen(
             modifier = Modifier
                 .focusRequester(segaCdFocusRequester)
                 .focusProperties {
-                    up = controllerSettingsFocusRequester
+                    up = if (profile.hasTouchscreen) {
+                        onScreenControllerSettingsFocusRequester
+                    } else {
+                        controllerSettingsFocusRequester
+                    }
                     down = playStationFocusRequester
                 },
         ) {
