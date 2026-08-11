@@ -5,7 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -44,22 +44,20 @@ fun TouchAnalogStick(
     xAxis: LogicalControl = LogicalControl.AXIS_LX,
     yAxis: LogicalControl = LogicalControl.AXIS_LY,
     modifier: Modifier = Modifier,
+    opacity: Float = 0.72f,
 ) {
-    val baseSizeDp = 112.dp
-    val knobSizeDp = 48.dp
-
     var knobOffset by remember { mutableStateOf(Offset.Zero) }
     var baseWidthPx by remember { mutableStateOf(0f) }
     var baseHeightPx by remember { mutableStateOf(0f) }
 
-    val baseColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.25f)
+    val baseColor = MaterialTheme.colorScheme.surface.copy(alpha = opacity * 0.38f)
     val baseBorder = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-    val knobColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+    val knobColor = MaterialTheme.colorScheme.primary.copy(alpha = opacity)
     val knobBorder = MaterialTheme.colorScheme.onPrimary
 
     Box(
         modifier = modifier
-            .size(baseSizeDp)
+            .fillMaxSize()
             .onSizeChanged { size ->
                 baseWidthPx = size.width.toFloat()
                 baseHeightPx = size.height.toFloat()
@@ -68,14 +66,14 @@ fun TouchAnalogStick(
             .background(baseColor)
             .border(2.dp, baseBorder, CircleShape),
     ) {
-        val knobPx = knobSizeDp.value * (baseWidthPx / baseSizeDp.value)
+        val knobPx = minOf(baseWidthPx, baseHeightPx) * 0.42f
         val centerX = baseWidthPx / 2f
         val centerY = baseHeightPx / 2f
         val maxDisplacement = (baseWidthPx / 2f) - (knobPx / 2f)
 
         Box(
             modifier = Modifier
-                .size(knobSizeDp)
+                .fillMaxSize(0.42f)
                 .offset {
                     IntOffset(
                         (centerX + knobOffset.x - knobPx / 2f).toInt(),
@@ -90,7 +88,7 @@ fun TouchAnalogStick(
         // Pointer input for drag tracking
         Box(
             modifier = Modifier
-                .size(baseSizeDp)
+                .fillMaxSize()
                 .pointerInput(centerX, centerY, maxDisplacement, xAxis, yAxis) {
                     trackStick(
                         centerX = centerX,

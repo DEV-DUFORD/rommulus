@@ -66,7 +66,6 @@ import com.romm.androidtv.controller.LibretroInputAdapter
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
 import com.romm.androidtv.controller.config.ControllerConfigDatabase
 import com.romm.androidtv.controller.config.ControllerConfigRepository
-import com.romm.androidtv.controller.config.CoreControlDescriptor
 import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.controller.config.RoomControllerConfigRepository
 import com.romm.androidtv.controller.config.toRouterMappings
@@ -592,7 +591,6 @@ class EmulationActivity : ComponentActivity() {
                             scanlinesEnabled = scanlinesEnabled,
                             touchControlsEnabled = touchControlsEnabled,
                             touchCoordinator = touchCoordinator,
-                            touchControls = CoreControllerProfiles.byCoreId(coreId ?: "")?.controls.orEmpty(),
                             onSetScanlinesEnabled = ::setScanlinesEnabled,
                             onStop = { finishAndDeliverResult() },
                             onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
@@ -1076,7 +1074,6 @@ private fun EmulationScreen(
     scanlinesEnabled: StateFlow<Boolean>,
     touchControlsEnabled: Boolean,
     touchCoordinator: TouchInputCoordinator,
-    touchControls: List<CoreControlDescriptor>,
     onSetScanlinesEnabled: (Boolean) -> Boolean,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
@@ -1204,12 +1201,14 @@ private fun EmulationScreen(
         if (touchControlsEnabled &&
             shouldRouteGameplayInput(sessionStarted, overlayState, saveFailureShown)
         ) {
-            TouchControllerOverlay(
-                controls = touchControls,
-                onButtonChange = touchCoordinator::onTouchButton,
-                onAxisChange = touchCoordinator::onTouchAxis,
-                onPause = { pauseOverlay.value = PauseOverlay.MENU },
-            )
+            CoreControllerProfiles.byCoreId(coreIdForMapping ?: "")?.let { profile ->
+                TouchControllerOverlay(
+                    profile = profile,
+                    onButtonChange = touchCoordinator::onTouchButton,
+                    onAxisChange = touchCoordinator::onTouchAxis,
+                    onPause = { pauseOverlay.value = PauseOverlay.MENU },
+                )
+            }
         }
 
         if (sessionStarted) {

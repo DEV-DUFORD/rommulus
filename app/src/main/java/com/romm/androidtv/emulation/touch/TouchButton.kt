@@ -5,8 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,12 +38,18 @@ fun TouchButton(
     label: String,
     onPressChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    shape: TouchControlShape = TouchControlShape.CIRCLE,
+    opacity: Float = 0.72f,
 ) {
     var isPressed by remember { mutableStateOf(false) }
 
+    val buttonShape = when (shape) {
+        TouchControlShape.CIRCLE -> CircleShape
+        TouchControlShape.ROUNDED_RECT -> RoundedCornerShape(18.dp)
+    }
     val backgroundColor = when {
-        isPressed -> MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-        else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.35f)
+        isPressed -> MaterialTheme.colorScheme.primary.copy(alpha = opacity)
+        else -> MaterialTheme.colorScheme.surface.copy(alpha = opacity * 0.52f)
     }
 
     val borderColor = if (isPressed) {
@@ -53,10 +60,10 @@ fun TouchButton(
 
     Box(
         modifier = modifier
-            .size(56.dp)
-            .clip(CircleShape)
+            .fillMaxSize()
+            .clip(buttonShape)
             .background(backgroundColor)
-            .border(2.dp, borderColor, CircleShape)
+            .border(2.dp, borderColor, buttonShape)
             .pointerInput(label) {
                 awaitPointerEventScope {
                     while (true) {

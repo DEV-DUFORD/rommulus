@@ -2,15 +2,10 @@ package com.romm.androidtv.emulation.touch
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -32,22 +27,28 @@ import com.romm.androidtv.controller.model.LogicalControl
  */
 @Composable
 fun TouchDpad(
+    directions: DpadLogicalControls = DpadLogicalControls(
+        up = LogicalControl.DPAD_UP,
+        down = LogicalControl.DPAD_DOWN,
+        left = LogicalControl.DPAD_LEFT,
+        right = LogicalControl.DPAD_RIGHT,
+    ),
     onDirectionChange: (LogicalControl, Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    opacity: Float = 0.72f,
 ) {
-    val dpadColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)
+    val dpadColor = MaterialTheme.colorScheme.surface.copy(alpha = opacity * 0.45f)
 
     Box(
         modifier = modifier
-            .width(200.dp)
-            .height(200.dp),
+            .fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         // Vertical column: Up / Center / Down
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(64.dp),
+                .fillMaxWidth(0.34f),
             contentAlignment = Alignment.Center,
         ) {
             // Up zone
@@ -55,14 +56,14 @@ fun TouchDpad(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .fillMaxHeight(0.34f)
                     .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
                     .background(dpadColor)
                     .padding(2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 TouchZone(
-                    logicalControl = LogicalControl.DPAD_UP,
+                    logicalControl = directions.up,
                     onButtonChange = onDirectionChange,
                     modifier = Modifier.fillMaxSize(),
                     backgroundColor = Color.Transparent,
@@ -74,7 +75,7 @@ fun TouchDpad(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .fillMaxHeight(0.34f)
                     .background(dpadColor),
             )
 
@@ -83,14 +84,14 @@ fun TouchDpad(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .fillMaxHeight(0.34f)
                     .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
                     .background(dpadColor)
                     .padding(2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 TouchZone(
-                    logicalControl = LogicalControl.DPAD_DOWN,
+                    logicalControl = directions.down,
                     onButtonChange = onDirectionChange,
                     modifier = Modifier.fillMaxSize(),
                     backgroundColor = Color.Transparent,
@@ -103,7 +104,7 @@ fun TouchDpad(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp),
+                .fillMaxHeight(0.34f),
             contentAlignment = Alignment.Center,
         ) {
             // Left zone
@@ -111,14 +112,14 @@ fun TouchDpad(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .fillMaxHeight()
-                    .width(56.dp)
+                    .fillMaxWidth(0.34f)
                     .clip(RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp))
                     .background(dpadColor)
                     .padding(2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 TouchZone(
-                    logicalControl = LogicalControl.DPAD_LEFT,
+                    logicalControl = directions.left,
                     onButtonChange = onDirectionChange,
                     modifier = Modifier.fillMaxSize(),
                     backgroundColor = Color.Transparent,
@@ -131,14 +132,14 @@ fun TouchDpad(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .fillMaxHeight()
-                    .width(56.dp)
+                    .fillMaxWidth(0.34f)
                     .clip(RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp))
                     .background(dpadColor)
                     .padding(2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 TouchZone(
-                    logicalControl = LogicalControl.DPAD_RIGHT,
+                    logicalControl = directions.right,
                     onButtonChange = onDirectionChange,
                     modifier = Modifier.fillMaxSize(),
                     backgroundColor = Color.Transparent,
@@ -146,5 +147,13 @@ fun TouchDpad(
                 )
             }
         }
+
     }
 }
+
+data class DpadLogicalControls(
+    val up: LogicalControl,
+    val down: LogicalControl,
+    val left: LogicalControl,
+    val right: LogicalControl,
+)
