@@ -1,18 +1,24 @@
 package com.romm.androidtv.emulation.touch
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.controller.model.LogicalControl
 
@@ -40,10 +46,14 @@ fun TouchDpad(
     pressedDirections: Set<LogicalControl> = emptySet(),
 ) {
     val dpadColor = MaterialTheme.colorScheme.surface.copy(alpha = opacity * 0.45f)
+    val borderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
 
     Box(
         modifier = modifier
-            .fillMaxSize(),
+            .fillMaxSize()
+            .clip(DpadShape)
+            .background(dpadColor)
+            .border(2.dp, borderColor, DpadShape),
         contentAlignment = Alignment.Center,
     ) {
         // Vertical column: Up / Center / Down
@@ -59,8 +69,6 @@ fun TouchDpad(
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(0.34f)
-                    .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                    .background(dpadColor)
                     .padding(2.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -79,8 +87,7 @@ fun TouchDpad(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.34f)
-                    .background(dpadColor),
+                    .fillMaxHeight(0.34f),
             )
 
             // Down zone
@@ -89,8 +96,6 @@ fun TouchDpad(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(0.34f)
-                    .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
-                    .background(dpadColor)
                     .padding(2.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -119,8 +124,6 @@ fun TouchDpad(
                     .align(Alignment.CenterStart)
                     .fillMaxHeight()
                     .fillMaxWidth(0.34f)
-                    .clip(RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp))
-                    .background(dpadColor)
                     .padding(2.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -141,8 +144,6 @@ fun TouchDpad(
                     .align(Alignment.CenterEnd)
                     .fillMaxHeight()
                     .fillMaxWidth(0.34f)
-                    .clip(RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp))
-                    .background(dpadColor)
                     .padding(2.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -158,6 +159,45 @@ fun TouchDpad(
             }
         }
 
+    }
+}
+
+private object DpadShape : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Outline {
+        val armStartX = size.width * 0.33f
+        val armEndX = size.width * 0.67f
+        val armStartY = size.height * 0.33f
+        val armEndY = size.height * 0.67f
+        val radius = with(density) { 12.dp.toPx() }
+            .coerceAtMost(minOf(armStartX, armStartY))
+        val path = Path().apply {
+            moveTo(armStartX, radius)
+            quadraticBezierTo(armStartX, 0f, armStartX + radius, 0f)
+            lineTo(armEndX - radius, 0f)
+            quadraticBezierTo(armEndX, 0f, armEndX, radius)
+            lineTo(armEndX, armStartY)
+            lineTo(size.width - radius, armStartY)
+            quadraticBezierTo(size.width, armStartY, size.width, armStartY + radius)
+            lineTo(size.width, armEndY - radius)
+            quadraticBezierTo(size.width, armEndY, size.width - radius, armEndY)
+            lineTo(armEndX, armEndY)
+            lineTo(armEndX, size.height - radius)
+            quadraticBezierTo(armEndX, size.height, armEndX - radius, size.height)
+            lineTo(armStartX + radius, size.height)
+            quadraticBezierTo(armStartX, size.height, armStartX, size.height - radius)
+            lineTo(armStartX, armEndY)
+            lineTo(radius, armEndY)
+            quadraticBezierTo(0f, armEndY, 0f, armEndY - radius)
+            lineTo(0f, armStartY + radius)
+            quadraticBezierTo(0f, armStartY, radius, armStartY)
+            lineTo(armStartX, armStartY)
+            close()
+        }
+        return Outline.Generic(path)
     }
 }
 

@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,9 +58,37 @@ fun TouchLayoutEditorScreen(
     }
     var editingId by remember(profile.coreId) { mutableStateOf<TouchVisualControlId?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
+    var hasUnsavedChanges by remember(profile.coreId) { mutableStateOf(false) }
     val editing = layout.controls.firstOrNull { it.visualId == editingId }
 
-    BackHandler(onBack = onBack)
+    val persistLayout: (ConsoleTouchLayout) -> Unit = { updated ->
+        layout = updated
+        val document = updated.toOverrideDocument()
+        if (repository.save(document)) {
+            hasUnsavedChanges = false
+            status = null
+            onLayoutChanged(document)
+        } else {
+            hasUnsavedChanges = true
+            status = "Autosave failed"
+        }
+    }
+    val leaveEditor = {
+        if (!hasUnsavedChanges) {
+            onBack()
+        } else {
+            val document = layout.toOverrideDocument()
+            if (repository.save(document)) {
+                hasUnsavedChanges = false
+                onLayoutChanged(document)
+                onBack()
+            } else {
+                status = "Autosave failed"
+            }
+        }
+    }
+
+    BackHandler(onBack = leaveEditor)
 
     BoxWithConstraints(
         modifier = modifier
@@ -93,98 +122,92 @@ fun TouchLayoutEditorScreen(
                         ),
                     )
                 }
+                hasUnsavedChanges = true
                 status = null
             },
+            onMoveFinished = { persistLayout(layout) },
         )
 
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .fillMaxWidth()
-                .background(RommTvColors.NightHi.copy(alpha = 0.94f))
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-        ) {
-            Row(
+        if (editing == null) {
+            TvOutlinedButton(
+                onClick = leaveEditor,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                    .align(Alignment.TopStart)
+                    .padding(12.dp),
             ) {
-                Column {
-                    Text(
-                        text = "${profile.consoleName} On-Screen Controller",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = RommTvColors.TextPrimary,
-                    )
-                    Text(
-                        text = "Drag to move. Double-tap a control for size, opacity, and visibility.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = RommTvColors.TextSecondary,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TvOutlinedButton(onClick = onBack) { Text("Back") }
-                    TvButton(
-                        onClick = {
-                            val document = layout.toOverrideDocument()
-                            status = if (repository.save(document)) {
-                                onLayoutChanged(document)
-                                "Saved"
-                            } else {
-                                "Save failed"
-                            }
-                        },
-                    ) { Text("Save") }
-                }
+                Text("Back")
             }
-            if (editing != null) {
-                EditorControls(
-                    selected = editing,
-                    status = status,
-                    onDone = { editingId = null },
-                    onResize = { factor ->
-                        layout = layout.updateControl(editing.visualId) { definition ->
-                            val size = proportionallyResizedSize(
-                                definition = definition,
-                                factor = factor,
-                                viewportWidth = editorViewportWidth,
-                                viewportHeight = editorViewportHeight,
-                            )
-                            definition.withGeometry(
-                                size = size,
-                                center = NormalizedPoint(
-                                    definition.center.x.coerceIn(size.width / 2f, 1f - size.width / 2f),
-                                    definition.center.y.coerceIn(size.height / 2f, 1f - size.height / 2f),
-                                ),
-                            )
-                        }
-                        status = null
-                    },
-                    onOpacity = { delta ->
-                        layout = layout.updateControl(editing.visualId) { definition ->
-                            definition.withAppearance(
-                                opacity = (definition.opacity + delta).coerceIn(.20f, 1f),
-                            )
-                        }
-                        status = null
-                    },
-                    onVisibility = {
-                        layout = layout.updateControl(editing.visualId) { definition ->
-                            definition.withAppearance(visible = !definition.visible)
-                        }
-                        status = null
-                    },
-                    onReset = {
+        }
+
+        if (status != null && editing == null) {
+            Text(
+                text = status!!,
+                color = RommTvColors.Romm300,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .background(RommTvColors.NightHi.copy(alpha = 0.94f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        if (editing != null) {
+            val toolbarAlignment = if (editing.center.y >= .5f) {
+                Alignment.TopCenter
+            } else {
+                Alignment.BottomCenter
+            }
+            EditorControls(
+                selected = editing,
+                status = status,
+                modifier = Modifier.align(toolbarAlignment),
+                onBack = leaveEditor,
+                onDone = { editingId = null },
+                onResize = { factor ->
+                    val updated = layout.updateControl(editing.visualId) { definition ->
+                        val size = proportionallyResizedSize(
+                            definition = definition,
+                            factor = factor,
+                            viewportWidth = editorViewportWidth,
+                            viewportHeight = editorViewportHeight,
+                        )
+                        definition.withGeometry(
+                            size = size,
+                            center = NormalizedPoint(
+                                definition.center.x.coerceIn(size.width / 2f, 1f - size.width / 2f),
+                                definition.center.y.coerceIn(size.height / 2f, 1f - size.height / 2f),
+                            ),
+                        )
+                    }
+                    persistLayout(updated)
+                },
+                onOpacity = { delta ->
+                    val updated = layout.updateControl(editing.visualId) { definition ->
+                        definition.withAppearance(
+                            opacity = (definition.opacity + delta).coerceIn(.20f, 1f),
+                        )
+                    }
+                    persistLayout(updated)
+                },
+                onVisibility = {
+                    val updated = layout.updateControl(editing.visualId) { definition ->
+                        definition.withAppearance(visible = !definition.visible)
+                    }
+                    persistLayout(updated)
+                },
+                onReset = {
+                    if (repository.reset(profile.coreId)) {
                         layout = defaults
-                        repository.reset(profile.coreId)
+                        hasUnsavedChanges = false
                         onLayoutChanged(null)
                         selectedId = defaults.controls.firstOrNull()?.visualId
                         editingId = null
                         status = "Reset to default"
-                    },
-                )
-            }
+                    } else {
+                        status = "Reset failed"
+                    }
+                },
+            )
         }
     }
 }
@@ -198,8 +221,11 @@ private fun LayoutCanvas(
     onSelect: (TouchVisualControlId) -> Unit,
     onEdit: (TouchVisualControlId) -> Unit,
     onMove: (TouchVisualControlId, Float, Float) -> Unit,
+    onMoveFinished: () -> Unit,
 ) {
     val descriptors = remember(profile) { profile.controls.associateBy { it.id } }
+    val currentOnMove by rememberUpdatedState(onMove)
+    val currentOnMoveFinished by rememberUpdatedState(onMoveFinished)
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -245,9 +271,11 @@ private fun LayoutCanvas(
                     .pointerInput(definition.visualId, widthPx, heightPx) {
                         detectDragGestures(
                             onDragStart = { onSelect(definition.visualId) },
+                            onDragEnd = { currentOnMoveFinished() },
+                            onDragCancel = { currentOnMoveFinished() },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                onMove(
+                                currentOnMove(
                                     definition.visualId,
                                     dragAmount.x / widthPx,
                                     dragAmount.y / heightPx,
@@ -276,12 +304,14 @@ private fun EditorControls(
     onOpacity: (Float) -> Unit,
     onVisibility: () -> Unit,
     onReset: () -> Unit,
+    onBack: () -> Unit,
     onDone: () -> Unit,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 8.dp),
+            .background(RommTvColors.NightHi.copy(alpha = 0.94f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         Row(
             modifier = Modifier
@@ -290,6 +320,7 @@ private fun EditorControls(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            TvOutlinedButton(onClick = onBack) { Text("Back") }
             Text(
                 text = selected.visualId.value,
                 color = RommTvColors.TextPrimary,

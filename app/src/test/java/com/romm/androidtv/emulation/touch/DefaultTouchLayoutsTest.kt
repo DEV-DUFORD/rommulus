@@ -84,6 +84,23 @@ class DefaultTouchLayoutsTest {
     }
 
     @Test
+    fun `playstation face buttons use full-size symbols`() {
+        val labels = DefaultTouchLayouts.forCore("pcsx_rearmed")!!.controls
+            .filterIsInstance<TouchControlDefinition.Button>()
+            .filter { it.visualId.value in setOf("button.square", "button.cross", "button.triangle", "button.circle") }
+            .associate { it.visualId.value to it.displayLabel }
+
+        assertThat(labels).containsExactlyInAnyOrderEntriesOf(
+            mapOf(
+                "button.square" to "□",
+                "button.cross" to "✕",
+                "button.triangle" to "△",
+                "button.circle" to "◯",
+            ),
+        )
+    }
+
+    @Test
     fun `visual override cannot alter logical mapping`() {
         val profile = CoreControllerProfiles.byCoreId("snes9x")!!
         val defaults = DefaultTouchLayouts.forProfile(profile)
