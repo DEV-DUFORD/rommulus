@@ -130,8 +130,14 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/build.gradle.kts
-          git commit -m "Release $TAG"
+          # If the version is already applied in main (e.g. it was committed
+          # ahead of the workflow run), there is no diff to commit — just tag.
+          if git diff --quiet -- app/build.gradle.kts; then
+            echo "Version already applied on main; skipping commit."
+          else
+            git add app/build.gradle.kts
+            git commit -m "Release $TAG"
+          fi
           git tag --annotate "$TAG" --message "RomMulus $TAG"
           git push --atomic origin HEAD:main "$TAG"
 
