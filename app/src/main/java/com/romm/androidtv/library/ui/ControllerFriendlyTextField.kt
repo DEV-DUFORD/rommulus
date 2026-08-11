@@ -23,12 +23,14 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -71,6 +73,7 @@ fun ControllerFriendlyTextField(
     placeholder: @Composable (() -> Unit)? = null,
     leadingIcon: @Composable (() -> Unit)? = null,
     isError: Boolean = false,
+    touchEditEnabled: Boolean = false,
     singleLine: Boolean = true,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
@@ -79,6 +82,7 @@ fun ControllerFriendlyTextField(
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val inputModeManager = LocalInputModeManager.current
     val boxFocusRequester = remember { FocusRequester() }
     val fieldFocusRequester = remember { FocusRequester() }
     var isEditing by remember { mutableStateOf(false) }
@@ -134,7 +138,19 @@ fun ControllerFriendlyTextField(
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(fieldFocusRequester)
-                .focusProperties { canFocus = isEditing }
+                .focusProperties {
+                    canFocus = isEditing ||
+                        (touchEditEnabled && inputModeManager.inputMode == InputMode.Touch)
+                }
+                .onFocusChanged { state ->
+                    if (
+                        state.isFocused &&
+                        touchEditEnabled &&
+                        inputModeManager.inputMode == InputMode.Touch
+                    ) {
+                        isEditing = true
+                    }
+                }
                 .onPreviewKeyEvent { event ->
                     if (!isEditing || event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when {

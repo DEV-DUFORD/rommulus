@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -63,6 +64,7 @@ fun ControllerConsoleListScreen(
     onSelectCore: (coreId: String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String? = null,
 ) {
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
@@ -87,6 +89,7 @@ fun ControllerConsoleListScreen(
         modifier = modifier
             .fillMaxSize()
             .background(RommTvColors.NightHi)
+            .safeDrawingPadding()
             .onPreviewKeyEvent { keyEvent ->
                 // Intercept Back key at the composable level so the caller's
                 // onBack is invoked before navigation consumes it.
@@ -100,7 +103,7 @@ fun ControllerConsoleListScreen(
     ) {
         // ---- Title ----
         Text(
-            text = stringResource(R.string.controller_settings_title),
+            text = title ?: stringResource(R.string.controller_settings_title),
             style = MaterialTheme.typography.headlineMedium,
             color = RommTvColors.TextPrimary,
             modifier = Modifier

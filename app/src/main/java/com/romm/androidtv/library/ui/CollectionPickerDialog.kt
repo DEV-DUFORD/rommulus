@@ -323,6 +323,7 @@ private fun CreateCollectionContent(
     onCreateSubmit: () -> Unit,
     onCreateCancel: () -> Unit,
 ) {
+    val profile = com.romm.androidtv.platform.currentDeviceProfile()
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(text = "Create New Collection", style = MaterialTheme.typography.headlineSmall, color = RommTvColors.TextPrimary)
         Spacer(modifier = Modifier.height(16.dp))
@@ -333,6 +334,7 @@ private fun CreateCollectionContent(
             onValueChange = onNameChange,
             placeholder = { Text("Enter collection name", color = RommTvColors.TextSecondary) },
             isError = state.validationError != null,
+            touchEditEnabled = profile.hasTouchscreen,
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(fieldFocusRequester)

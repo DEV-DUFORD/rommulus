@@ -10,6 +10,7 @@ class EmulationInputRoutingPolicyTest {
         assertThat(shouldRouteGameplayInput(true, PauseOverlay.MENU, false)).isFalse()
         assertThat(shouldRouteGameplayInput(true, PauseOverlay.VIDEO_OPTIONS, false)).isFalse()
         assertThat(shouldRouteGameplayInput(true, PauseOverlay.CONTROLLER_SETTINGS, false)).isFalse()
+        assertThat(shouldRouteGameplayInput(true, PauseOverlay.TOUCH_CONTROLLER_SETTINGS, false)).isFalse()
         assertThat(shouldRouteGameplayInput(true, PauseOverlay.CLOSED, true)).isFalse()
         assertThat(shouldRouteGameplayInput(false, PauseOverlay.CLOSED, false)).isFalse()
     }
@@ -22,6 +23,8 @@ class EmulationInputRoutingPolicyTest {
             .isEqualTo(PauseOverlay.VIDEO_OPTIONS)
         assertThat(pauseOverlayOnBackground(PauseOverlay.CONTROLLER_SETTINGS))
             .isEqualTo(PauseOverlay.CONTROLLER_SETTINGS)
+        assertThat(pauseOverlayOnBackground(PauseOverlay.TOUCH_CONTROLLER_SETTINGS))
+            .isEqualTo(PauseOverlay.TOUCH_CONTROLLER_SETTINGS)
     }
 
     @Test
@@ -30,6 +33,8 @@ class EmulationInputRoutingPolicyTest {
         assertThat(quickBackTransition(PauseOverlay.MENU)).isEqualTo(PauseOverlay.CLOSED)
         assertThat(quickBackTransition(PauseOverlay.VIDEO_OPTIONS)).isEqualTo(PauseOverlay.MENU)
         assertThat(quickBackTransition(PauseOverlay.CONTROLLER_SETTINGS)).isEqualTo(PauseOverlay.MENU)
+        assertThat(quickBackTransition(PauseOverlay.TOUCH_CONTROLLER_SETTINGS))
+            .isEqualTo(PauseOverlay.MENU)
     }
 
     @Test

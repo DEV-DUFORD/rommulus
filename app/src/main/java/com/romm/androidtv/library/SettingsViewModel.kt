@@ -83,6 +83,12 @@ data class SettingsUiState(
      * false, every uploaded copy is kept on the server.
      */
     val autocleanSavesOnUpload: Boolean = true,
+    /**
+     * On-screen game controls toggle (on by default): when true, touch controls
+     * are rendered over the emulator surface during gameplay. Disabled on TV
+     * devices that lack a touchscreen.
+     */
+    val onScreenGameControlsEnabled: Boolean = true,
     /** Currently active theme chosen from the Settings screen. */
     val activeTheme: RommTheme = RommTheme.RomMulus,
 )
@@ -119,6 +125,8 @@ class SettingsViewModel(
     private val setVerifySha1OnLaunchFn: (Boolean) -> Unit = {},
     private val getAutocleanSavesOnUpload: () -> Boolean = { true },
     private val setAutocleanSavesOnUploadFn: (Boolean) -> Unit = {},
+    private val getOnScreenGameControlsEnabled: () -> Boolean = { true },
+    private val setOnScreenGameControlsEnabledFn: (Boolean) -> Unit = {},
     private val getTheme: () -> String = { RommTheme.RomMulus.name },
     private val setThemeFn: (String) -> Unit = {},
 ) : ViewModel() {
@@ -141,6 +149,7 @@ class SettingsViewModel(
             hideUnsupportedSystems = getHideUnsupportedSystems(),
             verifySha1OnLaunch = getVerifySha1OnLaunch(),
             autocleanSavesOnUpload = getAutocleanSavesOnUpload(),
+            onScreenGameControlsEnabled = getOnScreenGameControlsEnabled(),
             activeTheme = RommTheme.fromStorage(getTheme()),
         )
     }
@@ -161,6 +170,12 @@ class SettingsViewModel(
     fun onAutocleanSavesOnUploadChanged(enabled: Boolean) {
         setAutocleanSavesOnUploadFn(enabled)
         _uiState.value = _uiState.value.copy(autocleanSavesOnUpload = enabled)
+    }
+
+    /** Toggles the on-screen game controls setting and persists it immediately. */
+    fun onOnScreenGameControlsChanged(enabled: Boolean) {
+        setOnScreenGameControlsEnabledFn(enabled)
+        _uiState.value = _uiState.value.copy(onScreenGameControlsEnabled = enabled)
     }
 
     /**
@@ -433,6 +448,8 @@ class SettingsViewModel(
                 setVerifySha1OnLaunchFn = { verify -> settingsRepository.setVerifySha1OnLaunch(verify) },
                 getAutocleanSavesOnUpload = { settingsRepository.autocleanSavesOnUpload() },
                 setAutocleanSavesOnUploadFn = { enabled -> settingsRepository.setAutocleanSavesOnUpload(enabled) },
+                getOnScreenGameControlsEnabled = { settingsRepository.onScreenGameControlsEnabled() },
+                setOnScreenGameControlsEnabledFn = { enabled -> settingsRepository.setOnScreenGameControlsEnabled(enabled) },
                 getTheme = { settingsRepository.theme() },
                 setThemeFn = { theme -> settingsRepository.setTheme(theme) },
             ) as T

@@ -40,6 +40,10 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
     /** Returns the stored token for this server/user scope, or null if none exists. */
     override fun getToken(origin: String, username: String): ClientToken? {
         val scopeKey = makeScopeKey(origin, username)
+        if (prefs.getInt("${scopeKey}.scope_version", 0) != CURRENT_SCOPE_VERSION) {
+            Log.d("RommAuthDx", "ClientTokenStore.getToken: staleScopeVersion")
+            return null
+        }
         val encrypted = prefs.getString("${scopeKey}.enc", null) ?: run {
             Log.d("RommAuthDx", "ClientTokenStore.getToken: absent")
             return null
@@ -79,6 +83,7 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
         val scopeKey = makeScopeKey(origin, username)
         val encPrefKey = "${scopeKey}.enc"
         val noncePrefKey = "${scopeKey}.nonce"
+        val scopeVersionPrefKey = "${scopeKey}.scope_version"
 
         // Attempt encryption with current key. If it fails (e.g. Android 14 IV rejection
         // or corrupted keystore entry), delete + recreate the key exactly once and retry.
@@ -108,6 +113,7 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
                 val committed = prefs.edit()
                     .putString(encPrefKey, android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP))
                     .putString(noncePrefKey, android.util.Base64.encodeToString(generatedIv, android.util.Base64.NO_WRAP))
+                    .putInt(scopeVersionPrefKey, CURRENT_SCOPE_VERSION)
                     .commit()
 
                 if (!committed) {
@@ -140,6 +146,7 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
         prefs.edit()
             .remove("${scopeKey}.enc")
             .remove("${scopeKey}.nonce")
+            .remove("${scopeKey}.scope_version")
             .apply()
         Log.d("RommAuthDx", "ClientTokenStore.clearToken: completed")
     }
@@ -222,5 +229,6 @@ class ClientTokenStore(context: Context) : ClientTokenStorage {
         // GCM IV length: NIST SP 800-38D recommends 12 bytes; allow a safe range.
         private const val GCM_IV_MIN_SIZE = 12
         private const val GCM_IV_MAX_SIZE = 16
+        private const val CURRENT_SCOPE_VERSION = 2
     }
 }

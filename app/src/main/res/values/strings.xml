@@ -98,6 +98,7 @@
     <string name="pause_menu_resume">Resume</string>
     <string name="pause_menu_video_options">Video Options</string>
     <string name="pause_menu_controller_settings">Controller Settings</string>
+    <string name="pause_menu_on_screen_controller_settings">On-Screen Controller Settings</string>
     <string name="pause_menu_quit">Quit</string>
 
     <!-- Video Options Dialog -->

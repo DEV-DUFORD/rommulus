@@ -126,6 +126,18 @@ class SettingsRepository(
     }
 
     /**
+     * On-screen game controls toggle (on by default): when true, touch controls
+     * are rendered over the emulator surface during gameplay. Disable this if
+     * you use a Bluetooth or USB controller, since the on-screen controls will
+     * interfere with physical input.
+     */
+    fun onScreenGameControlsEnabled(): Boolean = prefs.getBoolean(KEY_ON_SCREEN_GAME_CONTROLS, true)
+
+    fun setOnScreenGameControlsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ON_SCREEN_GAME_CONTROLS, enabled).apply()
+    }
+
+    /**
      * Currently active UI theme, stored by id string ("RomMulus"/"RomM").
      * Defaults to the local-appearance "RomMulus" (logo teal) theme.
      */
@@ -196,6 +208,7 @@ class SettingsRepository(
         private const val KEY_VERIFY_SHA1 = "verify_sha1_on_launch"
         private const val KEY_AUTOCLEAN_SAVES = "autoclean_saves_on_upload"
         private const val KEY_SCANLINES_ENABLED = "video_scanlines_enabled"
+        private const val KEY_ON_SCREEN_GAME_CONTROLS = "on_screen_game_controls"
         private const val KEY_SEGACD_BIOS_ID = "segacd_bios_id"
         private const val KEY_SEGACD_BIOS_FILE_NAME = "segacd_bios_file_name"
         private const val KEY_PSX_BIOS_ID = "psx_bios_id"

@@ -58,6 +58,7 @@ fun SearchScreen(
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
 ) {
+    val profile = com.romm.androidtv.platform.currentDeviceProfile()
     val viewModel: SearchViewModel = viewModel(
         factory = remember(repository, refreshEvents) {
             SearchViewModel.Factory(
@@ -91,6 +92,7 @@ fun SearchScreen(
                     tint = RommTvColors.TextSecondary,
                 )
             },
+            touchEditEnabled = profile.hasTouchscreen,
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(

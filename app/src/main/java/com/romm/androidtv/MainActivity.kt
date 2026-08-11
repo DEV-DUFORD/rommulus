@@ -7,6 +7,7 @@ import android.hardware.input.InputManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import java.util.Locale
 import android.util.Log
@@ -142,7 +143,9 @@ class MainActivity : ComponentActivity() {
         NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
         NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
         NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_VERSION_PICKER, NATIVE_BIOS_CONFIGURATION,
-        NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG, NATIVE_SCREENSHOT_VIEWER
+        NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG,
+        NATIVE_TOUCH_CONTROLLER_LIST, NATIVE_TOUCH_CONTROLLER_EDITOR,
+        NATIVE_SCREENSHOT_VIEWER
     }
 
     private var currentScreen by mutableStateOf(Screen.NATIVE_HOME)
@@ -240,6 +243,12 @@ class MainActivity : ComponentActivity() {
         SettingsRepository(
             getSharedPreferences(SettingsRepository.PREFS_NAME, MODE_PRIVATE),
             defaultOrigin = BuildConfig.ROMM_ORIGIN
+        )
+    }
+
+    private val touchLayoutRepository by lazy {
+        com.romm.androidtv.emulation.touch.TouchLayoutRepository(
+            getSharedPreferences(SettingsRepository.PREFS_NAME, MODE_PRIVATE),
         )
     }
 
@@ -427,6 +436,15 @@ class MainActivity : ComponentActivity() {
         private const val DIAG_TAG = "RommAuthDx"
         /** Duration of the fade-to-black transition before EmulationActivity launches. */
         private const val LAUNCH_FADE_MS = 400
+        private const val STATE_SCREEN = "navigation.screen"
+        private const val STATE_GAME_DETAIL_PARENT = "navigation.gameDetailParent"
+        private const val STATE_PLATFORM_ID = "navigation.platformId"
+        private const val STATE_COLLECTION_ID = "navigation.collectionId"
+        private const val STATE_ROM_ID = "navigation.romId"
+        private const val STATE_CONTROLLER_CORE_ID = "navigation.controllerCoreId"
+        private const val STATE_BIOS_SYSTEM = "navigation.biosSystem"
+        private const val STATE_SCREENSHOT_URLS = "navigation.screenshotUrls"
+        private const val STATE_SCREENSHOT_INDEX = "navigation.screenshotIndex"
     }
 
     /** Maps a sidebar destination to the [Screen] it opens; SETTINGS has no native screen yet (out of scope, UI_REFACTOR.md). */
@@ -436,6 +454,62 @@ class MainActivity : ComponentActivity() {
         com.romm.androidtv.library.ui.NavDestination.COLLECTIONS -> Screen.NATIVE_COLLECTIONS
         com.romm.androidtv.library.ui.NavDestination.SEARCH -> Screen.NATIVE_SEARCH
         com.romm.androidtv.library.ui.NavDestination.SETTINGS -> Screen.NATIVE_SETTINGS
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_SCREEN, currentScreen.name)
+        outState.putString(STATE_GAME_DETAIL_PARENT, gameDetailParent.name)
+        selectedPlatformId?.let { outState.putLong(STATE_PLATFORM_ID, it) }
+        selectedCollectionId?.let { outState.putLong(STATE_COLLECTION_ID, it) }
+        selectedRomId?.let { outState.putLong(STATE_ROM_ID, it) }
+        selectedControllerCoreId?.let { outState.putString(STATE_CONTROLLER_CORE_ID, it) }
+        outState.putString(STATE_BIOS_SYSTEM, selectedBiosSystem.name)
+        outState.putStringArrayList(STATE_SCREENSHOT_URLS, ArrayList(selectedScreenshotUrls))
+        outState.putInt(STATE_SCREENSHOT_INDEX, selectedScreenshotIndex)
+    }
+
+    private fun restoreNavigationState(state: Bundle) {
+        selectedPlatformId = state.takeIf { it.containsKey(STATE_PLATFORM_ID) }?.getLong(STATE_PLATFORM_ID)
+        selectedCollectionId = state.takeIf { it.containsKey(STATE_COLLECTION_ID) }?.getLong(STATE_COLLECTION_ID)
+        selectedRomId = state.takeIf { it.containsKey(STATE_ROM_ID) }?.getLong(STATE_ROM_ID)
+        selectedControllerCoreId = state.getString(STATE_CONTROLLER_CORE_ID)
+        selectedScreenshotUrls = state.getStringArrayList(STATE_SCREENSHOT_URLS).orEmpty()
+        selectedScreenshotIndex = state.getInt(STATE_SCREENSHOT_INDEX, 0)
+        gameDetailParent = state.getString(STATE_GAME_DETAIL_PARENT)
+            ?.let { runCatching { Screen.valueOf(it) }.getOrNull() }
+            ?: Screen.NATIVE_HOME
+        selectedBiosSystem = state.getString(STATE_BIOS_SYSTEM)
+            ?.let { runCatching { BiosSystem.valueOf(it) }.getOrNull() }
+            ?: BiosSystem.SEGA_CD
+
+        val restoredScreen = state.getString(STATE_SCREEN)
+            ?.let { runCatching { Screen.valueOf(it) }.getOrNull() }
+            ?: Screen.NATIVE_HOME
+        currentScreen = when (restoredScreen) {
+            Screen.NATIVE_PLATFORM_DETAIL ->
+                if (selectedPlatformId != null) restoredScreen else Screen.NATIVE_PLATFORMS
+            Screen.NATIVE_COLLECTION_DETAIL ->
+                if (selectedCollectionId != null) restoredScreen else Screen.NATIVE_COLLECTIONS
+            Screen.NATIVE_GAME_DETAIL ->
+                if (selectedRomId != null) restoredScreen else Screen.NATIVE_HOME
+            Screen.NATIVE_SCREENSHOT_VIEWER ->
+                if (selectedRomId != null && selectedScreenshotUrls.isNotEmpty()) {
+                    restoredScreen
+                } else if (selectedRomId != null) {
+                    Screen.NATIVE_GAME_DETAIL
+                } else {
+                    Screen.NATIVE_HOME
+                }
+            Screen.NATIVE_CONTROLLER_CONFIG ->
+                if (selectedControllerCoreId != null) restoredScreen else Screen.NATIVE_CONTROLLER_LIST
+            Screen.NATIVE_TOUCH_CONTROLLER_EDITOR ->
+                if (selectedControllerCoreId != null) restoredScreen else Screen.NATIVE_TOUCH_CONTROLLER_LIST
+            Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
+            Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_VERSION_PICKER ->
+                if (selectedRomId != null) Screen.NATIVE_GAME_DETAIL else Screen.NATIVE_HOME
+            else -> restoredScreen
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -498,6 +572,9 @@ class MainActivity : ComponentActivity() {
                     Screen.NATIVE_BIOS_CONFIGURATION -> currentScreen = Screen.NATIVE_SETTINGS
                     Screen.NATIVE_CONTROLLER_LIST -> currentScreen = Screen.NATIVE_SETTINGS
                     Screen.NATIVE_CONTROLLER_CONFIG -> currentScreen = Screen.NATIVE_CONTROLLER_LIST
+                    Screen.NATIVE_TOUCH_CONTROLLER_LIST -> currentScreen = Screen.NATIVE_SETTINGS
+                    Screen.NATIVE_TOUCH_CONTROLLER_EDITOR ->
+                        currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
                     Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
@@ -534,6 +611,9 @@ class MainActivity : ComponentActivity() {
             clientTokenStore.getToken(s.origin, s.username.orEmpty())
         }
         appMode = OnboardingRoutingPolicy.decide(startupSession, startupProfile.origin, startupToken != null)
+        if (appMode == OnboardingRoutingPolicy.AppMode.MAIN && savedInstanceState != null) {
+            restoreNavigationState(savedInstanceState)
+        }
         Log.d(DIAG_TAG, "MainActivity.onCreate: appMode=${appMode.name}")
 
         // Startup: verify existing session via lifecycle-aware coroutine. Runs ONLY in
@@ -565,7 +645,9 @@ class MainActivity : ComponentActivity() {
                         // a manual Back-out-of-WebView step to reach.
                         Log.d(TAG, "Startup: session valid, syncing cookies")
                         authRepository.syncCookiesToWebView(origin)
-                        currentScreen = Screen.NATIVE_HOME
+                        if (savedInstanceState == null) {
+                            currentScreen = Screen.NATIVE_HOME
+                        }
                         Log.d(DIAG_TAG, "MainActivity.startup: nav NATIVE_HOME verify=success")
                     }
                     is AuthFlowResult.Failure -> {
@@ -588,6 +670,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
+            com.romm.androidtv.platform.ProvideDeviceProfile {
             // Phase 4 PLACEHOLDER: cancel any in-progress capture whenever the
             // active screen changes. The actual capture-triggering UI (pause /
             // controller-config screens) does not exist yet — it arrives in
@@ -618,6 +701,7 @@ class MainActivity : ComponentActivity() {
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
                         Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_VERSION_PICKER, Screen.NATIVE_BIOS_CONFIGURATION,
                         Screen.NATIVE_CONTROLLER_LIST, Screen.NATIVE_CONTROLLER_CONFIG,
+                        Screen.NATIVE_TOUCH_CONTROLLER_LIST, Screen.NATIVE_TOUCH_CONTROLLER_EDITOR,
                         Screen.NATIVE_SCREENSHOT_VIEWER -> {
                             val homeViewModel: com.romm.androidtv.library.HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                 factory = com.romm.androidtv.library.HomeViewModel.Factory(
@@ -900,6 +984,9 @@ class MainActivity : ComponentActivity() {
                                                 onOpenControllerSettings = {
                                                     currentScreen = Screen.NATIVE_CONTROLLER_LIST
                                                 },
+                                                onOpenOnScreenControllerSettings = {
+                                                    currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
+                                                },
                                             )
                                         }
                                     }
@@ -972,6 +1059,50 @@ class MainActivity : ComponentActivity() {
                                             )
                                         }
                                     }
+                                    Screen.NATIVE_TOUCH_CONTROLLER_LIST -> {
+                                        com.romm.androidtv.controller.ui.ControllerConsoleListScreen(
+                                            profiles = com.romm.androidtv.controller.config.CoreControllerProfiles.forApprovedCores(),
+                                            title = "On-Screen Controller Settings",
+                                            onSelectCore = { coreId ->
+                                                selectedControllerCoreId = coreId
+                                                currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_EDITOR
+                                            },
+                                            onBack = { currentScreen = Screen.NATIVE_SETTINGS },
+                                        )
+                                    }
+                                    Screen.NATIVE_TOUCH_CONTROLLER_EDITOR -> {
+                                        androidx.compose.runtime.DisposableEffect(Unit) {
+                                            val controller = androidx.core.view.WindowCompat.getInsetsController(
+                                                window,
+                                                window.decorView,
+                                            )
+                                            controller.systemBarsBehavior =
+                                                androidx.core.view.WindowInsetsControllerCompat
+                                                    .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                                            controller.hide(
+                                                androidx.core.view.WindowInsetsCompat.Type.systemBars(),
+                                            )
+                                            onDispose {
+                                                controller.show(
+                                                    androidx.core.view.WindowInsetsCompat.Type.systemBars(),
+                                                )
+                                            }
+                                        }
+                                        val profile = selectedControllerCoreId?.let {
+                                            com.romm.androidtv.controller.config.CoreControllerProfiles.byCoreId(it)
+                                        }
+                                        if (profile == null) {
+                                            currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
+                                        } else {
+                                            com.romm.androidtv.emulation.touch.TouchLayoutEditorScreen(
+                                                profile = profile,
+                                                repository = touchLayoutRepository,
+                                                onBack = {
+                                                    currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
+                                                },
+                                            )
+                                        }
+                                    }
                                     Screen.NATIVE_BIOS_CONFIGURATION -> {
                                        val biosFactory = when (selectedBiosSystem) {
                                            BiosSystem.SEGA_CD ->
@@ -1010,6 +1141,7 @@ class MainActivity : ComponentActivity() {
             }
                 // Input lock during game preparation + fade-to-black transition into emulation.
                 LaunchTransitionOverlay()
+            }
         }
     }
     }
@@ -1196,6 +1328,8 @@ class MainActivity : ComponentActivity() {
                 )
                 putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_SAVE_PATH, savePath)
                 putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_ROM_ID, spec.romId)
+                val hasTouchscreen = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+                putExtra("on_screen_controls_enabled", hasTouchscreen && settingsRepository.onScreenGameControlsEnabled())
                 candidateMetadata?.let { CandidateExtras.putIntoIntent(this, it) }
             }
         )
