@@ -114,6 +114,25 @@ class SettingsRepository(
             .commit()
 
     /**
+     * Integer scaling toggle (off by default): when true, the game image is
+     * displayed at the largest clean integer multiple of the core's native
+     * output resolution that fits entirely on screen. No fractional scaling
+     * or overflow — each source pixel maps to an exact N×N block of display
+     * pixels for a crisp retro look.
+     */
+    fun integerScalingEnabled(): Boolean =
+        prefs.getBoolean(KEY_INTEGER_SCALING_ENABLED, false)
+
+    /**
+     * Persists the integer scaling toggle. Returns true only when the
+     * underlying SharedPreferences committed the write synchronously.
+     */
+    fun setIntegerScalingEnabled(enabled: Boolean): Boolean =
+        prefs.edit()
+            .putBoolean(KEY_INTEGER_SCALING_ENABLED, enabled)
+            .commit()
+
+    /**
      * Advanced save-cleanup toggle (on by default): when true, SRAM uploads ask
      * the server to auto-clean the "autosave" slot down to a short recent
      * history (5 files) right after each successful upload. When false, the
@@ -208,6 +227,7 @@ class SettingsRepository(
         private const val KEY_VERIFY_SHA1 = "verify_sha1_on_launch"
         private const val KEY_AUTOCLEAN_SAVES = "autoclean_saves_on_upload"
         private const val KEY_SCANLINES_ENABLED = "video_scanlines_enabled"
+        private const val KEY_INTEGER_SCALING_ENABLED = "video_integer_scaling_enabled"
         private const val KEY_ON_SCREEN_GAME_CONTROLS = "on_screen_game_controls"
         private const val KEY_SEGACD_BIOS_ID = "segacd_bios_id"
         private const val KEY_SEGACD_BIOS_FILE_NAME = "segacd_bios_file_name"

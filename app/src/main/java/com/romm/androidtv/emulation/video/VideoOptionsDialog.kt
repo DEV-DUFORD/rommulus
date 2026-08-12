@@ -50,25 +50,94 @@ import com.romm.androidtv.library.ui.RommTvColors
 import com.romm.androidtv.library.ui.TvOutlinedButton
 
 @Composable
-internal fun VideoOptionsDialog(
-    scanlinesEnabled: Boolean,
-    persistenceError: Boolean,
-    onScanlinesChanged: (Boolean) -> Boolean,
-    onDismiss: () -> Unit,
+private fun VideoOptionToggleRow(
+    label: String,
+    description: String,
+    checked: Boolean,
+    onChanged: (Boolean) -> Boolean,
+    focusRequester: FocusRequester,
+    onReady: () -> Unit,
 ) {
-    val focusRequester = remember { FocusRequester() }
-    var toggleReady by remember { mutableStateOf(false) }
-    val toggleInteractionSource = remember { MutableInteractionSource() }
-    val toggleIsFocused by toggleInteractionSource.collectIsFocusedAsState()
-    val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.7f
-
-    // Resolve string resources outside semantics blocks
-    val scanlinesLabel = stringResource(R.string.video_options_scanlines)
-    val stateDescription = if (scanlinesEnabled) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val borderColor = if (isFocused) RommTvColors.Romm300 else Color.Transparent
+    val stateDescription = if (checked) {
         stringResource(R.string.video_options_state_on)
     } else {
         stringResource(R.string.video_options_state_off)
     }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 80.dp)
+            .onGloballyPositioned { onReady() }
+            .focusRequester(focusRequester)
+            .toggleable(
+                value = checked,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Switch,
+                onValueChange = { onChanged(it) },
+            )
+            .border(
+                BorderStroke(3.dp, borderColor),
+                RoundedCornerShape(8.dp),
+            )
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$label - $stateDescription"
+            }
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RommTvColors.TextSecondary,
+                )
+            }
+
+            Switch(
+                checked = checked,
+                onCheckedChange = null,
+                interactionSource = remember { MutableInteractionSource() },
+                colors = SwitchDefaults.colors(
+                    checkedTrackColor = RommTvColors.Romm600,
+                    checkedThumbColor = Color.White,
+                    uncheckedTrackColor = RommTvColors.TextSecondary.copy(alpha = 0.35f),
+                    uncheckedThumbColor = RommTvColors.TextSecondary.copy(alpha = 0.7f),
+                    checkedBorderColor = borderColor,
+                    uncheckedBorderColor = borderColor,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun VideoOptionsDialog(
+    scanlinesEnabled: Boolean,
+    integerScalingEnabled: Boolean,
+    persistenceError: Boolean,
+    onScanlinesChanged: (Boolean) -> Boolean,
+    onIntegerScalingChanged: (Boolean) -> Boolean,
+    onDismiss: () -> Unit,
+) {
+    val scanlinesFocusRequester = remember { FocusRequester() }
+    val integerScalingFocusRequester = remember { FocusRequester() }
+    var firstToggleReady by remember { mutableStateOf(false) }
+    val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.7f
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -96,7 +165,6 @@ internal fun VideoOptionsDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // Title
                 Text(
                     text = stringResource(R.string.video_options_title),
                     style = MaterialTheme.typography.headlineSmall,
@@ -109,67 +177,25 @@ internal fun VideoOptionsDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Toggle row
-                val toggleBorderColor =
-                    if (toggleIsFocused) RommTvColors.Romm300 else Color.Transparent
+                VideoOptionToggleRow(
+                    label = stringResource(R.string.video_options_scanlines),
+                    description = stringResource(R.string.video_options_scanlines_description),
+                    checked = scanlinesEnabled,
+                    onChanged = onScanlinesChanged,
+                    focusRequester = scanlinesFocusRequester,
+                    onReady = { firstToggleReady = true },
+                )
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 80.dp)
-                        .onGloballyPositioned { toggleReady = true }
-                        .focusRequester(focusRequester)
-                        .toggleable(
-                            value = scanlinesEnabled,
-                            interactionSource = toggleInteractionSource,
-                            indication = null,
-                            role = Role.Switch,
-                            onValueChange = { onScanlinesChanged(it) },
-                        )
-                        .border(
-                            BorderStroke(3.dp, toggleBorderColor),
-                            RoundedCornerShape(8.dp),
-                        )
-                        .semantics(mergeDescendants = true) {
-                            contentDescription = "$scanlinesLabel - $stateDescription"
-                        }
-                        .padding(horizontal = 18.dp, vertical = 14.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = scanlinesLabel,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color.White,
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = stringResource(R.string.video_options_scanlines_description),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = RommTvColors.TextSecondary,
-                            )
-                        }
+                Spacer(modifier = Modifier.height(12.dp))
 
-                        // Passive visual-only Switch (onCheckedChange = null)
-                        Switch(
-                            checked = scanlinesEnabled,
-                            onCheckedChange = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = RommTvColors.Romm600,
-                                checkedThumbColor = Color.White,
-                                uncheckedTrackColor = RommTvColors.TextSecondary.copy(alpha = 0.35f),
-                                uncheckedThumbColor = RommTvColors.TextSecondary.copy(alpha = 0.7f),
-                                checkedBorderColor = toggleBorderColor,
-                                uncheckedBorderColor = toggleBorderColor,
-                            ),
-                        )
-                    }
-                }
+                VideoOptionToggleRow(
+                    label = stringResource(R.string.video_options_integer_scaling),
+                    description = stringResource(R.string.video_options_integer_scaling_description),
+                    checked = integerScalingEnabled,
+                    onChanged = onIntegerScalingChanged,
+                    focusRequester = integerScalingFocusRequester,
+                    onReady = { /* no-op, only track first */ },
+                )
 
                 // Persistence error
                 if (persistenceError) {
@@ -183,7 +209,6 @@ internal fun VideoOptionsDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Return button
                 TvOutlinedButton(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth(),
@@ -192,9 +217,9 @@ internal fun VideoOptionsDialog(
         }
     }
 
-    LaunchedEffect(toggleReady) {
-        if (toggleReady) {
-            focusRequester.requestFocus()
+    LaunchedEffect(firstToggleReady) {
+        if (firstToggleReady) {
+            scanlinesFocusRequester.requestFocus()
         }
     }
 }

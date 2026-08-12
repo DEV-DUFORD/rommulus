@@ -264,6 +264,18 @@ class EmulationActivity : ComponentActivity() {
         return ok
     }
 
+    /** Integer scaling toggle state, initialized from persistence; Compose observes this flow. */
+    private val integerScalingEnabled by lazy { MutableStateFlow(settingsRepository.integerScalingEnabled()) }
+
+    /**
+     * Mutation boundary for the integer scaling toggle. Mirrors [setScanlinesEnabled] exactly.
+     */
+    private fun setIntegerScalingEnabled(requested: Boolean): Boolean {
+        val ok = settingsRepository.setIntegerScalingEnabled(requested)
+        if (ok) integerScalingEnabled.value = requested
+        return ok
+    }
+
     /**
      * Set when [finishAndDeliverResult] is called on an active session but [checkpointIfRunning]
      * fails — blocks the quit until the user explicitly retries or chooses to quit without
@@ -599,11 +611,13 @@ class EmulationActivity : ComponentActivity() {
                             controllerRouter = controllerRouter,
                             saveFailureVisible = saveFailureVisible,
                             scanlinesEnabled = scanlinesEnabled,
+                            integerScalingEnabled = integerScalingEnabled,
                             touchControlsEnabled = touchControlsEnabled,
                             touchCoordinator = touchCoordinator,
                             touchLayoutOverride = coreIdForMapping?.let(touchLayoutRepository::load),
                             touchLayoutRepository = touchLayoutRepository,
                             onSetScanlinesEnabled = ::setScanlinesEnabled,
+                            onSetIntegerScalingEnabled = ::setIntegerScalingEnabled,
                             onStop = { finishAndDeliverResult() },
                             onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
                             onSetNativePaused = { paused -> host.nativeSetPaused(paused) },
@@ -1087,11 +1101,13 @@ private fun EmulationScreen(
     controllerRouter: ControllerEventRouter,
     saveFailureVisible: Flow<Boolean>,
     scanlinesEnabled: StateFlow<Boolean>,
+    integerScalingEnabled: StateFlow<Boolean>,
     touchControlsEnabled: Boolean,
     touchCoordinator: TouchInputCoordinator,
     touchLayoutOverride: com.romm.androidtv.emulation.touch.TouchLayoutOverrideDocument?,
     touchLayoutRepository: com.romm.androidtv.emulation.touch.TouchLayoutRepository,
     onSetScanlinesEnabled: (Boolean) -> Boolean,
+    onSetIntegerScalingEnabled: (Boolean) -> Boolean,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
     onSetNativePaused: (Boolean) -> Unit,
@@ -1112,6 +1128,7 @@ private fun EmulationScreen(
     val overlayState by pauseOverlay.collectAsState()
     val saveFailureShown by saveFailureVisible.collectAsState(initial = false)
     val scanlinesOn by scanlinesEnabled.collectAsState()
+    val integerScalingOn by integerScalingEnabled.collectAsState()
     var persistenceError by remember { mutableStateOf(false) }
     var pauseMenuFocusTarget by remember { mutableStateOf(PauseMenuFocusTarget.RESUME) }
     var activeTouchLayoutOverride by remember(coreIdForMapping) {
@@ -1200,6 +1217,7 @@ private fun EmulationScreen(
                 coreWidth = diagnostics[2].toInt(),
                 coreHeight = diagnostics[3].toInt(),
                 scanlinesEnabled = scanlinesOn,
+                integerScalingEnabled = integerScalingOn,
                 modifier = Modifier.fillMaxSize()
             )
         } else {
@@ -1258,9 +1276,15 @@ private fun EmulationScreen(
             if (overlayState == PauseOverlay.VIDEO_OPTIONS) {
                 VideoOptionsDialog(
                     scanlinesEnabled = scanlinesOn,
+                    integerScalingEnabled = integerScalingOn,
                     persistenceError = persistenceError,
                     onScanlinesChanged = { requested ->
                         val ok = onSetScanlinesEnabled(requested)
+                        persistenceError = !ok
+                        ok
+                    },
+                    onIntegerScalingChanged = { requested ->
+                        val ok = onSetIntegerScalingEnabled(requested)
                         persistenceError = !ok
                         ok
                     },
