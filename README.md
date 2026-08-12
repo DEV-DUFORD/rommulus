@@ -80,6 +80,9 @@ No microphone, storage, camera, or location permissions are used or requested.
 - `android:allowBackup="false"` and an isolated emulation process (`:emulation`) keep session data
   and native playback sandboxed.
 
+See the [RomMulus Privacy Notice](https://dev-duford.github.io/rommulus/privacy/) for details about
+data stored on the device and exchanged with a user-selected RomM server.
+
 ## Licensing & attribution
 
 This project is licensed under the **GNU General Public License v3.0** (see

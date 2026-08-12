@@ -1,5 +1,8 @@
 package com.romm.androidtv.library.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +44,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -94,9 +98,12 @@ fun SettingsScreen(
     val onScreenControlsFocusRequester = remember { FocusRequester() }
     val themeFocusRequester = remember { FocusRequester() }
     val licensesFocusRequester = remember { FocusRequester() }
+    val privacyFocusRequester = remember { FocusRequester() }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showLicensesDialog by remember { mutableStateOf(false) }
+    var privacyOpenError by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
     val profile = currentDeviceProfile()
 
     LaunchedEffect(Unit) {
@@ -663,9 +670,45 @@ fun SettingsScreen(
                         } else {
                             autocleanFocusRequester
                         }
+                        down = privacyFocusRequester
                     },
             ) {
             Text("View Licenses")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        TvOutlinedButton(
+            onClick = {
+                privacyOpenError = false
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_NOTICE_URL))
+                try {
+                    context.startActivity(intent)
+                } catch (_: ActivityNotFoundException) {
+                    privacyOpenError = true
+                }
+            },
+            modifier = Modifier
+                .focusRequester(privacyFocusRequester)
+                .focusProperties { up = licensesFocusRequester },
+        ) {
+            Text("Privacy Notice")
+        }
+
+        Text(
+            text = PRIVACY_NOTICE_URL,
+            style = MaterialTheme.typography.bodySmall,
+            color = RommTvColors.TextSecondary,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+
+        if (privacyOpenError) {
+            Text(
+                text = "No web browser is installed. Open the address above on another device.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFf44336),
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
 
         if (showLicensesDialog) {
@@ -673,6 +716,8 @@ fun SettingsScreen(
         }
     }
 }
+
+private const val PRIVACY_NOTICE_URL = "https://dev-duford.github.io/rommulus/privacy/"
 
 /** A button that shows a loading spinner when [isLoading] is true. */
 @Composable
