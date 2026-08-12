@@ -50,6 +50,7 @@ import com.romm.androidtv.library.HomeViewModel
 import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.PlatformSummary
 import com.romm.androidtv.library.SectionState
+import com.romm.androidtv.platform.currentDeviceProfile
 
 /**
  * Top-level Home content: a vertically scrollable stack of horizontally
@@ -67,6 +68,7 @@ fun NativeHomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val portraitTouchLayout = currentDeviceProfile().usePortraitTouchLayout
 
     LazyColumn(
         modifier = modifier
@@ -77,7 +79,10 @@ fun NativeHomeScreen(
                     endY = 600f,
                 ),
             )
-            .padding(top = 32.dp, start = 8.dp),
+            .padding(
+                top = if (portraitTouchLayout) 16.dp else 32.dp,
+                start = if (portraitTouchLayout) 0.dp else 8.dp,
+            ),
         // Bottom breathing room so the last shelf's title/subtitle isn't flush against
         // the screen edge once scrolled all the way down (matches the Platforms/Collections
         // grid fix — TV displays leave little/no margin for content sitting right at the edge).
@@ -117,6 +122,8 @@ private fun RomShelf(
     onRetry: () -> Unit,
     onCardClick: (LibraryRom) -> Unit,
 ) {
+    val portraitTouchLayout = currentDeviceProfile().usePortraitTouchLayout
+
     // Omit the shelf entirely once we know it's empty — never render an empty row.
     if (state is SectionState.Loaded && state.data.isEmpty()) return
 
@@ -148,8 +155,8 @@ private fun RomShelf(
 
             is SectionState.Loaded -> {
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(horizontal = if (portraitTouchLayout) 12.dp else 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (portraitTouchLayout) 12.dp else 16.dp),
                 ) {
                     items(state.data, key = { it.id }) { rom ->
                         GameCard(
@@ -242,11 +249,13 @@ private fun <T> TileGridScreen(
     modifier: Modifier = Modifier,
     tileContent: @Composable (T) -> Unit,
 ) {
+    val portraitTouchLayout = currentDeviceProfile().usePortraitTouchLayout
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(RommTvColors.NightHi)
-            .padding(24.dp),
+            .padding(if (portraitTouchLayout) 16.dp else 24.dp),
     ) {
         Text(text = title, style = MaterialTheme.typography.headlineSmall, color = RommTvColors.TextPrimary)
         Spacer(modifier = Modifier.height(16.dp))
@@ -272,9 +281,9 @@ private fun <T> TileGridScreen(
                     // the last row could render partially or fully off-screen with no way to
                     // scroll it into view.
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 160.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        columns = GridCells.Adaptive(minSize = if (portraitTouchLayout) 128.dp else 160.dp),
+                        horizontalArrangement = Arrangement.spacedBy(if (portraitTouchLayout) 12.dp else 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (portraitTouchLayout) 12.dp else 16.dp),
                         contentPadding = PaddingValues(bottom = 24.dp),
                         modifier = Modifier.fillMaxWidth().weight(1f),
                     ) {
@@ -288,6 +297,7 @@ private fun <T> TileGridScreen(
 
 @Composable
 private fun TileCard(title: String, subtitle: String, imageUrls: List<String>, imagePadding: Dp = 0.dp, onClick: () -> Unit = {}) {
+    val portraitTouchLayout = currentDeviceProfile().usePortraitTouchLayout
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     // Cascades through [imageUrls] on load failure (e.g. RomM's platform icon set
@@ -328,7 +338,11 @@ private fun TileCard(title: String, subtitle: String, imageUrls: List<String>, i
                     contentDescription = title,
                     contentScale = ContentScale.Fit,
                     onError = { candidateIndex++ },
-                    modifier = Modifier.fillMaxSize().padding(imagePadding),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            if (portraitTouchLayout && imagePadding > 0.dp) 12.dp else imagePadding,
+                        ),
                 )
             } else {
                 androidx.compose.material3.Icon(

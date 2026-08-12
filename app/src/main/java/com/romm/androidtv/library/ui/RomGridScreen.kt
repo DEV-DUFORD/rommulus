@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.RomGridViewModel
 import com.romm.androidtv.library.SectionState
+import com.romm.androidtv.platform.currentDeviceProfile
 
 /**
  * Generic paginated ROM grid, used for both `PlatformDetailScreen` and
@@ -48,12 +49,13 @@ fun RomGridScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val gridState = rememberLazyGridState()
+    val portraitTouchLayout = currentDeviceProfile().usePortraitTouchLayout
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(RommTvColors.NightHi)
-            .padding(24.dp),
+            .padding(if (portraitTouchLayout) 16.dp else 24.dp),
     ) {
         Text(text = title, style = MaterialTheme.typography.headlineSmall, color = RommTvColors.TextPrimary)
         if (uiState.total > 0) {
@@ -85,10 +87,10 @@ fun RomGridScreen(
                     LoadMoreOnScrollEnd(gridState = gridState, itemCount = section.data.size, onLoadMore = viewModel::loadMore)
                     LazyVerticalGrid(
                         state = gridState,
-                        columns = GridCells.Adaptive(minSize = 136.dp),
+                        columns = GridCells.Adaptive(minSize = if (portraitTouchLayout) 112.dp else 136.dp),
                         contentPadding = PaddingValues(bottom = 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(if (portraitTouchLayout) 12.dp else 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (portraitTouchLayout) 12.dp else 16.dp),
                         // weight(1f) bounds the grid to the remaining Column height so it owns
                         // its own scrolling — without it the grid isn't height-constrained and
                         // the last row can end up partially or fully unreachable by scrolling.

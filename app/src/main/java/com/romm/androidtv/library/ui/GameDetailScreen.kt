@@ -346,7 +346,12 @@ private fun GameDetailContent(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 24.dp),
+            .padding(
+                start = 32.dp,
+                end = 32.dp,
+                top = if (profile.usePortraitTouchLayout) 88.dp else 24.dp,
+                bottom = 24.dp,
+            ),
     ) {
         item {
             val cover: @Composable () -> Unit = {

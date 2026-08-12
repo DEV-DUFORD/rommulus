@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.romm.androidtv.platform.currentDeviceProfile
 
 private val GameCardShape = RoundedCornerShape(8.dp)
 
@@ -47,12 +48,13 @@ fun GameCard(
     subtitle: String? = null,
     onClick: () -> Unit = {},
 ) {
+    val profile = currentDeviceProfile()
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     Column(
         modifier = modifier
-            .width(136.dp)
+            .width(if (profile.usePortraitTouchLayout) 112.dp else 136.dp)
             // `clickable` (and thus the focus target Compose uses for "bring focused item
             // into view" when scrolling) lives on the whole Column, not just the image Box
             // below — otherwise bring-into-view only guarantees the poster is on-screen,

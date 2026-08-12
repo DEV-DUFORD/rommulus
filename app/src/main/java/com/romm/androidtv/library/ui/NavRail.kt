@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -75,6 +77,7 @@ private val navIcons: Map<NavDestination, ImageVector> = mapOf(
 
 private val CollapsedRailWidth = 72.dp
 private val ExpandedRailWidth = 200.dp
+private val BottomBarHeight = 64.dp
 
 /**
  * Shared top-level scaffold for the four sidebar-navigable native screens
@@ -95,6 +98,31 @@ fun LibraryScaffold(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    val deviceProfile = currentDeviceProfile()
+    if (deviceProfile.usePortraitTouchLayout) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(RommTvColors.NightHi)
+                .safeDrawingPadding(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = BottomBarHeight),
+            ) {
+                content()
+            }
+            BottomNavBar(
+                selected = current,
+                onSelect = onNavigate,
+                icons = navIcons,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+        return
+    }
+
     var railHasFocus by remember { mutableStateOf(false) }
     val railWidth by animateDpAsState(
         targetValue = if (railHasFocus) ExpandedRailWidth else CollapsedRailWidth,
@@ -125,6 +153,53 @@ fun LibraryScaffold(
             width = railWidth,
             onExpandedChange = { railHasFocus = it },
         )
+    }
+}
+
+@Composable
+private fun BottomNavBar(
+    selected: NavDestination,
+    onSelect: (NavDestination) -> Unit,
+    icons: Map<NavDestination, ImageVector>,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(BottomBarHeight)
+            .zIndex(1f)
+            .background(RommTvColors.StageHi),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NavDestination.entries.forEach { destination ->
+            val isSelected = destination == selected
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable { onSelect(destination) }
+                    .background(
+                        if (isSelected) RommTvColors.Romm600.copy(alpha = 0.4f) else Color.Transparent,
+                    )
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    imageVector = icons.getValue(destination),
+                    contentDescription = destination.label,
+                    tint = if (isSelected) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text(
+                    text = destination.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isSelected) RommTvColors.TextPrimary else RommTvColors.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 

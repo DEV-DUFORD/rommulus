@@ -24,6 +24,7 @@ val LocalDeviceProfile = staticCompositionLocalOf<DeviceProfile> {
     DeviceProfile(
         isTv = false,
         hasTouchscreen = true,
+        isPortrait = false,
         windowWidthClass = WindowWidthClass.MEDIUM,
         windowHeightClass = WindowHeightClass.MEDIUM,
         foldingFeature = null,
@@ -121,10 +122,13 @@ fun rememberDeviceProfile(): DeviceProfile {
         }
     }
 
-    return remember(isTv, hasTouchscreen, windowWidthClass, windowHeightClass, foldingFeatureState.value) {
+    val isPortrait = heightDp > widthDp
+
+    return remember(isTv, hasTouchscreen, isPortrait, windowWidthClass, windowHeightClass, foldingFeatureState.value) {
         DeviceProfile(
             isTv = isTv,
             hasTouchscreen = hasTouchscreen,
+            isPortrait = isPortrait,
             windowWidthClass = windowWidthClass,
             windowHeightClass = windowHeightClass,
             foldingFeature = foldingFeatureState.value,

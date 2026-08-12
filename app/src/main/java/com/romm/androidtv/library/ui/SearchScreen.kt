@@ -59,6 +59,7 @@ fun SearchScreen(
     refreshEvents: Flow<Unit>? = null,
 ) {
     val profile = com.romm.androidtv.platform.currentDeviceProfile()
+    val portraitTouchLayout = profile.usePortraitTouchLayout
     val viewModel: SearchViewModel = viewModel(
         factory = remember(repository, refreshEvents) {
             SearchViewModel.Factory(
@@ -76,7 +77,7 @@ fun SearchScreen(
         modifier = modifier
             .fillMaxSize()
             .background(RommTvColors.NightHi)
-            .padding(24.dp),
+            .padding(if (portraitTouchLayout) 16.dp else 24.dp),
     ) {
         // ---- Search input ----
         ControllerFriendlyTextField(
@@ -138,6 +139,7 @@ fun SearchScreen(
                 SearchResultsGrid(
                     roms = uiState.roms,
                     gridState = gridState,
+                    compact = portraitTouchLayout,
                     onLoadMore = viewModel::loadMore,
                     onGameSelected = onGameSelected,
                 )
@@ -199,6 +201,7 @@ private fun EmptySearchState(query: String) {
 private fun SearchResultsGrid(
     roms: List<LibraryRom>,
     gridState: LazyGridState,
+    compact: Boolean,
     onLoadMore: () -> Unit,
     onGameSelected: (Long) -> Unit,
 ) {
@@ -206,10 +209,10 @@ private fun SearchResultsGrid(
 
     LazyVerticalGrid(
         state = gridState,
-        columns = GridCells.Adaptive(minSize = 136.dp),
+        columns = GridCells.Adaptive(minSize = if (compact) 112.dp else 136.dp),
         contentPadding = PaddingValues(bottom = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 16.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 16.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         items(roms, key = { it.id }) { rom ->

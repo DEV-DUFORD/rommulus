@@ -7,6 +7,22 @@ import org.junit.jupiter.api.Test
 
 class DeviceProfileProviderTest {
 
+    @Test
+    fun `portrait touch layout requires both portrait orientation and touchscreen`() {
+        fun profile(hasTouchscreen: Boolean, isPortrait: Boolean) = DeviceProfile(
+            isTv = false,
+            hasTouchscreen = hasTouchscreen,
+            isPortrait = isPortrait,
+            windowWidthClass = WindowWidthClass.COMPACT,
+            windowHeightClass = WindowHeightClass.MEDIUM,
+            foldingFeature = null,
+        )
+
+        assertThat(profile(hasTouchscreen = true, isPortrait = true).usePortraitTouchLayout).isTrue()
+        assertThat(profile(hasTouchscreen = true, isPortrait = false).usePortraitTouchLayout).isFalse()
+        assertThat(profile(hasTouchscreen = false, isPortrait = true).usePortraitTouchLayout).isFalse()
+    }
+
     // ── Width classification ──
 
     @Test

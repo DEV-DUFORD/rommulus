@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -68,6 +70,7 @@ import com.romm.androidtv.platform.currentDeviceProfile
  * - D-pad navigable via focusRequester chain + semantic onClick
  */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun SettingsScreen(
     modifier: Modifier = Modifier,
     viewModelFactory: SettingsViewModel.Factory,
@@ -116,7 +119,7 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(RommTvColors.NightHi)
             .verticalScroll(rememberScrollState())
-            .padding(32.dp),
+            .padding(if (profile.usePortraitTouchLayout) 16.dp else 32.dp),
     ) {
         // ---- Title ----
         Text(
@@ -176,30 +179,36 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // ---- Action buttons row ----
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            SettingsActionButton(
-                label = "Check Connection",
-                focusRequester = checkConnectionFocusRequester,
-                isLoading = uiState.connectionCheck is ConnectionCheckState.Loading,
-                onClick = viewModel::onCheckConnection,
-            )
-
-            TvButton(
-                onClick = viewModel::onSave,
-                modifier = Modifier.focusRequester(saveFocusRequester),
+        if (profile.usePortraitTouchLayout) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Save")
+                SettingsServerActionButtons(
+                    checkConnectionFocusRequester = checkConnectionFocusRequester,
+                    saveFocusRequester = saveFocusRequester,
+                    restoreDefaultFocusRequester = restoreDefaultFocusRequester,
+                    isCheckingConnection = uiState.connectionCheck is ConnectionCheckState.Loading,
+                    onCheckConnection = viewModel::onCheckConnection,
+                    onSave = viewModel::onSave,
+                    onRestoreDefault = viewModel::onRestoreDefault,
+                )
             }
-
-            TvOutlinedButton(
-                onClick = viewModel::onRestoreDefault,
-                modifier = Modifier.focusRequester(restoreDefaultFocusRequester),
+        } else {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Restore Default")
+                SettingsServerActionButtons(
+                    checkConnectionFocusRequester = checkConnectionFocusRequester,
+                    saveFocusRequester = saveFocusRequester,
+                    restoreDefaultFocusRequester = restoreDefaultFocusRequester,
+                    isCheckingConnection = uiState.connectionCheck is ConnectionCheckState.Loading,
+                    onCheckConnection = viewModel::onCheckConnection,
+                    onSave = viewModel::onSave,
+                    onRestoreDefault = viewModel::onRestoreDefault,
+                )
             }
         }
 
@@ -719,6 +728,36 @@ fun SettingsScreen(
 
 private const val PRIVACY_NOTICE_URL = "https://dev-duford.github.io/rommulus/privacy/"
 
+@Composable
+private fun SettingsServerActionButtons(
+    checkConnectionFocusRequester: FocusRequester,
+    saveFocusRequester: FocusRequester,
+    restoreDefaultFocusRequester: FocusRequester,
+    isCheckingConnection: Boolean,
+    onCheckConnection: () -> Unit,
+    onSave: () -> Unit,
+    onRestoreDefault: () -> Unit,
+) {
+    SettingsActionButton(
+        label = "Check Connection",
+        focusRequester = checkConnectionFocusRequester,
+        isLoading = isCheckingConnection,
+        onClick = onCheckConnection,
+    )
+    TvButton(
+        onClick = onSave,
+        modifier = Modifier.focusRequester(saveFocusRequester),
+    ) {
+        Text("Save")
+    }
+    TvOutlinedButton(
+        onClick = onRestoreDefault,
+        modifier = Modifier.focusRequester(restoreDefaultFocusRequester),
+    ) {
+        Text("Restore Default")
+    }
+}
+
 /** A button that shows a loading spinner when [isLoading] is true. */
 @Composable
 private fun SettingsActionButton(
@@ -746,6 +785,18 @@ private fun SettingsActionButton(
 /** A read-only label/value row for informational settings. */
 @Composable
 private fun SettingsInfoRow(label: String, value: String) {
+    if (currentDeviceProfile().usePortraitTouchLayout) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+        ) {
+            Text(text = label, color = RommTvColors.TextSecondary)
+            Text(text = value, color = RommTvColors.TextPrimary)
+        }
+        return
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()

@@ -80,7 +80,7 @@
     <string name="onboarding_server_error_persistence">Could not save this server address. Please try again.</string>
     <string name="onboarding_qr_heading">Or sign in with your phone</string>
     <string name="onboarding_qr_loading">Preparing secure sign-in…</string>
-    <string name="onboarding_qr_instruction">Scan this code, sign in to RomM, then approve this TV.</string>
+    <string name="onboarding_qr_instruction">Scan this code, sign in to RomM, then approve this device.</string>
     <string name="onboarding_qr_code_label">Pairing code: %1$s</string>
     <string name="onboarding_qr_expires">Code expires in %1$d minutes</string>
     <string name="onboarding_qr_description">QR code for signing in to RomM</string>
