@@ -1589,7 +1589,7 @@ private fun PauseMenuOverlay(
         AlertDialog(
             onDismissRequest = { showQuitConfirm = false },
             title = { Text("Quit game?") },
-            text = { Text("Your save will be checkpointed before quitting.") },
+            text = { Text("Are you sure you want to quit?") },
             confirmButton = {
                 TextButton(
                     onClick = { showQuitConfirm = false; onQuit() },
