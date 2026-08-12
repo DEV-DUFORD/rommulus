@@ -578,10 +578,10 @@ class EmulationActivity : ComponentActivity() {
         val touchControlsEnabled = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) &&
             intent.getBooleanExtra("on_screen_controls_enabled", false)
 
-            setContent {
-                RommTvTheme {
-                    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
-                        EmulationScreen(
+        setContent {
+            RommTvTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+                    EmulationScreen(
                             host = host,
                             sessionStarted = sessionStarted,
                             lastError = host.nativeGetLastError(),
@@ -609,33 +609,33 @@ class EmulationActivity : ComponentActivity() {
                             // ("Entering controller settings from a paused game must never resume
                             // gameplay" — capture must not survive the pause menu).
                             onCaptureCancel = { captureCoordinator.cancel() },
-                        )
+                    )
 
-                        // Phase 7: hide system bars during active gameplay (sessionStarted,
-                        // pauseOverlay == CLOSED, no save-failure UI) so the emulation is
-                        // fully immersive on phone/tablet. Restored to normal (bars shown)
-                        // whenever gameplay is no longer "active" (overlay open, session ends,
-                        // or save-failure dialog visible). Phase 6B: the same gameplay-active
-                        // policy gates touch input routing — paused/configuration overlays must
-                        // never leak touch into the core, so routing is disabled (and any held
-                        // touch state released) the moment gameplay is no longer active.
-                        val overlayState by pauseOverlay.collectAsState()
-                        val saveFailureShown by saveFailureVisible.collectAsState(initial = false)
-                        LaunchedEffect(sessionStarted, overlayState, saveFailureShown) {
-                            val routingActive = shouldRouteGameplayInput(
-                                sessionStarted = sessionStarted,
-                                pauseOverlay = overlayState,
-                                saveFailureVisible = saveFailureShown,
-                            )
-                            applyImmersiveMode(
-                                routingActive || overlayState == PauseOverlay.TOUCH_CONTROLLER_SETTINGS,
-                            )
-                            touchCoordinator.setRoutingEnabled(routingActive)
-                            if (!routingActive) touchCoordinator.resetTouch()
-                        }
+                    // Phase 7: hide system bars during active gameplay (sessionStarted,
+                    // pauseOverlay == CLOSED, no save-failure UI) so the emulation is
+                    // fully immersive on phone/tablet. Restored to normal (bars shown)
+                    // whenever gameplay is no longer "active" (overlay open, session ends,
+                    // or save-failure dialog visible). Phase 6B: the same gameplay-active
+                    // policy gates touch input routing — paused/configuration overlays must
+                    // never leak touch into the core, so routing is disabled (and any held
+                    // touch state released) the moment gameplay is no longer active.
+                    val overlayState by pauseOverlay.collectAsState()
+                    val saveFailureShown by saveFailureVisible.collectAsState(initial = false)
+                    LaunchedEffect(sessionStarted, overlayState, saveFailureShown) {
+                        val routingActive = shouldRouteGameplayInput(
+                            sessionStarted = sessionStarted,
+                            pauseOverlay = overlayState,
+                            saveFailureVisible = saveFailureShown,
+                        )
+                        applyImmersiveMode(
+                            routingActive || overlayState == PauseOverlay.TOUCH_CONTROLLER_SETTINGS,
+                        )
+                        touchCoordinator.setRoutingEnabled(routingActive)
+                        if (!routingActive) touchCoordinator.resetTouch()
                     }
                 }
             }
+        }
     }
 
     /**
