@@ -1,5 +1,6 @@
 package com.romm.androidtv.controller
 
+import android.view.MotionEvent
 import com.romm.androidtv.controller.model.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
@@ -497,6 +498,221 @@ class ControllerModelTest {
             val sig1 = DeviceSignature("vid:045e-pid:02e0-src:1689", 0x045e, 0x02e0, "Xbox One")
             val sig2 = DeviceSignature("vid:045e-pid:02e0-src:1689", 0x045e, 0x02e0, "Xbox Series")
             assertThat(sig1).isNotEqualTo(sig2)
+        }
+    }
+
+    @Nested
+    @DisplayName("GamepadSnapshot — angle-based d-pad mapping")
+    inner class AngleBasedDpadTests {
+        private val dpadMapping = ControllerMapping(
+            axisDirections = mapOf(
+                AxisDirection(MotionEvent.AXIS_X,  1) to LogicalControl.DPAD_RIGHT,
+                AxisDirection(MotionEvent.AXIS_X, -1) to LogicalControl.DPAD_LEFT,
+                AxisDirection(MotionEvent.AXIS_Y,  1) to LogicalControl.DPAD_DOWN,
+                AxisDirection(MotionEvent.AXIS_Y, -1) to LogicalControl.DPAD_UP
+            )
+        )
+
+        private fun snap(axisX: Float = 0f, axisY: Float = 0f) =
+            GamepadSnapshot.fromPhysicalInput(
+                emptySet(),
+                mapOf(MotionEvent.AXIS_X to axisX, MotionEvent.AXIS_Y to axisY),
+                dpadMapping
+            )
+
+        private fun snap(mapping: ControllerMapping, axisX: Float = 0f, axisY: Float = 0f) =
+            GamepadSnapshot.fromPhysicalInput(
+                emptySet(),
+                mapOf(MotionEvent.AXIS_X to axisX, MotionEvent.AXIS_Y to axisY),
+                mapping
+            )
+
+        // ── Cardinal directions ────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("pure right: only RIGHT fires")
+        fun `pure right`() {
+            val s = snap(axisX = 1.0f, axisY = 0f)
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("pure left: only LEFT fires")
+        fun `pure left`() {
+            val s = snap(axisX = -1.0f, axisY = 0f)
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("pure up: only UP fires")
+        fun `pure up`() {
+            val s = snap(axisX = 0f, axisY = -1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("pure down: only DOWN fires")
+        fun `pure down`() {
+            val s = snap(axisX = 0f, axisY = 1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isZero()
+        }
+
+        // ── Diagonal directions ────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("up-right diagonal: UP + RIGHT fire")
+        fun `up right diagonal`() {
+            val s = snap(axisX = 0.7071f, axisY = -0.7071f) // ~45°
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("up-left diagonal: UP + LEFT fire")
+        fun `up left diagonal`() {
+            val s = snap(axisX = -0.7071f, axisY = -0.7071f) // ~135°
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("down-left diagonal: DOWN + LEFT fire")
+        fun `down left diagonal`() {
+            val s = snap(axisX = -0.7071f, axisY = 0.7071f) // ~225°
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("down-right diagonal: DOWN + RIGHT fire")
+        fun `down right diagonal`() {
+            val s = snap(axisX = 0.7071f, axisY = 0.7071f) // ~315°
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+        }
+
+        // ── Deadzone ───────────────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("within deadzone: no d-pad button fires")
+        fun `within deadzone`() {
+            val s = snap(axisX = 0.1f, axisY = 0.1f) // both < 0.15 default deadzone
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("zero axes: no d-pad button fires")
+        fun `zero axes`() {
+            val s = snap(axisX = 0f, axisY = 0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isZero()
+        }
+
+        // ── Narrow-band fix: slight drift on orthogonal axis stays cardinal ────
+
+        @Test
+        @DisplayName("right with tiny Y drift under deadzone: only RIGHT fires")
+        fun `right with small y drift`() {
+            val s = snap(axisX = 1.0f, axisY = 0.1f) // Y is within deadzone → zeroed
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+            assertThat(s.buttons[LogicalControl.DPAD_DOWN.index]).isZero()
+        }
+
+        @Test
+        @DisplayName("right with small Y drift beyond deadzone but angle still in RIGHT zone")
+        fun `right with moderate y drift stays right`() {
+            // X=0.95, Y=-0.16 → after deadzone: X=0.95, Y=-0.16 → atan2(-0.16, 0.95) ≈ -9.5° = 350.5°
+            // 350.5° is in RIGHT zone [337.5, 360) ∪ [0, 22.5)
+            val s = snap(axisX = 0.95f, axisY = -0.16f)
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.DPAD_UP.index]).isZero()
+        }
+
+        // ── Fallback: non-standard d-pad bindings use half-axis ────────────────
+
+        @Test
+        @DisplayName("missing d-pad binding falls back to half-axis")
+        fun `missing dpad binding falls back`() {
+            val partialMapping = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(MotionEvent.AXIS_X,  1) to LogicalControl.DPAD_RIGHT,
+                    AxisDirection(MotionEvent.AXIS_X, -1) to LogicalControl.DPAD_LEFT,
+                    // DOWN and UP missing → fallback
+                )
+            )
+            val s = snap(partialMapping, axisX = 0.7071f, axisY = -0.7071f)
+            // With half-axis: X=0.7071 > deadzone → RIGHT fires; Y=-0.7071 not bound → nothing
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1.0f)
+        }
+
+        @Test
+        @DisplayName("non-standard d-pad target falls back to half-axis")
+        fun `non standard dpad target falls back`() {
+            val weirdMapping = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(MotionEvent.AXIS_X,  1) to LogicalControl.DPAD_RIGHT,
+                    AxisDirection(MotionEvent.AXIS_X, -1) to LogicalControl.DPAD_LEFT,
+                    AxisDirection(MotionEvent.AXIS_Y,  1) to LogicalControl.DPAD_DOWN,
+                    AxisDirection(MotionEvent.AXIS_Y, -1) to LogicalControl.BUTTON_A // non-standard!
+                )
+            )
+            val s = snap(weirdMapping, axisX = 0.9f, axisY = -0.9f)
+            // Half-axis: X=0.9 → RIGHT fires; Y=-0.9 < 0 → BUTTON_A fires
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1.0f)
+        }
+
+        // ── Non-d-pad axis bindings still work via half-axis ───────────────────
+
+        @Test
+        @DisplayName("non-d-pad axis direction still fires via half-axis alongside angle d-pad")
+        fun `non dpad axis direction works`() {
+            val mapping = ControllerMapping(
+                axisDirections = mapOf(
+                    AxisDirection(MotionEvent.AXIS_X,  1) to LogicalControl.DPAD_RIGHT,
+                    AxisDirection(MotionEvent.AXIS_X, -1) to LogicalControl.DPAD_LEFT,
+                    AxisDirection(MotionEvent.AXIS_Y,  1) to LogicalControl.DPAD_DOWN,
+                    AxisDirection(MotionEvent.AXIS_Y, -1) to LogicalControl.DPAD_UP,
+                    AxisDirection(MotionEvent.AXIS_RX, 1) to LogicalControl.BUTTON_RB // extra
+                )
+            )
+            val s = GamepadSnapshot.fromPhysicalInput(
+                emptySet(),
+                mapOf(
+                    MotionEvent.AXIS_X to 1.0f,
+                    MotionEvent.AXIS_Y to 0f,
+                    MotionEvent.AXIS_RX to 0.8f
+                ),
+                mapping
+            )
+            assertThat(s.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1.0f)
+            assertThat(s.buttons[LogicalControl.BUTTON_RB.index]).isEqualTo(1.0f)
         }
     }
 }
