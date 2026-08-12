@@ -7,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +54,7 @@ import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import com.romm.androidtv.platform.currentDeviceProfile
 
 /** One destination reachable from the [NavRail]. */
 enum class NavDestination(val label: String) {
@@ -144,6 +147,8 @@ fun NavRail(
 ) {
     val focusManager = LocalFocusManager.current
     val view = LocalView.current
+    val deviceProfile = currentDeviceProfile()
+    val scrollState = rememberScrollState()
     val labelAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
         animationSpec = tween(durationMillis = 120),
@@ -168,6 +173,13 @@ fun NavRail(
                     false
                 }
             }
+            .then(
+                if (deviceProfile.hasTouchscreen) {
+                    Modifier.verticalScroll(scrollState)
+                } else {
+                    Modifier
+                },
+            )
             .padding(vertical = 24.dp),
         horizontalAlignment = Alignment.Start,
     ) {

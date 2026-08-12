@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.displayCutoutPadding
@@ -40,6 +42,7 @@ import com.romm.androidtv.controller.config.CoreControllerProfile
 import com.romm.androidtv.library.ui.RommTvColors
 import com.romm.androidtv.library.ui.TvButton
 import com.romm.androidtv.library.ui.TvOutlinedButton
+import com.romm.androidtv.platform.rememberDeviceProfile
 
 @Composable
 fun TouchLayoutEditorScreen(
@@ -295,6 +298,7 @@ private fun LayoutCanvas(
         }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EditorControls(
     selected: TouchControlDefinition,
@@ -307,34 +311,49 @@ private fun EditorControls(
     onBack: () -> Unit,
     onDone: () -> Unit,
 ) {
+    val deviceProfile = rememberDeviceProfile()
+    val controlItems: @Composable () -> Unit = {
+        TvOutlinedButton(onClick = onBack) { Text("Back") }
+        Text(
+            text = selected.visualId.value,
+            color = RommTvColors.TextPrimary,
+            modifier = Modifier.padding(end = 12.dp),
+        )
+        TvOutlinedButton(onClick = { onResize(.90f) }) { Text("Size -") }
+        TvOutlinedButton(onClick = { onResize(1.10f) }) { Text("Size +") }
+        TvOutlinedButton(onClick = { onOpacity(-.10f) }) { Text("Opacity -") }
+        TvOutlinedButton(onClick = { onOpacity(.10f) }) { Text("Opacity +") }
+        TvOutlinedButton(onClick = onVisibility) {
+            Text(if (selected.visible) "Hide" else "Show")
+        }
+        TvOutlinedButton(onClick = onReset) { Text("Reset Default") }
+        TvButton(onClick = onDone) { Text("Done") }
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(RommTvColors.NightHi.copy(alpha = 0.94f))
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TvOutlinedButton(onClick = onBack) { Text("Back") }
-            Text(
-                text = selected.visualId.value,
-                color = RommTvColors.TextPrimary,
-                modifier = Modifier.padding(end = 12.dp),
-            )
-            TvOutlinedButton(onClick = { onResize(.90f) }) { Text("Size -") }
-            TvOutlinedButton(onClick = { onResize(1.10f) }) { Text("Size +") }
-            TvOutlinedButton(onClick = { onOpacity(-.10f) }) { Text("Opacity -") }
-            TvOutlinedButton(onClick = { onOpacity(.10f) }) { Text("Opacity +") }
-            TvOutlinedButton(onClick = onVisibility) {
-                Text(if (selected.visible) "Hide" else "Show")
+        if (deviceProfile.hasTouchscreen) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                controlItems()
             }
-            TvOutlinedButton(onClick = onReset) { Text("Reset Default") }
-            TvButton(onClick = onDone) { Text("Done") }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                controlItems()
+            }
         }
         if (status != null) {
             Spacer(modifier = Modifier.height(4.dp))

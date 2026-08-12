@@ -41,4 +41,23 @@ class TouchLayoutResizeTest {
             assertThat(rendered.width).isEqualTo(rendered.height)
         }
     }
+
+    @Test
+    fun `dpad can be reduced below the previous 144dp floor`() {
+        val original = DefaultTouchLayouts.forCore("snes9x")!!.controls
+            .filterIsInstance<TouchControlDefinition.Dpad>()
+            .single()
+        val viewportWidth = 884.dp
+        val viewportHeight = 1104.dp
+        var current = original
+
+        repeat(12) {
+            current = current.copy(
+                size = proportionallyResizedSize(current, .9f, viewportWidth, viewportHeight),
+            )
+        }
+
+        assertThat(renderedSize(current, viewportWidth, viewportHeight).width)
+            .isLessThan(144.dp)
+    }
 }

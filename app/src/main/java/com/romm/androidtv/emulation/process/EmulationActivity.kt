@@ -18,6 +18,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -93,6 +95,7 @@ import com.romm.androidtv.library.ui.tvButtonFocus
 import com.romm.androidtv.library.ui.TvButton
 import com.romm.androidtv.library.ui.TvOutlinedButton
 import com.romm.androidtv.library.ui.RommTvTheme
+import com.romm.androidtv.platform.rememberDeviceProfile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -1466,6 +1469,9 @@ private fun PauseMenuOverlay(
     onQuit: () -> Unit,
 ) {
     var showQuitConfirm by remember { mutableStateOf(false) }
+    val deviceProfile = rememberDeviceProfile()
+    val pauseMenuScrollState = rememberScrollState()
+    val shouldScroll = deviceProfile.hasTouchscreen && deviceProfile.isCompactHeight
     val resumeFocusRequester = remember { FocusRequester() }
     val videoOptionsFocusRequester = remember { FocusRequester() }
     val controllerSettingsFocusRequester = remember { FocusRequester() }
@@ -1494,7 +1500,18 @@ private fun PauseMenuOverlay(
             .background(Color.Black.copy(alpha = 0.85f)),
         contentAlignment = Alignment.Center,
     ) {
-        Column(modifier = Modifier.padding(32.dp).width(420.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(32.dp)
+                .width(420.dp)
+                .then(
+                    if (shouldScroll) {
+                        Modifier.verticalScroll(pauseMenuScrollState)
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
             Text(
                 text = stringResource(R.string.pause_menu_paused),
                 color = Color.White,

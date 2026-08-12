@@ -206,27 +206,27 @@ internal fun renderedSize(
     val requestedHeight = availableHeight * definition.size.height
     return when (definition) {
         is TouchControlDefinition.Dpad -> {
-            val side = minOf(requestedWidth, requestedHeight).coerceIn(144.dp, 220.dp)
+            val side = minOf(requestedWidth, requestedHeight).coerceIn(72.dp, 220.dp)
             RenderedTouchSize(side, side)
         }
         is TouchControlDefinition.Stick -> {
-            val side = minOf(requestedWidth, requestedHeight).coerceIn(112.dp, 156.dp)
+            val side = minOf(requestedWidth, requestedHeight).coerceIn(64.dp, 156.dp)
             RenderedTouchSize(side, side)
         }
         is TouchControlDefinition.Button -> {
             if (definition.shape == TouchControlShape.CIRCLE) {
-                val side = minOf(requestedWidth, requestedHeight).coerceIn(48.dp, 88.dp)
+                val side = minOf(requestedWidth, requestedHeight).coerceIn(36.dp, 88.dp)
                 RenderedTouchSize(side, side)
             } else {
                 RenderedTouchSize(
-                    requestedWidth.coerceIn(64.dp, 120.dp),
-                    requestedHeight.coerceIn(48.dp, 64.dp),
+                    requestedWidth.coerceIn(48.dp, 120.dp),
+                    requestedHeight.coerceIn(36.dp, 64.dp),
                 )
             }
         }
         is TouchControlDefinition.Menu -> RenderedTouchSize(
-            requestedWidth.coerceIn(64.dp, 104.dp),
-            requestedHeight.coerceIn(48.dp, 64.dp),
+            requestedWidth.coerceIn(48.dp, 104.dp),
+            requestedHeight.coerceIn(36.dp, 64.dp),
         )
     }
 }

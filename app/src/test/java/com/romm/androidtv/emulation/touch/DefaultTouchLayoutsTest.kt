@@ -75,11 +75,12 @@ class DefaultTouchLayoutsTest {
     }
 
     @Test
-    fun `renderer enforces 48dp minimum touch targets`() {
+    fun `renderer keeps controls usable at their smaller phone minimums`() {
         DefaultTouchLayouts.all.flatMap { it.controls }.forEach { control ->
             val size = renderedSize(control, 320.dp, 240.dp)
-            assertThat(size.width).isGreaterThanOrEqualTo(48.dp)
-            assertThat(size.height).isGreaterThanOrEqualTo(48.dp)
+            val minimum = if (control is TouchControlDefinition.Dpad) 72.dp else 36.dp
+            assertThat(size.width).isGreaterThanOrEqualTo(minimum)
+            assertThat(size.height).isGreaterThanOrEqualTo(minimum)
         }
     }
 
