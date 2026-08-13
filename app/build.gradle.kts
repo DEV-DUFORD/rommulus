@@ -152,6 +152,9 @@ android {
 }
 
 dependencies {
+    // Shared domain (Linux port Phase 1)
+    implementation(project(":shared:domain"))
+
     // Compose BOM pins all androidx.compose.* versions
     implementation(platform("androidx.compose:compose-bom:2025.02.00"))
     implementation("androidx.compose.ui:ui")
