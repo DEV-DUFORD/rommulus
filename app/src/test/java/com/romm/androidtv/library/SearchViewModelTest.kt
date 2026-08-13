@@ -108,7 +108,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(15), 42)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             vm.onQueryChanged("Zelda")
             vm.submitQuery()
@@ -145,7 +145,7 @@ class SearchViewModelTest {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Failure(RommApiError.NETWORK_ERROR))
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(5), 5)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             // First search fails
             vm.onQueryChanged("retry")
@@ -165,7 +165,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(10), 10)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             // Load results
             vm.onQueryChanged("something")
@@ -187,7 +187,7 @@ class SearchViewModelTest {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(1, 100), 1)))
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(1, 200), 1)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             // First search
             vm.onQueryChanged("first")
@@ -207,7 +207,7 @@ class SearchViewModelTest {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(20, 1), 60)))
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(20, 21), 60)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             // First page
             vm.onQueryChanged("multi")
@@ -230,7 +230,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(5), 5)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             vm.onQueryChanged("small")
             vm.submitQuery()
@@ -275,7 +275,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(3), 3)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             // Set query — debounce timer starts
             vm.onQueryChanged("debounce")
@@ -296,7 +296,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(1, 999), 1)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             // Rapid changes — each resets the debounce timer
             vm.onQueryChanged("a")
@@ -321,7 +321,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepository()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(3), 3)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             vm.onQueryChanged("  trimmed  ")
             vm.submitQuery()
@@ -403,7 +403,7 @@ class SearchViewModelTest {
                 override suspend fun fetchRomDetail(romId: Long) = LibraryResult.Failure(RommApiError.NETWORK_ERROR)
             }
 
-            val vm = SearchViewModel(blockingRepo, testScope)
+            val vm = SearchViewModel(blockingRepo, testScope, hideUnsupportedSystems = { false })
             vm.onQueryChanged("original")
             vm.submitQuery()
             assertThat(vm.uiState.value.roms).hasSize(10)
@@ -452,7 +452,7 @@ class SearchViewModelTest {
                 override suspend fun fetchRomDetail(romId: Long) = LibraryResult.Failure(RommApiError.NETWORK_ERROR)
             }
 
-            val vm = SearchViewModel(blockingRepo, testScope)
+            val vm = SearchViewModel(blockingRepo, testScope, hideUnsupportedSystems = { false })
             vm.onQueryChanged("loadtest")
             vm.submitQuery()
             assertThat(vm.uiState.value.roms).hasSize(10)
@@ -484,7 +484,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepositoryWithQueries()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(3), 3)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             vm.onQueryChanged("sonic advance ")
             delay(350) // Past debounce
@@ -502,7 +502,7 @@ class SearchViewModelTest {
             val repo = MockRepositoryWithQueries()
             repo.enqueue(LibraryResult.Failure(RommApiError.NETWORK_ERROR))
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(2), 2)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             // Submit with trailing space
             vm.onQueryChanged("mega man ")
@@ -525,7 +525,7 @@ class SearchViewModelTest {
         runBlocking {
             val repo = MockRepositoryWithQueries()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(1), 1)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             vm.onQueryChanged("  sonic advance  ")
             vm.submitQuery()
@@ -558,7 +558,7 @@ class SearchViewModelTest {
             val repo = MockRepositoryWithQueries()
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(20, 1), 60)))
             repo.enqueue(LibraryResult.Success(RomPage(makeRoms(20, 21), 60)))
-            val vm = SearchViewModel(repo, testScope)
+            val vm = SearchViewModel(repo, testScope, hideUnsupportedSystems = { false })
 
             vm.onQueryChanged("gta ")
             vm.submitQuery()

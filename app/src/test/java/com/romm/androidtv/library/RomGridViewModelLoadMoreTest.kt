@@ -3,6 +3,7 @@ package com.romm.androidtv.library
 import com.romm.androidtv.romm.RommApiError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test
  * page's offset tracks the raw fetched count (not the de-duplicated list size) so pagination
  * still terminates correctly.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @DisplayName("RomGridViewModel — loadMore pagination")
 class RomGridViewModelLoadMoreTest {
 
@@ -84,7 +86,7 @@ class RomGridViewModelLoadMoreTest {
         repo.enqueue(RomPage(roms = listOf(rom(1), rom(2), rom(3)), total = 5))
         repo.enqueue(RomPage(roms = listOf(rom(3), rom(4)), total = 5))
 
-        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1))
+        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1), hideUnsupportedSystems = { false })
         vm.loadMore()
 
         val loaded = vm.uiState.value.section as SectionState.Loaded
@@ -101,7 +103,7 @@ class RomGridViewModelLoadMoreTest {
         repo.enqueue(RomPage(roms = listOf(rom(3), rom(4), rom(5)), total = 9))
         repo.enqueue(RomPage(roms = listOf(rom(6), rom(7), rom(8)), total = 9))
 
-        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1))
+        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1), hideUnsupportedSystems = { false })
         vm.loadMore()
         vm.loadMore()
 
@@ -115,7 +117,7 @@ class RomGridViewModelLoadMoreTest {
         val repo = RecordingMockRepository()
         repo.enqueue(RomPage(roms = listOf(rom(1), rom(2)), total = 2))
 
-        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1))
+        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1), hideUnsupportedSystems = { false })
         vm.loadMore()
 
         assertThat(repo.requestedOffsets).containsExactly(0)

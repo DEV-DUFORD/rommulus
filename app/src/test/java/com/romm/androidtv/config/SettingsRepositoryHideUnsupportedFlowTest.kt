@@ -19,11 +19,11 @@ import org.junit.jupiter.api.Test
 class SettingsRepositoryHideUnsupportedFlowTest {
 
     @Test
-    fun `flow initial value matches persisted default (false)`() = runBlocking {
+    fun `flow initial value matches persisted default (true)`() = runBlocking {
         val repo = SettingsRepository(FakeSharedPreferences(), defaultOrigin = "https://example.com")
 
-        assertThat(repo.hideUnsupportedSystemsFlow.value).isFalse()
-        assertThat(repo.hideUnsupportedSystems()).isFalse()
+        assertThat(repo.hideUnsupportedSystemsFlow.value).isTrue()
+        assertThat(repo.hideUnsupportedSystems()).isTrue()
     }
 
     @Test
@@ -62,16 +62,16 @@ class SettingsRepositoryHideUnsupportedFlowTest {
             repo.hideUnsupportedSystemsFlow.collect { collectedValues.add(it) }
         }
 
-        // Initial emission
-        assertThat(collectedValues).containsExactly(false)
+        // Initial emission (default is now true)
+        assertThat(collectedValues).containsExactly(true)
 
-        // Toggle ON
+        // Toggle ON (already on — no new emission)
         repo.setHideUnsupportedSystems(true)
-        assertThat(collectedValues).containsExactly(false, true)
+        assertThat(collectedValues).containsExactly(true)
 
         // Toggle OFF
         repo.setHideUnsupportedSystems(false)
-        assertThat(collectedValues).containsExactly(false, true, false)
+        assertThat(collectedValues).containsExactly(true, false)
 
         scope.coroutineContext[Job]!!.cancel()
     }
@@ -94,8 +94,8 @@ class SettingsRepositoryHideUnsupportedFlowTest {
         repo.setHideUnsupportedSystems(true)
         repo.setHideUnsupportedSystems(false)
 
-        assertThat(collector1).containsExactly(false, true, false)
-        assertThat(collector2).containsExactly(false, true, false)
+        assertThat(collector1).containsExactly(true, false)
+        assertThat(collector2).containsExactly(true, false)
 
         scope.coroutineContext[Job]!!.cancel()
     }
