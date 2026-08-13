@@ -41,7 +41,7 @@ data class HomeUiState(
  */
 class HomeViewModel(
     private val repository: LibraryRepository,
-    private val hideUnsupportedSystems: () -> Boolean = { false },
+    private val hideUnsupportedSystems: () -> Boolean = { true },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
     private val onRetrySucceeded: () -> Unit = {},
@@ -258,7 +258,7 @@ class HomeViewModel(
     /** Simple factory since this app doesn't yet use a DI framework. */
     class Factory(
         private val repository: LibraryRepository,
-        private val hideUnsupportedSystems: () -> Boolean = { false },
+        private val hideUnsupportedSystems: () -> Boolean = { true },
         private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
         private val refreshEvents: Flow<Unit>? = null,
         private val onRetrySucceeded: () -> Unit = {},

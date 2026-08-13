@@ -45,7 +45,7 @@ data class RomGridUiState(
 class RomGridViewModel(
     private val repository: LibraryRepository,
     private val query: RomQuery,
-    private val hideUnsupportedSystems: () -> Boolean = { false },
+    private val hideUnsupportedSystems: () -> Boolean = { true },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
 ) : ViewModel() {
@@ -157,7 +157,7 @@ class RomGridViewModel(
     class Factory(
         private val repository: LibraryRepository,
         private val query: RomQuery,
-        private val hideUnsupportedSystems: () -> Boolean = { false },
+        private val hideUnsupportedSystems: () -> Boolean = { true },
         private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
         private val refreshEvents: Flow<Unit>? = null,
     ) : ViewModelProvider.Factory {

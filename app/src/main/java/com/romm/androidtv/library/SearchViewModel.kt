@@ -40,7 +40,7 @@ data class SearchUiState(
     /** Whether the hide-unsupported-systems filter was active during the most recent fetch.
      * Snapshotted once per operation so filtering and UI state stay consistent.
      * When true the result-count label always shows visible count; when false it shows server total. */
-    val hideUnsupportedSystems: Boolean = false,
+    val hideUnsupportedSystems: Boolean = true,
 )
 
 /**
@@ -55,7 +55,7 @@ data class SearchUiState(
 class SearchViewModel(
     private val repository: LibraryRepository,
     testScope: CoroutineScope? = null,
-    private val hideUnsupportedSystems: () -> Boolean = { false },
+    private val hideUnsupportedSystems: () -> Boolean = { true },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
 ) : ViewModel() {
@@ -240,7 +240,7 @@ class SearchViewModel(
     /** Factory — used by [com.romm.androidtv.library.ui.SearchScreen] to construct the ViewModel. */
     class Factory(
         private val repository: LibraryRepository,
-        private val hideUnsupportedSystems: () -> Boolean = { false },
+        private val hideUnsupportedSystems: () -> Boolean = { true },
         private val hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
         private val refreshEvents: Flow<Unit>? = null,
     ) : ViewModelProvider.Factory {

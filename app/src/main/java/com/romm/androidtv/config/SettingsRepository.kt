@@ -63,7 +63,7 @@ class SettingsRepository(
      * with no approved native core instead of showing a disabled "not
      * supported yet" state for each one.
      */
-    fun hideUnsupportedSystems(): Boolean = prefs.getBoolean(KEY_HIDE_UNSUPPORTED, false)
+    fun hideUnsupportedSystems(): Boolean = prefs.getBoolean(KEY_HIDE_UNSUPPORTED, true)
 
     /**
      * Reactive source-of-truth for the hide-unsupported-systems preference.

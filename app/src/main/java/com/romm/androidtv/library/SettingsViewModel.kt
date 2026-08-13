@@ -68,7 +68,7 @@ data class SettingsUiState(
      * true, the library grid/shelves hide games on platforms with no
      * approved native core. Off by default.
      */
-    val hideUnsupportedSystems: Boolean = false,
+    val hideUnsupportedSystems: Boolean = true,
     /**
      * Advanced, opt-in setting (LIBRETRO_REFACTOR.md section 10): when true,
      * [com.romm.androidtv.romm.RomRepositoryImpl.stageForLaunch] verifies a

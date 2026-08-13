@@ -54,7 +54,7 @@ fun SearchScreen(
     repository: LibraryRepository,
     modifier: Modifier = Modifier,
     onGameSelected: (Long) -> Unit = {},
-    hideUnsupportedSystems: () -> Boolean = { false },
+    hideUnsupportedSystems: () -> Boolean = { true },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
 ) {
