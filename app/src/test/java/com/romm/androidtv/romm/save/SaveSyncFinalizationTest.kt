@@ -85,7 +85,7 @@ class SaveSyncFinalizationTest {
             val replica = saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")
             assertThat(replica).isNotNull
             assertThat(replica!!.syncStatus).isEqualTo(SaveSyncStatus.SYNCED)
-            assertThat(replica.localHash).isEqualTo("checkpoint-hash-abc")
+            assertThat(replica.localHash).isEqualTo("server-hash")
             assertThat(replica.localSizeBytes).isEqualTo(32768L)
             assertThat(replica.rommSaveId).isEqualTo(10L)
             assertThat(replica.serverHash).isEqualTo("server-hash")
@@ -182,21 +182,111 @@ class SaveSyncFinalizationTest {
                     sessionId = 7L, rommSaveId = 10L, serverKey = "localhost", userKey = "alice",
                     romId = 1L, romHash = "hash-a", slot = "autosave", coreId = "sameboy",
                     coreBuildRevision = "v1.0.3-libretro", checkpointedHash = "new-hash", checkpointedSizeBytes = 16384L,
-                    serverContentHash = null,
+                    serverContentHash = "adopted-server-hash",
                 )
             )
 
             assertThat(result).isInstanceOf(FinalizeAdoptionResult.Success::class.java)
             val replica = saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")
             assertThat(replica).isNotNull
-            assertThat(replica!!.localHash).isEqualTo("new-hash")
+            assertThat(replica!!.localHash).isEqualTo("adopted-server-hash")
             assertThat(replica.localSizeBytes).isEqualTo(16384L)
             assertThat(replica.rommSaveId).isEqualTo(10L)
         }
     }
 
     @Test
-    fun `finalizeAdoption marks replica SYNCED even when confirmDownload fails`() {
+    fun `gameplay changes after adoption are queued on the first exit`() {
+        runBlocking {
+            enqueueDeviceRegistered()
+            server.enqueue(MockResponse().setResponseCode(200))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"session": {"id": 7, "status": "COMPLETED"}}"""))
+
+            coordinator.finalizeAdoption(
+                FinalizeAdoptionRequest(
+                    sessionId = 7L,
+                    rommSaveId = 10L,
+                    serverKey = "localhost",
+                    userKey = "alice",
+                    romId = 1L,
+                    romHash = "hash-a",
+                    slot = "autosave",
+                    coreId = "sameboy",
+                    coreBuildRevision = "v1.0.3-libretro",
+                    checkpointedHash = "post-game-hash",
+                    checkpointedSizeBytes = 32768L,
+                    serverContentHash = "downloaded-server-hash",
+                )
+            )
+
+            val result = coordinator.syncPostPlay(
+                PostPlayCheckpointRequest(
+                    serverKey = "localhost",
+                    userKey = "alice",
+                    romId = 1L,
+                    romHash = "hash-a",
+                    slot = "autosave",
+                    coreId = "sameboy",
+                    coreBuildRevision = "v1.0.3-libretro",
+                    fileName = "autosave.srm",
+                    checkpointedHash = "post-game-hash",
+                    checkpointedSizeBytes = 32768L,
+                )
+            )
+
+            assertThat(result).isInstanceOf(PostPlayCheckpointResult.Queued::class.java)
+            val replica = saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")
+            assertThat(replica!!.localHash).isEqualTo("post-game-hash")
+            assertThat(replica.syncStatus).isEqualTo(SaveSyncStatus.UNSYNCED)
+        }
+    }
+
+    @Test
+    fun `unchanged adopted save remains synced without queueing an upload`() {
+        runBlocking {
+            enqueueDeviceRegistered()
+            server.enqueue(MockResponse().setResponseCode(200))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"session": {"id": 7, "status": "COMPLETED"}}"""))
+
+            coordinator.finalizeAdoption(
+                FinalizeAdoptionRequest(
+                    sessionId = 7L,
+                    rommSaveId = 10L,
+                    serverKey = "localhost",
+                    userKey = "alice",
+                    romId = 1L,
+                    romHash = "hash-a",
+                    slot = "autosave",
+                    coreId = "sameboy",
+                    coreBuildRevision = "v1.0.3-libretro",
+                    checkpointedHash = "downloaded-server-hash",
+                    checkpointedSizeBytes = 32768L,
+                    serverContentHash = "downloaded-server-hash",
+                )
+            )
+
+            val result = coordinator.syncPostPlay(
+                PostPlayCheckpointRequest(
+                    serverKey = "localhost",
+                    userKey = "alice",
+                    romId = 1L,
+                    romHash = "hash-a",
+                    slot = "autosave",
+                    coreId = "sameboy",
+                    coreBuildRevision = "v1.0.3-libretro",
+                    fileName = "autosave.srm",
+                    checkpointedHash = "downloaded-server-hash",
+                    checkpointedSizeBytes = 32768L,
+                )
+            )
+
+            assertThat(result).isEqualTo(PostPlayCheckpointResult.Unchanged)
+            assertThat(pendingOperationDao.findByStatus(PendingOperationStatus.PENDING)).isEmpty()
+        }
+    }
+
+    @Test
+    fun `finalizeAdoption without a server hash stays UNSYNCED when confirmDownload fails`() {
         runBlocking {
             enqueueDeviceRegistered()
             server.enqueue(MockResponse().setResponseCode(500)) // confirm fails
@@ -215,7 +305,7 @@ class SaveSyncFinalizationTest {
             assertThat(result).isInstanceOf(FinalizeAdoptionResult.Success::class.java)
             assertThat((result as FinalizeAdoptionResult.Success).confirmed).isFalse()
             val replica = saveReplicaDao.findByScope("localhost", "alice", 1L, "hash-a", "autosave")
-            assertThat(replica!!.syncStatus).isEqualTo(SaveSyncStatus.SYNCED)
+            assertThat(replica!!.syncStatus).isEqualTo(SaveSyncStatus.UNSYNCED)
         }
     }
 

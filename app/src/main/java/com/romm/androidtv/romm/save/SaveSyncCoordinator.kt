@@ -76,7 +76,9 @@ interface SaveSyncCoordinator {
      * This method:
      * 1. Confirms the download via `/downloaded` (idempotent).
      * 2. Completes the sync session [sessionId] with `completed=1`.
-     * 3. Upserts the [SaveReplicaEntity] to SYNCED with the honest checkpoint hash/size.
+     * 3. Upserts the [SaveReplicaEntity] with the adopted server hash as its comparison
+     *    baseline. The caller then passes the post-game checkpoint to [syncPostPlay], which
+     *    queues an upload when gameplay changed the adopted bytes.
      *
      * Idempotent: calling twice for the same sessionId that is already confirmed/SYNCED
      * is a no-op (re-confirms, re-upserts identical data).

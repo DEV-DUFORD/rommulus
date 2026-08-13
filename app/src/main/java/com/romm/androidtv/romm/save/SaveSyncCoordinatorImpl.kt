@@ -423,11 +423,15 @@ class SaveSyncCoordinatorImpl(
             // Complete the sync session (idempotent: server ignores duplicate completions).
             completeSession(origin, request.sessionId, completed = 1, failed = 0)
 
-            // Persist the adopted replica honestly with the checkpoint hash from EmulationActivity.
+            // Preserve the downloaded server generation as the comparison baseline. The
+            // checkpoint may already include gameplay changes made after adoption; recording it
+            // as SYNCED here would make the immediately-following syncPostPlay call incorrectly
+            // skip the first upload.
             val existingReplica = saveReplicaDao.findByScope(
                 request.serverKey, request.userKey, request.romId, request.romHash, request.slot,
             )
             val now = clock()
+            val adoptedServerHash = request.serverContentHash ?: existingReplica?.serverHash
             saveReplicaDao.upsert(
                 (existingReplica ?: SaveReplicaEntity(
                     serverKey = request.serverKey,
@@ -438,12 +442,16 @@ class SaveSyncCoordinatorImpl(
                     coreId = request.coreId,
                     coreBuildRevision = request.coreBuildRevision,
                 )).copy(
-                    localHash = request.checkpointedHash,
+                    localHash = adoptedServerHash,
                     localSizeBytes = request.checkpointedSizeBytes,
                     localWrittenAtEpochMs = now,
                     rommSaveId = request.rommSaveId,
-                    serverHash = request.serverContentHash,
-                    syncStatus = SaveSyncStatus.SYNCED,
+                    serverHash = adoptedServerHash,
+                    syncStatus = if (adoptedServerHash != null) {
+                        SaveSyncStatus.SYNCED
+                    } else {
+                        SaveSyncStatus.UNSYNCED
+                    },
                     lastError = null,
                     expectedSramSizeBytes = request.expectedSramSizeBytes ?: existingReplica?.expectedSramSizeBytes,
                 )
