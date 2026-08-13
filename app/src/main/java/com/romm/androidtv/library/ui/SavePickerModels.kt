@@ -15,8 +15,8 @@ data class SavePickerEntryUiModel(
     val sizeText: String?,
     /** Relative or absolute timestamp text for display, or null if unavailable. */
     val updatedAtText: String?,
-    /** True when this is the save currently adopted as this device's local autosave. */
-    val isCurrentlyAdopted: Boolean,
+    /** True when this is the picker default: the newest autosave for the current game file. */
+    val isDefaultSelection: Boolean,
     /**
      * Server content hash, carried through (not displayed) so the caller can pass it to
      * [com.romm.androidtv.romm.save.SaveSyncCoordinator.adoptChosenSave] on selection without

@@ -1491,7 +1491,6 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
                 savePickerStagedOutcome = stagingOutcome
-                val spec = stagingOutcome.launchSpec
 
                 val detail = libraryRepository.fetchRomDetail(romId)
                 val romDetail = (detail as? com.romm.androidtv.library.LibraryResult.Success)?.data
@@ -1507,18 +1506,7 @@ class MainActivity : ComponentActivity() {
 
                 when (val listResult = saveSyncCoordinator.listSavesForRom(romId)) {
                     is com.romm.androidtv.romm.SaveListResult.Success -> {
-                        val session = sessionStore.current()
-                        val currentlyAdoptedSaveId = session?.let { sess ->
-                            saveSyncCoordinator.findSaveReplicaByScope(
-                                serverKey = extractServerKey(sess.origin),
-                                userKey = sess.username ?: "",
-                                romId = spec.romId,
-                                romHash = spec.romHash,
-                                slot = SavePathPolicy.AUTOSAVE_SLOT,
-                            )?.rommSaveId
-                        }
-
-                        val entries = buildList {
+                        val sortedSaves = buildList {
                             // Every save for the launched ROM regardless of core — SRAM saves are
                             // cross-core compatible for the same platform (e.g. a sameboy save loads
                             // fine under gambatte), so filtering by coreId would hide valid choices.
@@ -1534,6 +1522,11 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                             .sortedByDescending { (save, _) -> save.updatedAt }
+                        val defaultSaveId = sortedSaves
+                            .firstOrNull { (_, sourceFileLabel) -> sourceFileLabel == null }
+                            ?.first
+                            ?.saveId
+                        val entries = sortedSaves
                             // Shows every save for this game regardless of which core produced it —
                             // SRAM saves are cross-core compatible for the same platform.
                             .map { (save, sourceFileLabel) ->
@@ -1545,8 +1538,7 @@ class MainActivity : ComponentActivity() {
                                     updatedAtText = com.romm.androidtv.library.ui.ConflictResolutionMapper.formatInstant(
                                         save.updatedAt?.toEpochMilli()
                                     ),
-                                    // Only the launched disc's own saves can be the currently-adopted one.
-                                    isCurrentlyAdopted = sourceFileLabel == null && save.saveId == currentlyAdoptedSaveId,
+                                    isDefaultSelection = save.saveId == defaultSaveId,
                                     contentHash = save.contentHash,
                                     sourceFileLabel = sourceFileLabel,
                                 )

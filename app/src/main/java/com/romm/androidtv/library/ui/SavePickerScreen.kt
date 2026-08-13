@@ -21,11 +21,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -33,8 +40,8 @@ import androidx.compose.ui.unit.dp
  * Native save-picker screen (game-detail "Choose Save" flow, Session 15/16 follow-up):
  * lists every server save for one ROM (all cores/devices — SRAM saves are cross-core
  * compatible for the same platform, so no core filter is applied), each row showing
- * filename, core badge, size, and relative timestamp, with the currently-adopted one
- * checked. Picking a row downloads and adopts that specific save via
+ * filename, core badge, size, and relative timestamp, with the newest autosave for the
+ * current game file checked as the default. Picking a row downloads and adopts that specific save via
  * [com.romm.androidtv.romm.save.SaveSyncCoordinator.adoptChosenSave] before launch —
  * this screen itself only reports the user's choice via [onSelect].
  */
@@ -92,6 +99,9 @@ private fun SavePickerContent(
     onSelect: (SavePickerEntryUiModel) -> Unit,
     onBack: () -> Unit,
 ) {
+    val firstEntryFocusRequester = remember(model.entries) { FocusRequester() }
+    var firstEntryReady by remember(model.entries) { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -132,21 +142,40 @@ private fun SavePickerContent(
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(model.entries.size) { index ->
                     val entry = model.entries[index]
-                    SaveEntryRow(entry = entry, onClick = { onSelect(entry) })
+                    SaveEntryRow(
+                        entry = entry,
+                        onClick = { onSelect(entry) },
+                        modifier = if (index == 0) {
+                            Modifier
+                                .focusRequester(firstEntryFocusRequester)
+                                .onGloballyPositioned { firstEntryReady = true }
+                        } else {
+                            Modifier
+                        },
+                    )
                 }
             }
         }
     }
+
+    LaunchedEffect(firstEntryReady) {
+        if (firstEntryReady) firstEntryFocusRequester.requestFocus()
+    }
 }
 
 @Composable
-private fun SaveEntryRow(entry: SavePickerEntryUiModel, onClick: () -> Unit) {
+private fun SaveEntryRow(
+    entry: SavePickerEntryUiModel,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .testTag("save_picker_entry_${entry.saveId}")
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) RommTvColors.Romm600.copy(alpha = 0.3f) else RommTvColors.NightLo)
             .tvFocusRing(isFocused)
@@ -162,7 +191,7 @@ private fun SaveEntryRow(entry: SavePickerEntryUiModel, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(modifier = Modifier.width(28.dp)) {
-                if (entry.isCurrentlyAdopted) {
+                if (entry.isDefaultSelection) {
                     Text(text = "✓", color = RommTvColors.Romm300, style = MaterialTheme.typography.titleMedium)
                 }
             }
