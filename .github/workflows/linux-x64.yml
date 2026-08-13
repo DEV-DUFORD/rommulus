@@ -1,0 +1,485 @@
+# Linux x86_64 Desktop CI — RomMulus
+# -------------------------------------------------------------------
+# Plan:   plans/LINUX_X64.md  §15 (Build and CI plan)
+# Runner: ubuntu-24.04
+# JDK:    Temurin 17 (pinned via actions/setup-java@v4)
+#
+# Toolchain pins (verified against packages.ubuntu.com/noble/):
+#   clang-18=1:18.1.3-1
+#   cmake=3.28.3-1build7
+#   ninja-build=1.11.1-2
+#   libsqlite3-dev=3.45.1-1build2
+#   libsdl3-dev — NOT in noble repos; requires PPA or source build.
+#   xvfb=2:21.1.12-1ubuntu1.5
+#   pkg-config=1.8.1-2build1
+#   zstd=1.5.5+dfsg2-2
+#
+# PHASE-0 REALITY:
+#   The native/ directory, rommulus-player, cores, and tarball packaging
+#   do not exist yet (later phases).  Jobs 4-8 are stubbed with
+#   `if: false` and will be enabled when their dependencies land.
+#
+# REQUIRED CI ASSERTIONS (from §15):
+#   • no Android imports in shared modules
+#   • no JNI/Android/SDL imports in native engine
+#   • launch schema compatibility fixtures pass
+#   • core SHA and provenance match
+#   • exported symbols match allowlist
+#   • package has every required license
+#   • package has no undeclared executable
+#   • no file is world-writable
+#   • generated artifacts contain no test credentials or tokens
+#   • player has no direct dependency on JVM/Android libraries
+#   • desktop bundle starts with bundled runtime
+# -------------------------------------------------------------------
+
+name: Linux x64 CI
+
+on:
+  push:
+    branches: [main, zd/linux-build]
+  pull_request:
+    branches: [main, zd/linux-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+# -------------------------------------------------------------------
+# Pinned toolchain versions (Ubuntu 24.04 noble)
+# -------------------------------------------------------------------
+# These env vars are referenced by every job that installs native packages.
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs="-Xmx3g"
+  CLANG_VERSION: "1:18.1.3-1"
+  CMAKE_VERSION: "3.28.3-1build7"
+  NINJA_VERSION: "1.11.1-2"
+  SQLITE3_DEV_VERSION: "3.45.1-1build2"
+  XVFB_VERSION: "2:21.1.12-1ubuntu1.5"
+  PKG_CONFIG_VERSION: "1.8.1-2build1"
+  ZSTD_VERSION: "1.5.5+dfsg2-2"
+
+jobs:
+  # =================================================================
+  # 1. shared-jvm-tests  — Phase 0+ (functional when shared modules exist)
+  # =================================================================
+  shared-jvm-tests:
+    name: Shared JVM tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Run shared module JVM tests
+        run: |
+          ./gradlew \
+            :shared:domain:test \
+            :shared:network:test \
+            :shared:storage-api:test \
+            :shared:presentation:test \
+            :shared:ui:test
+
+      # The AndroidImportGuardTest (in :shared:domain:test) already scans
+      # all Kotlin files under shared/{domain,network,storage-api,presentation}/src/main/
+      # for `import android.`, `import androidx.`, and fully-qualified
+      # `android.`/`androidx.` tokens.  No redundant grep is needed here.
+      # CI relies on the JUnit guard test to enforce this architecture rule.
+
+  # =================================================================
+  # 2. android-regression  — Phase 0 (functional now)
+  # =================================================================
+  android-regression:
+    name: Android regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Install Android build tools
+        run: |
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
+
+      - name: Run Android unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Assemble Android debug APK
+        run: ./gradlew :app:assembleDebug
+
+      - name: Assemble Android release (unsigned)
+        run: ./gradlew :app:assembleRelease
+
+  # =================================================================
+  # 3. desktop-tests  — Phase 0+ (functional when :desktop exists)
+  # =================================================================
+  desktop-tests:
+    name: Desktop tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install native dev packages (pinned)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            "clang-18=${CLANG_VERSION}" \
+            "cmake=${CMAKE_VERSION}" \
+            "ninja-build=${NINJA_VERSION}" \
+            "libsqlite3-dev=${SQLITE3_DEV_VERSION}" \
+            "xvfb=${XVFB_VERSION}" \
+            "pkg-config=${PKG_CONFIG_VERSION}"
+          # NOTE: libsdl3-dev is NOT in the noble repos.  It is available
+          # only in Ubuntu 26.04+ (resolute) or via third-party PPAs.
+          # When Phase 7 lands, add a PPA or source-build step here.
+
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          clang-18 --version | head -1
+          cmake --version | head -1
+          ninja --version
+          pkg-config --modversion sqlite3
+          sqlite3 --version 2>/dev/null || echo "sqlite3 CLI not installed (dev headers present)"
+          echo "=========================="
+
+      - name: Run desktop build and tests
+        run: |
+          # Xvfb for any headless UI tests (§15: Xvfb for ordinary desktop UI tests)
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1920x1080x24 &
+          XVFB_PID=$!
+          ./gradlew :desktop:test :desktop:build
+          kill $XVFB_PID || true
+
+      - name: Smoke — desktop window starts and stays alive
+        run: |
+          # timeout exit code 124 means the process was still running when
+          # the timer fired — i.e. the Compose Desktop window opened and
+          # did not crash immediately.
+          timeout 30 xvfb-run -a ./gradlew --offline --no-daemon :desktop:run
+          rc=$?
+          if [ $rc -eq 124 ]; then
+            echo "✓ Desktop window stayed alive for 30s — smoke pass."
+            exit 0
+          else
+            echo "::error::Desktop app exited early (rc=$rc) — smoke fail."
+            exit 1
+          fi
+
+  # =================================================================
+  # 4. native-debug-asan-ubsan  — STUBBED (Phase 7+)
+  # =================================================================
+  # TODO(phase 7): enable when native/engine/ and native/platform/linux/ land.
+  #   This job will compile the native engine with AddressSanitizer and
+  #   UndefinedBehaviorSanitizer, then run the CTest suite under ASan/UBSan.
+  #   Expected command (once native/ exists):
+  #     cd native && mkdir -p build-debug && cd build-debug
+  #     cmake .. -DCMAKE_BUILD_TYPE=Debug \
+  #             -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
+  #             -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
+  #             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
+  #             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+  #             -G Ninja
+  #     ninja -j$(nproc)
+  #     ctest --output-on-failure
+  native-debug-asan-ubsan:
+    name: Native debug (ASan/UBSan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    if: false  # TODO(phase 7): remove this guard when native/ lands
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install native dev packages (pinned)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            "clang-18=${CLANG_VERSION}" \
+            "cmake=${CMAKE_VERSION}" \
+            "ninja-build=${NINJA_VERSION}" \
+            "libsqlite3-dev=${SQLITE3_DEV_VERSION}"
+          # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
+
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          clang-18 --version | head -1
+          cmake --version | head -1
+          ninja --version
+          pkg-config --modversion sqlite3
+          echo "=========================="
+
+      - name: Stub — native debug with ASan/UBSan
+        run: |
+          echo "⏭ native-debug-asan-ubsan is stubbed until Phase 7 (native engine extraction)."
+
+  # =================================================================
+  # 5. native-release-build  — STUBBED (Phase 7+)
+  # =================================================================
+  # TODO(phase 7): enable when native/engine/ and native/platform/linux/ land.
+  #   This job will produce an optimized release build of the player
+  #   binary against SDL3 and POSIX dlopen.
+  #   Expected command (once native/ exists):
+  #     cd native && mkdir -p build-release && cd build-release
+  #     cmake .. -DCMAKE_BUILD_TYPE=Release \
+  #             -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
+  #             -G Ninja
+  #     ninja -j$(nproc) rommulus-player
+  native-release-build:
+    name: Native release build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    if: false  # TODO(phase 7): remove this guard when native/ lands
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install native dev packages (pinned)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            "clang-18=${CLANG_VERSION}" \
+            "cmake=${CMAKE_VERSION}" \
+            "ninja-build=${NINJA_VERSION}" \
+            "libsqlite3-dev=${SQLITE3_DEV_VERSION}"
+          # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
+
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          clang-18 --version | head -1
+          cmake --version | head -1
+          ninja --version
+          pkg-config --modversion sqlite3
+          echo "=========================="
+
+      - name: Stub — native release build
+        run: |
+          echo "⏭ native-release-build is stubbed until Phase 7 (native engine extraction)."
+
+  # =================================================================
+  # 6. core-smoke-tier-1  — STUBBED (Phase 9+)
+  # =================================================================
+  # TODO(phase 9): enable when Linux core builds and rommulus-player exist.
+  #   This job will run the per-core smoke gate (§13.2) for Tier 1 cores
+  #   (test_core, Gambatte): retro_init/retro_deinit smoke, synthetic
+  #   content boot, 10-minute automated frame run, input mapping, and
+  #   SRAM round-trip where supported.
+  #   Asserts:
+  #     • core SHA and provenance match (§15)
+  #     • exported symbols match allowlist (§15)
+  #     • launch schema compatibility fixtures pass (§15)
+  core-smoke-tier-1:
+    name: Core smoke (Tier 1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    if: false  # TODO(phase 9): remove this guard when Linux core builds land
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install native dev packages (pinned)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            "clang-18=${CLANG_VERSION}" \
+            "cmake=${CMAKE_VERSION}" \
+            "ninja-build=${NINJA_VERSION}" \
+            "libsqlite3-dev=${SQLITE3_DEV_VERSION}"
+          # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
+
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          clang-18 --version | head -1
+          cmake --version | head -1
+          ninja --version
+          pkg-config --modversion sqlite3
+          echo "=========================="
+
+      - name: Stub — core smoke tests
+        run: |
+          echo "⏭ core-smoke-tier-1 is stubbed until Phase 9 (Gambatte production integration)."
+
+  # =================================================================
+  # 7. package-tarball  — STUBBED (Phase 14)
+  # =================================================================
+  # TODO(phase 14): enable when tarball packaging pipeline is implemented.
+  #   This job will produce the self-contained x86_64 tarball
+  #   (rommulus-<version>-linux-x86_64.tar.zst) with bundled jlink JVM,
+  #   player, cores, manifests, desktop entry, icons, and notices (§16.1).
+  #   Asserts:
+  #     • package has every required license (§15)
+  #     • package has no undeclared executable (§15)
+  #     • no file is world-writable (§15)
+  #     • generated artifacts contain no test credentials or tokens (§15)
+  #     • desktop bundle starts with bundled runtime (§15)
+  package-tarball:
+    name: Package tarball
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    if: false  # TODO(phase 14): remove this guard when packaging lands
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install native dev packages (pinned)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            "clang-18=${CLANG_VERSION}" \
+            "cmake=${CMAKE_VERSION}" \
+            "ninja-build=${NINJA_VERSION}" \
+            "libsqlite3-dev=${SQLITE3_DEV_VERSION}" \
+            "zstd=${ZSTD_VERSION}"
+          # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
+
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          clang-18 --version | head -1
+          cmake --version | head -1
+          ninja --version
+          pkg-config --modversion sqlite3
+          zstd --version
+          echo "=========================="
+
+      - name: Stub — tarball packaging
+        run: |
+          echo "⏭ package-tarball is stubbed until Phase 14 (packaging and release hardening)."
+
+  # =================================================================
+  # 8. license-and-provenance-audit  — STUBBED (Phase 14)
+  # =================================================================
+  # TODO(phase 14): enable when tarball packaging and core manifests exist.
+  #   This job will verify every shipped core binary has a manifest record
+  #   with source revision, patches, compiler/flags, and binary checksum.
+  #   Asserts:
+  #     • core SHA and provenance match (§15)
+  #     • exported symbols match allowlist (§15)
+  #     • package has every required license (§15)
+  #     • package has no undeclared executable (§15)
+  #     • no file is world-writable (§15)
+  #     • generated artifacts contain no test credentials or tokens (§15)
+  license-and-provenance-audit:
+    name: License and provenance audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: false  # TODO(phase 14): remove this guard when packaging lands
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install native dev packages (pinned)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            "clang-18=${CLANG_VERSION}" \
+            "cmake=${CMAKE_VERSION}" \
+            "ninja-build=${NINJA_VERSION}" \
+            "libsqlite3-dev=${SQLITE3_DEV_VERSION}"
+          # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
+
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          clang-18 --version | head -1
+          cmake --version | head -1
+          ninja --version
+          pkg-config --modversion sqlite3
+          echo "=========================="
+
+      - name: Stub — license and provenance audit
+        run: |
+          echo "⏭ license-and-provenance-audit is stubbed until Phase 14 (packaging and release hardening)."
