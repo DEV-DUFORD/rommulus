@@ -94,6 +94,7 @@ import com.romm.androidtv.emulation.video.VideoOptionsDialog
 import com.romm.androidtv.library.ui.tvButtonFocus
 import com.romm.androidtv.library.ui.TvButton
 import com.romm.androidtv.library.ui.TvOutlinedButton
+import com.romm.androidtv.library.ui.RommTvColors
 import com.romm.androidtv.library.ui.RommTvTheme
 import com.romm.androidtv.platform.rememberDeviceProfile
 import kotlinx.coroutines.delay
@@ -1443,14 +1444,14 @@ private fun SaveFailureOverlay(onRetry: () -> Unit, onQuitAnyway: () -> Unit) {
     LaunchedEffect(Unit) {
         retryFocusRequester.requestFocus()
     }
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.fillMaxSize().background(RommTvColors.NightHi.copy(alpha = 0.92f)), contentAlignment = Alignment.Center) {
         Column(modifier = Modifier.padding(32.dp)) {
-            Text(text = "Save failed", color = Color.White, style = MaterialTheme.typography.headlineSmall)
+            Text(text = "Save failed", color = RommTvColors.TextPrimary, style = MaterialTheme.typography.headlineSmall)
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "The game's save data could not be checkpointed. Quitting now may lose recent progress. " +
                     "You can retry, or quit anyway and keep the last successful save.",
-                color = Color(0xFFbdbdbd),
+                color = RommTvColors.TextSecondary,
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(modifier = Modifier.height(24.dp))
@@ -1522,7 +1523,7 @@ private fun PauseMenuOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.85f)),
+            .background(RommTvColors.NightHi.copy(alpha = 0.85f)),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -1539,7 +1540,7 @@ private fun PauseMenuOverlay(
         ) {
             Text(
                 text = stringResource(R.string.pause_menu_paused),
-                color = Color.White,
+                color = RommTvColors.TextPrimary,
                 style = MaterialTheme.typography.headlineSmall,
             )
             Spacer(modifier = Modifier.height(20.dp))
