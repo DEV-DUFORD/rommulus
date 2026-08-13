@@ -59,6 +59,7 @@ class VideoOptionsDialogInstrumentedTest {
 
                 VideoOptionsDialog(
                     scanlinesEnabled = enabled.value,
+                    integerScalingEnabled = false,
                     persistenceError = error.value,
                     onScanlinesChanged = { requested ->
                         val ok = commitShouldSucceed()
@@ -72,6 +73,7 @@ class VideoOptionsDialogInstrumentedTest {
                         bucket.commitCount++
                         ok
                     },
+                    onIntegerScalingChanged = { true },
                     onDismiss = { bucket.dismissed = true },
                 )
             }
@@ -162,6 +164,7 @@ class VideoOptionsDialogInstrumentedTest {
 
                 VideoOptionsDialog(
                     scanlinesEnabled = enabled.value,
+                    integerScalingEnabled = false,
                     persistenceError = error.value,
                     onScanlinesChanged = { requested ->
                         val ok = shouldSucceed.value
@@ -173,6 +176,7 @@ class VideoOptionsDialogInstrumentedTest {
                         }
                         ok
                     },
+                    onIntegerScalingChanged = { true },
                     onDismiss = {},
                 )
             }

@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +50,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.romm.androidtv.R
 import com.romm.androidtv.library.ui.RommTvColors
 import com.romm.androidtv.library.ui.TvOutlinedButton
+import com.romm.androidtv.platform.rememberDeviceProfile
 
 @Composable
 private fun VideoOptionToggleRow(
@@ -134,6 +137,9 @@ internal fun VideoOptionsDialog(
     onIntegerScalingChanged: (Boolean) -> Boolean,
     onDismiss: () -> Unit,
 ) {
+    val deviceProfile = rememberDeviceProfile()
+    val scrollState = rememberScrollState()
+    val shouldScroll = deviceProfile.hasTouchscreen && deviceProfile.isCompactHeight
     val scanlinesFocusRequester = remember { FocusRequester() }
     val integerScalingFocusRequester = remember { FocusRequester() }
     var firstToggleReady by remember { mutableStateOf(false) }
@@ -162,7 +168,15 @@ internal fun VideoOptionsDialog(
                 .padding(28.dp),
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (shouldScroll) {
+                            Modifier.verticalScroll(scrollState)
+                        } else {
+                            Modifier
+                        },
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
