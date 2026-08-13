@@ -393,9 +393,10 @@ private fun GameDetailContent(
                         )
                     }
                     MetadataChips(rom)
-                    if (rom.summary != null) {
+                    val summaryText = rom.summary
+                    if (summaryText != null) {
                         Text(
-                            text = rom.summary,
+                            text = summaryText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = RommTvColors.TextSecondary,
                             modifier = Modifier.padding(top = 16.dp),
