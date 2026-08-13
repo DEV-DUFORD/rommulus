@@ -1,6 +1,5 @@
 package com.romm.androidtv.diagnostic
 
-import com.romm.androidtv.model.DiagnosticResult
 import com.romm.androidtv.network.RommOrigin
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
