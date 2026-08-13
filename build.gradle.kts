@@ -1,6 +1,6 @@
 // Top-level build file.
 plugins {
-    id("com.android.application") version "8.6.1" apply false
+    id("com.android.application") version "8.10.1" apply false
     id("org.jetbrains.kotlin.android") version "1.9.23" apply false
     // Room's annotation processor (Phase 5: local save-replica + pending-operation databases,
     // LIBRETRO_REFACTOR.md section 11.1/11.4).

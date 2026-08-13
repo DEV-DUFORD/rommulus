@@ -33,7 +33,7 @@ require(hasReleaseSigning || releaseSigningEnvironment.values.none { !it.isNullO
 
 android {
     namespace = "com.romm.androidtv"
-    compileSdk = 35
+    compileSdk = 36
     // Pinned per LIBRETRO_REFACTOR.md section 7.1: build approved cores as pinned
     // shared libraries for armeabi-v7a and arm64-v8a. Keep this version pinned and
     // bump it deliberately, not implicitly via SDK manager updates.
@@ -42,7 +42,7 @@ android {
     defaultConfig {
         applicationId = "com.devduford.tv.rommulus"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 2002
         versionName = "0.2.2"
 
