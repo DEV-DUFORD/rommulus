@@ -44,6 +44,9 @@ struct SessionDiagnostics {
     std::atomic<uint64_t> audioFramesProduced{0};
     std::atomic<uint32_t> lastWidth{0};
     std::atomic<uint32_t> lastHeight{0};
+    // Libretro's intended display aspect ratio, scaled by 1,000,000 for
+    // lock-free transport through the integer-only JNI diagnostics array.
+    std::atomic<uint32_t> displayAspectRatioMicros{0};
     std::atomic<int> pixelFormat{-1};
     std::atomic<bool> coreRequestedShutdown{false};
     // Frames of silence inserted because the ring buffer ran dry (Oboe

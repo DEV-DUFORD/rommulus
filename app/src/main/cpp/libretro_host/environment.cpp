@@ -299,8 +299,17 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
         }
 
         case RETRO_ENVIRONMENT_SET_GEOMETRY: {
-            // Frontend acknowledges; actual surface/AV info re-negotiation is
-            // handled by the video pipeline (added in a later Phase 2 commit).
+            if (data == nullptr) return false;
+            if (geometryCallback_) {
+                geometryCallback_(*static_cast<const struct retro_game_geometry*>(data));
+            }
+            return true;
+        }
+
+        case RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO: {
+            if (data == nullptr) return false;
+            const auto* avInfo = static_cast<const struct retro_system_av_info*>(data);
+            if (geometryCallback_) geometryCallback_(avInfo->geometry);
             return true;
         }
 

@@ -25,7 +25,18 @@ constexpr unsigned kPcsxRearmedDualShockDevice =
 constexpr unsigned kPlayStationControllerPorts = 2;
 }  // namespace
 
-EmulationSession::EmulationSession() = default;
+EmulationSession::EmulationSession() {
+    environment_.setGeometryCallback([this](const struct retro_game_geometry& geometry) {
+        const double aspect = geometry.aspect_ratio > 0.0f
+                ? geometry.aspect_ratio
+                : (geometry.base_height > 0
+                        ? static_cast<double>(geometry.base_width) / geometry.base_height
+                        : 0.0);
+        diagnostics_.displayAspectRatioMicros.store(
+                aspect > 0.0 ? static_cast<uint32_t>(aspect * 1000000.0 + 0.5) : 0,
+                std::memory_order_relaxed);
+    });
+}
 
 EmulationSession::~EmulationSession() {
     stop();
@@ -158,6 +169,16 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     fns.retro_get_system_av_info(&av);
     avFps_ = av.timing.fps > 0.0 ? av.timing.fps : 60.0;
     avSampleRate_ = av.timing.sample_rate > 0.0 ? av.timing.sample_rate : 44100.0;
+    const double displayAspect = av.geometry.aspect_ratio > 0.0f
+            ? av.geometry.aspect_ratio
+            : (av.geometry.base_height > 0
+                    ? static_cast<double>(av.geometry.base_width) / av.geometry.base_height
+                    : 0.0);
+    diagnostics_.displayAspectRatioMicros.store(
+            displayAspect > 0.0
+                    ? static_cast<uint32_t>(displayAspect * 1000000.0 + 0.5)
+                    : 0,
+            std::memory_order_relaxed);
     glContext_.setBufferGeometry(av.geometry.base_width, av.geometry.base_height);
 
     if (!audioOutput_.start(avSampleRate_, isMupen64PlusNext ? 0.1 : 0.0)) {

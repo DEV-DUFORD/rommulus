@@ -18,6 +18,13 @@ import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
 import kotlin.math.floor
 import kotlin.math.min
 
+internal fun resolveDisplayAspectRatio(coreWidth: Int, coreHeight: Int, reportedAspectRatio: Float): Float =
+    when {
+        reportedAspectRatio.isFinite() && reportedAspectRatio > 0f -> reportedAspectRatio
+        coreWidth > 0 && coreHeight > 0 -> coreWidth.toFloat() / coreHeight
+        else -> 4f / 3f
+    }
+
 private class EmulationSurfaceView(context: Context) : SurfaceView(context) {
     private var bufferWidth = 0
     private var bufferHeight = 0
@@ -57,10 +64,12 @@ fun EmulationSurface(
     host: NativeLibretroHost,
     coreWidth: Int,
     coreHeight: Int,
+    displayAspectRatio: Float,
     scanlinesEnabled: Boolean = false,
     integerScalingEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val aspect = resolveDisplayAspectRatio(coreWidth, coreHeight, displayAspectRatio)
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (integerScalingEnabled && coreWidth > 0 && coreHeight > 0) {
             // Integer scaling branch: measure available space, compute largest integer scale.
@@ -69,7 +78,8 @@ fun EmulationSurface(
                 val maxWidthPx = with(density) { maxWidth.toPx() }
                 val maxHeightPx = with(density) { maxHeight.toPx() }
 
-                val scale = floor(min(maxWidthPx / coreWidth, maxHeightPx / coreHeight)).toInt()
+                val displayWidth = coreHeight * aspect
+                val scale = floor(min(maxWidthPx / displayWidth, maxHeightPx / coreHeight)).toInt()
                 val useIntegerScale = scale >= 1
 
                 val bufferW = if (useIntegerScale) coreWidth * scale else coreWidth
@@ -79,11 +89,10 @@ fun EmulationSurface(
                 // otherwise fall back to aspectRatio fit-to-screen.
                 val innerBoxModifier = if (useIntegerScale) {
                     Modifier.size(
-                        width = with(density) { bufferW.toDp() },
+                        width = with(density) { (displayWidth * scale).toDp() },
                         height = with(density) { bufferH.toDp() },
                     )
                 } else {
-                    val aspect = coreWidth.toFloat() / coreHeight.toFloat()
                     Modifier.aspectRatio(aspect)
                 }
 
@@ -126,12 +135,6 @@ fun EmulationSurface(
             }
         } else {
             // Non-integer-scaling branch: original fit-to-screen with fractional upscale.
-            val aspect = if (coreWidth > 0 && coreHeight > 0) {
-                coreWidth.toFloat() / coreHeight.toFloat()
-            } else {
-                4f / 3f
-            }
-
             Box(modifier = Modifier.aspectRatio(aspect)) {
                 AndroidView(
                     factory = { context ->

@@ -53,6 +53,10 @@ public:
     void setContentDirectory(const std::string& dir) { contentDirectory_ = dir; }
     void setCoreOptionOverride(const std::string& key, const std::string& value);
     void setVideoEnabled(bool enabled) { videoEnabled_ = enabled; }
+    void setGeometryCallback(
+            std::function<void(const struct retro_game_geometry&)> callback) {
+        geometryCallback_ = std::move(callback);
+    }
 
     // Hardware rendering (RETRO_ENVIRONMENT_SET_HW_RENDER)
     bool isHardwareRendering() const { return hwRenderActive_; }
@@ -110,6 +114,7 @@ private:
     // interface struct handed to the core (static so the pointer stays valid
     // for the core's current use of the interface).
     std::function<EGLContext()> glContextProvider_;
+    std::function<void(const struct retro_game_geometry&)> geometryCallback_;
     OpenGlEsHwRenderInterface hwRenderInterface_{};
 
     // Commands we've already logged as unsupported, so a core hammering an

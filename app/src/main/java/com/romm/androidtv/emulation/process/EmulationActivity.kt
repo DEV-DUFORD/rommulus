@@ -1216,6 +1216,7 @@ private fun EmulationScreen(
                 host = host,
                 coreWidth = diagnostics[2].toInt(),
                 coreHeight = diagnostics[3].toInt(),
+                displayAspectRatio = diagnostics.getOrElse(21) { 0L } / 1_000_000f,
                 scanlinesEnabled = scanlinesOn,
                 integerScalingEnabled = integerScalingOn,
                 modifier = Modifier.fillMaxSize()
