@@ -96,6 +96,8 @@ import com.romm.androidtv.library.ui.TvButton
 import com.romm.androidtv.library.ui.TvOutlinedButton
 import com.romm.androidtv.library.ui.RommTvColors
 import com.romm.androidtv.library.ui.RommTvTheme
+import com.romm.androidtv.library.ui.RommTheme
+import com.romm.androidtv.library.ui.applyTheme
 import com.romm.androidtv.platform.rememberDeviceProfile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -593,6 +595,10 @@ class EmulationActivity : ComponentActivity() {
         // regardless of what the caller passed.
         val touchControlsEnabled = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) &&
             intent.getBooleanExtra("on_screen_controls_enabled", false)
+
+        // EmulationActivity runs in :emulation, where the process-local theme state starts at
+        // its default. Restore the shared preference before composing the pause menu.
+        applyTheme(RommTheme.fromStorage(settingsRepository.theme()))
 
         setContent {
             RommTvTheme {

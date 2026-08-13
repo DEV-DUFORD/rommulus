@@ -116,9 +116,10 @@ class SettingsRepository(
     /**
      * Integer scaling toggle (off by default): when true, the game image is
      * displayed at the largest clean integer multiple of the core's native
-     * output resolution that fits entirely on screen. No fractional scaling
-     * or overflow — each source pixel maps to an exact N×N block of display
-     * pixels for a crisp retro look.
+     * output resolution that fits entirely on screen. Only the vertical scale
+     * is guaranteed to be integer; the horizontal width is aspect-corrected to
+     * match the display aspect ratio when it differs from the core's native
+     * pixel aspect. No fractional vertical scaling.
      */
     fun integerScalingEnabled(): Boolean =
         prefs.getBoolean(KEY_INTEGER_SCALING_ENABLED, false)

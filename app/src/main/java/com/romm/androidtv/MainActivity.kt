@@ -382,8 +382,28 @@ class MainActivity : ComponentActivity() {
             pendingOperationDao = db.pendingOperationDao(),
             saveContentStore = FileSaveContentStore(filesDir),
             onOperationQueued = { com.romm.androidtv.sync.SaveUploadEnqueueHelper.enqueue(applicationContext) },
+            onPostPlayOperationQueued = {
+                try {
+                    when (
+                        com.romm.androidtv.sync.SaveUploadDrainCoordinator.drain(
+                            postPlaySaveUploadExecutor,
+                        )
+                    ) {
+                        is com.romm.androidtv.romm.save.SaveUploadExecutor.DrainResult.Complete -> Unit
+                        is com.romm.androidtv.romm.save.SaveUploadExecutor.DrainResult.Retry ->
+                            com.romm.androidtv.sync.SaveUploadEnqueueHelper.enqueue(applicationContext)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Immediate post-play save upload failed; scheduling retry", e)
+                    com.romm.androidtv.sync.SaveUploadEnqueueHelper.enqueue(applicationContext)
+                }
+            },
             shouldAutoclean = { settingsRepository.autocleanSavesOnUpload() },
         )
+    }
+
+    private val postPlaySaveUploadExecutor by lazy {
+        com.romm.androidtv.sync.RommWorkerFactory.buildProductionExecutor(applicationContext)
     }
 
     /**

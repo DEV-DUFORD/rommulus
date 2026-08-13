@@ -592,6 +592,44 @@ class SaveSyncCoordinatorImplTest {
     }
 
     @Test
+    fun `syncPostPlay invokes foreground drain hook instead of generic queue hook`() {
+        runBlocking {
+            var genericQueueCount = 0
+            var foregroundDrainCount = 0
+            val foregroundCoordinator = SaveSyncCoordinatorImpl(
+                client,
+                sessionStore,
+                deviceRepository,
+                saveReplicaDao,
+                pendingOperationDao,
+                saveContentStore,
+                clock = { clockValue },
+                onOperationQueued = { genericQueueCount++ },
+                onPostPlayOperationQueued = { foregroundDrainCount++ },
+            )
+
+            val result = foregroundCoordinator.syncPostPlay(
+                PostPlayCheckpointRequest(
+                    serverKey = "localhost",
+                    userKey = "alice",
+                    romId = 1L,
+                    romHash = "hash-a",
+                    slot = "autosave",
+                    coreId = "sameboy",
+                    coreBuildRevision = "v1.6",
+                    fileName = "test.srm",
+                    checkpointedHash = "new-checkpoint-hash",
+                    checkpointedSizeBytes = 256,
+                )
+            )
+
+            assertThat(result).isInstanceOf(PostPlayCheckpointResult.Queued::class.java)
+            assertThat(foregroundDrainCount).isEqualTo(1)
+            assertThat(genericQueueCount).isZero()
+        }
+    }
+
+    @Test
     fun `syncPostPlay no existing replica creates new and queues operation`() {
         runBlocking {
             // No existing replica.

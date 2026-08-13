@@ -28,10 +28,10 @@ class SaveUploadWorker(
         // Kiosk (anonymous read-only demo) sessions never sync/uploads saves — drain nothing.
         if (sessionStore.current()?.kioskMode == true) return Result.success()
         return try {
-        when (executor.drainBatch()) {
-            is DrainResult.Complete -> Result.success()
-            is DrainResult.Retry -> Result.retry()
-        }
+            when (SaveUploadDrainCoordinator.drain(executor)) {
+                is DrainResult.Complete -> Result.success()
+                is DrainResult.Retry -> Result.retry()
+            }
         } catch (e: Exception) {
             // Unexpected top-level exceptions: attempt to recover any stranded RUNNING operations
             // before returning retry. The executor's drainBatch() already recovers stranded rows

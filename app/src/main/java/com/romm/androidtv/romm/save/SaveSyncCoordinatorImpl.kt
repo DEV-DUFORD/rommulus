@@ -55,13 +55,18 @@ class SaveSyncCoordinatorImpl(
     /** Conflict resolver; defaults to production impl sharing the same DAOs. Tests inject a fake. */
     private val conflictResolver: ConflictResolver? = null,
     /**
-     * Invoked every time a [PendingOperationEntity] (upload or negotiate-and-sync) is durably
-     * queued, so the caller can schedule the [com.romm.androidtv.sync.SaveUploadWorker] batch via
-     * [com.romm.androidtv.sync.SaveUploadEnqueueHelper]. Queuing a row in Room alone never causes
-     * it to be uploaded — something must call this to actually schedule the WorkManager job.
+     * Invoked when a pre-launch upload is durably queued, so the caller can schedule the
+     * [com.romm.androidtv.sync.SaveUploadWorker] batch. Post-play operations use
+     * [onPostPlayOperationQueued] instead.
      * Defaults to a no-op so plain-JVM unit tests never need an Android [android.content.Context].
      */
     private val onOperationQueued: () -> Unit = {},
+    /**
+     * Invoked specifically for post-play operations. Production uses this to attempt an
+     * immediate, awaited drain before falling back to WorkManager, avoiding scheduler latency
+     * between an in-app quit and another client launching the same game.
+     */
+    private val onPostPlayOperationQueued: suspend () -> Unit = { onOperationQueued() },
     /** Resolved per-upload: governs the server auto-clean of the autosave slot. Defaults to on. */
     private val shouldAutoclean: () -> Boolean = { true },
 ) : SaveSyncCoordinator, SaveSyncCoordinatorInternal {
@@ -322,7 +327,7 @@ class SaveSyncCoordinatorImpl(
                 }
                 val current = active.firstOrNull { it.localGenerationEpochMs == now }
                 if (current != null) {
-                    onOperationQueued()
+                    onPostPlayOperationQueued()
                     return@withContext PostPlayCheckpointResult.Queued(current.id)
                 }
 
@@ -393,7 +398,7 @@ class SaveSyncCoordinatorImpl(
                 )
             }
 
-            onOperationQueued()
+            onPostPlayOperationQueued()
             PostPlayCheckpointResult.Queued(pendingId)
         }
 

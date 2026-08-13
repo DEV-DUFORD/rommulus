@@ -17,6 +17,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
 import kotlin.math.floor
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 internal fun resolveDisplayAspectRatio(coreWidth: Int, coreHeight: Int, reportedAspectRatio: Float): Float =
     when {
@@ -24,6 +25,33 @@ internal fun resolveDisplayAspectRatio(coreWidth: Int, coreHeight: Int, reported
         coreWidth > 0 && coreHeight > 0 -> coreWidth.toFloat() / coreHeight
         else -> 4f / 3f
     }
+
+/**
+ * Computes the largest integer VERTICAL scale factor whose aspect-corrected
+ * footprint fits entirely within [maxWidthPx] x [maxHeightPx], or 0 when no
+ * integer scale >= 1 fits (the caller then falls back to fractional fit).
+ *
+ * Only the vertical scale is guaranteed to be integer; the horizontal buffer
+ * width is aspect-corrected (see [EmulationSurface] KDoc). The result is also
+ * capped so that `coreWidth * scale` and `coreHeight * scale` cannot overflow
+ * `Int`.
+ */
+internal fun computeIntegerScale(
+    coreWidth: Int,
+    coreHeight: Int,
+    displayAspectRatio: Float,
+    maxWidthPx: Float,
+    maxHeightPx: Float,
+): Int {
+    if (coreWidth <= 0 || coreHeight <= 0 || maxWidthPx <= 0f || maxHeightPx <= 0f) return 0
+    val aspect = resolveDisplayAspectRatio(coreWidth, coreHeight, displayAspectRatio)
+    val displayWidth = coreHeight * aspect
+    val scale = floor(min(maxWidthPx / displayWidth, maxHeightPx / coreHeight)).toInt()
+    if (scale < 1) return 0
+    // Guard against Int overflow in coreWidth * scale / coreHeight * scale.
+    val maxSafeScale = min(Int.MAX_VALUE / coreWidth, Int.MAX_VALUE / coreHeight).coerceAtLeast(1)
+    return min(scale, maxSafeScale)
+}
 
 private class EmulationSurfaceView(context: Context) : SurfaceView(context) {
     private var bufferWidth = 0
@@ -55,9 +83,12 @@ private class EmulationSurfaceView(context: Context) : SurfaceView(context) {
  * (320x240 -> 384x288 at frame 300).
  *
  * When [integerScalingEnabled] is true, the surface is sized to the largest
- * clean integer multiple of the core resolution that fits entirely on screen.
- * The buffer size is set to match the scaled dimensions so the compositor
- * performs a 1:1 pixel mapping (no fractional upscale).
+ * clean integer multiple of the core's native resolution that fits entirely on
+ * screen. Only the VERTICAL scale is guaranteed integer: the horizontal width
+ * is aspect-corrected (multiplied by [displayAspectRatio]) to preserve the
+ * display aspect ratio when it differs from the native pixel aspect. The buffer
+ * is sized to match the box exactly so the compositor maps each buffer pixel
+ * 1:1 to the box (no fractional upscale or downscale).
  */
 @Composable
 fun EmulationSurface(
@@ -78,18 +109,22 @@ fun EmulationSurface(
                 val maxWidthPx = with(density) { maxWidth.toPx() }
                 val maxHeightPx = with(density) { maxHeight.toPx() }
 
-                val displayWidth = coreHeight * aspect
-                val scale = floor(min(maxWidthPx / displayWidth, maxHeightPx / coreHeight)).toInt()
+                val scale = computeIntegerScale(coreWidth, coreHeight, aspect, maxWidthPx, maxHeightPx)
                 val useIntegerScale = scale >= 1
 
-                val bufferW = if (useIntegerScale) coreWidth * scale else coreWidth
+                // Size the box from the buffer (not the other way around) so the buffer can
+                // never exceed the box: vertical is an integer multiple of coreHeight, and the
+                // width is aspect-corrected (coreHeight * aspect * scale). This preserves the
+                // display aspect ratio while keeping the compositor at a 1:1 pixel mapping.
+                val scaledWidthPx = if (useIntegerScale) (coreHeight * aspect * scale).roundToInt() else coreWidth
+                val bufferW = scaledWidthPx
                 val bufferH = if (useIntegerScale) coreHeight * scale else coreHeight
 
                 // When integer scaling is active and valid, size the box to exact scaled px;
                 // otherwise fall back to aspectRatio fit-to-screen.
                 val innerBoxModifier = if (useIntegerScale) {
                     Modifier.size(
-                        width = with(density) { (displayWidth * scale).toDp() },
+                        width = with(density) { scaledWidthPx.toDp() },
                         height = with(density) { bufferH.toDp() },
                     )
                 } else {

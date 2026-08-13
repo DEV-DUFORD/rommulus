@@ -106,7 +106,7 @@
     <string name="video_options_scanlines">Scanlines</string>
     <string name="video_options_scanlines_description">Adds subtle horizontal lines for a classic CRT look.</string>
     <string name="video_options_integer_scaling">Integer Scaling</string>
-    <string name="video_options_integer_scaling_description">Scales the image to the largest clean multiple of the original resolution that fits on screen.</string>
+    <string name="video_options_integer_scaling_description">Scales the image vertically by a clean integer factor (aspect-corrected horizontally) to fit on screen for crisp pixels.</string>
     <string name="video_options_return">Return</string>
     <string name="video_options_save_error">Couldn\'t save this video option. Try again.</string>
     <string name="video_options_state_on">On</string>

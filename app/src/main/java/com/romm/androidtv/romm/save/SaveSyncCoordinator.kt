@@ -31,10 +31,8 @@ interface SaveSyncCoordinator {
      *    returns the queued operation ID.
      * 4. If bytes unchanged: returns null (no generation, no work).
      *
-     * The WorkManager executor (Milestone 7) drains the NEGOTIATE_AND_SYNC queue,
-     * authenticates, registers, negotiates a fresh session, and executes the server's
-     * returned action. This call never touches the network — it only persists durable
-     * state so the worker can replay after process death.
+     * After persisting durable state, production immediately drains the operation while the
+     * app is still foregrounded. WorkManager remains the retry/process-death fallback.
      *
      * Idempotent: calling twice for the same checkpoint hash produces the same outcome
      * (the second call sees unchanged bytes and returns null).
@@ -178,8 +176,7 @@ sealed interface SaveSyncOutcome {
 
     /**
      * The local autosave is newer; a durable, idempotent upload has been queued
-     * ([PendingOperationEntity], `status = PENDING`). The actual HTTP upload runs later, with
-     * backoff, from Milestone 7's `CoroutineWorker` — this call never uploads inline.
+     * ([PendingOperationEntity], `status = PENDING`). The caller schedules its execution.
      */
     data class UploadQueued(val sessionId: Long, val pendingOperationId: Long) : SaveSyncOutcome
 
@@ -256,7 +253,7 @@ sealed interface PostPlayCheckpointResult {
     /**
      * Checkpointed bytes differ from the last durable replica. A new generation was
      * persisted and a [PendingOperationType.NEGOTIATE_AND_SYNC] operation was durably
-     * enqueued. [pendingOperationId] is the database row the WorkManager executor will drain.
+     * enqueued. [pendingOperationId] is the database row drained immediately or by WorkManager.
      */
     data class Queued(val pendingOperationId: Long) : PostPlayCheckpointResult
 
