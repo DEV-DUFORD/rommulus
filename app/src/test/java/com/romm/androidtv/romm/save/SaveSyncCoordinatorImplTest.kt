@@ -34,6 +34,7 @@ class SaveSyncCoordinatorImplTest {
     private lateinit var coordinator: SaveSyncCoordinatorImpl
 
     private var clockValue = 10_000L
+    private var operationQueuedCount = 0
 
     @BeforeEach
     fun setUp() {
@@ -49,6 +50,7 @@ class SaveSyncCoordinatorImplTest {
         coordinator = SaveSyncCoordinatorImpl(
             client, sessionStore, deviceRepository, saveReplicaDao, pendingOperationDao, saveContentStore,
             clock = { clockValue },
+            onOperationQueued = { operationQueuedCount++ },
         )
     }
 
@@ -535,6 +537,7 @@ class SaveSyncCoordinatorImplTest {
                 serverKey = "localhost", userKey = "alice", romId = 1L, romHash = "hash-a",
                 slot = "autosave", coreId = "sameboy", coreBuildRevision = "v1.6",
                 localHash = "checkpoint-hash-abc", localWrittenAtEpochMs = 10_000L,
+                syncStatus = SaveSyncStatus.SYNCED,
             ))
 
             val result = coordinator.syncPostPlay(PostPlayCheckpointRequest(
@@ -610,7 +613,7 @@ class SaveSyncCoordinatorImplTest {
     }
 
     @Test
-    fun `syncPostPlay idempotent dedupe second call for same generation returns Unchanged`() {
+    fun `syncPostPlay same unsynced generation re-kicks existing operation`() {
         runBlocking {
             // First call: creates replica and queues operation.
             val result1 = coordinator.syncPostPlay(PostPlayCheckpointRequest(
@@ -624,18 +627,19 @@ class SaveSyncCoordinatorImplTest {
             // Advance clock slightly but hash is same.
             clockValue = 11_000L
 
-            // Second call: hash matches, returns Unchanged.
+            // Second call: hash matches, but the server has not confirmed it yet.
             val result2 = coordinator.syncPostPlay(PostPlayCheckpointRequest(
                 serverKey = "localhost", userKey = "alice", romId = 1L, romHash = "hash-a",
                 slot = "autosave", coreId = "sameboy", coreBuildRevision = "v1.6",
                 fileName = "test.srm", checkpointedHash = "checkpoint-hash",
                 checkpointedSizeBytes = 128,
             ))
-            assertThat(result2).isEqualTo(PostPlayCheckpointResult.Unchanged)
+            assertThat(result2).isEqualTo(result1)
 
-            // Only one operation was ever enqueued.
+            // The durable row remains deduplicated, while WorkManager is kicked again.
             val ops = pendingOperationDao.findByStatus(PendingOperationStatus.PENDING)
             assertThat(ops).hasSize(1)
+            assertThat(operationQueuedCount).isEqualTo(2)
         }
     }
 

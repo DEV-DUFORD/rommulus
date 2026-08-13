@@ -32,6 +32,35 @@ class FakeSaveReplicaDao : SaveReplicaDao {
         it.serverKey == serverKey && it.userKey == userKey && it.syncStatus == status
     }
 
+    override suspend fun markSyncedIfGenerationMatches(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        localGenerationEpochMs: Long,
+        rommSaveId: Long?,
+        serverHash: String?,
+        serverSizeBytes: Long?,
+        serverUpdatedAtEpochMs: Long?,
+    ): Int {
+        val index = rows.indexOfFirst {
+            it.serverKey == serverKey && it.userKey == userKey && it.romId == romId &&
+                it.romHash == romHash && it.slot == slot &&
+                it.localWrittenAtEpochMs == localGenerationEpochMs
+        }
+        if (index < 0) return 0
+        rows[index] = rows[index].copy(
+            rommSaveId = rommSaveId,
+            serverHash = serverHash,
+            serverSizeBytes = serverSizeBytes,
+            serverUpdatedAtEpochMs = serverUpdatedAtEpochMs,
+            syncStatus = SaveSyncStatus.SYNCED,
+            lastError = null,
+        )
+        return 1
+    }
+
     override suspend fun deleteByScope(
         serverKey: String, userKey: String, romId: Long, romHash: String, slot: String,
     ) {

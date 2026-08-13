@@ -65,6 +65,55 @@ class SaveUploadExecutorImplTest {
     }
 
     @Test
+    fun `successful stale upload does not mark a newer local generation synced`() {
+        runBlocking {
+            val dao = FakePendingOperationDao()
+            val replicaDao = FakeSaveReplicaDao()
+            val contentStore = FakeSaveContentStore()
+            val op = makePendingOp()
+            dao.insert(op)
+            contentStore.seedLocal(op.serverKey, op.userKey, op.romId, op.romHash, op.slot, byteArrayOf(1))
+            replicaDao.seed(makeReplicaWithGeneration(op))
+
+            val executor = buildExecutor(
+                pendingOperationDao = dao,
+                saveReplicaDao = replicaDao,
+                saveContentStore = contentStore,
+                uploadBehavior = { _, _ ->
+                    runBlocking {
+                        val current = replicaDao.findByScope(
+                            op.serverKey, op.userKey, op.romId, op.romHash, op.slot,
+                        )!!
+                        replicaDao.upsert(
+                            current.copy(
+                                localHash = "newer-hash",
+                                localWrittenAtEpochMs = op.localGenerationEpochMs + 1,
+                                syncStatus = SaveSyncStatus.UNSYNCED,
+                            )
+                        )
+                    }
+                    SaveUploadResult.Success(
+                        com.romm.androidtv.romm.ServerSaveInfo(
+                            saveId = 42L, romId = op.romId, fileName = "test.srm",
+                            slot = op.slot, emulator = null, contentHash = "old-server-hash",
+                            updatedAt = Instant.now(), fileSizeBytes = 1,
+                        )
+                    )
+                },
+            )
+
+            assertThat(executor.drainBatch()).isEqualTo(SaveUploadExecutor.DrainResult.Complete)
+            val replica = replicaDao.findByScope(
+                op.serverKey, op.userKey, op.romId, op.romHash, op.slot,
+            )!!
+            assertThat(replica.localHash).isEqualTo("newer-hash")
+            assertThat(replica.localWrittenAtEpochMs).isEqualTo(op.localGenerationEpochMs + 1)
+            assertThat(replica.syncStatus).isEqualTo(SaveSyncStatus.UNSYNCED)
+            assertThat(replica.rommSaveId).isNull()
+        }
+    }
+
+    @Test
     fun `network error transitions to RETRYABLE_FAILURE then PENDING`() {
         runBlocking {
             val dao = FakePendingOperationDao()

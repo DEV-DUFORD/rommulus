@@ -47,6 +47,31 @@ interface SaveReplicaDao {
     )
     suspend fun findByStatus(serverKey: String, userKey: String, status: SaveSyncStatus): List<SaveReplicaEntity>
 
+    /**
+     * Records a successful server round trip only if this is still the local generation that
+     * was uploaded. A newer checkpoint must never be overwritten by a stale worker completion.
+     */
+    @Query(
+        "UPDATE save_replicas SET rommSaveId = :rommSaveId, serverHash = :serverHash, " +
+            "serverSizeBytes = :serverSizeBytes, serverUpdatedAtEpochMs = :serverUpdatedAtEpochMs, " +
+            "syncStatus = 'SYNCED', lastError = NULL " +
+            "WHERE serverKey = :serverKey AND userKey = :userKey " +
+            "AND romId = :romId AND romHash = :romHash AND slot = :slot " +
+            "AND localWrittenAtEpochMs = :localGenerationEpochMs",
+    )
+    suspend fun markSyncedIfGenerationMatches(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        localGenerationEpochMs: Long,
+        rommSaveId: Long?,
+        serverHash: String?,
+        serverSizeBytes: Long?,
+        serverUpdatedAtEpochMs: Long?,
+    ): Int
+
     @Query(
         "DELETE FROM save_replicas " +
             "WHERE serverKey = :serverKey AND userKey = :userKey " +

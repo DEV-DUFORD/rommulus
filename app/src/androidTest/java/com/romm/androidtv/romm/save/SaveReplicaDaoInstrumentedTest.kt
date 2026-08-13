@@ -103,6 +103,37 @@ class SaveReplicaDaoInstrumentedTest {
     }
 
     @Test
+    fun markSyncedOnlyUpdatesTheExpectedLocalGeneration() {
+        runBlocking {
+            dao.upsert(
+                sample().copy(
+                    localHash = "newer-local",
+                    localWrittenAtEpochMs = 2_000L,
+                    syncStatus = SaveSyncStatus.UNSYNCED,
+                )
+            )
+
+            val staleUpdateCount = dao.markSyncedIfGenerationMatches(
+                "romm.example.com", "alice", 42L, "abc123", "autosave", 1_000L,
+                7L, "stale-server", 8192L, 1_000L,
+            )
+            assertEquals(0, staleUpdateCount)
+
+            val currentUpdateCount = dao.markSyncedIfGenerationMatches(
+                "romm.example.com", "alice", 42L, "abc123", "autosave", 2_000L,
+                8L, "current-server", 8192L, 2_000L,
+            )
+            assertEquals(1, currentUpdateCount)
+
+            val found = dao.findByScope("romm.example.com", "alice", 42L, "abc123", "autosave")
+            assertEquals("newer-local", found?.localHash)
+            assertEquals(8L, found?.rommSaveId)
+            assertEquals("current-server", found?.serverHash)
+            assertEquals(SaveSyncStatus.SYNCED, found?.syncStatus)
+        }
+    }
+
+    @Test
     fun differentRomHashIsAStructurallyDifferentRecord() {
         runBlocking {
             dao.upsert(sample(romHash = "hash-a"))

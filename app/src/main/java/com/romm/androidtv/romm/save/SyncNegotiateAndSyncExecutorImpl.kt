@@ -200,14 +200,18 @@ class SyncNegotiateAndSyncExecutorImpl(
 
         return when (uploadResult) {
             is SaveUploadResult.Success -> {
-                saveReplicaDao.upsert(replica.copy(
+                saveReplicaDao.markSyncedIfGenerationMatches(
+                    serverKey = op.serverKey,
+                    userKey = op.userKey,
+                    romId = op.romId,
+                    romHash = op.romHash,
+                    slot = op.slot,
+                    localGenerationEpochMs = op.localGenerationEpochMs,
                     rommSaveId = uploadResult.save.saveId,
                     serverHash = uploadResult.save.contentHash,
                     serverSizeBytes = uploadResult.save.fileSizeBytes,
                     serverUpdatedAtEpochMs = uploadResult.save.updatedAt?.toEpochMilli(),
-                    syncStatus = SaveSyncStatus.SYNCED,
-                    lastError = null,
-                ))
+                )
                 transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.SUCCEEDED, null, null, now, attemptCount)
                 1 to 0
             }

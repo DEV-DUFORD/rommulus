@@ -295,12 +295,49 @@ class SaveSyncCoordinatorImpl(
                 request.serverKey, request.userKey, request.romId, request.romHash, request.slot,
             )
 
-            // Unchanged bytes: localHash matches checkpointed hash — no new generation, no work.
-            if (existingReplica?.localHash == request.checkpointedHash) {
+            val checkpointChanged = existingReplica?.localHash != request.checkpointedHash
+
+            // A matching hash is only fully settled when the last server round trip succeeded.
+            // Otherwise re-kick an existing operation (which may have lost its WorkManager
+            // enqueue to an in-flight worker) or recreate the operation for this generation.
+            if (!checkpointChanged && existingReplica?.syncStatus == SaveSyncStatus.SYNCED) {
                 return@withContext PostPlayCheckpointResult.Unchanged
             }
 
-            val now = clock()
+            val now = if (checkpointChanged) {
+                clock()
+            } else {
+                existingReplica?.localWrittenAtEpochMs ?: clock()
+            }
+
+            if (!checkpointChanged && existingReplica != null) {
+                val active = listOf(
+                    PendingOperationType.NEGOTIATE_AND_SYNC,
+                    PendingOperationType.UPLOAD,
+                ).flatMap { operationType ->
+                    pendingOperationDao.findActiveByScope(
+                        request.serverKey, request.userKey, request.romId, request.romHash,
+                        request.slot, operationType,
+                    )
+                }
+                val current = active.firstOrNull { it.localGenerationEpochMs == now }
+                if (current != null) {
+                    onOperationQueued()
+                    return@withContext PostPlayCheckpointResult.Queued(current.id)
+                }
+
+                // Conflict and quarantine states require explicit user action; an unchanged
+                // checkpoint must not silently restart negotiation around that decision.
+                if (existingReplica.syncStatus in setOf(
+                        SaveSyncStatus.CONFLICT,
+                        SaveSyncStatus.QUARANTINED,
+                        SaveSyncStatus.AWAITING_CORE_VALIDATION,
+                        SaveSyncStatus.PENDING_DOWNLOAD,
+                    )
+                ) {
+                    return@withContext PostPlayCheckpointResult.Unchanged
+                }
+            }
 
             // Persist honest SaveReplicaEntity with new generation.
             val updatedReplica = (existingReplica ?: SaveReplicaEntity(
@@ -311,13 +348,19 @@ class SaveSyncCoordinatorImpl(
                 slot = request.slot,
                 coreId = request.coreId,
                 coreBuildRevision = request.coreBuildRevision,
-            )).copy(
-                localHash = request.checkpointedHash,
-                localSizeBytes = request.checkpointedSizeBytes,
-                localWrittenAtEpochMs = now,
-                syncStatus = SaveSyncStatus.UNSYNCED,
-                lastError = null,
-            )
+            )).let { replica ->
+                if (checkpointChanged || replica.localWrittenAtEpochMs == null) {
+                    replica.copy(
+                        localHash = request.checkpointedHash,
+                        localSizeBytes = request.checkpointedSizeBytes,
+                        localWrittenAtEpochMs = now,
+                        syncStatus = SaveSyncStatus.UNSYNCED,
+                        lastError = null,
+                    )
+                } else {
+                    replica
+                }
+            }
             saveReplicaDao.upsert(updatedReplica)
 
             // Durably enqueue NEGOTIATE_AND_SYNC operation (idempotent dedupe: drop stale, reuse current).

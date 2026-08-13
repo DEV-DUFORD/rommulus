@@ -51,7 +51,7 @@ class SaveUploadWorkerInstrumentedTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         SaveUploadEnqueueHelper.cancel(context)
 
-        // Multiple enqueues are safe; KEEP policy de-duplicates.
+        // Multiple enqueues are safe; each appended worker drains the idempotent Room queue.
         SaveUploadEnqueueHelper.enqueue(context)
         SaveUploadEnqueueHelper.enqueue(context)
         SaveUploadEnqueueHelper.enqueue(context)

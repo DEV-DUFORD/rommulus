@@ -12,11 +12,11 @@ import java.util.concurrent.TimeUnit
 /**
  * Unique one-time enqueue helper for the save-upload batch worker.
  *
- * Uses [ExistingWorkPolicy.KEEP] so a pending work request is not replaced on
- * repeated calls. This is inherently non-blocking: WorkManager schedules
- * asynchronously and provides no synchronous guarantee about whether a prior
- * request was still pending. Callers should not depend on the return value
- * to determine enqueue state — simply call [enqueue] whenever uploads are ready.
+ * Uses [ExistingWorkPolicy.APPEND_OR_REPLACE] so an enqueue that races with a
+ * currently-running drain always leaves a successor behind. With `KEEP`, a new
+ * pending-operation row could be inserted after the running worker took its
+ * queue snapshot, while the corresponding enqueue was discarded because that
+ * worker had not reached a terminal state yet.
  */
 object SaveUploadEnqueueHelper {
 
@@ -25,9 +25,9 @@ object SaveUploadEnqueueHelper {
     /**
      * Enqueues (or re-enqueues) the save-upload batch worker.
      *
-     * De-duplication is handled by WorkManager's [ExistingWorkPolicy.KEEP]: if a
-     * request with this unique work name is already queued and not yet terminal,
-     * the existing request is kept; otherwise a new one is created.
+     * Repeated requests are safe because the Room pending-operation queue is the
+     * source of truth and each worker drains it idempotently. Appending guarantees
+     * that work queued during an in-flight drain gets another pass.
      */
     fun enqueue(context: Context) {
         val constraints = Constraints.Builder()
@@ -41,7 +41,7 @@ object SaveUploadEnqueueHelper {
             .build()
 
         WorkManager.getInstance(context)
-            .enqueueUniqueWork(TAG, ExistingWorkPolicy.KEEP, workRequest)
+            .enqueueUniqueWork(TAG, ExistingWorkPolicy.APPEND_OR_REPLACE, workRequest)
     }
 
     fun cancel(context: Context) {
