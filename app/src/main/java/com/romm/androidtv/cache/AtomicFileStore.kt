@@ -7,6 +7,8 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 /**
@@ -75,9 +77,15 @@ object AtomicFileStore {
      */
     fun download(request: DownloadRequest): DownloadOutcome {
         request.destinationDir.mkdirs()
-        val tempFile = File(request.destinationDir, "${request.finalFileName}$TEMP_SUFFIX")
-        // Never resume a stale partial download from a previous attempt — always start clean.
-        tempFile.delete()
+        val tempFile = try {
+            Files.createTempFile(
+                request.destinationDir.toPath(),
+                "${request.finalFileName}.",
+                TEMP_SUFFIX,
+            ).toFile()
+        } catch (e: IOException) {
+            return DownloadOutcome.NetworkError(e.message ?: e.javaClass.simpleName)
+        }
 
         val httpRequest = Request.Builder().url(request.url).get().build()
 
@@ -137,9 +145,12 @@ object AtomicFileStore {
                 }
 
                 val finalFile = File(request.destinationDir, request.finalFileName)
-                if (!tempFile.renameTo(finalFile)) {
-                    return DownloadOutcome.NetworkError("atomic rename failed")
-                }
+                Files.move(
+                    tempFile.toPath(),
+                    finalFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
 
                 DownloadOutcome.Success(finalFile, totalBytes, digests)
             }

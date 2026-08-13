@@ -68,6 +68,28 @@ class AtomicFileStoreTest {
         }
 
         @Test
+        fun `atomically replaces an existing final file`() {
+            val oldContent = "old cached bytes".toByteArray()
+            val newContent = "fresh verified bytes".toByteArray()
+            val finalFile = File(destinationDir, "final.bin").apply { writeBytes(oldContent) }
+            server.enqueue(MockResponse().setResponseCode(200).setBody(String(newContent)))
+
+            val outcome = AtomicFileStore.download(
+                AtomicFileStore.DownloadRequest(
+                    client = client,
+                    url = server.url("/x").toString(),
+                    destinationDir = destinationDir,
+                    finalFileName = finalFile.name,
+                )
+            )
+
+            assertThat(outcome).isInstanceOf(AtomicFileStore.DownloadOutcome.Success::class.java)
+            assertThat(finalFile.readBytes()).isEqualTo(newContent)
+            assertThat(destinationDir.listFiles { file -> file.name.endsWith(AtomicFileStore.TEMP_SUFFIX) })
+                .isEmpty()
+        }
+
+        @Test
         fun `matching expected digest passes verification`() {
             val content = "verify me".toByteArray()
             server.enqueue(MockResponse().setResponseCode(200).setBody(String(content)))
