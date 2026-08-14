@@ -39,9 +39,10 @@ class AndroidImportGuardTest {
      * an import). This is intentional: the Linux port plan bans ALL
      * `android.*` / `androidx.*` usage in shared modules, not just imports.
      *
-     * Acceptable false-positive: a doc comment or string literal that
-     * happens to mention "android.something" will also trip the guard.
-     * Erring on the side of strictness is correct for this architecture guard.
+     * ALL lines are scanned, including comments and string literals. A KDoc
+     * mentioning "android.something" will trip the guard — trim the reference
+     * instead of weakening the test. Erring on the side of strictness is
+     * correct for this architecture guard.
      *
      * - `import android\.` — any android.* import statement
      * - `import androidx\.` — any androidx.* import statement
@@ -125,10 +126,6 @@ class AndroidImportGuardTest {
             for (index in lines.indices) {
                 val lineNumber = index + 1
                 val line = lines[index]
-                val trimmed = line.trim()
-                // Skip comment lines: KDoc, block comments, single-line comments.
-                // Known false-positive per own doc: doc comments mentioning android.* are acceptable.
-                if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue
                 for (pattern in FORBIDDEN_PATTERNS) {
                     if (pattern.containsMatchIn(line)) {
                         violations.add("$relativePath:$lineNumber: $line.trim()")

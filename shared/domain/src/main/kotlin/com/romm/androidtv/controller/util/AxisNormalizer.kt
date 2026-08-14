@@ -5,7 +5,7 @@ package com.romm.androidtv.controller.util
  *
  * Normalizes a raw axis value using device-reported MotionRange bounds.
  * Correctly handles the hardware flat (deadzone) region reported by
- * [android.view.MotionEvent.MotionRange].
+ * [MotionEvent.MotionRange].
  *
  * The `flat` field on MotionRange is a single non-negative distance from
  * the axis center. This is not a min/max pair and the center is not always zero.
