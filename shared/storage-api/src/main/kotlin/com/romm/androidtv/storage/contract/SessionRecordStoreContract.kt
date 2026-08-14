@@ -8,7 +8,7 @@ import com.romm.androidtv.storage.records.SessionRecord
 /** Contract-test suite for [SessionRecordStore] implementations. */
 class SessionRecordStoreContract(private val createStore: () -> SessionRecordStore) {
 
-    fun `save and read`() {
+    fun save_and_read() {
         val store = createStore()
         require(store.current() == null) { "Fresh store should have no session" }
 
@@ -22,7 +22,7 @@ class SessionRecordStoreContract(private val createStore: () -> SessionRecordSto
         require(current.username == record.username)
     }
 
-    fun `clear`() {
+    fun clear_session() {
         val store = createStore()
         store.save(SessionRecord("https://romm.example.com", "player1", System.currentTimeMillis()))
         require(store.current() != null)
@@ -32,7 +32,7 @@ class SessionRecordStoreContract(private val createStore: () -> SessionRecordSto
         require(store.current() == null) { "Store should be empty after clear" }
     }
 
-    fun `last write wins`() {
+    fun last_write_wins() {
         val store = createStore()
         store.save(SessionRecord("https://a.com", "user1", 100L))
         store.save(SessionRecord("https://b.com", "user2", 200L))

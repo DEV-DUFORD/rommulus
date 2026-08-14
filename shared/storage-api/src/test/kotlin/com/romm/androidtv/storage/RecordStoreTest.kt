@@ -162,12 +162,12 @@ class RecordStoreTest {
     @Test
     fun `contract tests pass against InMemoryRecordStore`() {
         val contract = StoreContract { InMemoryRecordStore() }
-        contract.`record identity is preserved`()
-        contract.`duplicate key within transaction preserves last-write-wins`()
-        contract.`duplicate key across commits overwrites`()
-        contract.`rollback discards uncommitted changes`()
-        contract.`delete removes record`()
-        contract.`keys returns all stored keys`()
-        contract.`size reflects committed records`()
+        contract.record_identity_is_preserved()
+        contract.duplicate_key_within_transaction_preserves_last_write_wins()
+        contract.duplicate_key_across_commits_overwrites()
+        contract.rollback_discards_uncommitted_changes()
+        contract.delete_removes_record()
+        contract.keys_returns_all_stored_keys()
+        contract.size_reflects_committed_records()
     }
 }

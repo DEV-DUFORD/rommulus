@@ -15,7 +15,7 @@ import kotlin.collections.set
  */
 class StoreContract(private val createStore: () -> RecordStore) {
 
-    fun `record identity is preserved`() {
+    fun record_identity_is_preserved() {
         val store = createStore()
         val record = Record("alpha", 1, mapOf("color" to "red"))
         store.begin().apply { put(record); commit() }
@@ -27,7 +27,7 @@ class StoreContract(private val createStore: () -> RecordStore) {
         require(read.payload["color"] == "red") { "payload mismatch" }
     }
 
-    fun `duplicate key within transaction preserves last-write-wins`() {
+    fun duplicate_key_within_transaction_preserves_last_write_wins() {
         val store = createStore()
         val v1 = Record("dup", 1, mapOf("val" to "one"))
         val v2 = Record("dup", 2, mapOf("val" to "two"))
@@ -44,7 +44,7 @@ class StoreContract(private val createStore: () -> RecordStore) {
         require(read.payload["val"] == "two") { "Expected 'two', got ${read.payload["val"]}" }
     }
 
-    fun `duplicate key across commits overwrites`() {
+    fun duplicate_key_across_commits_overwrites() {
         val store = createStore()
         store.begin().apply { put(Record("k", 1, mapOf("v" to "a"))); commit() }
         store.begin().apply { put(Record("k", 2, mapOf("v" to "b"))); commit() }
@@ -55,7 +55,7 @@ class StoreContract(private val createStore: () -> RecordStore) {
         require(read.payload["v"] == "b")
     }
 
-    fun `rollback discards uncommitted changes`() {
+    fun rollback_discards_uncommitted_changes() {
         val store = createStore()
         store.begin().apply { put(Record("persisted", 1, mapOf())); commit() }
 
@@ -68,14 +68,14 @@ class StoreContract(private val createStore: () -> RecordStore) {
         require(store.get("ephemeral") == null)
     }
 
-    fun `delete removes record`() {
+    fun delete_removes_record() {
         val store = createStore()
         store.begin().apply { put(Record("gone", 1, mapOf())); commit() }
         store.begin().apply { delete("gone"); commit() }
         require(store.get("gone") == null)
     }
 
-    fun `keys returns all stored keys`() {
+    fun keys_returns_all_stored_keys() {
         val store = createStore()
         store.begin().apply {
             put(Record("a", 1, mapOf()))
@@ -85,14 +85,14 @@ class StoreContract(private val createStore: () -> RecordStore) {
         require(store.keys() == setOf("a", "b"))
     }
 
-    fun `size reflects committed records`() {
+    fun size_reflects_committed_records() {
         val store = createStore()
         require(store.size == 0)
         store.begin().apply { put(Record("x", 1, mapOf())); commit() }
         require(store.size == 1)
     }
 
-    fun `failed migration leaves old data intact`() {
+    fun failed_migration_leaves_old_data_intact() {
         val store = InMemoryRecordStore()
         store.begin().apply { put(Record("survive", 1, mapOf("k" to "v"))); commit() }
 

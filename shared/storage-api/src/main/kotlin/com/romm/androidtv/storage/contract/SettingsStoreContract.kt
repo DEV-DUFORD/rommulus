@@ -8,7 +8,7 @@ import com.romm.androidtv.storage.ports.SettingsStore
 /** Contract-test suite for [SettingsStore] implementations. */
 class SettingsStoreContract(private val createStore: () -> SettingsStore) {
 
-    fun `write default snapshot`() {
+    fun write_default_snapshot() {
         val store = createStore()
         val result = store.write(mapOf("key1" to "val1", "key2" to "val2"))
         require(result.isSuccess) { "write should succeed" }
@@ -18,7 +18,7 @@ class SettingsStoreContract(private val createStore: () -> SettingsStore) {
         require(snap.get("key2") == "val2")
     }
 
-    fun `write merge`() {
+    fun write_merge() {
         val store = createStore()
         store.write(mapOf("a" to "1", "b" to "2"))
         val result = store.write(mapOf("b" to "updated", "c" to "3"))
@@ -30,7 +30,7 @@ class SettingsStoreContract(private val createStore: () -> SettingsStore) {
         require(snap.get("c") == "3") { "Key 'c' should be added" }
     }
 
-    fun `clear`() {
+    fun clear_settings() {
         val store = createStore()
         store.write(mapOf("a" to "1", "b" to "2"))
         val result = store.clear("a")
@@ -41,7 +41,7 @@ class SettingsStoreContract(private val createStore: () -> SettingsStore) {
         require(snap.get("b") == "2") { "Key 'b' should remain" }
     }
 
-    fun `snapshot defensive copy`() {
+    fun snapshot_defensive_copy() {
         val store = createStore()
         store.write(mapOf("x" to "y"))
         val snap1 = store.snapshot()
@@ -55,7 +55,7 @@ class SettingsStoreContract(private val createStore: () -> SettingsStore) {
         require(snap2.get("injected") == "bad") { "New snapshot should see latest writes" }
     }
 
-    fun `SettingsSnapshot boolean parsing`() {
+    fun SettingsSnapshot_boolean_parsing() {
         val snap = SettingsSnapshot(mapOf(
             "true_str" to "true",
             "one" to "1",

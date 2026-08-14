@@ -9,7 +9,7 @@ import com.romm.androidtv.storage.records.ControllerBindingRecord
 /** Contract-test suite for [ControllerBindingStore] implementations. */
 class ControllerBindingStoreContract(private val createStore: () -> ControllerBindingStore) {
 
-    fun `loadForCore returns all bindings for core`() {
+    fun loadForCore_returns_all_bindings_for_core() {
         val store = createStore()
         store.upsertAll(listOf(
             ControllerBindingRecord("snes9x", 0, "btn_a", BindingSlots.PRIMARY, "key", 1),
@@ -21,7 +21,7 @@ class ControllerBindingStoreContract(private val createStore: () -> ControllerBi
         require(all.size == 3) { "Expected 3 bindings for core, got ${all.size}" }
     }
 
-    fun `loadForPlayer filters by player index`() {
+    fun loadForPlayer_filters_by_player_index() {
         val store = createStore()
         store.upsertAll(listOf(
             ControllerBindingRecord("snes9x", 0, "btn_a", BindingSlots.PRIMARY, "key", 1),
@@ -37,7 +37,7 @@ class ControllerBindingStoreContract(private val createStore: () -> ControllerBi
         require(p1[0].inputCode == 2)
     }
 
-    fun `upsert replaces existing binding`() {
+    fun upsert_replaces_existing_binding() {
         val store = createStore()
         store.upsert(ControllerBindingRecord("snes9x", 0, "btn_a", BindingSlots.PRIMARY, "key", 1))
         store.upsert(ControllerBindingRecord("snes9x", 0, "btn_a", BindingSlots.PRIMARY, "axis", 5))
@@ -48,7 +48,7 @@ class ControllerBindingStoreContract(private val createStore: () -> ControllerBi
         require(found[0].inputCode == 5)
     }
 
-    fun `delete removes single binding`() {
+    fun delete_removes_single_binding() {
         val store = createStore()
         store.upsert(ControllerBindingRecord("snes9x", 0, "btn_a", BindingSlots.PRIMARY, "key", 1))
         store.delete("snes9x", 0, "btn_a", BindingSlots.PRIMARY)
@@ -56,7 +56,7 @@ class ControllerBindingStoreContract(private val createStore: () -> ControllerBi
         require(store.loadForPlayer("snes9x", 0).isEmpty())
     }
 
-    fun `deletePlayer removes all bindings for player`() {
+    fun deletePlayer_removes_all_bindings_for_player() {
         val store = createStore()
         store.upsertAll(listOf(
             ControllerBindingRecord("snes9x", 0, "btn_a", BindingSlots.PRIMARY, "key", 1),
@@ -69,7 +69,7 @@ class ControllerBindingStoreContract(private val createStore: () -> ControllerBi
         require(store.loadForPlayer("snes9x", 1).size == 1)
     }
 
-    fun `deleteCore removes all bindings for core`() {
+    fun deleteCore_removes_all_bindings_for_core() {
         val store = createStore()
         store.upsertAll(listOf(
             ControllerBindingRecord("snes9x", 0, "btn_a", BindingSlots.PRIMARY, "key", 1),
@@ -80,7 +80,7 @@ class ControllerBindingStoreContract(private val createStore: () -> ControllerBi
         require(store.loadForCore("snes9x").isEmpty())
     }
 
-    fun `upsertAll inserts multiple bindings`() {
+    fun upsertAll_inserts_multiple_bindings() {
         val store = createStore()
         val bindings = listOf(
             ControllerBindingRecord("gb", 0, "btn_a", BindingSlots.PRIMARY, "key", 1),

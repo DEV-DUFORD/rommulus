@@ -112,7 +112,7 @@ class AuthRepository(
     }
 
     /**
-     * Imports cookies Android's [android.webkit.CookieManager] already holds (e.g. from a
+      * Imports cookies Android's [CookieManager] already holds (e.g. from a
      * prior WebView session) into the native OkHttp cookie store. Synchronous; safe to call
      * from any thread per [RomMCookieSync.importFromWebView]'s existing contract.
      */

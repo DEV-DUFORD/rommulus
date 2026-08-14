@@ -9,11 +9,11 @@ class SessionRecordStoreContractTest {
     private val contract = SessionRecordStoreContract { InMemorySessionRecordStore() }
 
     @Test
-    fun `save and read`() = contract.`save and read`()
+    fun `save and read`() = contract.save_and_read()
 
     @Test
-    fun `clear`() = contract.`clear`()
+    fun `clear`() = contract.clear_session()
 
     @Test
-    fun `last write wins`() = contract.`last write wins`()
+    fun `last write wins`() = contract.last_write_wins()
 }

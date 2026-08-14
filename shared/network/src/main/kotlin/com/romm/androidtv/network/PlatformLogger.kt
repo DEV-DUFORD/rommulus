@@ -4,23 +4,23 @@ package com.romm.androidtv.network
  * Platform-neutral logging seam (Phase 2 work item 4).
  *
  * Production Android wires an [AndroidLogSink] in `RommApplication.onCreate`,
- * preserving the exact `android.util.Log` level/message behavior. On a plain JVM
+ * preserving the exact `Log` level/message behavior. On a plain JVM
  * (unit tests, the Linux desktop port) [sink] stays null and every call no-ops.
  *
- * Level constants mirror `android.util.Log` exactly so existing call sites can
+ * Level constants mirror `Log` exactly so existing call sites can
  * keep passing `RommLog.DEBUG` / `RommLog.WARN` unchanged.
  */
 object RommLog {
 
-    /** Mirrors `android.util.Log.VERBOSE`. */
+    /** Mirrors `Log.VERBOSE`. */
     const val VERBOSE = 2
-    /** Mirrors `android.util.Log.DEBUG`. */
+    /** Mirrors `Log.DEBUG`. */
     const val DEBUG = 3
-    /** Mirrors `android.util.Log.INFO`. */
+    /** Mirrors `Log.INFO`. */
     const val INFO = 4
-    /** Mirrors `android.util.Log.WARN`. */
+    /** Mirrors `Log.WARN`. */
     const val WARN = 5
-    /** Mirrors `android.util.Log.ERROR`. */
+    /** Mirrors `Log.ERROR`. */
     const val ERROR = 6
 
     /** Pluggable sink; null on a plain JVM so logging no-ops. */

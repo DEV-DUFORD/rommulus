@@ -155,6 +155,7 @@ dependencies {
     // Shared domain (Linux port Phase 1)
     implementation(project(":shared:domain"))
     implementation(project(":shared:network"))
+    implementation(project(":shared:storage-api"))
 
     // Compose BOM pins all androidx.compose.* versions
     implementation(platform("androidx.compose:compose-bom:2025.02.00"))

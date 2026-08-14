@@ -9,17 +9,17 @@ class ContentIndexStoreContractTest {
     private val contract = ContentIndexStoreContract { InMemoryContentIndexStore() }
 
     @Test
-    fun `upsert and get`() = contract.`upsert and get`()
+    fun `upsert and get`() = contract.upsert_and_get()
 
     @Test
-    fun `remove`() = contract.`remove`()
+    fun `remove`() = contract.remove()
 
     @Test
-    fun `evictionCandidates LRU order and limit`() = contract.`evictionCandidates LRU order and limit`()
+    fun `evictionCandidates LRU order and limit`() = contract.evictionCandidates_LRU_order_and_limit()
 
     @Test
-    fun `totalSizeBytes sum`() = contract.`totalSizeBytes sum`()
+    fun `totalSizeBytes sum`() = contract.totalSizeBytes_sum()
 
     @Test
-    fun `replace updates size sum`() = contract.`replace updates size sum`()
+    fun `replace updates size sum`() = contract.replace_updates_size_sum()
 }

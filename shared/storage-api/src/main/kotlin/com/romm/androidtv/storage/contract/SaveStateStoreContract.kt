@@ -9,7 +9,7 @@ import com.romm.androidtv.storage.records.*
 /** Contract-test suite for [SaveStateStore] implementations. */
 class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
 
-    fun `save replica identity is preserved`() {
+    fun save_replica_identity_is_preserved() {
         val store = createStore()
         val replica = SaveReplicaRecord(
             serverKey = "srv1", userKey = "usr1", romId = 100L, romHash = "abc", slot = "auto",
@@ -28,7 +28,7 @@ class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
         require(found.romId == replica.romId)
     }
 
-    fun `replicas scoped by status`() {
+    fun replicas_scoped_by_status() {
         val store = createStore()
         store.upsert(SaveReplicaRecord(serverKey = "s", userKey = "u", romId = 1L, romHash = "h1", slot = "a", coreId = "c", coreBuildRevision = "r", syncStatus = SaveSyncStatus.UNSYNCED))
         store.upsert(SaveReplicaRecord(serverKey = "s", userKey = "u", romId = 2L, romHash = "h2", slot = "a", coreId = "c", coreBuildRevision = "r", syncStatus = SaveSyncStatus.SYNCED))
@@ -41,13 +41,13 @@ class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
         require(synced.size == 1) { "Expected 1 SYNCED, got ${synced.size}" }
     }
 
-    fun `findByScope returns null for absent scope`() {
+    fun findByScope_returns_null_for_absent_scope() {
         val store = createStore()
         val scope = SaveReplicaScope("s", "u", 99L, "h", "a")
         require(store.findByScope(scope) == null) { "Absent scope should return null" }
     }
 
-    fun `markSyncedIfGenerationMatches updates only matching generation`() {
+    fun markSyncedIfGenerationMatches_updates_only_matching_generation() {
         val store = createStore()
         val now = System.currentTimeMillis()
         val replicaCurrent = SaveReplicaRecord(
@@ -77,7 +77,7 @@ class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
         require(!staleUpdated) { "Stale generation should not update" }
     }
 
-    fun `markSynced sets server metadata and SYNCED and clears lastError`() {
+    fun markSynced_sets_server_metadata_and_SYNCED_and_clears_lastError() {
         val store = createStore()
         val now = System.currentTimeMillis()
         val replica = SaveReplicaRecord(
@@ -98,7 +98,7 @@ class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
         require(found.lastError == null)
     }
 
-    fun `pending op enqueue then findByStatus_Active and findById round-trip`() {
+    fun pending_op_enqueue_then_findByStatus_Active_and_findById_round_trip() {
         val store = createStore()
         val now = System.currentTimeMillis()
         val op = PendingOperationRecord(
@@ -122,7 +122,7 @@ class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
         require(active.isNotEmpty()) { "findActiveByScope should find the op" }
     }
 
-    fun `updateStatus transitions state and records error_attempt`() {
+    fun updateStatus_transitions_state_and_records_error_attempt() {
         val store = createStore()
         val now = System.currentTimeMillis()
         val op = PendingOperationRecord(
@@ -145,7 +145,7 @@ class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
         require(found.updatedAtEpochMs == updatedNow)
     }
 
-    fun `deleteStaleForScope only removes ops older than generation`() {
+    fun deleteStaleForScope_only_removes_ops_older_than_generation() {
         val store = createStore()
         val baseNow = System.currentTimeMillis()
         val scope = SaveReplicaScope("s", "u", 1L, "h", "a")
@@ -171,7 +171,7 @@ class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
         require(remaining[0].localGenerationEpochMs == baseNow)
     }
 
-    fun `inTransaction commit applies both replica and op together, rollback stays completely clean`() {
+    fun inTransaction_commit_applies_both_replica_and_op_together_rollback_stays_clean() {
         val store = createStore()
 
         // Verify pre-transaction state is clean.
@@ -212,7 +212,7 @@ class SaveStateStoreContract(private val createStore: () -> SaveStateStore) {
         require(store.opCount() == prevOpCount) { "Ops should be unchanged after failed transaction" }
     }
 
-    fun `unique scope dedupe, second upsert of same scope replaces, does not duplicate`() {
+    fun unique_scope_dedupe_second_upsert_of_same_scope_replaces_does_not_duplicate() {
         val store = createStore()
         val replica1 = SaveReplicaRecord(
             serverKey = "s", userKey = "u", romId = 1L, romHash = "h", slot = "a",
