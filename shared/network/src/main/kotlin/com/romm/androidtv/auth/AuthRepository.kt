@@ -5,9 +5,10 @@ import com.romm.androidtv.network.AuthFlowResult
 import com.romm.androidtv.network.HeartbeatCallResult
 import com.romm.androidtv.network.HeartbeatParser
 import com.romm.androidtv.network.InvalidReason
-import com.romm.androidtv.network.RomMCookieSync
+import com.romm.androidtv.network.RommLog
 import com.romm.androidtv.network.RommServerAddress
 import com.romm.androidtv.network.ServerAddressResult
+import com.romm.androidtv.network.SessionCookieSync
 import com.romm.androidtv.network.executeAuthFlow
 import com.romm.androidtv.network.executeHeartbeat
 import com.romm.androidtv.network.verifyExistingSession
@@ -31,11 +32,6 @@ import kotlin.coroutines.resume
 
 /** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
 private const val TAG = "RommAuthDx"
-
-/** Safe diagnostic logger: swallows unmocked android.util.Log in JVM unit tests. */
-private fun diagLog(priority: Int, message: String) {
-    try { android.util.Log.println(priority, TAG, message) } catch (_: Exception) { /* JVM test env */ }
-}
 
 /**
  * Repository seam over the native RomM authentication flow
@@ -68,8 +64,8 @@ interface ClientTokenStorage {
 
 class AuthRepository(
     private val client: OkHttpClient,
-    private val cookieSync: RomMCookieSync,
-    private val sessionStore: SessionStore,
+    private val cookieSync: SessionCookieSync,
+    private val sessionStore: SessionStorage,
     private val clientTokenStorage: ClientTokenStorage? = null,
 ) {
 
@@ -159,7 +155,7 @@ class AuthRepository(
      */
     suspend fun forceReconcileClientToken(origin: String, username: String): Boolean = withContext(Dispatchers.IO) {
         val storage = clientTokenStorage ?: run {
-            diagLog(android.util.Log.DEBUG, "forceReconcileClientToken: skipped storage=null")
+            RommLog.debug(TAG, "forceReconcileClientToken: skipped storage=null")
             return@withContext false
         }
         // Remove potentially revoked/stale token first so the server issues a fresh one.
@@ -173,22 +169,22 @@ class AuthRepository(
             when (result) {
                 is ClientTokenAcquireResult.Success -> {
                     val persist = storage.setToken(origin, username, result.info.token)
-                    diagLog(android.util.Log.DEBUG, "forceReconcileClientToken: reconciled=true persist=${persist::class.simpleName}")
+                    RommLog.debug(TAG, "forceReconcileClientToken: reconciled=true persist=${persist::class.simpleName}")
                     true
                 }
                 is ClientTokenAcquireResult.TokenLimitReached -> {
-                    diagLog(android.util.Log.WARN, "forceReconcileClientToken: reconciled=false tokenLimitReached detail=${result.detail}")
+                    RommLog.warn(TAG, "forceReconcileClientToken: reconciled=false tokenLimitReached detail=${result.detail}")
                     false
                 }
                 is ClientTokenAcquireResult.Failure -> {
                     val httpCode = result.httpCode ?: -1
-                    diagLog(android.util.Log.WARN, "forceReconcileClientToken: reconciled=false error=${result.error.name} httpCode=$httpCode")
+                    RommLog.warn(TAG, "forceReconcileClientToken: reconciled=false error=${result.error.name} httpCode=$httpCode")
                     false
                 }
             }
         } catch (_: Exception) {
             // Acquisition failure; caller will handle as terminal auth-expired.
-            diagLog(android.util.Log.WARN, "forceReconcileClientToken: exception during reconciliation")
+            RommLog.warn(TAG, "forceReconcileClientToken: exception during reconciliation")
             false
         }
     }
@@ -199,15 +195,15 @@ class AuthRepository(
      */
     suspend fun ensureClientTokenExists(origin: String, username: String): Boolean {
         val storage = clientTokenStorage ?: run {
-            diagLog(android.util.Log.DEBUG, "ensureClientTokenExists: skipped storage=null")
+            RommLog.debug(TAG, "ensureClientTokenExists: skipped storage=null")
             return false
         }
         if (storage.getToken(origin, username) != null) {
-            diagLog(android.util.Log.DEBUG, "ensureClientTokenExists: alreadyPresent=true")
+            RommLog.debug(TAG, "ensureClientTokenExists: alreadyPresent=true")
             return true
         }
         val result = forceReconcileClientToken(origin, username)
-        diagLog(android.util.Log.DEBUG, "ensureClientTokenExists: afterForceReconcile=$result")
+        RommLog.debug(TAG, "ensureClientTokenExists: afterForceReconcile=$result")
         return result
     }
 
@@ -216,7 +212,7 @@ class AuthRepository(
      * scope. Called when authentication is definitively expired/invalid (not transient errors).
      */
     fun clearExpiredSession(origin: String, username: String) {
-        diagLog(android.util.Log.DEBUG, "clearExpiredSession: clearing session+token")
+        RommLog.debug(TAG, "clearExpiredSession: clearing session+token")
         sessionStore.clear()
         clientTokenStorage?.clearToken(origin, username)
     }
@@ -310,7 +306,7 @@ class AuthRepository(
      */
     suspend fun establishKioskSession(origin: String): Boolean = withContext(Dispatchers.IO) {
         val persisted = sessionStore.save(origin, KIOSK_USERNAME, kioskMode = true)
-        diagLog(android.util.Log.DEBUG, "establishKioskSession: origin=$origin persisted=$persisted")
+        RommLog.debug(TAG, "establishKioskSession: origin=$origin persisted=$persisted")
         persisted
     }
 
@@ -320,7 +316,7 @@ class AuthRepository(
         return try {
             validationClient.newCall(probeRequest).execute().use { response -> response.isSuccessful }
         } catch (e: IOException) {
-            diagLog(android.util.Log.WARN, "validateServer: probeAnonymousRead failed ${e.javaClass.simpleName}")
+            RommLog.warn(TAG, "validateServer: probeAnonymousRead failed ${e.javaClass.simpleName}")
             false
         }
     }
@@ -354,7 +350,7 @@ class AuthRepository(
             return LoginCompletionResult.PersistenceFailure
         }
         val storage = clientTokenStorage ?: run {
-            diagLog(android.util.Log.WARN, "loginOnboarding: storage not configured")
+            RommLog.warn(TAG, "loginOnboarding: storage not configured")
             return LoginCompletionResult.PersistenceFailure
         }
 
@@ -371,12 +367,12 @@ class AuthRepository(
         )) {
             is ClientTokenAcquireResult.Success -> acquire.info
             is ClientTokenAcquireResult.TokenLimitReached -> {
-                diagLog(android.util.Log.WARN, "loginOnboarding: tokenLimitReached detail=${acquire.detail}")
+                RommLog.warn(TAG, "loginOnboarding: tokenLimitReached detail=${acquire.detail}")
                 cleanupPartialOnboarding(origin, uname, tokenInfo = null)
                 return LoginCompletionResult.TokenLimitReached
             }
             is ClientTokenAcquireResult.Failure -> {
-                diagLog(android.util.Log.WARN, "loginOnboarding: tokenCreationFailed error=${acquire.error.name} httpCode=${acquire.httpCode}")
+                RommLog.warn(TAG, "loginOnboarding: tokenCreationFailed error=${acquire.error.name} httpCode=${acquire.httpCode}")
                 cleanupPartialOnboarding(origin, uname, tokenInfo = null)
                 return LoginCompletionResult.TokenCreationFailure
             }
@@ -385,7 +381,7 @@ class AuthRepository(
         // 3. Encrypt + durably persist it.
         val persist = storage.setToken(origin, uname, tokenInfo.token)
         if (persist != TokenPersistResult.Success) {
-            diagLog(android.util.Log.WARN, "loginOnboarding: tokenPersistenceFailed result=${persist::class.simpleName}")
+            RommLog.warn(TAG, "loginOnboarding: tokenPersistenceFailed result=${persist::class.simpleName}")
             cleanupPartialOnboarding(origin, uname, tokenInfo)
             return LoginCompletionResult.PersistenceFailure
         }
@@ -395,14 +391,14 @@ class AuthRepository(
         // implementation can decrypt the value after a process restart.
         val persistedToken = storage.getToken(origin, uname)
         if (persistedToken?.raw != tokenInfo.token.raw) {
-            diagLog(android.util.Log.WARN, "loginOnboarding: tokenReadBackFailed")
+            RommLog.warn(TAG, "loginOnboarding: tokenReadBackFailed")
             cleanupPartialOnboarding(origin, uname, tokenInfo)
             return LoginCompletionResult.PersistenceFailure
         }
 
         // 5. Verify the read-back token with an authenticated bearer request.
         if (!RommSyncApi.verifyBearerToken(client, origin, persistedToken)) {
-            diagLog(android.util.Log.WARN, "loginOnboarding: tokenVerificationFailed")
+            RommLog.warn(TAG, "loginOnboarding: tokenVerificationFailed")
             cleanupPartialOnboarding(origin, uname, tokenInfo)
             return LoginCompletionResult.TokenVerificationFailure
         }
@@ -433,17 +429,17 @@ class AuthRepository(
     suspend fun removeOldestClientToken(origin: String): Boolean = withContext(Dispatchers.IO) {
         when (val list = RommSyncApi.listClientTokens(client, origin)) {
             is ClientTokenListResult.Failure -> {
-                diagLog(android.util.Log.WARN, "removeOldestClientToken: listFailed error=${list.error.name}")
+                RommLog.warn(TAG, "removeOldestClientToken: listFailed error=${list.error.name}")
                 false
             }
             is ClientTokenListResult.Success -> {
                 val oldest = list.tokens.minByOrNull { it.createdAtEpochSeconds ?: Long.MAX_VALUE }
                 if (oldest == null) {
-                    diagLog(android.util.Log.WARN, "removeOldestClientToken: noTokensToRemove")
+                    RommLog.warn(TAG, "removeOldestClientToken: noTokensToRemove")
                     false
                 } else {
                     val revoked = RommSyncApi.revokeClientToken(client, origin, oldest.id)
-                    diagLog(android.util.Log.WARN, "removeOldestClientToken: removedId=${oldest.id} success=$revoked")
+                    RommLog.warn(TAG, "removeOldestClientToken: removedId=${oldest.id} success=$revoked")
                     revoked
                 }
             }
@@ -520,13 +516,13 @@ class AuthRepository(
     private fun recordIfSuccessful(origin: String, result: AuthFlowResult, forceReplaceToken: Boolean) {
         if (result is AuthFlowResult.Success) {
             val usernamePresent = result.verifiedUser.username != null
-            diagLog(android.util.Log.DEBUG, "recordIfSuccessful: success=true usernamePresent=$usernamePresent")
+            RommLog.debug(TAG, "recordIfSuccessful: success=true usernamePresent=$usernamePresent")
             sessionStore.save(origin, result.verifiedUser.username)
             // Acquire durable ClientToken for worker execution while foreground client is authenticated.
             acquireAndPersistClientToken(origin, result.verifiedUser.username, forceReplaceToken)
         } else {
             val httpCode = (result as? AuthFlowResult.Failure)?.httpCode ?: -1
-            diagLog(android.util.Log.WARN, "recordIfSuccessful: success=false httpCode=$httpCode")
+            RommLog.warn(TAG, "recordIfSuccessful: success=false httpCode=$httpCode")
         }
     }
 
@@ -539,11 +535,11 @@ class AuthRepository(
      */
     private fun acquireAndPersistClientToken(origin: String, username: String?, forceReplace: Boolean = false) {
         val uname = username ?: run {
-            diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: skipped username=null")
+            RommLog.debug(TAG, "acquireAndPersistClientToken: skipped username=null")
             return
         }
         val storage = clientTokenStorage ?: run {
-            diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: skipped storage=null")
+            RommLog.debug(TAG, "acquireAndPersistClientToken: skipped storage=null")
             return
         }
 
@@ -551,7 +547,7 @@ class AuthRepository(
         // On session verification, reuse existing valid token to avoid churn.
         val tokenAlreadyPresent = storage.getToken(origin, uname) != null
         if (!forceReplace && tokenAlreadyPresent) {
-            diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: reused existing forceReplace=$forceReplace")
+            RommLog.debug(TAG, "acquireAndPersistClientToken: reused existing forceReplace=$forceReplace")
             return
         }
 
@@ -564,19 +560,19 @@ class AuthRepository(
             when (result) {
                 is ClientTokenAcquireResult.Success -> {
                     val persist = storage.setToken(origin, uname, result.info.token)
-                    diagLog(android.util.Log.DEBUG, "acquireAndPersistClientToken: acquired+persisted scopes=${RommClientTokenScopes.FOREGROUND_NATIVE} persist=${persist::class.simpleName}")
+                    RommLog.debug(TAG, "acquireAndPersistClientToken: acquired+persisted scopes=${RommClientTokenScopes.FOREGROUND_NATIVE} persist=${persist::class.simpleName}")
                 }
                 is ClientTokenAcquireResult.TokenLimitReached -> {
-                    diagLog(android.util.Log.WARN, "acquireAndPersistClientToken: tokenLimitReached detail=${result.detail}")
+                    RommLog.warn(TAG, "acquireAndPersistClientToken: tokenLimitReached detail=${result.detail}")
                 }
                 is ClientTokenAcquireResult.Failure -> {
                     val httpCode = result.httpCode ?: -1
-                    diagLog(android.util.Log.WARN, "acquireAndPersistClientToken: acquireFailed error=${result.error.name} httpCode=$httpCode")
+                    RommLog.warn(TAG, "acquireAndPersistClientToken: acquireFailed error=${result.error.name} httpCode=$httpCode")
                 }
             }
         } catch (e: Exception) {
             // Acquisition failure is non-fatal; worker will handle missing token as AUTH_REQUIRED.
-            diagLog(android.util.Log.WARN, "acquireAndPersistClientToken: exception ${e.javaClass.simpleName}")
+            RommLog.warn(TAG, "acquireAndPersistClientToken: exception ${e.javaClass.simpleName}")
         }
     }
 

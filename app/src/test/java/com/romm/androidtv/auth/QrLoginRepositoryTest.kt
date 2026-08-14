@@ -1,6 +1,8 @@
 package com.romm.androidtv.auth
 
 import com.romm.androidtv.config.FakeSharedPreferences
+import com.romm.androidtv.network.AndroidDeviceIdentityStorage
+import com.romm.androidtv.network.AndroidSessionStorage
 import com.romm.androidtv.romm.ClientToken
 import com.romm.androidtv.romm.DeviceIdentityStore
 import kotlinx.coroutines.runBlocking
@@ -28,9 +30,9 @@ class QrLoginRepositoryTest {
         identityStore = DeviceIdentityStore(FakeSharedPreferences())
         repository = QrLoginRepository(
             client = OkHttpClient(),
-            sessionStore = sessionStore,
+            sessionStore = AndroidSessionStorage(sessionStore),
             tokenStorage = tokenStorage,
-            identityStore = identityStore,
+            identityStore = AndroidDeviceIdentityStorage(identityStore),
             deviceName = "Google TV Streamer",
             clientVersion = "0.1.0",
         )

@@ -275,7 +275,12 @@ class MainActivity : ComponentActivity() {
     // Auth repository — owns login/session-verification/cookie-sync network calls so
     // MainActivity coordinates navigation rather than owning network internals.
     private val authRepository: AuthRepository by lazy {
-        AuthRepository(okHttpClient, RommOkHttpClient.cookieSyncJar, sessionStore, clientTokenStore)
+        AuthRepository(
+            okHttpClient,
+            AndroidSessionCookieSync(RommOkHttpClient.cookieSyncJar),
+            AndroidSessionStorage(sessionStore),
+            clientTokenStore,
+        )
     }
 
     private val qrLoginRepository: com.romm.androidtv.auth.QrLoginRepository by lazy {
@@ -285,9 +290,9 @@ class MainActivity : ComponentActivity() {
             .ifBlank { "Android TV" }
         com.romm.androidtv.auth.QrLoginRepository(
             client = okHttpClient,
-            sessionStore = sessionStore,
+            sessionStore = AndroidSessionStorage(sessionStore),
             tokenStorage = clientTokenStore,
-            identityStore = deviceIdentityStore,
+            identityStore = AndroidDeviceIdentityStorage(deviceIdentityStore),
             deviceName = deviceName,
             clientVersion = BuildConfig.VERSION_NAME,
         )
@@ -377,7 +382,10 @@ class MainActivity : ComponentActivity() {
         SaveSyncCoordinatorImpl(
             client = bearerClient,
             sessionStore = sessionStore,
-            deviceRepository = DeviceRepositoryImpl(bearerClient, com.romm.androidtv.romm.DeviceIdentityStore(devicePrefs)),
+            deviceRepository = DeviceRepositoryImpl(
+                bearerClient,
+                AndroidDeviceIdentityStorage(com.romm.androidtv.romm.DeviceIdentityStore(devicePrefs)),
+            ),
             saveReplicaDao = db.saveReplicaDao(),
             pendingOperationDao = db.pendingOperationDao(),
             saveContentStore = FileSaveContentStore(filesDir),

@@ -4,7 +4,7 @@ import com.romm.androidtv.network.DeviceAuthInitRequest
 import com.romm.androidtv.network.DeviceAuthInitResult
 import com.romm.androidtv.network.DeviceAuthService
 import com.romm.androidtv.network.DeviceAuthTokenResult
-import com.romm.androidtv.romm.DeviceIdentityStore
+import com.romm.androidtv.romm.DeviceIdentityStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -13,9 +13,9 @@ import java.util.concurrent.TimeUnit
 
 class QrLoginRepository(
     private val client: okhttp3.OkHttpClient,
-    private val sessionStore: SessionStore,
+    private val sessionStore: SessionStorage,
     private val tokenStorage: ClientTokenStorage,
-    private val identityStore: DeviceIdentityStore,
+    private val identityStore: DeviceIdentityStorage,
     private val deviceName: String,
     private val clientVersion: String,
 ) {
