@@ -14,7 +14,7 @@ class InMemoryContentIndexStore : ContentIndexStore {
     }
 
     override fun upsert(record: ContentIndexRecord): Result<Unit> = runCatching {
-        synchronized(lock) { entries[record.cacheKey] = record }
+        synchronized(lock) { entries[record.key] = record }
     }
 
     override fun remove(cacheKey: String): Result<Unit> = runCatching {
@@ -24,7 +24,7 @@ class InMemoryContentIndexStore : ContentIndexStore {
     override fun evictionCandidates(limit: Int): List<ContentIndexRecord> {
         return synchronized(lock) {
             entries.values.toList()
-                .sortedBy { it.lastAccessEpochMs }
+                .sortedBy { it.lastAccessedEpochMs }
                 .take(limit)
         }
     }

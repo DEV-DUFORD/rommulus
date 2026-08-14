@@ -3,14 +3,39 @@
 package com.romm.androidtv.storage.contract
 
 import com.romm.androidtv.storage.ports.ContentIndexStore
+import com.romm.androidtv.storage.records.ContentIndexKind
 import com.romm.androidtv.storage.records.ContentIndexRecord
 
 /** Contract-test suite for [ContentIndexStore] implementations. */
 class ContentIndexStoreContract(private val createStore: () -> ContentIndexStore) {
 
-    fun `upsert and get`() {
+    private fun record(
+        key: String,
+        absolutePath: String,
+        sizeBytes: Long,
+        contentHash: String,
+        lastAccessedEpochMs: Long,
+        kind: ContentIndexKind = ContentIndexKind.ROM,
+        serverKey: String = "s",
+        userKey: String = "u",
+        remoteId: Long = 1L,
+        fileIdsKey: String = "",
+    ) = ContentIndexRecord(
+        key = key,
+        kind = kind,
+        serverKey = serverKey,
+        userKey = userKey,
+        remoteId = remoteId,
+        fileIdsKey = fileIdsKey,
+        contentHash = contentHash,
+        absolutePath = absolutePath,
+        sizeBytes = sizeBytes,
+        lastAccessedEpochMs = lastAccessedEpochMs,
+    )
+
+    fun upsert_and_get() {
         val store = createStore()
-        val record = ContentIndexRecord("key1", "/path/to/file", 1024L, "abc123", 100L)
+        val record = record("key1", "/path/to/file", 1024L, "abc123", 100L)
         val result = store.upsert(record)
         require(result.isSuccess)
 
@@ -18,11 +43,12 @@ class ContentIndexStoreContract(private val createStore: () -> ContentIndexStore
         require(found != null) { "get should return the upserted record" }
         require(found.sizeBytes == 1024L)
         require(found.contentHash == "abc123")
+        require(found.kind == ContentIndexKind.ROM)
     }
 
-    fun `remove`() {
+    fun remove() {
         val store = createStore()
-        store.upsert(ContentIndexRecord("key1", "/path/1", 512L, null, 100L))
+        store.upsert(record("key1", "/path/1", 512L, "h1", 100L))
         require(store.get("key1") != null)
 
         val result = store.remove("key1")
@@ -30,32 +56,32 @@ class ContentIndexStoreContract(private val createStore: () -> ContentIndexStore
         require(store.get("key1") == null) { "Record should be removed" }
     }
 
-    fun `evictionCandidates LRU order and limit`() {
+    fun evictionCandidates_LRU_order_and_limit() {
         val store = createStore()
-        store.upsert(ContentIndexRecord("c", "/c", 100L, null, 300L)) // newest
-        store.upsert(ContentIndexRecord("a", "/a", 200L, null, 100L)) // oldest
-        store.upsert(ContentIndexRecord("b", "/b", 300L, null, 200L)) // middle
+        store.upsert(record("c", "/c", 100L, "hc", 300L)) // newest
+        store.upsert(record("a", "/a", 200L, "ha", 100L)) // oldest
+        store.upsert(record("b", "/b", 300L, "hb", 200L)) // middle
 
         val candidates = store.evictionCandidates(2)
         require(candidates.size == 2) { "Should return at most limit entries" }
-        require(candidates[0].cacheKey == "a") { "Oldest should be first" }
-        require(candidates[1].cacheKey == "b") { "Second oldest should be second" }
+        require(candidates[0].key == "a") { "Oldest should be first" }
+        require(candidates[1].key == "b") { "Second oldest should be second" }
     }
 
-    fun `totalSizeBytes sum`() {
+    fun totalSizeBytes_sum() {
         val store = createStore()
-        store.upsert(ContentIndexRecord("x", "/x", 100L, null, 100L))
-        store.upsert(ContentIndexRecord("y", "/y", 200L, null, 200L))
+        store.upsert(record("x", "/x", 100L, "hx", 100L))
+        store.upsert(record("y", "/y", 200L, "hy", 200L))
 
         require(store.totalSizeBytes() == 300L) { "Total should be sum of sizes" }
     }
 
-    fun `replace updates size sum`() {
+    fun replace_updates_size_sum() {
         val store = createStore()
-        store.upsert(ContentIndexRecord("k", "/old", 500L, null, 100L))
+        store.upsert(record("k", "/old", 500L, "h1", 100L))
         require(store.totalSizeBytes() == 500L)
 
-        store.upsert(ContentIndexRecord("k", "/new", 100L, null, 200L))
+        store.upsert(record("k", "/new", 100L, "h2", 200L))
         require(store.totalSizeBytes() == 100L) { "Replace should update total size" }
     }
 }

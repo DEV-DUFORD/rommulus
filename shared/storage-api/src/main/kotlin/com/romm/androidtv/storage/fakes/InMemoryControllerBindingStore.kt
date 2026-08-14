@@ -33,9 +33,9 @@ class InMemoryControllerBindingStore : ControllerBindingStore {
         synchronized(lock) { bindings[toKey(binding)] = binding }
     }
 
-    override fun upsertAll(bindingsList: List<ControllerBindingRecord>): Result<Unit> = runCatching {
+    override fun upsertAll(bindings: List<ControllerBindingRecord>): Result<Unit> = runCatching {
         synchronized(lock) {
-            bindingsList.forEach { bindings[toKey(it)] = it }
+            bindings.forEach { this.bindings[toKey(it)] = it }
         }
     }
 

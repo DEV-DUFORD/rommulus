@@ -18,6 +18,7 @@ class InMemorySaveStateStore(
     private val replicas: MutableMap<SaveReplicaScope, SaveReplicaRecord> = mutableMapOf()
     private val operations: MutableMap<Long, PendingOperationRecord> = mutableMapOf()
     @Volatile private var nextOpId: Long = 1
+    private var lastReplicaId: Long = 0
 
     // ---- SaveReplicaStore ----
 
@@ -99,8 +100,7 @@ class InMemorySaveStateStore(
                     op.romHash == scope.romHash &&
                     op.slot == scope.slot &&
                     op.operationType == operationType &&
-                    op.status != PendingOperationStatus.SUCCEEDED &&
-                    op.status != PendingOperationStatus.PERMANENT_FAILURE
+                    !op.status.isTerminal()
             }.toList()
         }
     }
@@ -138,6 +138,7 @@ class InMemorySaveStateStore(
                     op.romHash == scope.romHash &&
                     op.slot == scope.slot &&
                     op.operationType == operationType &&
+                    !op.status.isTerminal() &&
                     op.localGenerationEpochMs < olderThanLocalGenerationEpochMs
             }.map { it.key }
             staleIds.forEach { operations.remove(it) }
@@ -152,10 +153,12 @@ class InMemorySaveStateStore(
         val snapReplicas: Map<SaveReplicaScope, SaveReplicaRecord>
         val snapOperations: Map<Long, PendingOperationRecord>
         val snapNextOpId: Long
+        val snapLastReplicaId: Long
         synchronized(lock) {
             snapReplicas = replicas.toMap()
             snapOperations = operations.toMap()
             snapNextOpId = nextOpId
+            snapLastReplicaId = lastReplicaId
         }
 
         // Create working copy.
@@ -164,6 +167,7 @@ class InMemorySaveStateStore(
             working.replicas.putAll(snapReplicas)
             working.operations.putAll(snapOperations)
             working.nextOpId = snapNextOpId
+            working.lastReplicaId = snapLastReplicaId
         }
 
         // Execute block on working copy.
@@ -177,6 +181,7 @@ class InMemorySaveStateStore(
                 operations.clear()
                 operations.putAll(working.operations)
                 nextOpId = working.nextOpId
+                lastReplicaId = working.lastReplicaId
             }
         }
 
@@ -186,7 +191,10 @@ class InMemorySaveStateStore(
         onFailure = { Result.failure(it) }
     )
 
-    private fun nextIdForReplica(): Long = clock.millis()
+    private fun nextIdForReplica(): Long {
+        lastReplicaId = maxOf(lastReplicaId + 1, clock.millis())
+        return lastReplicaId
+    }
 
     /** Expose replica count for contract tests. */
     internal fun replicaCount(): Int = synchronized(lock) { replicas.size }
@@ -194,3 +202,10 @@ class InMemorySaveStateStore(
     /** Expose operation count for contract tests. */
     internal fun opCount(): Int = synchronized(lock) { operations.size }
 }
+
+/** Terminal statuses per Android `PendingOperationTransitions.isTerminal` (SUCCEEDED, AUTH_REQUIRED, CONFLICT, PERMANENT_FAILURE). */
+private fun PendingOperationStatus.isTerminal(): Boolean =
+    this == PendingOperationStatus.SUCCEEDED ||
+        this == PendingOperationStatus.AUTH_REQUIRED ||
+        this == PendingOperationStatus.CONFLICT ||
+        this == PendingOperationStatus.PERMANENT_FAILURE
