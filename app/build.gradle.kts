@@ -156,6 +156,8 @@ dependencies {
     implementation(project(":shared:domain"))
     implementation(project(":shared:network"))
     implementation(project(":shared:storage-api"))
+    // Shared presenters (Linux port Phase 4)
+    implementation(project(":shared:presentation"))
 
     // Compose BOM pins all androidx.compose.* versions
     implementation(platform("androidx.compose:compose-bom:2025.02.00"))

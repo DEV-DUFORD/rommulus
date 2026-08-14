@@ -96,7 +96,7 @@ import com.romm.androidtv.library.ui.TvButton
 import com.romm.androidtv.library.ui.TvOutlinedButton
 import com.romm.androidtv.library.ui.RommTvColors
 import com.romm.androidtv.library.ui.RommTvTheme
-import com.romm.androidtv.library.ui.RommTheme
+import com.romm.androidtv.library.RommTheme
 import com.romm.androidtv.library.ui.applyTheme
 import com.romm.androidtv.platform.rememberDeviceProfile
 import kotlinx.coroutines.delay

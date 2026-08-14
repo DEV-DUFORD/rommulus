@@ -61,15 +61,9 @@ data class FirmwareAvailability(
     val isReady: Boolean get() = missing.isEmpty() && hashMismatches.isEmpty()
 }
 
-sealed interface FirmwareStagingOutcome {
-    /** Absolute paths for every requested file name, all hash-verified. */
-    data class Success(val stagedPaths: Map<String, String>) : FirmwareStagingOutcome
-    data class Missing(val fileNames: List<String>) : FirmwareStagingOutcome
-    object AuthExpired : FirmwareStagingOutcome
-    data class InsufficientSpace(val requiredBytes: Long, val availableBytes: Long) : FirmwareStagingOutcome
-    data class CorruptedDownload(val fileName: String, val reason: String) : FirmwareStagingOutcome
-    data class NetworkError(val message: String) : FirmwareStagingOutcome
-}
+// FirmwareStagingOutcome moved to `:shared:presentation` (same package
+// com.romm.androidtv.romm) for the Linux port Phase 4; references here and in
+// SegaCdBiosManager/PsxBiosManager keep resolving unchanged.
 
 class FirmwareRepositoryImpl(
     private val client: OkHttpClient,

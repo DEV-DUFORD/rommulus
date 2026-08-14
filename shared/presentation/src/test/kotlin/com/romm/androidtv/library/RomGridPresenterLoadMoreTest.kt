@@ -1,21 +1,15 @@
 package com.romm.androidtv.library
 
 import com.romm.androidtv.romm.RommApiError
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
 /**
- * JVM unit tests for [RomGridViewModel.loadMore] pagination, covering a real-device crash:
+ * JVM unit tests for [RomGridPresenter.loadMore] pagination, covering a real-device crash:
  * `group_by_meta_id=true` (see [LibraryApi.fetchRoms]'s doc) can shift which sibling rom
  * represents a group across a page boundary, so the server occasionally repeats the same rom
  * id across two consecutive offset pages. `RomGridScreen`'s `items(..., key = { it.id })` used
@@ -26,24 +20,8 @@ import org.junit.jupiter.api.Test
  * still terminates correctly.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-@DisplayName("RomGridViewModel — loadMore pagination")
-class RomGridViewModelLoadMoreTest {
-
-    private lateinit var testJob: Job
-    private lateinit var testScope: CoroutineScope
-
-    @BeforeEach
-    fun setUp() {
-        testJob = Job()
-        testScope = CoroutineScope(Dispatchers.Unconfined + testJob)
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-    }
-
-    @AfterEach
-    fun tearDown() {
-        testJob.cancel()
-        Dispatchers.resetMain()
-    }
+@DisplayName("RomGridPresenter — loadMore pagination")
+class RomGridPresenterLoadMoreTest {
 
     private class RecordingMockRepository : LibraryRepository {
         val requestedOffsets = mutableListOf<Int>()
@@ -86,7 +64,12 @@ class RomGridViewModelLoadMoreTest {
         repo.enqueue(RomPage(roms = listOf(rom(1), rom(2), rom(3)), total = 5))
         repo.enqueue(RomPage(roms = listOf(rom(3), rom(4)), total = 5))
 
-        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1), hideUnsupportedSystems = { false })
+        val vm = RomGridPresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
+            repository = repo,
+            query = RomQuery.ByCollection(1),
+            hideUnsupportedSystems = { false },
+        )
         vm.loadMore()
 
         val loaded = vm.uiState.value.section as SectionState.Loaded
@@ -103,7 +86,12 @@ class RomGridViewModelLoadMoreTest {
         repo.enqueue(RomPage(roms = listOf(rom(3), rom(4), rom(5)), total = 9))
         repo.enqueue(RomPage(roms = listOf(rom(6), rom(7), rom(8)), total = 9))
 
-        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1), hideUnsupportedSystems = { false })
+        val vm = RomGridPresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
+            repository = repo,
+            query = RomQuery.ByCollection(1),
+            hideUnsupportedSystems = { false },
+        )
         vm.loadMore()
         vm.loadMore()
 
@@ -117,7 +105,12 @@ class RomGridViewModelLoadMoreTest {
         val repo = RecordingMockRepository()
         repo.enqueue(RomPage(roms = listOf(rom(1), rom(2)), total = 2))
 
-        val vm = RomGridViewModel(repo, RomQuery.ByCollection(1), hideUnsupportedSystems = { false })
+        val vm = RomGridPresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
+            repository = repo,
+            query = RomQuery.ByCollection(1),
+            hideUnsupportedSystems = { false },
+        )
         vm.loadMore()
 
         assertThat(repo.requestedOffsets).containsExactly(0)

@@ -712,7 +712,7 @@ class MainActivity : ComponentActivity() {
             // when changed from the Settings screen).
             LaunchedEffect(Unit) {
                 settingsRepository.themeFlow.collect {
-                    applyTheme(com.romm.androidtv.library.ui.RommTheme.fromStorage(it))
+                    applyTheme(com.romm.androidtv.library.RommTheme.fromStorage(it))
                 }
             }
             com.romm.androidtv.library.ui.RommTvTheme {

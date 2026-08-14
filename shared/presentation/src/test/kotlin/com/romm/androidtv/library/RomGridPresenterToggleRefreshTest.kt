@@ -1,42 +1,22 @@
 package com.romm.androidtv.library
 
 import com.romm.androidtv.romm.RommApiError
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
 /**
- * JVM unit tests for [RomGridViewModel] reactive refresh driven by the
+ * JVM unit tests for [RomGridPresenter] reactive refresh driven by the
  * hideUnsupportedSystems preference flow. Verifies that toggling the setting
  * from Settings causes platform/collection grids to re-fetch immediately.
  */
-@DisplayName("RomGridViewModel — toggle-driven reactive refresh")
-class RomGridViewModelToggleRefreshTest {
-
-    private lateinit var testJob: Job
-    private lateinit var testScope: CoroutineScope
-
-    @BeforeEach
-    fun setUp() {
-        testJob = Job()
-        testScope = CoroutineScope(Dispatchers.Unconfined + testJob)
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-    }
-
-    @AfterEach
-    fun tearDown() {
-        testJob.cancel()
-        Dispatchers.resetMain()
-    }
+@OptIn(ExperimentalCoroutinesApi::class)
+@DisplayName("RomGridPresenter — toggle-driven reactive refresh")
+class RomGridPresenterToggleRefreshTest {
 
     private class CountingMockRepository : LibraryRepository {
         var fetchCount = 0
@@ -77,7 +57,8 @@ class RomGridViewModelToggleRefreshTest {
             repo.enqueue(RomPage(listOf(makeSupportedRom(1), makeUnsupportedRom(2)), total = 10))
         }
 
-        val vm = RomGridViewModel(
+        val vm = RomGridPresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             query = RomQuery.ByPlatform(42L),
             hideUnsupportedSystems = { preferenceFlow.value },
@@ -104,7 +85,8 @@ class RomGridViewModelToggleRefreshTest {
             repo.enqueue(RomPage(listOf(makeSupportedRom(1), makeUnsupportedRom(2)), total = 10))
         }
 
-        val vm = RomGridViewModel(
+        val vm = RomGridPresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             query = RomQuery.ByPlatform(42L),
             hideUnsupportedSystems = { preferenceFlow.value },
@@ -132,7 +114,8 @@ class RomGridViewModelToggleRefreshTest {
         // After toggle OFF: refetch with hide=false, return all again.
         repo.enqueue(RomPage(listOf(makeSupportedRom(1), makeUnsupportedRom(2)), total = 2))
 
-        val vm = RomGridViewModel(
+        val vm = RomGridPresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             query = RomQuery.ByPlatform(42L),
             hideUnsupportedSystems = { preferenceFlow.value },
@@ -163,7 +146,8 @@ class RomGridViewModelToggleRefreshTest {
         val repo = CountingMockRepository()
         repo.enqueue(RomPage(listOf(makeSupportedRom(1)), total = 1))
 
-        val vm = RomGridViewModel(
+        val vm = RomGridPresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             query = RomQuery.ByPlatform(42L),
             hideUnsupportedSystems = { false },

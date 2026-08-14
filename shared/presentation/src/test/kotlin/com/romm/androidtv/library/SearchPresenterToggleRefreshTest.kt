@@ -1,13 +1,12 @@
 package com.romm.androidtv.library
 
 import com.romm.androidtv.romm.RommApiError
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.TestScope
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -15,28 +14,29 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
 /**
- * JVM unit tests for [SearchViewModel] reactive refresh driven by the
+ * JVM unit tests for [SearchPresenter] reactive refresh driven by the
  * hideUnsupportedSystems preference flow. Verifies that toggling the setting
  * from Settings causes Search to re-execute its active query immediately,
- * and that idle (no active query) searches are unaffected.
+ * and that idle (no active query) searches are unaffected. The presenter runs
+ * on a virtual-time [StandardTestDispatcher]; flow emissions are drained with
+ * [TestCoroutineScheduler.advanceUntilIdle].
  */
-@DisplayName("SearchViewModel — toggle-driven reactive refresh")
-class SearchViewModelToggleRefreshTest {
+@OptIn(ExperimentalCoroutinesApi::class)
+@DisplayName("SearchPresenter — toggle-driven reactive refresh")
+class SearchPresenterToggleRefreshTest {
 
-    private lateinit var testJob: Job
-    private lateinit var testScope: CoroutineScope
+    private lateinit var scheduler: TestCoroutineScheduler
+    private lateinit var testScope: TestScope
 
     @BeforeEach
     fun setUp() {
-        testJob = Job()
-        testScope = CoroutineScope(Dispatchers.Unconfined + testJob)
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        testScope = TestScope(StandardTestDispatcher())
+        scheduler = testScope.testScheduler
     }
 
     @AfterEach
     fun tearDown() {
-        testJob.cancel()
-        Dispatchers.resetMain()
+        testScope.coroutineContext[Job]?.cancel()
     }
 
     /** Mock repository that records every query term and offset passed to fetchRomsPage. */
@@ -80,21 +80,25 @@ class SearchViewModelToggleRefreshTest {
         repo.enqueue(RomPage(listOf(makeSupportedRom(1), makeUnsupportedRom(2)), total = 2))
         repo.enqueue(RomPage(listOf(makeSupportedRom(1)), total = 2))
 
-        val vm = SearchViewModel(
+        val presenter = SearchPresenter(
+            scope = testScope,
             repository = repo,
-            testScope = testScope,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
         )
+        // Start the flow collector (initial emission is dropped by the presenter).
+        scheduler.advanceUntilIdle()
 
         // Execute a search using onQueryChanged + submitQuery to bypass debounce.
-        vm.onQueryChanged("test")
-        vm.submitQuery()
+        presenter.onQueryChanged("test")
+        presenter.submitQuery()
+        scheduler.advanceUntilIdle()
         assertThat(repo.queries).containsExactly("test" to 0)
         val beforeToggle = repo.queries.size
 
         // Toggle ON from Settings while search results are displayed.
         preferenceFlow.value = true
+        scheduler.advanceUntilIdle()
 
         // Should re-execute the same query from offset 0.
         assertThat(repo.queries.size).isEqualTo(beforeToggle + 1)
@@ -109,20 +113,23 @@ class SearchViewModelToggleRefreshTest {
         repo.enqueue(RomPage(listOf(makeSupportedRom(1)), total = 2))
         repo.enqueue(RomPage(listOf(makeSupportedRom(1), makeUnsupportedRom(2)), total = 2))
 
-        val vm = SearchViewModel(
+        val presenter = SearchPresenter(
+            scope = testScope,
             repository = repo,
-            testScope = testScope,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
         )
+        scheduler.advanceUntilIdle()
 
-        vm.onQueryChanged("test")
-        vm.submitQuery()
+        presenter.onQueryChanged("test")
+        presenter.submitQuery()
+        scheduler.advanceUntilIdle()
         assertThat(repo.queries).containsExactly("test" to 0)
         val beforeToggle = repo.queries.size
 
         // Toggle OFF from Settings.
         preferenceFlow.value = false
+        scheduler.advanceUntilIdle()
 
         assertThat(repo.queries.size).isEqualTo(beforeToggle + 1)
         assertThat(repo.queries.last()).isEqualTo("test" to 0)
@@ -133,22 +140,25 @@ class SearchViewModelToggleRefreshTest {
         val repo = RecordingMockRepository()
         val preferenceFlow = MutableStateFlow(false)
 
-        val vm = SearchViewModel(
+        SearchPresenter(
+            scope = testScope,
             repository = repo,
-            testScope = testScope,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
         )
+        scheduler.advanceUntilIdle()
 
         // No search has been executed yet.
         assertThat(repo.queries).isEmpty()
 
         // Toggle ON → should NOT trigger a search (no active query).
         preferenceFlow.value = true
+        scheduler.advanceUntilIdle()
         assertThat(repo.queries).isEmpty()
 
         // Toggle OFF → still no-op.
         preferenceFlow.value = false
+        scheduler.advanceUntilIdle()
         assertThat(repo.queries).isEmpty()
     }
 
@@ -162,24 +172,27 @@ class SearchViewModelToggleRefreshTest {
         // After toggle ON: refetch with hide=true.
         repo.enqueue(RomPage(listOf(makeSupportedRom(1)), total = 2))
 
-        val vm = SearchViewModel(
+        val presenter = SearchPresenter(
+            scope = testScope,
             repository = repo,
-            testScope = testScope,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
         )
+        scheduler.advanceUntilIdle()
 
         // Execute search using onQueryChanged + submitQuery to bypass debounce.
-        vm.onQueryChanged("test")
-        vm.submitQuery()
+        presenter.onQueryChanged("test")
+        presenter.submitQuery()
+        scheduler.advanceUntilIdle()
 
         // Initial: both items visible.
-        var state = vm.uiState.value
+        var state = presenter.uiState.value
         assertThat(state.roms).hasSize(2)
 
         // Toggle ON: refetch + filter removes unsupported.
         preferenceFlow.value = true
-        state = vm.uiState.value
+        scheduler.advanceUntilIdle()
+        state = presenter.uiState.value
         assertThat(state.roms).hasSize(1)
         assertThat(state.roms[0].title).isEqualTo("Game 1")
     }
@@ -188,14 +201,14 @@ class SearchViewModelToggleRefreshTest {
     fun `null flow does not break initialization`() {
         val repo = RecordingMockRepository()
 
-        val vm = SearchViewModel(
+        val presenter = SearchPresenter(
+            scope = testScope,
             repository = repo,
-            testScope = testScope,
             hideUnsupportedSystems = { false },
             hideUnsupportedSystemsFlow = null,
         )
 
         // Should be constructable without errors.
-        assertThat(vm.uiState.value.query).isEmpty()
+        assertThat(presenter.uiState.value.query).isEmpty()
     }
 }

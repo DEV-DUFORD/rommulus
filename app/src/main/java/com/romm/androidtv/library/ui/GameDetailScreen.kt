@@ -152,7 +152,7 @@ fun GameDetailScreen(
     onOpenScreenshot: (List<String>, Int) -> Unit = { _, _ -> },
     onBack: () -> Unit,
 ) {
-    val state: RomDetailUiState by viewModel.state.collectAsState()
+    val state: RomDetailUiState by viewModel.uiState.collectAsState()
 
     // Shared focus requesters for the rail ↔ Play focus link.
     val playButtonFocusRequester = remember { FocusRequester() }

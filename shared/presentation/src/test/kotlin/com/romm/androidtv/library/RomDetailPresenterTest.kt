@@ -2,11 +2,10 @@ package com.romm.androidtv.library
 
 import com.romm.androidtv.romm.RommApiError
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -14,25 +13,30 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
 /**
- * JVM unit tests for [RomDetailViewModel]: ROM detail rendering, favorite
+ * JVM unit tests for [RomDetailPresenter]: ROM detail rendering, favorite
  * derivation/toggling, collection picker behavior and the create-collection
  * flow, including optimistic updates, rollback alerts and stale-response
- * protection.
+ * protection. The presenter runs on a virtual-time [TestScope] so no Android
+ * Main dispatcher is required (Linux port Phase 4).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-@DisplayName("RomDetailViewModel")
-class RomDetailViewModelTest {
+@DisplayName("RomDetailPresenter")
+class RomDetailPresenterTest {
 
     private val romId = 7L
 
+    /** Test scope with a virtual-time dispatcher driving all presenter coroutines. */
+    private lateinit var testScope: TestScope
+
     @BeforeEach
     fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        testScope = TestScope(UnconfinedTestDispatcher())
     }
 
+    /** Cancel the test scope after each test to avoid leaking coroutine resources. */
     @AfterEach
     fun tearDown() {
-        Dispatchers.resetMain()
+        testScope.coroutineContext[Job]?.cancel()
     }
 
     // -----------------------------------------------------------------------
@@ -124,10 +128,10 @@ class RomDetailViewModelTest {
         }
     }
 
-    private fun makeVm(
+    private fun makePresenter(
         repo: FakeRepo,
         onLibraryMutated: () -> Unit = {},
-    ) = RomDetailViewModel(repository = repo, romId = romId, onLibraryMutated = onLibraryMutated)
+    ) = RomDetailPresenter(scope = testScope, repository = repo, romId = romId, onLibraryMutated = onLibraryMutated)
 
     private fun loaded(state: RomDetailUiState) = state.collections as CollectionLoadState.Loaded
 
@@ -142,9 +146,9 @@ class RomDetailViewModelTest {
             ownedResult = LibraryResult.Success(emptyList())
             ownedGate = CompletableDeferred()
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        val state = vm.state.value
+        val state = presenter.uiState.value
         assertThat(state.detail).isEqualTo(SectionState.Loaded(detail))
         assertThat(state.collections).isEqualTo(CollectionLoadState.Loading)
         assertThat(state.favorite).isEqualTo(FavoriteUiState.Loading)
@@ -157,9 +161,9 @@ class RomDetailViewModelTest {
             detailResult = LibraryResult.Success(detail)
             ownedResult = LibraryResult.Success(listOf(favoriteColl))
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
     }
 
     @Test
@@ -168,9 +172,9 @@ class RomDetailViewModelTest {
             detailResult = LibraryResult.Success(detail)
             ownedResult = LibraryResult.Success(listOf(coll(2, name = "Games")))
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
     }
 
     // -----------------------------------------------------------------------
@@ -188,15 +192,15 @@ class RomDetailViewModelTest {
             addResult = LibraryResult.Success(added)
         }
         var mutations = 0
-        val vm = makeVm(repo) { mutations++ }
+        val presenter = makePresenter(repo) { mutations++ }
 
-        vm.onFavoriteSelected()
+        presenter.onFavoriteSelected()
 
         assertThat(repo.createCount).isEqualTo(1)
         assertThat(repo.addCount).isEqualTo(1)
         assertThat(repo.addLog).containsExactly(created.id to romId)
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
-        assertThat(loaded(vm.state.value).favoriteCollection?.id).isEqualTo(created.id)
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
+        assertThat(loaded(presenter.uiState.value).favoriteCollection?.id).isEqualTo(created.id)
         assertThat(mutations).isEqualTo(1)
     }
 
@@ -210,14 +214,14 @@ class RomDetailViewModelTest {
             ownedResult = LibraryResult.Success(listOf(favoriteColl))
             addResult = LibraryResult.Success(added)
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onFavoriteSelected()
+        presenter.onFavoriteSelected()
 
         assertThat(repo.createCount).isZero()
         assertThat(repo.addCount).isEqualTo(1)
         assertThat(repo.addLog).containsExactly(favoriteColl.id to romId)
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
     }
 
     @Test
@@ -228,14 +232,14 @@ class RomDetailViewModelTest {
             ownedResult = LibraryResult.Success(listOf(favoriteColl))
             removeResult = LibraryResult.Success(favoriteColl.copy(romIds = emptySet()))
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onFavoriteSelected()
+        presenter.onFavoriteSelected()
 
         assertThat(repo.addCount).isZero()
         assertThat(repo.removeCount).isEqualTo(1)
         assertThat(repo.removeLog).containsExactly(favoriteColl.id to romId)
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
     }
 
     @Test
@@ -247,11 +251,11 @@ class RomDetailViewModelTest {
             removeResult = LibraryResult.Success(favoriteColl.copy(romIds = emptySet()))
             removeGate = CompletableDeferred()
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onFavoriteSelected()
+        presenter.onFavoriteSelected()
 
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Updating(previous = true, target = false))
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Updating(previous = true, target = false))
         repo.removeGate!!.complete(Unit)
     }
 
@@ -264,12 +268,12 @@ class RomDetailViewModelTest {
             ownedResult = LibraryResult.Success(listOf(favoriteColl))
             addResult = LibraryResult.Success(added)
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onFavoriteSelected()
+        presenter.onFavoriteSelected()
 
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
-        assertThat(vm.state.value.alert).isNull()
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
+        assertThat(presenter.uiState.value.alert).isNull()
     }
 
     @Test
@@ -280,10 +284,10 @@ class RomDetailViewModelTest {
             ownedResult = LibraryResult.Success(listOf(coll(1, name = "Favorites", isFavorite = true)))
             addResult = LibraryResult.Failure(RommApiError.SERVER_ERROR)
         }
-        val vm = makeVm(repo)
-        vm.onFavoriteSelected()
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
-        assertThat(vm.state.value.alert).isEqualTo(GameDetailAlert.FavoriteFailure(FavoriteOperation.ADD))
+        val presenter = makePresenter(repo)
+        presenter.onFavoriteSelected()
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
+        assertThat(presenter.uiState.value.alert).isEqualTo(GameDetailAlert.FavoriteFailure(FavoriteOperation.ADD))
 
         // REMOVE failure
         val repo2 = FakeRepo().apply {
@@ -291,10 +295,10 @@ class RomDetailViewModelTest {
             ownedResult = LibraryResult.Success(listOf(coll(1, name = "Favorites", isFavorite = true, romIds = setOf(romId))))
             removeResult = LibraryResult.Failure(RommApiError.SERVER_ERROR)
         }
-        val vm2 = makeVm(repo2)
-        vm2.onFavoriteSelected()
-        assertThat(vm2.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
-        assertThat(vm2.state.value.alert).isEqualTo(GameDetailAlert.FavoriteFailure(FavoriteOperation.REMOVE))
+        val presenter2 = makePresenter(repo2)
+        presenter2.onFavoriteSelected()
+        assertThat(presenter2.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
+        assertThat(presenter2.uiState.value.alert).isEqualTo(GameDetailAlert.FavoriteFailure(FavoriteOperation.REMOVE))
     }
 
     @Test
@@ -306,10 +310,10 @@ class RomDetailViewModelTest {
             addResult = LibraryResult.Success(favoriteColl.copy(romIds = setOf(romId)))
             addGate = CompletableDeferred()
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onFavoriteSelected()
-        vm.onFavoriteSelected()
+        presenter.onFavoriteSelected()
+        presenter.onFavoriteSelected()
 
         assertThat(repo.addCount).isEqualTo(1)
         repo.addGate!!.complete(Unit)
@@ -326,19 +330,19 @@ class RomDetailViewModelTest {
             addGate = CompletableDeferred()
         }
         var mutations = 0
-        val vm = makeVm(repo) { mutations++ }
+        val presenter = makePresenter(repo) { mutations++ }
 
-        vm.onFavoriteSelected() // starts add, suspended on gate
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Updating(previous = false, target = true))
+        presenter.onFavoriteSelected() // starts add, suspended on gate
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Updating(previous = false, target = true))
 
         // Refresh bumps generation + mutation token; new owned snapshot still has no membership.
-        vm.refresh()
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
+        presenter.refresh()
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
 
         repo.addGate!!.complete(Unit) // late success must be ignored
 
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
-        assertThat(vm.state.value.alert).isNull()
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
+        assertThat(presenter.uiState.value.alert).isNull()
         assertThat(mutations).isZero() // stale success never fires onLibraryMutated
     }
 
@@ -351,14 +355,14 @@ class RomDetailViewModelTest {
             addResult = LibraryResult.Failure(RommApiError.SERVER_ERROR)
             addGate = CompletableDeferred()
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onFavoriteSelected()
-        vm.refresh()
+        presenter.onFavoriteSelected()
+        presenter.refresh()
         repo.addGate!!.complete(Unit)
 
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
-        assertThat(vm.state.value.alert).isNull() // stale failure must not set alert
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(false))
+        assertThat(presenter.uiState.value.alert).isNull() // stale failure must not set alert
     }
 
     @Test
@@ -373,16 +377,16 @@ class RomDetailViewModelTest {
             createResult = LibraryResult.Failure(RommApiError.SERVER_ERROR, httpCode = 409)
             addResult = LibraryResult.Success(added)
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onFavoriteSelected()
+        presenter.onFavoriteSelected()
 
         assertThat(repo.createCount).isEqualTo(1)
         assertThat(repo.fetchOwnedCount).isEqualTo(2)
         assertThat(repo.addCount).isEqualTo(1)
         assertThat(repo.addLog).containsExactly(discovered.id to romId)
-        assertThat(vm.state.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
-        assertThat(loaded(vm.state.value).favoriteCollection?.id).isEqualTo(discovered.id)
+        assertThat(presenter.uiState.value.favorite).isEqualTo(FavoriteUiState.Confirmed(true))
+        assertThat(loaded(presenter.uiState.value).favoriteCollection?.id).isEqualTo(discovered.id)
     }
 
     // -----------------------------------------------------------------------
@@ -404,9 +408,9 @@ class RomDetailViewModelTest {
                 ),
             )
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        val loaded = loaded(vm.state.value)
+        val loaded = loaded(presenter.uiState.value)
         assertThat(loaded.ownedWritable.map { it.id }).containsExactly(owned.id)
         assertThat(loaded.allVisible.map { it.id }).doesNotContain(5L)
     }
@@ -421,15 +425,15 @@ class RomDetailViewModelTest {
             removeResult = LibraryResult.Success(removed)
         }
         var mutations = 0
-        val vm = makeVm(repo) { mutations++ }
+        val presenter = makePresenter(repo) { mutations++ }
 
-        vm.onCollectionPickerRequested()
-        vm.onCollectionSelected(owned.id)
+        presenter.onCollectionPickerRequested()
+        presenter.onCollectionSelected(owned.id)
 
         assertThat(repo.addCount).isZero()
         assertThat(repo.removeLog).containsExactly(owned.id to romId)
-        assertThat(vm.state.value.collectionDialog).isNull()
-        assertThat(loaded(vm.state.value).ownedWritable.single().romIds).doesNotContain(romId)
+        assertThat(presenter.uiState.value.collectionDialog).isNull()
+        assertThat(loaded(presenter.uiState.value).ownedWritable.single().romIds).doesNotContain(romId)
         assertThat(mutations).isEqualTo(1)
     }
 
@@ -441,16 +445,16 @@ class RomDetailViewModelTest {
             ownedResult = LibraryResult.Success(listOf(owned))
             removeResult = LibraryResult.Failure(RommApiError.SERVER_ERROR)
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCollectionPickerRequested()
-        vm.onCollectionSelected(owned.id)
+        presenter.onCollectionPickerRequested()
+        presenter.onCollectionSelected(owned.id)
 
         assertThat(repo.addCount).isZero()
-        assertThat(vm.state.value.collectionDialog).isEqualTo(CollectionDialogState.List)
-        assertThat(vm.state.value.alert).isEqualTo(GameDetailAlert.CollectionRemoveFailure(owned.id))
+        assertThat(presenter.uiState.value.collectionDialog).isEqualTo(CollectionDialogState.List)
+        assertThat(presenter.uiState.value.alert).isEqualTo(GameDetailAlert.CollectionRemoveFailure(owned.id))
         // Membership unchanged after a failed remove.
-        assertThat(loaded(vm.state.value).ownedWritable.single().romIds).contains(romId)
+        assertThat(loaded(presenter.uiState.value).ownedWritable.single().romIds).contains(romId)
     }
 
     @Test
@@ -463,15 +467,15 @@ class RomDetailViewModelTest {
             addResult = LibraryResult.Success(added)
         }
         var mutations = 0
-        val vm = makeVm(repo) { mutations++ }
+        val presenter = makePresenter(repo) { mutations++ }
 
-        vm.onCollectionPickerRequested()
-        assertThat(vm.state.value.collectionDialog).isEqualTo(CollectionDialogState.List)
-        vm.onCollectionSelected(owned.id)
+        presenter.onCollectionPickerRequested()
+        assertThat(presenter.uiState.value.collectionDialog).isEqualTo(CollectionDialogState.List)
+        presenter.onCollectionSelected(owned.id)
 
         assertThat(repo.addCount).isEqualTo(1)
-        assertThat(vm.state.value.collectionDialog).isNull()
-        assertThat(loaded(vm.state.value).ownedWritable.single().romIds).contains(romId)
+        assertThat(presenter.uiState.value.collectionDialog).isNull()
+        assertThat(loaded(presenter.uiState.value).ownedWritable.single().romIds).contains(romId)
         assertThat(mutations).isEqualTo(1)
     }
 
@@ -483,13 +487,13 @@ class RomDetailViewModelTest {
             ownedResult = LibraryResult.Success(listOf(owned))
             addResult = LibraryResult.Failure(RommApiError.SERVER_ERROR)
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCollectionPickerRequested()
-        vm.onCollectionSelected(owned.id)
+        presenter.onCollectionPickerRequested()
+        presenter.onCollectionSelected(owned.id)
 
-        assertThat(vm.state.value.collectionDialog).isEqualTo(CollectionDialogState.List)
-        assertThat(vm.state.value.alert).isEqualTo(GameDetailAlert.CollectionAddFailure(owned.id))
+        assertThat(presenter.uiState.value.collectionDialog).isEqualTo(CollectionDialogState.List)
+        assertThat(presenter.uiState.value.alert).isEqualTo(GameDetailAlert.CollectionAddFailure(owned.id))
     }
 
     // -----------------------------------------------------------------------
@@ -499,27 +503,27 @@ class RomDetailViewModelTest {
     @Test
     fun `Blank name does not call the API`() {
         val repo = baseCreateRepo()
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("")
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("")
+        presenter.onCreateCollectionSubmitted()
 
         assertThat(repo.createCount).isZero()
-        assertDialogValidation(vm, "Please enter a collection name")
+        assertDialogValidation(presenter, "Please enter a collection name")
     }
 
     @Test
     fun `Whitespace name does not call the API`() {
         val repo = baseCreateRepo()
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("   ")
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("   ")
+        presenter.onCreateCollectionSubmitted()
 
         assertThat(repo.createCount).isZero()
-        assertDialogValidation(vm, "Please enter a collection name")
+        assertDialogValidation(presenter, "Please enter a collection name")
     }
 
     @Test
@@ -528,27 +532,27 @@ class RomDetailViewModelTest {
             detailResult = LibraryResult.Success(detail)
             ownedResult = LibraryResult.Success(listOf(coll(2, name = "Games")))
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("games")
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("games")
+        presenter.onCreateCollectionSubmitted()
 
         assertThat(repo.createCount).isZero()
-        assertDialogValidation(vm, "A collection with that name already exists")
+        assertDialogValidation(presenter, "A collection with that name already exists")
     }
 
     @Test
     fun `Name longer than 400 characters does not call the API`() {
         val repo = baseCreateRepo()
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("x".repeat(401))
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("x".repeat(401))
+        presenter.onCreateCollectionSubmitted()
 
         assertThat(repo.createCount).isZero()
-        assertDialogValidation(vm, "Collection name must be 400 characters or fewer")
+        assertDialogValidation(presenter, "Collection name must be 400 characters or fewer")
     }
 
     @Test
@@ -561,15 +565,15 @@ class RomDetailViewModelTest {
             createResult = LibraryResult.Success(created)
             addResult = LibraryResult.Success(added)
         }
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("  MyColl  ")
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("  MyColl  ")
+        presenter.onCreateCollectionSubmitted()
 
         assertThat(repo.createCount).isEqualTo(1)
         assertThat(repo.createLog).containsExactly("MyColl" to false)
-        assertThat(vm.state.value.collectionDialog).isNull()
+        assertThat(presenter.uiState.value.collectionDialog).isNull()
     }
 
     @Test
@@ -583,16 +587,16 @@ class RomDetailViewModelTest {
             addResult = LibraryResult.Success(added)
         }
         var mutations = 0
-        val vm = makeVm(repo) { mutations++ }
+        val presenter = makePresenter(repo) { mutations++ }
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("MyColl")
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("MyColl")
+        presenter.onCreateCollectionSubmitted()
 
         assertThat(repo.createCount).isEqualTo(1)
         assertThat(repo.addCount).isEqualTo(1)
-        assertThat(vm.state.value.collectionDialog).isNull()
-        assertThat(loaded(vm.state.value).ownedWritable.single().id).isEqualTo(created.id)
+        assertThat(presenter.uiState.value.collectionDialog).isNull()
+        assertThat(loaded(presenter.uiState.value).ownedWritable.single().id).isEqualTo(created.id)
         assertThat(mutations).isEqualTo(1)
     }
 
@@ -606,15 +610,15 @@ class RomDetailViewModelTest {
             addResult = LibraryResult.Failure(RommApiError.SERVER_ERROR)
         }
         var mutations = 0
-        val vm = makeVm(repo) { mutations++ }
+        val presenter = makePresenter(repo) { mutations++ }
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("MyColl")
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("MyColl")
+        presenter.onCreateCollectionSubmitted()
 
-        assertThat(vm.state.value.collectionDialog).isEqualTo(CollectionDialogState.List)
-        assertThat(vm.state.value.alert).isEqualTo(GameDetailAlert.CreatedButAddFailed(created.id))
-        assertThat(loaded(vm.state.value).ownedWritable.map { it.id }).contains(created.id)
+        assertThat(presenter.uiState.value.collectionDialog).isEqualTo(CollectionDialogState.List)
+        assertThat(presenter.uiState.value.alert).isEqualTo(GameDetailAlert.CreatedButAddFailed(created.id))
+        assertThat(loaded(presenter.uiState.value).ownedWritable.map { it.id }).contains(created.id)
         assertThat(mutations).isEqualTo(1)
     }
 
@@ -622,13 +626,13 @@ class RomDetailViewModelTest {
     fun `Create failure preserves entered name and stays in Creating`() {
         val repo = baseCreateRepo()
         repo.createResult = LibraryResult.Failure(RommApiError.SERVER_ERROR)
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("MyColl")
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("MyColl")
+        presenter.onCreateCollectionSubmitted()
 
-        val dialog = vm.state.value.collectionDialog
+        val dialog = presenter.uiState.value.collectionDialog
         assertThat(dialog).isInstanceOf(CollectionDialogState.Creating::class.java)
         dialog as CollectionDialogState.Creating
         assertThat(dialog.name).isEqualTo("MyColl")
@@ -641,13 +645,13 @@ class RomDetailViewModelTest {
     fun `Create duplicate failure shows safe actionable message`() {
         val repo = baseCreateRepo()
         repo.createResult = LibraryResult.Failure(RommApiError.SERVER_ERROR, httpCode = 409)
-        val vm = makeVm(repo)
+        val presenter = makePresenter(repo)
 
-        vm.onCreateCollectionRequested()
-        vm.onCollectionNameChanged("MyColl")
-        vm.onCreateCollectionSubmitted()
+        presenter.onCreateCollectionRequested()
+        presenter.onCollectionNameChanged("MyColl")
+        presenter.onCreateCollectionSubmitted()
 
-        val dialog = vm.state.value.collectionDialog as CollectionDialogState.Creating
+        val dialog = presenter.uiState.value.collectionDialog as CollectionDialogState.Creating
         assertThat(dialog.validationError).isEqualTo("A collection with that name already exists")
     }
 
@@ -661,16 +665,16 @@ class RomDetailViewModelTest {
             detailResult = LibraryResult.Success(detail)
             ownedResult = LibraryResult.Failure(RommApiError.NETWORK_ERROR)
         }
-        val vm = makeVm(repo)
-        assertThat(vm.state.value.collections).isEqualTo(CollectionLoadState.Error(RommApiError.NETWORK_ERROR))
+        val presenter = makePresenter(repo)
+        assertThat(presenter.uiState.value.collections).isEqualTo(CollectionLoadState.Error(RommApiError.NETWORK_ERROR))
 
         repo.ownedResult = LibraryResult.Success(listOf(coll(2, name = "Games")))
         repo.ownedGate = CompletableDeferred()
-        vm.onCollectionRetry()
-        assertThat(vm.state.value.collections).isEqualTo(CollectionLoadState.Loading)
+        presenter.onCollectionRetry()
+        assertThat(presenter.uiState.value.collections).isEqualTo(CollectionLoadState.Loading)
 
         repo.ownedGate!!.complete(Unit)
-        assertThat(vm.state.value.collections).isInstanceOf(CollectionLoadState.Loaded::class.java)
+        assertThat(presenter.uiState.value.collections).isInstanceOf(CollectionLoadState.Loaded::class.java)
     }
 
     // -----------------------------------------------------------------------
@@ -682,8 +686,8 @@ class RomDetailViewModelTest {
         ownedResult = LibraryResult.Success(emptyList())
     }
 
-    private fun assertDialogValidation(vm: RomDetailViewModel, message: String) {
-        val dialog = vm.state.value.collectionDialog
+    private fun assertDialogValidation(presenter: RomDetailPresenter, message: String) {
+        val dialog = presenter.uiState.value.collectionDialog
         assertThat(dialog).isInstanceOf(CollectionDialogState.Creating::class.java)
         dialog as CollectionDialogState.Creating
         assertThat(dialog.validationError).isEqualTo(message)

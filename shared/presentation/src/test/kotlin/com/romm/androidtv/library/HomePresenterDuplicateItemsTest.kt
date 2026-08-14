@@ -1,18 +1,14 @@
 package com.romm.androidtv.library
 
 import com.romm.androidtv.romm.RommApiError
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class HomeViewModelDuplicateItemsTest {
+class HomePresenterDuplicateItemsTest {
 
     private val rom = LibraryRom(
         id = 7,
@@ -35,19 +31,13 @@ class HomeViewModelDuplicateItemsTest {
         coverUrl = null,
     )
 
-    @BeforeEach
-    fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-    }
-
-    @AfterEach
-    fun tearDown() {
-        Dispatchers.resetMain()
-    }
-
     @Test
     fun `duplicate server rows are removed before Home renders keyed lists`() {
-        val viewModel = HomeViewModel(DuplicateRepository(), hideUnsupportedSystems = { false })
+        val viewModel = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
+            repository = DuplicateRepository(),
+            hideUnsupportedSystems = { false },
+        )
 
         val state = viewModel.uiState.value
         assertThat((state.continuePlaying as SectionState.Loaded).data).containsExactly(rom)
@@ -59,7 +49,11 @@ class HomeViewModelDuplicateItemsTest {
 
     @Test
     fun `section retry also removes duplicate server rows`() {
-        val viewModel = HomeViewModel(DuplicateRepository(), hideUnsupportedSystems = { false })
+        val viewModel = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
+            repository = DuplicateRepository(),
+            hideUnsupportedSystems = { false },
+        )
 
         viewModel.retryRecentlyAdded()
 

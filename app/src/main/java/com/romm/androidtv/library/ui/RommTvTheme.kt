@@ -1,5 +1,6 @@
 package com.romm.androidtv.library.ui
 
+import com.romm.androidtv.library.RommTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -10,24 +11,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
-/**
- * Selectable app themes. [displayName] is shown in the Settings "Change Theme"
- * chooser; the theme maps to a [RommPalette] in [RommTvPalettes.forTheme].
- */
-enum class RommTheme(val displayName: String) {
-    RomMulus("RomMulus"),
-    RomM("RomM"),
-    Crimson("Crimson"),
-    Mono("Monochrome"),
-    Light("Light"),
-    Olive("Olive Drab");
-
-    companion object {
-        /** Maps a persisted storage id back to a theme, defaulting to [RomMulus]. */
-        fun fromStorage(id: String?): RommTheme =
-            entries.firstOrNull { it.name == id } ?: RomMulus
-    }
-}
+// RommTheme (the selectable-theme enum) moved to `:shared:presentation`
+// (com.romm.androidtv.library.RommTheme) for the Linux port Phase 4; the
+// palette mapping below still resolves it via that import.
 
 /**
  * The complete color palette used by the native browsing UI

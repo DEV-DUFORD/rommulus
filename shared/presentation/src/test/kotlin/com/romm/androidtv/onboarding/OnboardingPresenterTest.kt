@@ -8,17 +8,14 @@ import com.romm.androidtv.auth.ServerValidationResult
 import com.romm.androidtv.model.HeartbeatResponse
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
@@ -28,8 +25,8 @@ import org.junit.jupiter.api.Test
  * exact ordering of edit/in-flight/response can be asserted deterministically.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-@DisplayName("OnboardingViewModel — state machine")
-class OnboardingViewModelTest {
+@DisplayName("OnboardingPresenter — state machine")
+class OnboardingPresenterTest {
 
     private val heartbeat = HeartbeatResponse(
         version = "v0.17.1",
@@ -149,7 +146,8 @@ class OnboardingViewModelTest {
         initialStep: OnboardingStep = OnboardingStep.WELCOME,
         initialUsername: String = "",
     ) {
-        val vm = OnboardingViewModel(
+        val vm = OnboardingPresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             validateRommServer = validate,
             persistValidatedOrigin = persist,
             loginToRomm = login,
@@ -168,17 +166,11 @@ class OnboardingViewModelTest {
         initialStep: OnboardingStep = OnboardingStep.WELCOME,
         initialUsername: String = "",
     ): Harness {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
         return Harness(
             initialServerInput = initialServerInput,
             initialStep = initialStep,
             initialUsername = initialUsername,
         )
-    }
-
-    @AfterEach
-    fun tearDown() {
-        Dispatchers.resetMain()
     }
 
     // ------------------------------------------------------------------ Basics

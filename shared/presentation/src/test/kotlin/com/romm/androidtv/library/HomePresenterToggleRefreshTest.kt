@@ -1,44 +1,24 @@
 package com.romm.androidtv.library
 
 import com.romm.androidtv.romm.RommApiError
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
 /**
- * JVM unit tests for [HomeViewModel] reactive refresh driven by the
+ * JVM unit tests for [HomePresenter] reactive refresh driven by the
  * hideUnsupportedSystems preference flow. Verifies that toggling the setting
  * from Settings causes Home to re-fetch all sections immediately, without
  * requiring navigation or app restart.
  */
-@DisplayName("HomeViewModel — toggle-driven reactive refresh")
-class HomeViewModelToggleRefreshTest {
-
-    private lateinit var testJob: Job
-    private lateinit var testScope: CoroutineScope
-
-    @BeforeEach
-    fun setUp() {
-        testJob = Job()
-        testScope = CoroutineScope(Dispatchers.Unconfined + testJob)
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-    }
-
-    @AfterEach
-    fun tearDown() {
-        testJob.cancel()
-        Dispatchers.resetMain()
-    }
+@OptIn(ExperimentalCoroutinesApi::class)
+@DisplayName("HomePresenter — toggle-driven reactive refresh")
+class HomePresenterToggleRefreshTest {
 
     /** Mock repository that counts total fetch invocations. */
     private class CountingMockRepository : LibraryRepository {
@@ -86,7 +66,8 @@ class HomeViewModelToggleRefreshTest {
         val repo = CountingMockRepository()
         val preferenceFlow = MutableStateFlow(false)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -108,7 +89,8 @@ class HomeViewModelToggleRefreshTest {
         val repo = CountingMockRepository()
         val preferenceFlow = MutableStateFlow(true)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -128,7 +110,11 @@ class HomeViewModelToggleRefreshTest {
     fun `successful login event triggers full refresh of all sections`() {
         val repo = CountingMockRepository()
         val refreshEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-        HomeViewModel(repository = repo, refreshEvents = refreshEvents)
+        HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
+            repository = repo,
+            refreshEvents = refreshEvents,
+        )
 
         assertThat(repo.fetchCount).isEqualTo(5)
         refreshEvents.tryEmit(Unit)
@@ -140,7 +126,8 @@ class HomeViewModelToggleRefreshTest {
     fun `successful section retry publishes app-wide refresh`() {
         val repo = CountingMockRepository()
         var successfulRetries = 0
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             onRetrySucceeded = { successfulRetries++ },
         )
@@ -154,7 +141,8 @@ class HomeViewModelToggleRefreshTest {
     fun `failed section retry does not publish app-wide refresh`() {
         val repo = CountingMockRepository()
         var successfulRetries = 0
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             onRetrySucceeded = { successfulRetries++ },
         )
@@ -170,7 +158,8 @@ class HomeViewModelToggleRefreshTest {
         val repo = CountingMockRepository()
         val preferenceFlow = MutableStateFlow(false)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -211,7 +200,8 @@ class HomeViewModelToggleRefreshTest {
 
         val preferenceFlow = MutableStateFlow(false)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = mockRepo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -240,7 +230,8 @@ class HomeViewModelToggleRefreshTest {
     fun `null flow does not break initialization`() {
         val repo = CountingMockRepository()
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { false },
             hideUnsupportedSystemsFlow = null,

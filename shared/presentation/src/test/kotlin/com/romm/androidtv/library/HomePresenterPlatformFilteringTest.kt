@@ -1,42 +1,22 @@
 package com.romm.androidtv.library
 
 import com.romm.androidtv.romm.RommApiError
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
 /**
- * JVM unit tests for platform-card filtering in [HomeViewModel] driven by the
+ * JVM unit tests for platform-card filtering in [HomePresenter] driven by the
  * hideUnsupportedSystems preference. Verifies that unsupported platforms are
  * hidden from the Platforms grid when the toggle is ON, and restored when OFF.
  */
-@DisplayName("HomeViewModel — platform filtering by native support")
-class HomeViewModelPlatformFilteringTest {
-
-    private lateinit var testJob: Job
-    private lateinit var testScope: CoroutineScope
-
-    @BeforeEach
-    fun setUp() {
-        testJob = Job()
-        testScope = CoroutineScope(Dispatchers.Unconfined + testJob)
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-    }
-
-    @AfterEach
-    fun tearDown() {
-        testJob.cancel()
-        Dispatchers.resetMain()
-    }
+@OptIn(ExperimentalCoroutinesApi::class)
+@DisplayName("HomePresenter — platform filtering by native support")
+class HomePresenterPlatformFilteringTest {
 
     private val supportedPlatform = PlatformSummary(
         id = 1, displayName = "Game Boy", romCount = 50, logoUrl = null, slug = "gb",
@@ -65,7 +45,8 @@ class HomeViewModelPlatformFilteringTest {
         val repo = emptyMockRepo(listOf(supportedPlatform, unsupportedPlatform))
         val preferenceFlow = MutableStateFlow(false)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -82,7 +63,8 @@ class HomeViewModelPlatformFilteringTest {
         val repo = emptyMockRepo(listOf(supportedPlatform, unsupportedPlatform))
         val preferenceFlow = MutableStateFlow(true)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -99,7 +81,8 @@ class HomeViewModelPlatformFilteringTest {
         val repo = emptyMockRepo(listOf(supportedPlatform, blankSlugPlatform))
         val preferenceFlow = MutableStateFlow(true)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -116,7 +99,8 @@ class HomeViewModelPlatformFilteringTest {
         val repo = emptyMockRepo(listOf(supportedPlatform, unsupportedPlatform))
         val preferenceFlow = MutableStateFlow(false)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -140,7 +124,8 @@ class HomeViewModelPlatformFilteringTest {
         val repo = emptyMockRepo(listOf(supportedPlatform, unsupportedPlatform))
         val preferenceFlow = MutableStateFlow(true)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -167,7 +152,8 @@ class HomeViewModelPlatformFilteringTest {
         val repo = emptyMockRepo(listOf(supportedPlatform, emptySupportedPlatform, unsupportedPlatform))
         val preferenceFlow = MutableStateFlow(true)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -189,7 +175,8 @@ class HomeViewModelPlatformFilteringTest {
         val repo = emptyMockRepo(listOf(psp, gb, gbc))
         val preferenceFlow = MutableStateFlow(true)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
@@ -207,7 +194,8 @@ class HomeViewModelPlatformFilteringTest {
         val repo = emptyMockRepo(listOf(supportedPlatform, unsupportedPlatform))
         val preferenceFlow = MutableStateFlow(false)
 
-        val vm = HomeViewModel(
+        val vm = HomePresenter(
+            scope = TestScope(UnconfinedTestDispatcher()),
             repository = repo,
             hideUnsupportedSystems = { preferenceFlow.value },
             hideUnsupportedSystemsFlow = preferenceFlow,
