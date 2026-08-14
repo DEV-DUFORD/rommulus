@@ -125,6 +125,10 @@ class AndroidImportGuardTest {
             for (index in lines.indices) {
                 val lineNumber = index + 1
                 val line = lines[index]
+                val trimmed = line.trim()
+                // Skip comment lines: KDoc, block comments, single-line comments.
+                // Known false-positive per own doc: doc comments mentioning android.* are acceptable.
+                if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue
                 for (pattern in FORBIDDEN_PATTERNS) {
                     if (pattern.containsMatchIn(line)) {
                         violations.add("$relativePath:$lineNumber: $line.trim()")
