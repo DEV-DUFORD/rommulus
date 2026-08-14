@@ -71,6 +71,8 @@ interface PendingOperationDao {
      * Deletes non-terminal operations for [scope] older than
      * [olderThanLocalGenerationEpochMs] — the "supersede a stale queued
      * operation" half of the dedupe rule in section 11.4.
+     * Returns the number of rows deleted (return type widened from Unit to Int
+     * to satisfy storage-api PendingOperationStore contract).
      */
     @Query(
         "DELETE FROM pending_operations " +
@@ -88,5 +90,5 @@ interface PendingOperationDao {
         slot: String,
         operationType: PendingOperationType,
         olderThanLocalGenerationEpochMs: Long,
-    )
+    ): Int
 }

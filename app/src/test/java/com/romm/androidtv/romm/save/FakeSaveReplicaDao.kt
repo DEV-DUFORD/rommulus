@@ -13,10 +13,12 @@ class FakeSaveReplicaDao : SaveReplicaDao {
         if (existing != null) {
             val idx = rows.indexOfFirst { it.id == existing.id }
             if (idx >= 0) rows[idx] = entity.copy(id = existing.id)
+            return existing.id
         } else {
-            rows.add(entity.copy(id = nextId++))
+            val id = nextId++
+            rows.add(entity.copy(id = id))
+            return id
         }
-        return entity.id.takeIf { it > 0 } ?: (nextId++)
     }
 
     override suspend fun findByScope(
