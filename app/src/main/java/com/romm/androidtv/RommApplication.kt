@@ -6,6 +6,8 @@ import androidx.work.Configuration
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.SvgDecoder
+import com.romm.androidtv.network.AndroidLogSink
+import com.romm.androidtv.network.RommLog
 import com.romm.androidtv.sync.RommWorkerFactory
 import com.romm.androidtv.romm.save.SaveDatabase
 
@@ -17,6 +19,11 @@ import com.romm.androidtv.romm.save.SaveDatabase
  * RomM's bundled platform icons are served as SVGs.
  */
 class RommApplication : Application(), Configuration.Provider, ImageLoaderFactory {
+
+    override fun onCreate() {
+        super.onCreate()
+        RommLog.sink = AndroidLogSink
+    }
 
     override val workManagerConfiguration: Configuration = Configuration.Builder()
         .setWorkerFactory(RommWorkerFactory(this) { RommWorkerFactory.buildProductionExecutor(this) })

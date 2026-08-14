@@ -2,6 +2,7 @@
 
 package com.romm.androidtv.romm
 
+import com.romm.androidtv.network.RommLog
 import com.romm.androidtv.network.RommOrigin
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
@@ -18,9 +19,9 @@ import java.time.Instant
 /** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
 private const val TAG = "RommAuthDx"
 
-/** Safe diagnostic logger: swallows unmocked android.util.Log in JVM unit tests. */
+/** Safe diagnostic logger: routes to [RommLog], which no-ops when no sink is wired (JVM unit tests). */
 private fun diagLog(priority: Int, message: String) {
-    try { android.util.Log.println(priority, TAG, message) } catch (_: Exception) { /* JVM test env */ }
+    RommLog.log(priority, TAG, message)
 }
 
 /**
@@ -545,23 +546,23 @@ object RommSyncApi {
             client.newCall(httpRequest).execute().use { response ->
                 val classification = classifyResponse(response)
                 if (classification != null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.registerDevice: failure error=${classification.name} httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.registerDevice: failure error=${classification.name} httpCode=${response.code}")
                     return DeviceRegisterResult.Failure(classification, response.code)
                 }
                 val responseBody = response.body?.string()
                 val info = responseBody?.let(::parseDeviceCreateResponse)
                 if (info == null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.registerDevice: parseFailed httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.registerDevice: parseFailed httpCode=${response.code}")
                     DeviceRegisterResult.Failure(RommApiError.PARSE_ERROR, response.code)
                 } else {
                     val alreadyExisted = response.code == 200
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.registerDevice: success status=${if (alreadyExisted) "reused" else "created"}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.registerDevice: success status=${if (alreadyExisted) "reused" else "created"}")
                     DeviceRegisterResult.Success(info, alreadyExisted = alreadyExisted)
                 }
             }
         } catch (e: IOException) {
             val error = classifyIOException(e)
-            diagLog(android.util.Log.WARN, "RommSyncApi.registerDevice: ioError $error")
+            diagLog(RommLog.WARN, "RommSyncApi.registerDevice: ioError $error")
             DeviceRegisterResult.Failure(error)
         }
     }
@@ -580,39 +581,39 @@ object RommSyncApi {
         if (origin.isBlank()) return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
 
         val httpRequest: okhttp3.Request = try {
-            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase urlConstruction")
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase urlConstruction")
             val url = apiUrl(origin, "client-tokens") ?: return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
-            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase payloadSerialization")
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase payloadSerialization")
             val payloadJson = clientTokenPayloadAdapter.toJson(
                 ClientTokenPayloadJson(
                     name = "romm-android-tv",
                     scopes = scopes,
                 ),
             )
-            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase requestBody")
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase requestBody")
             val body = payloadJson.toRequestBody("application/json".toMediaType())
-            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase requestBuilder")
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase requestBuilder")
             val builder = okhttp3.Request.Builder().url(url).post(body)
             // Cookie-authenticated POST /api/client-tokens is CSRF-protected: the matching
             // romm_csrftoken cookie value must also be sent as X-CSRFToken. Presence-only diag.
-            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase csrfHeader")
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase csrfHeader")
             val csrfToken = csrfTokenFor(client, url)
             if (csrfToken != null) {
                 builder.header("X-CSRFToken", csrfToken)
             }
-            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: csrfTokenPresent=${csrfToken != null}")
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: csrfTokenPresent=${csrfToken != null}")
             builder.build()
         } catch (e: Exception) {
-            diagLog(android.util.Log.WARN, "RommSyncApi.acquireClientToken: constructionFailed ${e.javaClass.simpleName}")
+            diagLog(RommLog.WARN, "RommSyncApi.acquireClientToken: constructionFailed ${e.javaClass.simpleName}")
             return ClientTokenAcquireResult.Failure(RommApiError.NETWORK_ERROR)
         }
 
         return try {
-            diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: phase executeStart")
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase executeStart")
             client.newCall(httpRequest).execute().use { response ->
                 val classification = classifyResponse(response)
                 if (classification != null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: failure error=${classification.name} httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: failure error=${classification.name} httpCode=${response.code}")
                     // A 400 from this endpoint is most commonly the backend's
                     // `MAX_TOKENS_PER_USER` cap (see client_tokens.py:
                     // "Maximum of N tokens per user reached"), NOT a local
@@ -630,16 +631,16 @@ object RommSyncApi {
                 val responseBody = response.body?.string()
                 val info = responseBody?.let(::parseClientTokenResponse)
                 if (info == null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: parseFailed httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: parseFailed httpCode=${response.code}")
                     ClientTokenAcquireResult.Failure(RommApiError.PARSE_ERROR, response.code)
                 } else {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.acquireClientToken: success scopes=$scopes")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: success scopes=$scopes")
                     ClientTokenAcquireResult.Success(info)
                 }
             }
         } catch (e: IOException) {
             val error = classifyIOException(e)
-            diagLog(android.util.Log.WARN, "RommSyncApi.acquireClientToken: ioError $error")
+            diagLog(RommLog.WARN, "RommSyncApi.acquireClientToken: ioError $error")
             ClientTokenAcquireResult.Failure(error)
         }
     }
@@ -683,7 +684,7 @@ object RommSyncApi {
         return try {
             client.newCall(builder.build()).execute().use { it.isSuccessful }
         } catch (e: IOException) {
-            diagLog(android.util.Log.WARN, "RommSyncApi.revokeClientToken: failed ${e.javaClass.simpleName}")
+            diagLog(RommLog.WARN, "RommSyncApi.revokeClientToken: failed ${e.javaClass.simpleName}")
             false
         }
     }
@@ -757,23 +758,23 @@ object RommSyncApi {
             client.newCall(httpRequest).execute().use { response ->
                 val classification = classifyResponse(response)
                 if (classification != null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.negotiate: failure error=${classification.name} httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.negotiate: failure error=${classification.name} httpCode=${response.code}")
                     return SyncNegotiateResult.Failure(classification, response.code)
                 }
                 val responseBody = response.body?.string()
                 val info = responseBody?.let(::parseSyncNegotiateResponse)
                 if (info == null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.negotiate: parseFailed httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.negotiate: parseFailed httpCode=${response.code}")
                     SyncNegotiateResult.Failure(RommApiError.PARSE_ERROR, response.code)
                 } else {
                     val opCount = info.operations.size
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.negotiate: success ops=$opCount")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.negotiate: success ops=$opCount")
                     SyncNegotiateResult.Success(info)
                 }
             }
         } catch (e: IOException) {
             val error = classifyIOException(e)
-            diagLog(android.util.Log.WARN, "RommSyncApi.negotiate: ioError $error")
+            diagLog(RommLog.WARN, "RommSyncApi.negotiate: ioError $error")
             SyncNegotiateResult.Failure(error)
         }
     }
@@ -846,22 +847,22 @@ object RommSyncApi {
             client.newCall(httpRequest).execute().use { response ->
                 val classification = classifyResponse(response)
                 if (classification != null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.ingestPlaySessions: failure error=${classification.name} httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.ingestPlaySessions: failure error=${classification.name} httpCode=${response.code}")
                     return PlaySessionIngestResult.Failure(classification, response.code)
                 }
                 val responseBody = response.body?.string()
                 val counts = responseBody?.let(::parsePlaySessionIngestResponse)
                 if (counts == null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.ingestPlaySessions: parseFailed httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.ingestPlaySessions: parseFailed httpCode=${response.code}")
                     PlaySessionIngestResult.Failure(RommApiError.PARSE_ERROR, response.code)
                 } else {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.ingestPlaySessions: success created=${counts.first} skipped=${counts.second}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.ingestPlaySessions: success created=${counts.first} skipped=${counts.second}")
                     PlaySessionIngestResult.Success(counts.first, counts.second)
                 }
             }
         } catch (e: IOException) {
             val error = classifyIOException(e)
-            diagLog(android.util.Log.WARN, "RommSyncApi.ingestPlaySessions: ioError $error")
+            diagLog(RommLog.WARN, "RommSyncApi.ingestPlaySessions: ioError $error")
             PlaySessionIngestResult.Failure(error)
         }
     }
@@ -1005,22 +1006,22 @@ object RommSyncApi {
             client.newCall(httpRequest).execute().use { response ->
                 val classification = classifyResponse(response)
                 if (classification != null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.listSaves: failure error=${classification.name} httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.listSaves: failure error=${classification.name} httpCode=${response.code}")
                     return SaveListResult.Failure(classification, response.code)
                 }
                 val responseBody = response.body?.string()
                 val saves = responseBody?.let(::parseSaveSchemaList)
                 if (saves == null) {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.listSaves: parseFailed httpCode=${response.code}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.listSaves: parseFailed httpCode=${response.code}")
                     SaveListResult.Failure(RommApiError.PARSE_ERROR, response.code)
                 } else {
-                    diagLog(android.util.Log.DEBUG, "RommSyncApi.listSaves: success count=${saves.size}")
+                    diagLog(RommLog.DEBUG, "RommSyncApi.listSaves: success count=${saves.size}")
                     SaveListResult.Success(saves)
                 }
             }
         } catch (e: IOException) {
             val error = classifyIOException(e)
-            diagLog(android.util.Log.WARN, "RommSyncApi.listSaves: ioError $error")
+            diagLog(RommLog.WARN, "RommSyncApi.listSaves: ioError $error")
             SaveListResult.Failure(error)
         }
     }

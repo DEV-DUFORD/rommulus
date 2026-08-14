@@ -1,5 +1,6 @@
 package com.romm.androidtv.romm
 
+import com.romm.androidtv.network.RommLog
 import com.romm.androidtv.network.RommOrigin
 import com.romm.androidtv.network.ServerAddressResult
 import okhttp3.Interceptor
@@ -8,9 +9,9 @@ import okhttp3.Response
 /** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
 private const val TAG = "RommAuthDx"
 
-/** Safe diagnostic logger: swallows unmocked android.util.Log in JVM unit tests. */
+/** Safe diagnostic logger: routes to [RommLog], which no-ops when no sink is wired (JVM unit tests). */
 private fun diagLog(priority: Int, message: String) {
-    try { android.util.Log.println(priority, TAG, message) } catch (_: Exception) { /* JVM test env */ }
+    RommLog.log(priority, TAG, message)
 }
 
 /**
@@ -46,7 +47,7 @@ class BearerAuthInterceptor(
         // Only requests under the resolved RomM origin carry the credential.
         val matchesOrigin = currentOrigin != null && currentOrigin.containsUri(request.url.toUri())
         diagLog(
-            android.util.Log.DEBUG,
+            RommLog.DEBUG,
             "BearerAuthInterceptor: tokenPresent=$tokenPresent matchesOrigin=$matchesOrigin",
         )
 
