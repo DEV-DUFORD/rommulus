@@ -8,7 +8,7 @@
 #   clang-18=1:18.1.3-1
 #   cmake=3.28.3-1build7
 #   ninja-build=1.11.1-2
-#   libsqlite3-dev=3.45.1-1build2
+#   libsqlite3-dev — unpinned (previous pin 3.45.1-1build2 went stale in noble repos)
 #   libsdl3-dev — NOT in noble repos; requires PPA or source build.
 #   xvfb=2:21.1.12-1ubuntu1.5
 #   pkg-config=1.8.1-2build1
@@ -54,11 +54,15 @@ concurrency:
 # -------------------------------------------------------------------
 # These env vars are referenced by every job that installs native packages.
 env:
-  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs="-Xmx3g"
+  # NOTE: do NOT set org.gradle.jvmargs here — a system property from
+  # GRADLE_OPTS overrides gradle.properties and would drop the AGP-required
+  # --add-opens flags (JDK 17 strong encapsulation / Gson reflection).
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
   CLANG_VERSION: "1:18.1.3-1"
   CMAKE_VERSION: "3.28.3-1build7"
   NINJA_VERSION: "1.11.1-2"
-  SQLITE3_DEV_VERSION: "3.45.1-1build2"
+  # libsqlite3-dev is installed unpinned: the previous pin (3.45.1-1build2)
+  # went stale and is no longer available in the ubuntu-24.04 noble repos.
   XVFB_VERSION: "2:21.1.12-1ubuntu1.5"
   PKG_CONFIG_VERSION: "1.8.1-2build1"
   ZSTD_VERSION: "1.5.5+dfsg2-2"
@@ -164,7 +168,7 @@ jobs:
             "clang-18=${CLANG_VERSION}" \
             "cmake=${CMAKE_VERSION}" \
             "ninja-build=${NINJA_VERSION}" \
-            "libsqlite3-dev=${SQLITE3_DEV_VERSION}" \
+            libsqlite3-dev \
             "xvfb=${XVFB_VERSION}" \
             "pkg-config=${PKG_CONFIG_VERSION}"
           # NOTE: libsdl3-dev is NOT in the noble repos.  It is available
@@ -247,7 +251,7 @@ jobs:
             "clang-18=${CLANG_VERSION}" \
             "cmake=${CMAKE_VERSION}" \
             "ninja-build=${NINJA_VERSION}" \
-            "libsqlite3-dev=${SQLITE3_DEV_VERSION}"
+            libsqlite3-dev
           # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
 
       - name: Verify toolchain versions
@@ -301,7 +305,7 @@ jobs:
             "clang-18=${CLANG_VERSION}" \
             "cmake=${CMAKE_VERSION}" \
             "ninja-build=${NINJA_VERSION}" \
-            "libsqlite3-dev=${SQLITE3_DEV_VERSION}"
+            libsqlite3-dev
           # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
 
       - name: Verify toolchain versions
@@ -355,7 +359,7 @@ jobs:
             "clang-18=${CLANG_VERSION}" \
             "cmake=${CMAKE_VERSION}" \
             "ninja-build=${NINJA_VERSION}" \
-            "libsqlite3-dev=${SQLITE3_DEV_VERSION}"
+            libsqlite3-dev
           # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
 
       - name: Verify toolchain versions
@@ -410,7 +414,7 @@ jobs:
             "clang-18=${CLANG_VERSION}" \
             "cmake=${CMAKE_VERSION}" \
             "ninja-build=${NINJA_VERSION}" \
-            "libsqlite3-dev=${SQLITE3_DEV_VERSION}" \
+            libsqlite3-dev \
             "zstd=${ZSTD_VERSION}"
           # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
 
@@ -467,7 +471,7 @@ jobs:
             "clang-18=${CLANG_VERSION}" \
             "cmake=${CMAKE_VERSION}" \
             "ninja-build=${NINJA_VERSION}" \
-            "libsqlite3-dev=${SQLITE3_DEV_VERSION}"
+            libsqlite3-dev
           # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
 
       - name: Verify toolchain versions
