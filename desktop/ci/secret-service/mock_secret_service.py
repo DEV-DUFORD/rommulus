@@ -136,7 +136,7 @@ class Collection(dbus.service.Object):
         session, _parameters, value, content_type = secret
         if self.locked:
             # A real daemon would demand an unlock prompt before writing.
-            return ("", PROMPT_PATH)
+            return ("/", PROMPT_PATH)
         if str(session) not in self._store.sessions:
             raise dbus.exceptions.DBusException(
                 f"invalid session {session}", name=ERROR_INVALID_ARGS)
@@ -161,7 +161,7 @@ class Collection(dbus.service.Object):
         item.attributes = attributes
         item.value = bytes(value)
         item.content_type = str(content_type)
-        return (item.path, "")
+        return (item.path, "/")
 
     @dbus.service.method("org.freedesktop.Secret.Collection", in_signature="a{ss}",
                          out_signature="(aoao)")
@@ -246,9 +246,9 @@ class Service(dbus.service.Object):
         label = str(label) if label is not None else "new collection"
         alias = str(alias)
         if alias in STORE.aliases:
-            return (STORE.aliases[alias], "")
+            return (STORE.aliases[alias], "/")
         col = STORE._create_collection(label, alias=alias or None, locked=False)
-        return (col.path, "")
+        return (col.path, "/")
 
     @dbus.service.method("org.freedesktop.Secret.Service", in_signature="say",
                          out_signature="o")
