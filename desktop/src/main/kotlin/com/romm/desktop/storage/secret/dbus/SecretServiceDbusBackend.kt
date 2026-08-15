@@ -97,13 +97,13 @@ class SecretServiceDbusBackend(
             val result = col.CreateItem(
                 properties = mapOf(
                     "Label" to Variant<String>(scope),
-                    "Attributes" to Variant<Map<String, String>>(attributes),
+                    "Attributes" to Variant<Map<String, String>>(attributes, "a{ss}"),
                 ),
                 secret = secretStruct,
                 replace = true,
             )
             // A non-empty prompt path means the daemon wants a (host-side) unlock dialog: fail closed.
-            result.prompt.getPath().isEmpty()
+            EMPTY_PATH.contains(result.prompt.getPath())
         }.getOrDefault(false)
     }
 
