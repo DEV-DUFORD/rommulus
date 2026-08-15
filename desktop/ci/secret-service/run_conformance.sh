@@ -65,7 +65,7 @@ sys.exit(0 if not m.NameHasOwner("org.freedesktop.secrets") else 1)'; then
 
     # --no-daemon on purpose: a reused Gradle daemon captured its environment at startup
     # and would NOT see DBUS_SESSION_BUS_ADDRESS / ROM_SECRET_MODE exported here.
-    (cd "$REPO_ROOT" && ./gradlew --no-daemon :desktop:test \
+    (cd "$REPO_ROOT" && ./gradlew --no-daemon --configure-on-demand :desktop:test \
         --tests '*SecretServiceDbusBackendConformanceTest*')
 
     # Assert the run actually executed at least one test (not all skipped) and had 0 failures.

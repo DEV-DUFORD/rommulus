@@ -76,7 +76,7 @@ jobs:
 
       - name: Run shared module JVM tests
         run: |
-          ./gradlew \
+          ./gradlew --configure-on-demand \
             :shared:domain:test \
             :shared:network:test \
             :shared:storage-api:test \
@@ -179,7 +179,7 @@ jobs:
           export DISPLAY=:99
           Xvfb :99 -screen 0 1920x1080x24 &
           XVFB_PID=$!
-          ./gradlew :desktop:test :desktop:build
+          ./gradlew --configure-on-demand :desktop:test :desktop:build
           kill $XVFB_PID || true
 
       - name: Smoke — desktop window starts and stays alive
@@ -187,7 +187,7 @@ jobs:
           # timeout exit code 124 means the process was still running when
           # the timer fired — i.e. the Compose Desktop window opened and
           # did not crash immediately.
-          timeout 30 xvfb-run -a ./gradlew --offline --no-daemon :desktop:run
+          timeout 30 xvfb-run -a ./gradlew --offline --no-daemon --configure-on-demand :desktop:run
           rc=$?
           if [ $rc -eq 124 ]; then
             echo "✓ Desktop window stayed alive for 30s — smoke pass."

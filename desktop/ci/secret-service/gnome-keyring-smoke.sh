@@ -66,7 +66,7 @@ sys.exit(0 if m.NameHasOwner("org.freedesktop.secrets") else 1)' \
     echo "smoke: collection at $ALIAS_PATH"
 
     # 3. Real-daemon data-path conformance (set/get/overwrite/delete/clearAll).
-    ROM_SECRET_MODE=available ./gradlew --no-daemon :desktop:test \
+    ROM_SECRET_MODE=available ./gradlew --no-daemon --configure-on-demand :desktop:test \
         --tests '*SecretServiceDbusBackendConformanceTest*'
 
     # Store one item directly via python3-dbus so the post-lock check below is meaningful
@@ -99,7 +99,7 @@ EOF
     [[ "$HIDDEN" == *"([], [])"* ]] || { echo "FAIL: expected ([], []) while locked" >&2; exit 1; }
 
     # 6. Fail-closed conformance against the REAL locked daemon.
-    ROM_SECRET_MODE=locked ./gradlew --no-daemon :desktop:test \
+    ROM_SECRET_MODE=locked ./gradlew --no-daemon --configure-on-demand :desktop:test \
         --tests '*SecretServiceDbusBackendConformanceTest*'
 
     echo "smoke: PASS (real gnome-keyring, unlocked + locked)" >&2
