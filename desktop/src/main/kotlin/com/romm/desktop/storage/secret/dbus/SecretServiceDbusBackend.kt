@@ -181,8 +181,7 @@ class SecretServiceDbusBackend(
 
     private fun isCollectionLocked(conn: DBusConnection, collection: DBusPath): Boolean = runCatching {
         val props = conn.getRemoteObject(BUS_NAME, collection.getPath(), Properties::class.java)
-        val v = props.Get<Any>(COLLECTION_IFACE, "Locked")
-        (v as? Variant<*>)?.value as? Boolean ?: false
+        props.Get<Boolean>(COLLECTION_IFACE, "Locked")
     }.getOrDefault(false)
 
     /** Maps a caught transport/daemon failure to a fail-closed [KeyringState]. Never throws. */

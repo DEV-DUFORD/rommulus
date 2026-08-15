@@ -131,7 +131,7 @@ class Collection(dbus.service.Object):
     # --- org.freedesktop.Secret.Collection ------------------------------------
 
     @dbus.service.method("org.freedesktop.Secret.Collection",
-                         in_signature="a{sv}(oayays)b", out_signature="(oo)")
+                         in_signature="a{sv}(oayays)b", out_signature="oo")
     def CreateItem(self, properties, secret, replace):
         session, _parameters, value, content_type = secret
         if self.locked:
@@ -164,7 +164,7 @@ class Collection(dbus.service.Object):
         return (item.path, "/")
 
     @dbus.service.method("org.freedesktop.Secret.Collection", in_signature="a{ss}",
-                         out_signature="(aoao)")
+                         out_signature="aoao")
     def SearchItems(self, attributes):
         if self.locked:
             # Metadata is unreadable while locked; nothing matches.
@@ -240,7 +240,7 @@ class Service(dbus.service.Object):
         return path or "/"
 
     @dbus.service.method("org.freedesktop.Secret.Service", in_signature="a{sv}s",
-                         out_signature="(oo)")
+                         out_signature="oo")
     def CreateCollection(self, properties, alias):
         label = properties.get("Label")
         label = str(label) if label is not None else "new collection"
