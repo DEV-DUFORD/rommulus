@@ -67,6 +67,8 @@ if MODE not in ("available", "locked"):
 class Item(dbus.service.Object):
     def __init__(self, bus_name, store, path):
         super().__init__(bus_name, path)
+        # dbus-python 1.2.x Object exposes no public .object_path/.bus_name; track ours.
+        self.path = path
         self._store = store
         self.label = ""
         self.attributes = {}
@@ -79,7 +81,7 @@ class Item(dbus.service.Object):
             raise dbus.exceptions.DBusException(
                 f"collection is locked", name=ERROR_FAILED)
         self._store.items.remove(self)
-        log(f"deleted item {self.object_path}")
+        log(f"deleted item {self.path}")
 
     @dbus.service.method("org.freedesktop.Secret.Item", in_signature="o",
                          out_signature="(oayays)")
@@ -96,6 +98,8 @@ class Item(dbus.service.Object):
 class Collection(dbus.service.Object):
     def __init__(self, bus_name, store, path, label, locked):
         super().__init__(bus_name, path)
+        # dbus-python 1.2.x Object exposes no public .object_path/.bus_name; track ours.
+        self.path = path
         self._store = store
         self.label = label
         self.locked = locked
@@ -147,17 +151,17 @@ class Collection(dbus.service.Object):
             (i for i in self._store.items if i.attributes == attributes), None)
         if existing is not None:
             item = existing
-            log(f"replaced item {item.object_path} attrs={attributes}")
+            log(f"replaced item {item.path} attrs={attributes}")
         else:
-            item = Item(self.bus_name, self._store,
+            item = Item(BUS_NAME_OBJ, self._store,
                         f"/org/freedesktop/secrets/item{self._store.next_item_id()}")
             self._store.items.append(item)
-            log(f"created item {item.object_path} attrs={attributes}")
+            log(f"created item {item.path} attrs={attributes}")
         item.label = label
         item.attributes = attributes
         item.value = bytes(value)
         item.content_type = str(content_type)
-        return (str(item.object_path), "")
+        return (item.path, "")
 
     @dbus.service.method("org.freedesktop.Secret.Collection", in_signature="a{ss}",
                          out_signature="(aoao)")
@@ -166,7 +170,7 @@ class Collection(dbus.service.Object):
             # Metadata is unreadable while locked; nothing matches.
             return ([], [])
         wanted = {str(k): str(v) for k, v in attributes.items()}
-        unlocked = [str(i.object_path) for i in self._store.items
+        unlocked = [i.path for i in self._store.items
                     if all(i.attributes.get(k) == v for k, v in wanted.items())]
         log(f"search {wanted} -> {unlocked}")
         return (unlocked, [])
@@ -197,9 +201,12 @@ class SecretServiceMock:
 
     def _create_collection(self, label, alias=None, locked=False):
         path = f"/org/freedesktop/secrets/collection{len(self.aliases)}"
-        col = Collection(BUS_NAME, self, path, label, locked=locked)
+        # Must be a BusName (not the BUS_NAME string): dbus-python 1.2.x Object.__init__
+        # hands its first argument to add_to_connection(), and a str has no
+        # _register_object_path -> AttributeError on every CreateCollection/CreateItem.
+        col = Collection(BUS_NAME_OBJ, self, path, label, locked=locked)
         if alias:
-            self.aliases[alias] = str(col.object_path)
+            self.aliases[alias] = col.path
         if self.collection is None:
             self.collection = col
         log(f"created collection {path} alias={alias!r} label={label!r} locked={locked}")
@@ -241,7 +248,7 @@ class Service(dbus.service.Object):
         if alias in STORE.aliases:
             return (STORE.aliases[alias], "")
         col = STORE._create_collection(label, alias=alias or None, locked=False)
-        return (str(col.object_path), "")
+        return (col.path, "")
 
     @dbus.service.method("org.freedesktop.Secret.Service", in_signature="say",
                          out_signature="o")
