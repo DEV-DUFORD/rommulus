@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 MOCK="$SCRIPT_DIR/mock_secret_service.py"
 RESULTS_XML="$REPO_ROOT/desktop/build/test-results/test/TEST-com.romm.desktop.storage.secret.dbus.SecretServiceDbusBackendConformanceTest.xml"
 
@@ -95,7 +95,7 @@ fi
 
 for MODE in available locked; do
     echo "=== conformance run: ROM_SECRET_MODE=$MODE ===" >&2
-    ROM_SECRET_MODE="$MODE" dbus-run-session -- "$BASH_SOURCE[0]" --inner
+    ROM_SECRET_MODE="$MODE" dbus-run-session -- "$SCRIPT_DIR/run_conformance.sh" --inner
 done
 
 echo "Conformance suite passed (available + locked)." >&2

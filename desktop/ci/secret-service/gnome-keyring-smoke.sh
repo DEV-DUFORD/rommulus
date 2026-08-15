@@ -20,7 +20,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 dbus_method() { # dbus_method <object-path> <method> [args...]
     gdbus call --session \
@@ -31,6 +31,7 @@ dbus_method() { # dbus_method <object-path> <method> [args...]
 
 # --- inner phase: runs INSIDE dbus-run-session ---------------------------------
 if [[ "${1:-}" == "--inner" ]]; then
+    cd "$REPO_ROOT" # ./gradlew below must resolve from the repo root regardless of caller CWD
     gnome-keyring-daemon --components=secrets --daemonize 2>/dev/null || true
     trap 'pkill -f gnome-keyring-daemon 2>/dev/null || true' EXIT
 
@@ -125,4 +126,4 @@ if [[ "$MISSING" == "1" ]]; then
 fi
 
 cd "$REPO_ROOT"
-dbus-run-session -- "$BASH_SOURCE[0]" --inner
+dbus-run-session -- "$SCRIPT_DIR/gnome-keyring-smoke.sh" --inner
