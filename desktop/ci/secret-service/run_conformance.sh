@@ -34,6 +34,20 @@ sys.exit(0 if m.NameHasOwner("org.freedesktop.secrets") else 1)'; then
             fi
             sleep 0.2
         done
+        # Hard-fail if the mock never came up: a crashed/hung mock must NOT silently fall
+        # through to Gradle (it would only produce confusing "name has no owner" test failures).
+        if ! kill -0 "$MOCK_PID" 2>/dev/null; then
+            echo "inner: FAIL — mock_secret_service.py died during startup (see stderr above)" >&2
+            exit 1
+        fi
+        if ! python3 -c '
+import dbus, sys
+bus = dbus.SessionBus()
+m = bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+sys.exit(0 if m.NameHasOwner("org.freedesktop.secrets") else 1)'; then
+            echo "inner: FAIL — org.freedesktop.secrets has no owner after 10s (mock failed to start)" >&2
+            exit 1
+        fi
     else
         # unavailable: the mock must NOT own the name. Give it a moment to exit, then verify.
         sleep 1

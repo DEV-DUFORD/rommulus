@@ -34,6 +34,12 @@ import dbus
 import dbus.service
 import dbus.mainloop.glib
 
+# Must run BEFORE `dbus.SessionBus()` below: a connection is only attached to a main loop if
+# one is already the default when it is created. Without this, constructing any
+# dbus.service.Object (Service.__init__ -> add_to_connection) raises RuntimeError
+# ("D-Bus connections must be attached to a main loop").
+dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
 MODE = os.environ.get("ROM_SECRET_MODE", "available")
 BUS_NAME = "org.freedesktop.secrets"
 SERVICE_PATH = "/org/freedesktop/secrets"
@@ -237,11 +243,15 @@ class Service(dbus.service.Object):
         col = STORE._create_collection(label, alias=alias or None, locked=False)
         return (str(col.object_path), "")
 
+    @dbus.service.method("org.freedesktop.Secret.Service", in_signature="say",
+                         out_signature="o")
+    def OpenSession(self, algorithm, _input):
+        return STORE.open_session(algorithm, _input)
+
 
 Service()
 log(f"ready on {BUS_NAME} at {SERVICE_PATH} (mode={MODE})")
 
-dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 import gi  # noqa: E402
 gi.require_version("GLib", "2.0")
 from gi.repository import GLib  # noqa: E402
