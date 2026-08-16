@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +33,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -42,6 +44,9 @@ import com.romm.desktop.ui.components.LocalRommulusTheme
 import com.romm.desktop.ui.components.LoadingIndicator
 import com.romm.desktop.ui.components.RommulusTheme
 import com.romm.desktop.ui.navigation.keyboardShortcuts
+import com.romm.desktop.ui.navigation.FocusNavigator
+import com.romm.desktop.ui.navigation.LocalFocusNavigator
+import com.romm.desktop.ui.navigation.focusableItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -61,6 +66,7 @@ fun LicensesDialog(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
     // Captured in the OUTER composition (the shell provides RommulusTheme) because Compose
     // Desktop dialogs are separate compositions: locals do not propagate into the dialog
     // window, so the theme value is re-applied explicitly below.
@@ -78,6 +84,16 @@ fun LicensesDialog(
         ),
     ) {
         RommulusTheme(theme = theme) {
+        val dialogFocusManager = LocalFocusManager.current
+        val focusOverrideOwner = remember { Any() }
+        DisposableEffect(navigator, dialogFocusManager, focusOverrideOwner, onDismiss) {
+            navigator.installSpatialFocusOverride(
+                owner = focusOverrideOwner,
+                moveFocus = dialogFocusManager::moveFocus,
+                onBack = onDismiss,
+            )
+            onDispose { navigator.removeSpatialFocusOverride(focusOverrideOwner) }
+        }
         Box(
             // Explicit size: Compose Desktop 1.6 has no `defaultSize` modifier, and a
             // `fillMaxSize` root gives the dialog window no intrinsic size to size itself to.
@@ -92,7 +108,7 @@ fun LicensesDialog(
                 ),
         ) {
             Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-                DialogHeader(count = notices?.size, onDismiss = onDismiss)
+                DialogHeader(count = notices?.size, onDismiss = onDismiss, navigator = navigator)
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -131,6 +147,9 @@ fun LicensesDialog(
                                     onToggle = {
                                         expandedIndex = if (expandedIndex == index) null else index
                                     },
+                                    modifier = Modifier.focusableItem("license:$index", navigator) {
+                                        expandedIndex = if (expandedIndex == index) null else index
+                                    },
                                 )
                             }
                         }
@@ -143,7 +162,11 @@ fun LicensesDialog(
 }
 
 @Composable
-private fun DialogHeader(count: Int?, onDismiss: () -> Unit) {
+private fun DialogHeader(
+    count: Int?,
+    onDismiss: () -> Unit,
+    navigator: FocusNavigator,
+) {
     val colors = LocalRommulusColors.current
     val closeFocusRequester = remember { FocusRequester() }
     var closeReady by remember { mutableStateOf(false) }
@@ -169,6 +192,7 @@ private fun DialogHeader(count: Int?, onDismiss: () -> Unit) {
             onClick = onDismiss,
             modifier = Modifier
                 .focusRequester(closeFocusRequester)
+                .focusableItem("license:close", navigator, onDismiss)
                 .onGloballyPositioned { closeReady = true },
         ) {
             Text("Close", color = colors.romm300)
@@ -190,10 +214,11 @@ private fun LicenseNoticeItem(
     expanded: Boolean,
     onSelect: () -> Unit,
     onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalRommulusColors.current
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(if (expanded) colors.romm600.copy(alpha = 0.3f) else colors.nightLo)

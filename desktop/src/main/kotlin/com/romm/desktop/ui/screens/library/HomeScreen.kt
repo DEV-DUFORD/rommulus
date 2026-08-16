@@ -282,8 +282,11 @@ private fun ShelfPlaceholder(content: @Composable () -> Unit) {
  * RomGrid and Search screens (same package) can reuse it.
  */
 @Composable
-internal fun RetryButton(onRetry: () -> Unit) {
-    TextButton(onClick = onRetry) {
+internal fun RetryButton(
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TextButton(onClick = onRetry, modifier = modifier) {
         Text("Retry", color = LocalRommulusColors.current.romm300)
     }
 }

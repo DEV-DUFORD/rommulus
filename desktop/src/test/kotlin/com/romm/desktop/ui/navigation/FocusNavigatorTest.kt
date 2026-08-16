@@ -302,6 +302,42 @@ class FocusNavigatorTest {
     inner class FocusControl {
 
         @Test
+        fun `modal spatial focus override takes precedence until removed`() {
+            val owner = Any()
+            var modalMoves = 0
+            var fallbackMoves = 0
+            var modalBacks = 0
+            navigator.installSpatialFocusOverride(
+                owner = owner,
+                moveFocus = {
+                    modalMoves++
+                    true
+                },
+                onBack = { modalBacks++ },
+            )
+
+            assertThat(
+                navigator.moveSpatialFocus(FocusDirection.Down) {
+                    fallbackMoves++
+                    false
+                },
+            ).isTrue()
+            assertThat(navigator.handleBack()).isTrue()
+            navigator.removeSpatialFocusOverride(owner)
+            assertThat(
+                navigator.moveSpatialFocus(FocusDirection.Down) {
+                    fallbackMoves++
+                    true
+                },
+            ).isTrue()
+
+            assertThat(modalMoves).isEqualTo(1)
+            assertThat(fallbackMoves).isEqualTo(1)
+            assertThat(modalBacks).isEqualTo(1)
+            assertThat(navigator.handleBack()).isFalse()
+        }
+
+        @Test
         fun `focusFirst sets focused index to 0`() {
             repeat(3) { navigator.register("item$it", FocusRequester()) }
             navigator.focusFirst()

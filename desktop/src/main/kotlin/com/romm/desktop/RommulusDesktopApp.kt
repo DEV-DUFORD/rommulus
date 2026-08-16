@@ -126,13 +126,18 @@ fun RommulusDesktopApp(
                 router.focusActions.collect { action ->
                     when (action) {
                         is FocusAction.Move -> {
-                            val moved = focusManager.moveFocus(action.direction.toComposeDirection())
+                            val moved = focusNavigator.moveSpatialFocus(
+                                action.direction.toComposeDirection(),
+                                focusManager::moveFocus,
+                            )
                             if (!moved && focusNavigator.focusedIndex() < 0) {
                                 focusNavigator.focusFirst()
                             }
                         }
                         FocusAction.Activate -> focusNavigator.activateFocused()
-                        FocusAction.Back -> coordinator.onBack()
+                        FocusAction.Back -> {
+                            if (!focusNavigator.handleBack()) coordinator.onBack()
+                        }
                     }
                 }
             }

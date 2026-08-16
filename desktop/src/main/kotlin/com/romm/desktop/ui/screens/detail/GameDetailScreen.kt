@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -33,9 +35,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -43,6 +48,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.library.CollectionDialogState
@@ -476,10 +482,26 @@ private fun ScreenshotViewer(
     onClose: () -> Unit,
 ) {
     val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
     var index by remember(screenshotUrls) {
         mutableStateOf(initialIndex.coerceIn(0, (screenshotUrls.size - 1).coerceAtLeast(0)))
     }
     val focusRequester = remember { FocusRequester() }
+    val focusOverrideOwner = remember { Any() }
+    DisposableEffect(navigator, focusOverrideOwner, screenshotUrls, onClose) {
+        navigator.installSpatialFocusOverride(
+            owner = focusOverrideOwner,
+            moveFocus = { direction ->
+                when (direction) {
+                    FocusDirection.Left -> if (index > 0) index--
+                    FocusDirection.Right -> if (index < screenshotUrls.lastIndex) index++
+                }
+                true
+            },
+            onBack = onClose,
+        )
+        onDispose { navigator.removeSpatialFocusOverride(focusOverrideOwner) }
+    }
     LaunchedEffect(Unit) { focusRequester.requestFocusSafely() }
 
     Box(
@@ -552,6 +574,7 @@ private fun ScreenshotViewer(
  * screen-level back shortcut does.
  */
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun CollectionPickerOverlay(
     rom: RomDetail,
     dialogState: CollectionDialogState,
@@ -567,11 +590,34 @@ private fun CollectionPickerOverlay(
     onDismiss: () -> Unit,
 ) {
     val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val focusManager = LocalFocusManager.current
+    val focusOverrideOwner = remember { Any() }
+    val overlayFocusRequester = remember { FocusRequester() }
+    val initialFocusRequester = remember { FocusRequester() }
+
+    DisposableEffect(navigator, focusManager, focusOverrideOwner, onDismiss) {
+        navigator.installSpatialFocusOverride(
+            owner = focusOverrideOwner,
+            moveFocus = focusManager::moveFocus,
+            onBack = onDismiss,
+        )
+        onDispose { navigator.removeSpatialFocusOverride(focusOverrideOwner) }
+    }
+    LaunchedEffect(Unit) {
+        overlayFocusRequester.requestFocusSafely()
+    }
+    LaunchedEffect(dialogState, collections) {
+        initialFocusRequester.requestFocusSafely()
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.6f))
+            .focusProperties { exit = { FocusRequester.Cancel } }
+            .focusGroup()
+            .focusRequester(overlayFocusRequester)
             // Swallow stray clicks so the scrim doesn't pass through to the rail behind it.
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
             // Escape dismisses the picker (must win over the screen-level back shortcut).
@@ -612,7 +658,12 @@ private fun CollectionPickerOverlay(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         ErrorBanner(message = "Couldn't load collections (${errorMessage(collections.error)})")
-                        RetryButton(onRetry = onCollectionRetry)
+                        RetryButton(
+                            onRetry = onCollectionRetry,
+                            modifier = Modifier
+                                .focusRequester(initialFocusRequester)
+                                .focusableItem("collection:retry", navigator, onCollectionRetry),
+                        )
                     }
 
                     is CollectionLoadState.Loaded -> {
@@ -627,17 +678,40 @@ private fun CollectionPickerOverlay(
                                 modifier = Modifier.fillMaxWidth().height(320.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                items(collections.ownedWritable, key = { it.id }) { collection ->
+                                itemsIndexed(collections.ownedWritable, key = { _, item -> item.id }) { index, collection ->
                                     CollectionRow(
                                         name = collection.name,
                                         romCount = collection.romCount,
                                         isMember = collection.romIds.contains(rom.id),
                                         onClick = { onCollectionSelected(collection.id) },
+                                        modifier = Modifier
+                                            .then(
+                                                if (index == 0) {
+                                                    Modifier.focusRequester(initialFocusRequester)
+                                                } else {
+                                                    Modifier
+                                                },
+                                            )
+                                            .focusableItem("collection:${collection.id}", navigator) {
+                                                onCollectionSelected(collection.id)
+                                            },
                                     )
                                 }
                             }
                         }
-                        TextButton(onClick = onCreateNewRequested, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = onCreateNewRequested,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (collections.ownedWritable.isEmpty()) {
+                                        Modifier.focusRequester(initialFocusRequester)
+                                    } else {
+                                        Modifier
+                                    },
+                                )
+                                .focusableItem("collection:new", navigator, onCreateNewRequested),
+                        ) {
                             Text("+ New collection…", color = colors.romm300)
                         }
                     }
@@ -649,6 +723,7 @@ private fun CollectionPickerOverlay(
                         onValueChange = onCollectionNameChanged,
                         label = "Collection name",
                         onDone = onCreateSubmit,
+                        modifier = Modifier.focusRequester(initialFocusRequester),
                     )
                     val validationError = dialogState.validationError
                     if (validationError != null) {
@@ -656,10 +731,18 @@ private fun CollectionPickerOverlay(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TvButton(onClick = onCreateSubmit, enabled = !dialogState.submitting) {
+                        TvButton(
+                            onClick = onCreateSubmit,
+                            enabled = !dialogState.submitting,
+                            modifier = Modifier.focusableItem("collection:create", navigator, onCreateSubmit),
+                        ) {
                             Text(if (dialogState.submitting) "Creating…" else "Create")
                         }
-                        TvOutlinedButton(onClick = onCancelCreate, enabled = !dialogState.submitting) {
+                        TvOutlinedButton(
+                            onClick = onCancelCreate,
+                            enabled = !dialogState.submitting,
+                            modifier = Modifier.focusableItem("collection:cancel", navigator, onCancelCreate),
+                        ) {
                             Text("Cancel")
                         }
                     }
@@ -678,7 +761,14 @@ private fun CollectionPickerOverlay(
             if (alertMessage != null) {
                 Spacer(modifier = Modifier.height(12.dp))
                 ErrorBanner(message = alertMessage)
-                TextButton(onClick = onAlertDismissed) {
+                TextButton(
+                    onClick = onAlertDismissed,
+                    modifier = Modifier.focusableItem(
+                        "collection:alert-ok",
+                        navigator,
+                        onAlertDismissed,
+                    ),
+                ) {
                     Text("OK", color = colors.romm300)
                 }
             }
@@ -693,13 +783,14 @@ private fun CollectionRow(
     romCount: Int,
     isMember: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalRommulusColors.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
@@ -769,16 +860,33 @@ private fun SiblingVersionRow(
 
 /** Centered modal alert panel with a single OK action (favorite-failure alerts). */
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun ModalAlertPanel(
     message: String,
     onOk: () -> Unit,
 ) {
     val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
+    val focusOverrideOwner = remember { Any() }
+
+    DisposableEffect(navigator, focusManager, focusOverrideOwner, onOk) {
+        navigator.installSpatialFocusOverride(
+            owner = focusOverrideOwner,
+            moveFocus = focusManager::moveFocus,
+            onBack = onOk,
+        )
+        onDispose { navigator.removeSpatialFocusOverride(focusOverrideOwner) }
+    }
+    LaunchedEffect(Unit) { focusRequester.requestFocusSafely() }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.6f))
+            .focusProperties { exit = { FocusRequester.Cancel } }
+            .focusGroup()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
         contentAlignment = Alignment.Center,
     ) {
@@ -796,7 +904,12 @@ private fun ModalAlertPanel(
                 color = colors.textPrimary,
             )
             Spacer(modifier = Modifier.height(16.dp))
-            TvButton(onClick = onOk) {
+            TvButton(
+                onClick = onOk,
+                modifier = Modifier
+                    .focusRequester(focusRequester)
+                    .focusableItem("alert:ok", navigator, onOk),
+            ) {
                 Text("OK")
             }
         }

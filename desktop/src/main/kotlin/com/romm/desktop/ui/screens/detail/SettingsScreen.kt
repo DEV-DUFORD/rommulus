@@ -17,6 +17,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,6 +31,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -94,6 +96,7 @@ fun SettingsScreen(
     val presenter = remember { coordinator.settingsPresenter() }
     val uiState by presenter.uiState.collectAsState()
     var showThemeDialog by remember { mutableStateOf(false) }
+    var restoreThemeFocus by remember { mutableStateOf(false) }
     var privacyOpenError by remember { mutableStateOf(false) }
 
     // Focus requesters — the D-pad/arrow navigation chain (mirrors the Android screen).
@@ -112,6 +115,13 @@ fun SettingsScreen(
     val autocleanFocus = remember { FocusRequester() }
     val licensesFocus = remember { FocusRequester() }
     val privacyFocus = remember { FocusRequester() }
+
+    LaunchedEffect(showThemeDialog, restoreThemeFocus) {
+        if (!showThemeDialog && restoreThemeFocus) {
+            themeFocus.requestFocus()
+            restoreThemeFocus = false
+        }
+    }
 
     // Theming is owned by the shell (RommulusDesktopApp wraps the whole app in RommulusTheme
     // with coordinator.settingsAdapter.currentTheme, which updates live).
@@ -509,8 +519,12 @@ fun SettingsScreen(
             onSelect = { theme ->
                 presenter.onThemeSelected(theme)
                 showThemeDialog = false
+                restoreThemeFocus = true
             },
-            onDismiss = { showThemeDialog = false },
+            onDismiss = {
+                showThemeDialog = false
+                restoreThemeFocus = true
+            },
         )
     }
 }
@@ -613,10 +627,22 @@ private fun ThemePickerDialog(
     // RommulusTheme is harmless, same rationale as OnboardingScreen).
     RommulusTheme(theme = current) {
         val colors = LocalRommulusColors.current
+        val navigator = LocalFocusNavigator.current
         Dialog(
             onDismissRequest = onDismiss,
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         ) {
+            val dialogFocusManager = LocalFocusManager.current
+            val focusOverrideOwner = remember { Any() }
+            DisposableEffect(navigator, dialogFocusManager, focusOverrideOwner) {
+                navigator.installSpatialFocusOverride(
+                    focusOverrideOwner,
+                    dialogFocusManager::moveFocus,
+                    onDismiss,
+                )
+                onDispose { navigator.removeSpatialFocusOverride(focusOverrideOwner) }
+            }
+
             Column(
                 modifier = Modifier
                     .width(360.dp)
@@ -651,6 +677,7 @@ private fun ThemePickerDialog(
                     val buttonModifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 10.dp)
+                        .focusableItem("theme:${theme.name}", navigator) { onSelect(theme) }
                         .then(
                             if (index == 0) Modifier.focusRequester(firstFocusRequester) else Modifier,
                         )

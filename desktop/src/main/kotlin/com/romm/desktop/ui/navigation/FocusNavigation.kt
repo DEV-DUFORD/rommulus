@@ -36,6 +36,10 @@ class FocusNavigator {
     /** Stable key of the focused item. Registration indices can shift as lazy items change. */
     private var focusedKey: Any? = null
 
+    private var spatialFocusOverrideOwner: Any? = null
+    private var spatialFocusOverride: ((FocusDirection) -> Boolean)? = null
+    private var backOverride: (() -> Unit)? = null
+
     /** Data class returned by [snapshot]. */
     data class RegisteredItem(val key: Any, val requester: FocusRequester)
 
@@ -115,6 +119,37 @@ class FocusNavigator {
     /** Clear focus ownership only if [key] is still the item recorded as focused. */
     internal fun clearFocusedKey(key: Any) {
         if (focusedKey == key) focusedKey = null
+    }
+
+    /** Route spatial movement to a modal's focus owner while that modal is visible. */
+    internal fun installSpatialFocusOverride(
+        owner: Any,
+        moveFocus: (FocusDirection) -> Boolean,
+        onBack: () -> Unit,
+    ) {
+        spatialFocusOverrideOwner = owner
+        spatialFocusOverride = moveFocus
+        backOverride = onBack
+    }
+
+    internal fun removeSpatialFocusOverride(owner: Any) {
+        if (spatialFocusOverrideOwner == owner) {
+            spatialFocusOverrideOwner = null
+            spatialFocusOverride = null
+            backOverride = null
+        }
+    }
+
+    fun moveSpatialFocus(
+        direction: FocusDirection,
+        fallback: (FocusDirection) -> Boolean,
+    ): Boolean = spatialFocusOverride?.invoke(direction) ?: fallback(direction)
+
+    /** Invoke a modal's back action, returning false when no modal owns controller focus. */
+    fun handleBack(): Boolean {
+        val action = backOverride ?: return false
+        action()
+        return true
     }
 
     // ----------------------------------------------------------------------- move focus
