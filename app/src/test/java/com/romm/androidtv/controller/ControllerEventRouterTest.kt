@@ -152,7 +152,7 @@ class ControllerEventRouterTest {
 
             val mapping = ControllerMapping()
             val snap = GamepadSnapshot.fromPhysicalInput(
-                setOf(KeyEvent.KEYCODE_DPAD_UP),
+                setOf(NeutralKey.DPAD_UP),
                 emptyMap(),
                 mapping
             )
@@ -165,8 +165,8 @@ class ControllerEventRouterTest {
             // This test verifies the design: hatDpadKeysPerDevice is tracked separately
             // The actual merging happens in rebuildSnapshotForDevice
             val mapping = ControllerMapping()
-            val pressedKeys = setOf(android.view.KeyEvent.KEYCODE_DPAD_UP)
-            val hatDpadKeys = setOf(android.view.KeyEvent.KEYCODE_DPAD_RIGHT)
+            val pressedKeys = setOf(NeutralKey.DPAD_UP)
+            val hatDpadKeys = setOf(NeutralKey.DPAD_RIGHT)
             val mergedKeys = pressedKeys + hatDpadKeys
 
             val snap = GamepadSnapshot.fromPhysicalInput(mergedKeys, emptyMap(), mapping)
@@ -200,8 +200,8 @@ class ControllerEventRouterTest {
         fun `simultaneousDpadDirections`() {
             val mapping = ControllerMapping()
             val pressedKeys = setOf(
-                android.view.KeyEvent.KEYCODE_DPAD_UP,
-                android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+                NeutralKey.DPAD_UP,
+                NeutralKey.DPAD_RIGHT
             )
             val snap = GamepadSnapshot.fromPhysicalInput(pressedKeys, emptyMap(), mapping)
 
@@ -221,8 +221,8 @@ class ControllerEventRouterTest {
         fun `leftStickMapping`() {
             val mapping = ControllerMapping()
             val axes = mapOf(
-                android.view.MotionEvent.AXIS_X to 0.5f,
-                android.view.MotionEvent.AXIS_Y to -0.3f
+                NeutralAxis.X to 0.5f,
+                NeutralAxis.Y to -0.3f
             )
             val snap = GamepadSnapshot.fromPhysicalInput(emptySet(), axes, mapping)
 
@@ -235,8 +235,8 @@ class ControllerEventRouterTest {
         fun `rightStickMapping`() {
             val mapping = ControllerMapping()
             val axes = mapOf(
-                android.view.MotionEvent.AXIS_RX to 0.7f,
-                android.view.MotionEvent.AXIS_RY to -0.4f
+                NeutralAxis.RX to 0.7f,
+                NeutralAxis.RY to -0.4f
             )
             val snap = GamepadSnapshot.fromPhysicalInput(emptySet(), axes, mapping)
 
@@ -249,8 +249,8 @@ class ControllerEventRouterTest {
         fun `rightStickFallbackMapping`() {
             val mapping = ControllerMapping()
             val axes = mapOf(
-                android.view.MotionEvent.AXIS_Z to 0.7f,
-                android.view.MotionEvent.AXIS_RZ to -0.4f
+                NeutralAxis.Z to 0.7f,
+                NeutralAxis.RZ to -0.4f
             )
             val snap = GamepadSnapshot.fromPhysicalInput(emptySet(), axes, mapping)
 
@@ -299,7 +299,7 @@ class ControllerEventRouterTest {
             // Stick moved
             var snap = GamepadSnapshot.fromPhysicalInput(
                 emptySet(),
-                mapOf(android.view.MotionEvent.AXIS_X to 0.8f),
+                mapOf(NeutralAxis.X to 0.8f),
                 mapping
             )
             assertThat(snap.axes[LogicalControl.AXIS_LX.index]).isGreaterThan(0f)
@@ -307,7 +307,7 @@ class ControllerEventRouterTest {
             // Stick returned to center (axis value = 0)
             snap = GamepadSnapshot.fromPhysicalInput(
                 emptySet(),
-                mapOf(android.view.MotionEvent.AXIS_X to 0f),
+                mapOf(NeutralAxis.X to 0f),
                 mapping
             )
             // With default deadzone (0.15), 0 should be zeroed
@@ -424,7 +424,7 @@ class ControllerEventRouterTest {
     @DisplayName("Axis-direction (half-axis) digital bindings")
     inner class AxisDirectionBindingTests {
 
-        private fun snap(axes: Map<Int, Float>, mapping: ControllerMapping): GamepadSnapshot =
+        private fun snap(axes: Map<NeutralAxis, Float>, mapping: ControllerMapping): GamepadSnapshot =
             GamepadSnapshot.fromPhysicalInput(emptySet(), axes, mapping)
 
         @Test
@@ -432,10 +432,10 @@ class ControllerEventRouterTest {
         fun `positivePolarityPressesButton`() {
             val mapping = ControllerMapping(
                 axisDirections = mapOf(
-                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                    AxisDirection(NeutralAxis.X, +1) to LogicalControl.BUTTON_A
                 )
             )
-            val snap = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.8f), mapping)
+            val snap = snap(mapOf(NeutralAxis.X to 0.8f), mapping)
             assertThat(snap.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
         }
 
@@ -444,13 +444,13 @@ class ControllerEventRouterTest {
         fun `returnToNeutralReleasesButton`() {
             val mapping = ControllerMapping(
                 axisDirections = mapOf(
-                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                    AxisDirection(NeutralAxis.X, +1) to LogicalControl.BUTTON_A
                 )
             )
-            val neutral = snap(mapOf(android.view.MotionEvent.AXIS_X to 0f), mapping)
+            val neutral = snap(mapOf(NeutralAxis.X to 0f), mapping)
             assertThat(neutral.buttons[LogicalControl.BUTTON_A.index]).isZero()
 
-            val withinDeadzone = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.1f), mapping)
+            val withinDeadzone = snap(mapOf(NeutralAxis.X to 0.1f), mapping)
             assertThat(withinDeadzone.buttons[LogicalControl.BUTTON_A.index]).isZero()
         }
 
@@ -459,13 +459,13 @@ class ControllerEventRouterTest {
         fun `deadzoneThresholdRespected`() {
             val mapping = ControllerMapping(
                 axisDirections = mapOf(
-                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                    AxisDirection(NeutralAxis.X, +1) to LogicalControl.BUTTON_A
                 )
             )
-            val justInside = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.14f), mapping)
+            val justInside = snap(mapOf(NeutralAxis.X to 0.14f), mapping)
             assertThat(justInside.buttons[LogicalControl.BUTTON_A.index]).isZero()
 
-            val justOutside = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.16f), mapping)
+            val justOutside = snap(mapOf(NeutralAxis.X to 0.16f), mapping)
             assertThat(justOutside.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
         }
 
@@ -474,16 +474,16 @@ class ControllerEventRouterTest {
         fun `negativePolarityOnlyOnNegativeSide`() {
             val mapping = ControllerMapping(
                 axisDirections = mapOf(
-                    AxisDirection(android.view.MotionEvent.AXIS_X, -1) to LogicalControl.DPAD_LEFT
+                    AxisDirection(NeutralAxis.X, -1) to LogicalControl.DPAD_LEFT
                 )
             )
-            val negative = snap(mapOf(android.view.MotionEvent.AXIS_X to -0.8f), mapping)
+            val negative = snap(mapOf(NeutralAxis.X to -0.8f), mapping)
             assertThat(negative.buttons[LogicalControl.DPAD_LEFT.index]).isEqualTo(1f)
 
-            val positive = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.8f), mapping)
+            val positive = snap(mapOf(NeutralAxis.X to 0.8f), mapping)
             assertThat(positive.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
 
-            val neutral = snap(mapOf(android.view.MotionEvent.AXIS_X to 0f), mapping)
+            val neutral = snap(mapOf(NeutralAxis.X to 0f), mapping)
             assertThat(neutral.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
         }
 
@@ -492,11 +492,11 @@ class ControllerEventRouterTest {
         fun `bothHalfAxesMapToDifferentButtons`() {
             val mapping = ControllerMapping(
                 axisDirections = mapOf(
-                    AxisDirection(android.view.MotionEvent.AXIS_X, -1) to LogicalControl.DPAD_LEFT,
-                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.DPAD_RIGHT
+                    AxisDirection(NeutralAxis.X, -1) to LogicalControl.DPAD_LEFT,
+                    AxisDirection(NeutralAxis.X, +1) to LogicalControl.DPAD_RIGHT
                 )
             )
-            val right = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.9f), mapping)
+            val right = snap(mapOf(NeutralAxis.X to 0.9f), mapping)
             assertThat(right.buttons[LogicalControl.DPAD_RIGHT.index]).isEqualTo(1f)
             assertThat(right.buttons[LogicalControl.DPAD_LEFT.index]).isZero()
         }
@@ -505,12 +505,12 @@ class ControllerEventRouterTest {
         @DisplayName("axis-direction binding does not affect existing axis output")
         fun `axisDirectionBindingPreservesAnalogAxis`() {
             val mapping = ControllerMapping(
-                axes = mapOf(android.view.MotionEvent.AXIS_X to LogicalControl.AXIS_LX),
+                axes = mapOf(NeutralAxis.X to LogicalControl.AXIS_LX),
                 axisDirections = mapOf(
-                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                    AxisDirection(NeutralAxis.X, +1) to LogicalControl.BUTTON_A
                 )
             )
-            val snap = snap(mapOf(android.view.MotionEvent.AXIS_X to 0.8f), mapping)
+            val snap = snap(mapOf(NeutralAxis.X to 0.8f), mapping)
             assertThat(snap.axes[LogicalControl.AXIS_LX.index]).isEqualTo(0.8f)
             assertThat(snap.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
         }
@@ -527,7 +527,7 @@ class ControllerEventRouterTest {
 
             val custom = ControllerMapping(
                 axisDirections = mapOf(
-                    AxisDirection(android.view.MotionEvent.AXIS_X, +1) to LogicalControl.BUTTON_A
+                    AxisDirection(NeutralAxis.X, +1) to LogicalControl.BUTTON_A
                 )
             )
             router.applyMappings(mapOf(0 to custom, 1 to custom, 3 to custom))
@@ -562,7 +562,7 @@ class ControllerEventRouterTest {
 
             val custom = ControllerMapping(
                 axisDirections = mapOf(
-                    AxisDirection(android.view.MotionEvent.AXIS_Y, -1) to LogicalControl.DPAD_UP
+                    AxisDirection(NeutralAxis.Y, -1) to LogicalControl.DPAD_UP
                 )
             )
             router.applyMappings(mapOf(4 to custom, -1 to custom))

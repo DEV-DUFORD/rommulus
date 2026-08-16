@@ -2,8 +2,8 @@ package com.romm.androidtv.controller.config
 
 import android.view.KeyEvent
 import android.view.MotionEvent
-import com.romm.androidtv.controller.model.AXIS_TO_CONTROL
-import com.romm.androidtv.controller.model.KEYCODE_TO_CONTROL
+import com.romm.androidtv.controller.model.NEUTRAL_AXIS_TO_CONTROL
+import com.romm.androidtv.controller.model.NEUTRAL_KEY_TO_CONTROL
 import com.romm.androidtv.controller.model.LogicalControl
 import com.romm.androidtv.emulation.model.CoreManifest
 
@@ -350,7 +350,7 @@ object CoreControllerProfiles {
             val keyCode = when (target) {
                 LogicalControl.BUTTON_LT -> KeyEvent.KEYCODE_BUTTON_L2
                 LogicalControl.BUTTON_RT -> KeyEvent.KEYCODE_BUTTON_R2
-                else -> KEYCODE_TO_CONTROL.entries.first { it.value == target }.key
+                else -> NEUTRAL_KEY_TO_CONTROL.entries.first { it.value == target }.key.platformCode
             }
             PhysicalBinding.Key(keyCode)
         }
@@ -360,7 +360,7 @@ object CoreControllerProfiles {
             val axis = when (target) {
                 LogicalControl.AXIS_RX -> MotionEvent.AXIS_RX
                 LogicalControl.AXIS_RY -> MotionEvent.AXIS_RY
-                else -> AXIS_TO_CONTROL.entries.first { it.value == target }.key
+                else -> NEUTRAL_AXIS_TO_CONTROL.entries.first { it.value == target }.key.platformCode
             }
             PhysicalBinding.Axis(axis)
         }

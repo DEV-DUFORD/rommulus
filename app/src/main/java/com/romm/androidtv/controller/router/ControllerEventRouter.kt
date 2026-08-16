@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import com.romm.androidtv.controller.adapters.AndroidDeviceSignatureAdapter
 import com.romm.androidtv.controller.isAndroidTvVirtualController
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.policy.AxisMappingPolicy
@@ -13,6 +14,7 @@ import com.romm.androidtv.controller.policy.EventConsumptionPolicy
 import com.romm.androidtv.controller.policy.RemoteSlotPolicy
 import com.romm.androidtv.controller.policy.SlotAssignmentPolicy
 import com.romm.androidtv.controller.policy.SourceFilterPolicy
+import com.romm.androidtv.controller.policy.SourceMask
 import com.romm.androidtv.controller.util.AxisNormalizer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -174,10 +176,10 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         val device = InputDevice.getDevice(deviceId) ?: return
 
         val sources = device.sources
-        if (!SourceFilterPolicy.isControllerSource(sources)) return
+        if (!SourceFilterPolicy.isControllerSource(sourceMaskFromAndroid(sources))) return
         if (isTvRemoteByAxes(device, sources)) return
 
-        val signature = DeviceSignature.from(device)
+        val signature = AndroidDeviceSignatureAdapter.from(device)
         // Android TV exposes helpers such as "virtual-search" with GAMEPAD/JOYSTICK
         // capabilities. They are not playable controllers and must not consume a
         // player slot, otherwise Player 1 mappings are installed on the virtual
@@ -198,8 +200,8 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
 
     override fun onInputDeviceChanged(deviceId: Int) {
         val device = InputDevice.getDevice(deviceId) ?: return
-        if (!SourceFilterPolicy.isControllerSource(device.sources)) return
-        val signature = DeviceSignature.from(device)
+        if (!SourceFilterPolicy.isControllerSource(sourceMaskFromAndroid(device.sources))) return
+        val signature = AndroidDeviceSignatureAdapter.from(device)
         if (signature.isAndroidTvVirtualController()) {
             onInputDeviceRemoved(deviceId)
             return
@@ -247,7 +249,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         val device = InputDevice.getDevice(deviceId) ?: return false
 
         val sources = device.sources
-        if (!SourceFilterPolicy.isControllerSource(sources)) return false
+        if (!SourceFilterPolicy.isControllerSource(sourceMaskFromAndroid(sources))) return false
 
         val keyCode = event.keyCode
 
@@ -345,7 +347,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         val device = InputDevice.getDevice(deviceId) ?: return false
 
         val sources = event.source
-        if (!SourceFilterPolicy.isControllerSource(sources)) return false
+        if (!SourceFilterPolicy.isControllerSource(sourceMaskFromAndroid(sources))) return false
         // Skip TV remote motion events (they don't have motion axes)
         if (isTvRemoteByAxes(device, sources)) return false
 
@@ -429,12 +431,13 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         ) {
             val result = RemoteSlotPolicy.makeRoomForPhysicalController(currentSlots)
             currentSlots = result.slots
-            if (result.remoteSlotIndex == null) {
+            val newRemoteIndex = result.remoteSlotIndex
+            if (newRemoteIndex == null) {
                 deviceIdToSlotIndex.remove(virtualRemoteDeviceId)
                 pressedKeysPerDevice.remove(virtualRemoteDeviceId)
                 hatDpadKeysPerDevice.remove(virtualRemoteDeviceId)
             } else {
-                deviceIdToSlotIndex[virtualRemoteDeviceId] = result.remoteSlotIndex
+                deviceIdToSlotIndex[virtualRemoteDeviceId] = newRemoteIndex
             }
             slotIndex = SlotAssignmentPolicy.findSlotForDevice(currentSlots, signature)
         }
@@ -501,7 +504,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         val mapping = if (deviceId == virtualRemoteDeviceId) {
             slot.mapping
         } else {
-            slot.mapping.copy(axes = resolvedAxesPerDevice[deviceId] ?: emptyMap())
+            slot.mapping.copy(axes = resolvedAxesToNeutral(resolvedAxesPerDevice[deviceId]))
         }
 
         val pressedKeys = pressedKeysPerDevice[deviceId] ?: emptySet()
@@ -510,7 +513,13 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         val mergedKeys = pressedKeys + hatDpadKeys
         val axisValues = axisValuesPerDevice[deviceId] ?: emptyMap()
 
-        val snapshot = GamepadSnapshot.fromPhysicalInput(mergedKeys, axisValues, mapping)
+        val snapshot = GamepadSnapshot.fromPhysicalInput(
+            mergedKeys.mapNotNull { NeutralKey.fromPlatform(it) }.toSet(),
+            axisValues.mapNotNull { (code, value) ->
+                NeutralAxis.fromPlatform(code)?.let { it to value }
+            }.toMap(),
+            mapping
+        )
         updateSlot(slotIdx) { it.updateSnapshot(snapshot) }
     }
 
@@ -552,11 +561,12 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         val range = ranges?.find { it.axis == axisConstant }
         if (range == null) return AxisNormalizer.normalizeFallback(rawValue)
 
+        val neutralAxis = NeutralAxis.fromPlatform(axisConstant)
         return if (
-            axisConstant == android.view.MotionEvent.AXIS_LTRIGGER ||
-            axisConstant == android.view.MotionEvent.AXIS_RTRIGGER ||
-            axisConstant == android.view.MotionEvent.AXIS_BRAKE ||
-            axisConstant == android.view.MotionEvent.AXIS_GAS ||
+            neutralAxis == NeutralAxis.LTRIGGER ||
+            neutralAxis == NeutralAxis.RTRIGGER ||
+            neutralAxis == NeutralAxis.BRAKE ||
+            neutralAxis == NeutralAxis.GAS ||
             logicalControl == LogicalControl.TRIGGER_LEFT ||
             logicalControl == LogicalControl.TRIGGER_RIGHT
         ) {
@@ -570,13 +580,18 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         device: InputDevice,
         mapping: ControllerMapping
     ): Map<Int, LogicalControl> {
-        val supportedAxes = device.motionRanges.orEmpty().mapTo(mutableSetOf()) { it.axis }
-        val resolved = AxisMappingPolicy.resolve(supportedAxes, mapping.axes).toMutableMap()
+        val supportedAxes = device.motionRanges.orEmpty()
+            .mapNotNull { NeutralAxis.fromPlatform(it.axis) }
+            .toMutableSet()
+        val resolved = AxisMappingPolicy.resolve(supportedAxes, mapping.axes)
+            .mapKeys { it.key.platformCode }
+            .toMutableMap()
         for (direction in mapping.axisDirections.keys) {
             if (direction.axis in supportedAxes) {
                 resolved.putIfAbsent(
-                    direction.axis,
-                    AXIS_TO_CONTROL[direction.axis] ?: mapping.axisDirections.getValue(direction),
+                    direction.axis.platformCode,
+                    NEUTRAL_AXIS_TO_CONTROL[direction.axis]
+                        ?: mapping.axisDirections.getValue(direction),
                 )
             }
         }
@@ -584,22 +599,46 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     }
 
     /**
+     * Convert an Android-constant-keyed resolved-axes map into a
+     * [NeutralAxis]-keyed map for installation into a [ControllerMapping].
+     */
+    private fun resolvedAxesToNeutral(resolved: Map<Int, LogicalControl>?): Map<NeutralAxis, LogicalControl> =
+        resolved?.mapNotNull { (code, logical) ->
+            NeutralAxis.fromPlatform(code)?.let { it to logical }
+        }?.toMap() ?: emptyMap()
+
+    /**
      * Check whether a device is likely a TV remote based on its motion ranges.
      * A device with DPAD source but no joystick axes is a remote.
      */
     private fun isTvRemoteByAxes(device: InputDevice, sources: Int): Boolean {
-        val ranges = device.motionRanges ?: return SourceFilterPolicy.isTvRemote(sources, 0)
+        val neutralSources = sourceMaskFromAndroid(sources)
+        val ranges = device.motionRanges
+            ?: return SourceFilterPolicy.isTvRemote(neutralSources, 0)
 
         val joystickAxisCount = ranges.count { r ->
-            r.axis == android.view.MotionEvent.AXIS_X ||
-            r.axis == android.view.MotionEvent.AXIS_Y ||
-            r.axis == android.view.MotionEvent.AXIS_RX ||
-            r.axis == android.view.MotionEvent.AXIS_RY ||
-            r.axis == android.view.MotionEvent.AXIS_Z ||
-            r.axis == android.view.MotionEvent.AXIS_RZ
+            val neutral = NeutralAxis.fromPlatform(r.axis)
+            neutral == NeutralAxis.X ||
+                neutral == NeutralAxis.Y ||
+                neutral == NeutralAxis.RX ||
+                neutral == NeutralAxis.RY ||
+                neutral == NeutralAxis.Z ||
+                neutral == NeutralAxis.RZ
         }
 
-        return SourceFilterPolicy.isTvRemote(sources, joystickAxisCount)
+        return SourceFilterPolicy.isTvRemote(neutralSources, joystickAxisCount)
+    }
+
+    /**
+     * Adapter: translate an Android `InputDevice` source mask into the neutral
+     * [SourceMask] bits consumed by the shared source filter policy.
+     */
+    private fun sourceMaskFromAndroid(sources: Int): Int {
+        var mask = 0
+        if ((sources and android.view.InputDevice.SOURCE_GAMEPAD) != 0) mask = mask or SourceMask.GAMEPAD
+        if ((sources and android.view.InputDevice.SOURCE_JOYSTICK) != 0) mask = mask or SourceMask.JOYSTICK
+        if ((sources and android.view.InputDevice.SOURCE_DPAD) != 0) mask = mask or SourceMask.DPAD
+        return mask
     }
 
     /**
@@ -666,11 +705,13 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         val effectiveMapping = if (deviceId == null || deviceId == virtualRemoteDeviceId) {
             newMapping
         } else {
-            newMapping.copy(axes = resolvedAxesPerDevice[deviceId] ?: emptyMap())
+            newMapping.copy(axes = resolvedAxesToNeutral(resolvedAxesPerDevice[deviceId]))
         }
         val snapshot = GamepadSnapshot.fromPhysicalInput(
-            pressedKeys + hatKeys,
-            axisValues,
+            (pressedKeys + hatKeys).mapNotNull { NeutralKey.fromPlatform(it) }.toSet(),
+            axisValues.mapNotNull { (code, value) ->
+                NeutralAxis.fromPlatform(code)?.let { it to value }
+            }.toMap(),
             effectiveMapping
         )
         updateSlot(slotIndex) { it.remap(newMapping).updateSnapshot(snapshot) }

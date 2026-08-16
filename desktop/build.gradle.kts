@@ -19,9 +19,18 @@ dependencies {
     // dbus-java-core depends on slf4j-api; a NOP binding keeps the JVM unit tests quiet without a
     // logging backend (and without a Secret Service daemon).
     runtimeOnly("org.slf4j:slf4j-nop:2.0.17")
+    // Desktop SQLite (schema v1, independent of Android Room v4) behind explicit stores —
+    // plans/LINUX_X64.md §10.2. Pure-JDBC driver; no Room annotations anywhere on desktop.
+    implementation("org.xerial:sqlite-jdbc:3.41.2.2")
+    implementation("net.java.jinput:jinput:2.0.10")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:1.9.23")
     implementation(project(":shared:storage-api"))
+    implementation(project(":shared:domain"))
+    implementation(project(":shared:network"))
+    implementation(project(":shared:presentation"))
+    // OkHttp (used by shared:network — re-exported here because desktop also fetches artwork).
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("org.assertj:assertj-core:3.25.3")
 }
 

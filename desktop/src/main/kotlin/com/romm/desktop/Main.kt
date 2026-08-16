@@ -1,26 +1,49 @@
 package com.romm.desktop
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
+import com.romm.desktop.storage.FileLockAppInstanceLock
+import com.romm.desktop.storage.paths.XdgAppPaths
+import com.romm.desktop.storage.secret.dbus.SecretServiceDbusBackend
 
+/**
+ * Desktop entry point: builds the real XDG [XdgAppPaths], the freedesktop Secret Service
+ * backend, and the [DesktopAppCoordinator], then hosts the Compose shell in a Window.
+ *
+ * Single-instance enforcement (plans/LINUX_X64.md §10.4): if the advisory file lock cannot
+ * be acquired, another instance is already running — print an explanatory message and exit.
+ */
 fun main() = application {
+    val paths = XdgAppPaths()
+    val lock = FileLockAppInstanceLock(null, paths.stateDir)
+    if (!lock.acquire()) {
+        println("RomMulus is already running. Only one instance may run at a time; exiting.")
+        return@application
+    }
+
+    val coordinator = DesktopAppCoordinator(
+        paths = paths,
+        secretBackend = SecretServiceDbusBackend(),
+        appVersion = APP_VERSION,
+        buildDefaultOrigin = BUILD_DEFAULT_ORIGIN,
+    )
+    // Select the root AppMode synchronously before the first composition so onboarding never
+    // flashes Home (mirrors MainActivity).
+    coordinator.appMode = coordinator.computeStartupAppMode()
+
     Window(
         onCloseRequest = ::exitApplication,
         title = "RomMulus",
-        state = WindowState(width = 1280.dp, height = 720.dp)
+        state = WindowState(width = 1280.dp, height = 720.dp),
     ) {
-        MaterialTheme {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("RomMulus Linux — Phase 0")
-            }
-        }
+        RommulusDesktopApp(
+            coordinator = coordinator,
+            onCloseRequest = ::exitApplication,
+        )
     }
 }
+
+private const val APP_VERSION = "0.1.0-desktop"
+private const val BUILD_DEFAULT_ORIGIN = "https://demo.romm.app"

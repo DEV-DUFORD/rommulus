@@ -179,10 +179,19 @@ class SecretServiceDbusBackend(
         }
     }
 
+    /**
+     * Returns `true` iff the collection is locked, OR if the Locked property couldn't be read
+     * transiently. Fail-closed: a transient D-Bus failure to read the Locked property defaults to
+     * `true` (locked) so [state] never briefly reports [KeyringState.Available] for a locked
+     * collection — see PHASE5.md §5.2.
+     *
+     * This differs from transport-level failure, which is wrapped by the caller's catch block
+     * and mapped to [KeyringState.Unavailable]; only the *Locked-property value* defaults here.
+     */
     private fun isCollectionLocked(conn: DBusConnection, collection: DBusPath): Boolean = runCatching {
         val props = conn.getRemoteObject(BUS_NAME, collection.getPath(), Properties::class.java)
         props.Get<Boolean>(COLLECTION_IFACE, "Locked")
-    }.getOrDefault(false)
+    }.getOrDefault(true)
 
     /** Maps a caught transport/daemon failure to a fail-closed [KeyringState]. Never throws. */
     private fun classifyFailure(e: Throwable): KeyringState {

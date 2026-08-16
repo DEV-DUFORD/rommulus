@@ -4,6 +4,7 @@ import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.policy.EventConsumptionPolicy
 import com.romm.androidtv.controller.policy.SlotAssignmentPolicy
 import com.romm.androidtv.controller.policy.SourceFilterPolicy
+import com.romm.androidtv.controller.policy.SourceMask
 import com.romm.androidtv.controller.util.AxisNormalizer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
@@ -264,7 +265,7 @@ class ControllerRoutingLogicTest {
         @DisplayName("WebView receives only translated snapshots, not raw events")
         fun `only translated output`() {
             val mapping = ControllerMapping.swapAB(ControllerMapping())
-            val pressed = setOf(android.view.KeyEvent.KEYCODE_BUTTON_A)
+            val pressed = setOf(NeutralKey.BUTTON_A)
             val snap = GamepadSnapshot.fromPhysicalInput(pressed, emptyMap(), mapping)
 
             assertThat(snap.buttons[LogicalControl.BUTTON_B.index]).isEqualTo(1.0f)
@@ -279,9 +280,9 @@ class ControllerRoutingLogicTest {
     @Nested
     @DisplayName("SourceFilterPolicy — device classification")
     inner class SourceFilterTests {
-        private val SOURCE_GAMEPAD = android.view.InputDevice.SOURCE_GAMEPAD
-        private val SOURCE_JOYSTICK = android.view.InputDevice.SOURCE_JOYSTICK
-        private val SOURCE_DPAD = android.view.InputDevice.SOURCE_DPAD
+        private val SOURCE_GAMEPAD = SourceMask.GAMEPAD
+        private val SOURCE_JOYSTICK = SourceMask.JOYSTICK
+        private val SOURCE_DPAD = SourceMask.DPAD
 
         @Test
         @DisplayName("GAMEPAD source is a controller")
@@ -302,10 +303,9 @@ class ControllerRoutingLogicTest {
         }
 
         @Test
-        @DisplayName("KEYBOARD source is NOT a controller")
-        fun `keyboard not controller`() {
-            val SOURCE_KEYBOARD = android.view.InputDevice.SOURCE_KEYBOARD
-            assertThat(SourceFilterPolicy.isControllerSource(SOURCE_KEYBOARD)).isFalse()
+        @DisplayName("unrelated source bit is NOT a controller")
+        fun `unrelated source not controller`() {
+            assertThat(SourceFilterPolicy.isControllerSource(0x00001000)).isFalse()
         }
 
         @Test
@@ -432,7 +432,7 @@ class ControllerRoutingLogicTest {
                 .isEqualTo(1.0f)
 
             val rebuilt = GamepadSnapshot.fromPhysicalInput(
-                setOf(android.view.KeyEvent.KEYCODE_BUTTON_A),
+                setOf(NeutralKey.BUTTON_A),
                 emptyMap(),
                 remappedSlot.mapping
             )

@@ -42,6 +42,9 @@ fun AppPaths.databaseDir(): Path = dataDir.resolve("database")
 /** Resolve the saves directory under an [AppPaths].dataDir. */
 fun AppPaths.savesDir(): Path = dataDir.resolve("saves")
 
+/** Resolve the firmware/BIOS staging directory under an [AppPaths].dataDir (LINUX_X64.md §9 rule 1: firmware never lives under cache). */
+fun AppPaths.firmwareDir(): Path = dataDir.resolve("firmware")
+
 /** Resolve the journals directory under an [AppPaths].stateDir. */
 fun AppPaths.journalsDir(): Path = stateDir.resolve("journals")
 

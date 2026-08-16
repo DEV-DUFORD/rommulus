@@ -12,7 +12,7 @@
 #
 # PHASE-0 REALITY:
 #   The native/ directory, rommulus-player, cores, and tarball packaging
-#   do not exist yet (later phases).  Jobs 4-8 are stubbed with
+  # do not exist yet (later phases).  Jobs 5-9 are stubbed with
 #   `if: false` and will be enabled when their dependencies land.
 #
 # REQUIRED CI ASSERTIONS (from §15):
@@ -198,7 +198,71 @@ jobs:
           fi
 
   # =================================================================
-  # 4. native-debug-asan-ubsan  — STUBBED (Phase 7+)
+  # 4. secret-service-conformance  — Phase 5 (functional now)
+  # =================================================================
+  # plans/PHASE5.md §5.4 item 4: the Secret Service conformance scripts
+  # (desktop/ci/secret-service/) must be wired into CI before Phase 6
+  # enables desktop login.
+  secret-service-conformance:
+    name: Secret Service conformance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install Secret Service packages
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            dbus \
+            python3-dbus \
+            python3-gi \
+            gnome-keyring \
+            libglib2.0-bin
+          # dbus:          dbus-run-session (private session bus for both scripts)
+          # python3-dbus:  mock daemon + name-owner probes (import dbus)
+          # python3-gi:    dbus.mainloop.glib required by mock_secret_service.py
+          # gnome-keyring: real gnome-keyring-daemon for the smoke step
+          # glib2.0-bin:   gdbus, used by gnome-keyring-smoke.sh
+
+      - name: Verify Secret Service tooling
+        run: |
+          set -euo pipefail
+          echo "=== Secret Service tooling ==="
+          dbus-daemon --version | head -1
+          gdbus --version
+          python3 -c 'import dbus; print("python3-dbus OK")'
+          gnome-keyring-daemon --version
+          echo "================================"
+
+      - name: Conformance — mock daemon (available + locked)
+        run: |
+          # Self-invokes ./gradlew from the repo root; runs the conformance
+          # test against mock_secret_service.py in available + locked modes.
+          set -euo pipefail
+          desktop/ci/secret-service/run_conformance.sh
+
+      - name: Smoke — real gnome-keyring-daemon (unlocked + locked)
+        run: |
+          # Headless-safe: the script runs inside `dbus-run-session` and
+          # deliberately never triggers the UI-gated unlock prompt (the
+          # backend contract is to fail closed on a locked keyring, so no
+          # desktop session or interactive unlock is needed on the runner).
+          set -euo pipefail
+          desktop/ci/secret-service/gnome-keyring-smoke.sh
+
+  # =================================================================
+  # 5. native-debug-asan-ubsan  — STUBBED (Phase 7+)
   # =================================================================
   # TODO(phase 7): enable when native/engine/ and native/platform/linux/ land.
   #   This job will compile the native engine with AddressSanitizer and
@@ -256,7 +320,7 @@ jobs:
           echo "⏭ native-debug-asan-ubsan is stubbed until Phase 7 (native engine extraction)."
 
   # =================================================================
-  # 5. native-release-build  — STUBBED (Phase 7+)
+  # 6. native-release-build  — STUBBED (Phase 7+)
   # =================================================================
   # TODO(phase 7): enable when native/engine/ and native/platform/linux/ land.
   #   This job will produce an optimized release build of the player
@@ -310,7 +374,7 @@ jobs:
           echo "⏭ native-release-build is stubbed until Phase 7 (native engine extraction)."
 
   # =================================================================
-  # 6. core-smoke-tier-1  — STUBBED (Phase 9+)
+  # 7. core-smoke-tier-1  — STUBBED (Phase 9+)
   # =================================================================
   # TODO(phase 9): enable when Linux core builds and rommulus-player exist.
   #   This job will run the per-core smoke gate (§13.2) for Tier 1 cores
@@ -364,7 +428,7 @@ jobs:
           echo "⏭ core-smoke-tier-1 is stubbed until Phase 9 (Gambatte production integration)."
 
   # =================================================================
-  # 7. package-tarball  — STUBBED (Phase 14)
+  # 8. package-tarball  — STUBBED (Phase 14)
   # =================================================================
   # TODO(phase 14): enable when tarball packaging pipeline is implemented.
   #   This job will produce the self-contained x86_64 tarball
@@ -421,7 +485,7 @@ jobs:
           echo "⏭ package-tarball is stubbed until Phase 14 (packaging and release hardening)."
 
   # =================================================================
-  # 8. license-and-provenance-audit  — STUBBED (Phase 14)
+  # 9. license-and-provenance-audit  — STUBBED (Phase 14)
   # =================================================================
   # TODO(phase 14): enable when tarball packaging and core manifests exist.
   #   This job will verify every shipped core binary has a manifest record

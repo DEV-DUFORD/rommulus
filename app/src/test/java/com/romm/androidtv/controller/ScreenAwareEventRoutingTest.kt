@@ -1,6 +1,6 @@
 package com.romm.androidtv.controller
 
-import com.romm.androidtv.controller.model.KEYCODE_TO_CONTROL
+import com.romm.androidtv.controller.adapters.KEYCODE_TO_CONTROL
 import com.romm.androidtv.controller.policy.EventConsumptionPolicy
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName

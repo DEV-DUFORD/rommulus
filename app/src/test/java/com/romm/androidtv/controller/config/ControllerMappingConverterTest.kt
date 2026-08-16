@@ -3,6 +3,8 @@ package com.romm.androidtv.controller.config
 import com.romm.androidtv.controller.model.AxisDirection
 import com.romm.androidtv.controller.model.ControllerMapping
 import com.romm.androidtv.controller.model.LogicalControl
+import com.romm.androidtv.controller.model.NeutralAxis
+import com.romm.androidtv.controller.model.NeutralKey
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -33,7 +35,7 @@ class ControllerMappingConverterTest {
         val result = config.toRouterMappings(profile)
         val mapping = result.getValue(0)
         // snes9x maps BUTTON_A -> LogicalControl.BUTTON_A
-        assertThat(mapping.buttons).containsEntry(97, LogicalControl.BUTTON_A)
+        assertThat(mapping.buttons).containsEntry(NeutralKey.BUTTON_B, LogicalControl.BUTTON_A)
     }
 
     @Test
@@ -55,7 +57,7 @@ class ControllerMappingConverterTest {
         val result = stickConfig.toRouterMappings(stickProfile)
         val mapping = result.getValue(0)
         // LEFT_STICK_X -> AXIS_LX
-        assertThat(mapping.axes).containsEntry(0, LogicalControl.AXIS_LX)
+        assertThat(mapping.axes).containsEntry(NeutralAxis.X, LogicalControl.AXIS_LX)
     }
 
     @Test
@@ -64,7 +66,7 @@ class ControllerMappingConverterTest {
         val mapping = result.getValue(0)
         // D_PAD_LEFT -> DPAD_LEFT, physical (axis=1, polarity=-1)
         assertThat(mapping.axisDirections)
-            .containsEntry(AxisDirection(axis = 1, polarity = -1), LogicalControl.DPAD_LEFT)
+            .containsEntry(AxisDirection(NeutralAxis.Y, -1), LogicalControl.DPAD_LEFT)
     }
 
     @Test
@@ -89,10 +91,10 @@ class ControllerMappingConverterTest {
         val mapping = dualConfig.toRouterMappings(profile).getValue(0)
 
         assertThat(mapping.buttons)
-            .containsEntry(android.view.KeyEvent.KEYCODE_DPAD_UP, LogicalControl.DPAD_UP)
+            .containsEntry(NeutralKey.DPAD_UP, LogicalControl.DPAD_UP)
         assertThat(mapping.axisDirections)
             .containsEntry(
-                AxisDirection(android.view.MotionEvent.AXIS_Y, -1),
+                AxisDirection(NeutralAxis.Y, -1),
                 LogicalControl.DPAD_UP,
             )
     }
@@ -118,17 +120,17 @@ class ControllerMappingConverterTest {
         val mapping = triggerConfig.toRouterMappings(playStationProfile).getValue(0)
 
         assertThat(mapping.axisDirections).containsEntry(
-            AxisDirection(android.view.MotionEvent.AXIS_LTRIGGER, 1),
+            AxisDirection(NeutralAxis.LTRIGGER, 1),
             LogicalControl.BUTTON_LT,
         )
         val pressed = com.romm.androidtv.controller.model.GamepadSnapshot.fromPhysicalInput(
             emptySet(),
-            mapOf(android.view.MotionEvent.AXIS_LTRIGGER to 0.9f),
+            mapOf(NeutralAxis.LTRIGGER to 0.9f),
             mapping,
         )
         val released = com.romm.androidtv.controller.model.GamepadSnapshot.fromPhysicalInput(
             emptySet(),
-            mapOf(android.view.MotionEvent.AXIS_LTRIGGER to 0f),
+            mapOf(NeutralAxis.LTRIGGER to 0f),
             mapping,
         )
         assertThat(pressed.buttons[LogicalControl.BUTTON_LT.index]).isEqualTo(1f)
@@ -158,14 +160,14 @@ class ControllerMappingConverterTest {
                     mapOf(CoreControlId.BUTTON_A to ControlBindings(primary = PhysicalBinding.Key(97))),
                 ),
                 2 to PlayerControllerConfig(
-                    mapOf(CoreControlId.BUTTON_B to ControlBindings(primary = PhysicalBinding.Key(98))),
+                    mapOf(CoreControlId.BUTTON_B to ControlBindings(primary = PhysicalBinding.Key(99))),
                 ),
             ),
         )
         val result = multiConfig.toRouterMappings(profile)
         assertThat(result).containsOnlyKeys(0, 2)
-        assertThat(result.getValue(0).buttons).containsEntry(97, LogicalControl.BUTTON_A)
-        assertThat(result.getValue(2).buttons).containsEntry(98, LogicalControl.BUTTON_B)
+        assertThat(result.getValue(0).buttons).containsEntry(NeutralKey.BUTTON_B, LogicalControl.BUTTON_A)
+        assertThat(result.getValue(2).buttons).containsEntry(NeutralKey.BUTTON_X, LogicalControl.BUTTON_B)
     }
 
     @Test
@@ -212,22 +214,22 @@ class ControllerMappingConverterTest {
         // the raw physical axes (AXIS_Z / AXIS_RZ) — so both fire correctly.
         assertThat(mapping.axisDirections)
             .containsEntry(
-                AxisDirection(android.view.MotionEvent.AXIS_Z, 1),
+                AxisDirection(NeutralAxis.Z, 1),
                 LogicalControl.BUTTON_RB,
             )
         assertThat(mapping.axisDirections)
             .containsEntry(
-                AxisDirection(android.view.MotionEvent.AXIS_RZ, 1),
+                AxisDirection(NeutralAxis.RZ, 1),
                 LogicalControl.BUTTON_A,
             )
         assertThat(mapping.axisDirections)
             .containsEntry(
-                AxisDirection(android.view.MotionEvent.AXIS_Z, -1),
+                AxisDirection(NeutralAxis.Z, -1),
                 LogicalControl.BUTTON_LB,
             )
         assertThat(mapping.axisDirections)
             .containsEntry(
-                AxisDirection(android.view.MotionEvent.AXIS_RZ, -1),
+                AxisDirection(NeutralAxis.RZ, -1),
                 LogicalControl.BUTTON_X,
             )
 
@@ -236,9 +238,9 @@ class ControllerMappingConverterTest {
         assertThat(mapping.axisDirections).hasSize(4)
         // No canonical RX/RY keys are produced.
         assertThat(mapping.axisDirections.keys)
-            .doesNotContain(AxisDirection(android.view.MotionEvent.AXIS_RX, 1))
+            .doesNotContain(AxisDirection(NeutralAxis.RX, 1))
         assertThat(mapping.axisDirections.keys)
-            .doesNotContain(AxisDirection(android.view.MotionEvent.AXIS_RY, 1))
+            .doesNotContain(AxisDirection(NeutralAxis.RY, 1))
     }
 
     @Test

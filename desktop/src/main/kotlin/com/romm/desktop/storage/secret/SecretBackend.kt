@@ -3,7 +3,7 @@ package com.romm.desktop.storage.secret
 /**
  * Minimal transport seam for a platform keyring (freedesktop Secret Service on
  * Linux; a test double on macOS/CI). The production D-Bus implementation of this
- * seam is added in a later step of the Phase 5 spike.
+ * seam now exists: `SecretServiceDbusBackend` in `com.romm.desktop.storage.secret.dbus`.
  *
  * All methods are synchronous and MUST NOT throw. Implementations translate
  * transport failures into the null/Boolean/KeyringState results below so callers
