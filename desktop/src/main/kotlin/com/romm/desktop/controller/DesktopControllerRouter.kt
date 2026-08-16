@@ -27,8 +27,8 @@ import java.util.logging.Logger
  * (first active) controller produces a focus-relevant button transition.
  *
  * The desktop shell maps these onto the Compose focus system (e.g. `Move(UP)` becomes a
- * `FocusNavigator.moveFocus(FocusDirection.Up)` call, `Activate` triggers the focused
- * item, `Back` pops the navigation stack). The router itself has zero Compose
+ * spatial `FocusManager.moveFocus(FocusDirection.Up)` call, `Activate` triggers the
+ * focused item, `Back` pops the navigation stack). The router itself has zero Compose
  * dependencies so it stays unit-testable on a bare JVM.
  */
 sealed interface FocusAction {

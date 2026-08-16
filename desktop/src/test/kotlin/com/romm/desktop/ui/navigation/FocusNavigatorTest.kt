@@ -244,6 +244,33 @@ class FocusNavigatorTest {
         }
 
         @Test
+        fun `focused activation remains attached to its key when earlier items unregister`() {
+            var activated: String? = null
+            navigator.register("a", FocusRequester()) { activated = "a" }
+            navigator.register("b", FocusRequester()) { activated = "b" }
+            navigator.setFocused(1)
+
+            navigator.unregister("a")
+
+            assertThat(navigator.focusedIndex()).isEqualTo(0)
+            assertThat(navigator.activateFocused()).isTrue()
+            assertThat(activated).isEqualTo("b")
+        }
+
+        @Test
+        fun `losing focus clears only the matching focused key`() {
+            navigator.register("a", FocusRequester())
+            navigator.register("b", FocusRequester())
+            navigator.setFocusedKey("a")
+
+            navigator.clearFocusedKey("b")
+            assertThat(navigator.focusedIndex()).isEqualTo(0)
+
+            navigator.clearFocusedKey("a")
+            assertThat(navigator.focusedIndex()).isEqualTo(-1)
+        }
+
+        @Test
         fun `unregister of unknown key is no-op`() {
             navigator.register("a", FocusRequester())
             navigator.unregister("unknown")

@@ -28,12 +28,8 @@ import java.util.logging.Logger
  * The 2.0.10 button identifier set is `_0.._31`, TRIGGER, THUMB..., A/B/X/Y/C/Z, SELECT,
  * START, MODE, LEFT_THUMB/RIGHT_THUMB(2/3), TOOL_* — there are no BUTTON_A-style names,
  * no L/R shoulder constants, and no DPAD_* button constants. We therefore map only the
- * identifiers that exist: A/B/X/Y, SELECT/START, and the thumb clicks. The D-pad is not a
- * button in JInput on this platform: the Linux plugin reports the hats (ABS_HAT0X/ABS_HAT0Y)
- * as two axis components that BOTH carry the [Component.Identifier.Axis.SLIDER] identifier
- * (LinuxNativeTypesMap.getAbsAxisID falls back to SLIDER for unmapped absolute axes). They
- * are translated directly into DPAD_* [NeutralKey]s in [LiveJInputController.poll] — not
- * folded into the X/Y axis map, which would clobber the left-stick values.
+ * identifiers that exist. On Linux, BTN_TL/TR, BTN_TL2/TR2, and BTN_THUMBL/THUMBR map to
+ * LEFT/RIGHT_THUMB, LEFT/RIGHT_THUMB2, and LEFT/RIGHT_THUMB3 respectively.
  */
 private val BUTTON_TO_NEUTRAL: Map<Component.Identifier.Button, NeutralKey> = mapOf(
     Component.Identifier.Button.A to NeutralKey.BUTTON_A,
@@ -42,18 +38,21 @@ private val BUTTON_TO_NEUTRAL: Map<Component.Identifier.Button, NeutralKey> = ma
     Component.Identifier.Button.Y to NeutralKey.BUTTON_Y,
     Component.Identifier.Button.SELECT to NeutralKey.BUTTON_SELECT,
     Component.Identifier.Button.START to NeutralKey.BUTTON_START,
-    Component.Identifier.Button.LEFT_THUMB to NeutralKey.BUTTON_THUMBL,
-    Component.Identifier.Button.RIGHT_THUMB to NeutralKey.BUTTON_THUMBR,
+    Component.Identifier.Button.LEFT_THUMB to NeutralKey.BUTTON_L1,
+    Component.Identifier.Button.RIGHT_THUMB to NeutralKey.BUTTON_R1,
+    Component.Identifier.Button.LEFT_THUMB2 to NeutralKey.BUTTON_L2,
+    Component.Identifier.Button.RIGHT_THUMB2 to NeutralKey.BUTTON_R2,
+    Component.Identifier.Button.LEFT_THUMB3 to NeutralKey.BUTTON_THUMBL,
+    Component.Identifier.Button.RIGHT_THUMB3 to NeutralKey.BUTTON_THUMBR,
 )
 
 /**
  * JInput -> neutral axis translation. JInput 2.0.10 exposes the six standard stick axes
  * plus slider/acceleration variants and POV; only X/Y/Z/RX/RY/RZ have neutral equivalents
- * here. SLIDER is deliberately NOT in this table: on Linux both D-pad hats arrive as
- * SLIDER components, and mapping them into NeutralAxis.X/Y would clobber the left-stick
- * values (the axes map is keyed by NeutralAxis, last write wins). SLIDER components are
- * handled separately in [LiveJInputController.poll] and become DPAD_* buttons. POV and the
- * other slider-family axes are ignored. There are no trigger-like identifiers
+ * here. Linux D-pad hats arrive as a combined POV component and are translated directly
+ * into DPAD_* buttons in [LiveJInputController.poll]. Slider-family axes are ignored because
+ * JInput gives triggers the same identifier and does not retain enough metadata to distinguish
+ * them portably. There are no trigger-like identifiers
  * (THROTTLE/GAS/...)
  * in this API version, so every mapped axis normalizes as a stick via
  * [AxisNormalizer.normalize] with the JInput convention that polled analog data is already
@@ -274,7 +273,7 @@ class JInputControllerSource : JInputSource {
  * of the OS session — the same session-stability guarantee the Android
  * signature adapter provides for transient device ids.
  */
-private class LiveJInputController(private val controller: Controller) : JInputController {
+internal class LiveJInputController(private val controller: Controller) : JInputController {
 
     override val id: String = controller.name?.takeIf { it.isNotBlank() } ?: controller.javaClass.name
 
@@ -286,17 +285,14 @@ private class LiveJInputController(private val controller: Controller) : JInputC
     )
 
     override fun poll(): JInputControllerState {
+        // JInput only refreshes Component.pollData when the owning controller is polled.
+        // A failed poll means the device is unavailable, so expose a neutral state.
+        if (!controller.poll()) {
+            return JInputControllerState(buttons = emptySet(), axes = emptyMap())
+        }
+
         val buttons = LinkedHashSet<NeutralKey>()
         val axes = HashMap<NeutralAxis, Float>()
-
-        // JInput's Linux plugin reports the D-pad hats (ABS_HAT0X/ABS_HAT0Y) as two
-        // separate components that BOTH carry the Axis.SLIDER identifier. They cannot be
-        // folded into the X/Y axis map (that would clobber the left-stick values), so
-        // they are translated directly into DPAD_* buttons here. Orientation is assigned
-        // by component order: the first SLIDER is the horizontal hat (HAT0X), the second
-        // the vertical (HAT0Y) — matching the kernel's axis enumeration order. Hat poll
-        // data is digital (-1/0/+1); the component dead zone (usually 0) is the threshold.
-        var sliderIndex = 0
 
         // getComponents() returns a Component[] in 2.0.10; the component's identifier
         // (not its runtime class) tells us whether it is a button or an axis.
@@ -309,22 +305,8 @@ private class LiveJInputController(private val controller: Controller) : JInputC
                 }
 
                 is Component.Identifier.Axis -> {
-                    if (identifier == Component.Identifier.Axis.SLIDER) {
-                        val value = component.pollData
-                        val deadZone = component.deadZone
-                        when (sliderIndex) {
-                            0 -> when {
-                                value < -deadZone -> buttons.add(NeutralKey.DPAD_LEFT)
-                                value > deadZone -> buttons.add(NeutralKey.DPAD_RIGHT)
-                                else -> {}
-                            }
-                            1 -> when {
-                                value < -deadZone -> buttons.add(NeutralKey.DPAD_UP)
-                                value > deadZone -> buttons.add(NeutralKey.DPAD_DOWN)
-                                else -> {}
-                            }
-                        }
-                        sliderIndex++
+                    if (identifier == Component.Identifier.Axis.POV) {
+                        addPovButtons(component.pollData, buttons)
                     } else {
                         val neutral = AXIS_TO_NEUTRAL[identifier] ?: continue
                         axes[neutral] = AxisNormalizer.normalize(
@@ -339,5 +321,30 @@ private class LiveJInputController(private val controller: Controller) : JInputC
         }
 
         return JInputControllerState(buttons = buttons, axes = axes)
+    }
+
+    private fun addPovButtons(value: Float, buttons: MutableSet<NeutralKey>) {
+        when (value) {
+            Component.POV.UP_LEFT -> {
+                buttons.add(NeutralKey.DPAD_UP)
+                buttons.add(NeutralKey.DPAD_LEFT)
+            }
+            Component.POV.UP -> buttons.add(NeutralKey.DPAD_UP)
+            Component.POV.UP_RIGHT -> {
+                buttons.add(NeutralKey.DPAD_UP)
+                buttons.add(NeutralKey.DPAD_RIGHT)
+            }
+            Component.POV.RIGHT -> buttons.add(NeutralKey.DPAD_RIGHT)
+            Component.POV.DOWN_RIGHT -> {
+                buttons.add(NeutralKey.DPAD_DOWN)
+                buttons.add(NeutralKey.DPAD_RIGHT)
+            }
+            Component.POV.DOWN -> buttons.add(NeutralKey.DPAD_DOWN)
+            Component.POV.DOWN_LEFT -> {
+                buttons.add(NeutralKey.DPAD_DOWN)
+                buttons.add(NeutralKey.DPAD_LEFT)
+            }
+            Component.POV.LEFT -> buttons.add(NeutralKey.DPAD_LEFT)
+        }
     }
 }

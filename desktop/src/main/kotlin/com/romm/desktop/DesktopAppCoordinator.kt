@@ -283,11 +283,15 @@ class DesktopAppCoordinator(
 
     fun settingsPresenter(): SettingsPresenter = settingsPresenterLazy
 
-    fun homePresenter(): HomePresenter = HomePresenter(
-        scope = scope,
-        repository = network.libraryRepository,
-        hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
-    )
+    private val homePresenterLazy: HomePresenter by lazy {
+        HomePresenter(
+            scope = scope,
+            repository = network.libraryRepository,
+            hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
+        )
+    }
+
+    fun homePresenter(): HomePresenter = homePresenterLazy
 
     fun searchPresenter(): SearchPresenter = SearchPresenter(
         scope = scope,

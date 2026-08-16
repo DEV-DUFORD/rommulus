@@ -456,8 +456,8 @@ private fun ScreenshotThumbnail(url: String, onClick: () -> Unit) {
                 color = if (isFocused) colors.romm500 else Color.Transparent,
                 shape = RoundedCornerShape(8.dp),
             )
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-            .focusableItem("detail:screenshot:$url", navigator, onClick),
+            .focusableItem("detail:screenshot:$url", navigator, onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         RommAsyncImage(model = url, contentDescription = "Screenshot")
@@ -744,8 +744,8 @@ private fun SiblingVersionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .focusableItem("detail:sibling:${sibling.id}", navigator, onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

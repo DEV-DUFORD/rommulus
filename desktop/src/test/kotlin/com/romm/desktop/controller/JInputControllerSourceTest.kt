@@ -1,0 +1,83 @@
+package com.romm.desktop.controller
+
+import com.romm.androidtv.controller.model.NeutralKey
+import net.java.games.input.Component
+import net.java.games.input.Controller
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import java.lang.reflect.Proxy
+
+class JInputControllerSourceTest {
+
+    @Test
+    fun `poll refreshes the controller before reading component data`() {
+        var refreshed = false
+        val component = component(Component.Identifier.Button.A) { if (refreshed) 1f else 0f }
+        val controller = controller(arrayOf(component)) {
+            refreshed = true
+            true
+        }
+
+        val state = LiveJInputController(controller).poll()
+
+        assertThat(refreshed).isTrue()
+        assertThat(state.buttons).containsExactly(NeutralKey.BUTTON_A)
+    }
+
+    @Test
+    fun `POV dpad values map cardinal and diagonal directions`() {
+        val expectations = mapOf(
+            Component.POV.UP to setOf(NeutralKey.DPAD_UP),
+            Component.POV.RIGHT to setOf(NeutralKey.DPAD_RIGHT),
+            Component.POV.DOWN to setOf(NeutralKey.DPAD_DOWN),
+            Component.POV.LEFT to setOf(NeutralKey.DPAD_LEFT),
+            Component.POV.UP_RIGHT to setOf(NeutralKey.DPAD_UP, NeutralKey.DPAD_RIGHT),
+        )
+
+        for ((value, expected) in expectations) {
+            val pov = component(Component.Identifier.Axis.POV) { value }
+            val state = LiveJInputController(controller(arrayOf(pov))).poll()
+            assertThat(state.buttons).containsExactlyInAnyOrderElementsOf(expected)
+        }
+    }
+
+    @Test
+    fun `slider axes are not mistaken for dpad input`() {
+        val slider = component(Component.Identifier.Axis.SLIDER) { 1f }
+
+        val state = LiveJInputController(controller(arrayOf(slider))).poll()
+
+        assertThat(state.buttons).isEmpty()
+    }
+
+    private fun component(
+        identifier: Component.Identifier,
+        pollData: () -> Float,
+    ): Component = proxy { method ->
+        when (method.name) {
+            "getIdentifier" -> identifier
+            "getPollData" -> pollData()
+            "getDeadZone" -> 0f
+            "getName" -> identifier.name
+            "isRelative", "isAnalog" -> false
+            else -> error("Unexpected Component method: ${method.name}")
+        }
+    }
+
+    private fun controller(
+        components: Array<Component>,
+        poll: () -> Boolean = { true },
+    ): Controller = proxy { method ->
+        when (method.name) {
+            "getName" -> "Test pad"
+            "getComponents" -> components
+            "poll" -> poll()
+            else -> error("Unexpected Controller method: ${method.name}")
+        }
+    }
+
+    private inline fun <reified T> proxy(crossinline call: (java.lang.reflect.Method) -> Any?): T =
+        Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java)) { _, method, _ ->
+            call(method)
+        } as T
+}

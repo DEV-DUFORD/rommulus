@@ -9,18 +9,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import com.romm.androidtv.library.LibraryResult
 import com.romm.androidtv.library.RomQuery
 import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
@@ -29,16 +30,22 @@ import com.romm.desktop.controller.FocusAction
 import com.romm.desktop.controller.JInputControllerSource
 import com.romm.desktop.ui.components.RommulusTheme
 import com.romm.desktop.ui.navigation.DesktopFocusScope
+import com.romm.desktop.ui.navigation.DesktopLibraryScaffold
 import com.romm.desktop.ui.navigation.FocusNavigator
 import com.romm.desktop.ui.screens.detail.BiosConfigurationScreen
 import com.romm.desktop.ui.screens.detail.GameDetailScreen
 import com.romm.desktop.ui.screens.detail.LicensesDialog
 import com.romm.desktop.ui.screens.detail.SettingsScreen
 import com.romm.desktop.ui.screens.library.HomeScreen
+import com.romm.desktop.ui.screens.library.CollectionsScreen
+import com.romm.desktop.ui.screens.library.PlatformsScreen
 import com.romm.desktop.ui.screens.library.RomGridScreen
 import com.romm.desktop.ui.screens.library.SearchScreen
 import com.romm.desktop.ui.screens.onboarding.OnboardingScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withContext
 
 /**
@@ -53,8 +60,8 @@ import kotlinx.coroutines.withContext
  * Controller focus navigation: one shared [FocusNavigator] is provided to every screen via
  * [DesktopFocusScope]/[com.romm.desktop.ui.navigation.LocalFocusNavigator]. The
  * [DesktopControllerRouter] (JInput, ~60 Hz poll) emits platform-neutral [FocusAction]s from
- * the primary controller; this shell maps them onto the navigator:
- *  - `Move(dir)` → [FocusNavigator.moveFocus] (D-pad / left-stick moves focus)
+ * the primary controller; this shell maps them onto Compose's spatial focus engine:
+ *  - `Move(dir)` → [FocusManager.moveFocus] (D-pad / left-stick follows UI geometry)
  *  - `Activate`  → [FocusNavigator.activateFocused] (A presses the focused item's action)
  *  - `Back`      → [DesktopAppCoordinator.onBack] (B / Escape semantics)
  *
@@ -78,25 +85,20 @@ fun RommulusDesktopApp(
     }
 
     // ── JInput controller router: created once; poll loop lives on the composition scope ──
-    val pollScope = rememberCoroutineScope()
+    // JInput performs native device enumeration and polling synchronously. Keep it off the
+    // Compose UI dispatcher so a slow device read cannot stall focus or animation updates.
+    val pollScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
     val router = remember { DesktopControllerRouter(JInputControllerSource(), pollScope) }
-    DisposableEffect(router) {
+    DisposableEffect(router, pollScope) {
         router.start()
-        onDispose { router.stop() }
+        onDispose {
+            router.stop()
+            pollScope.cancel()
+        }
     }
 
     // ── Shared focus navigator: the single navigation authority for controller input ──
     val focusNavigator = remember { FocusNavigator() }
-
-    LaunchedEffect(router, focusNavigator) {
-        router.focusActions.collect { action ->
-            when (action) {
-                is FocusAction.Move -> focusNavigator.moveFocus(action.direction.toComposeDirection())
-                FocusAction.Activate -> focusNavigator.activateFocused()
-                FocusAction.Back -> coordinator.onBack()
-            }
-        }
-    }
 
     // Shell-owned theme: reading the settings adapter's observable state here makes the shell
     // re-compose (and re-theme the whole app) when the user picks a new theme in Settings.
@@ -119,11 +121,27 @@ fun RommulusDesktopApp(
 
     RommulusTheme(theme = theme) {
         DesktopFocusScope(navigator = focusNavigator) {
+            val focusManager = LocalFocusManager.current
+            LaunchedEffect(router, focusManager, focusNavigator) {
+                router.focusActions.collect { action ->
+                    when (action) {
+                        is FocusAction.Move -> {
+                            val moved = focusManager.moveFocus(action.direction.toComposeDirection())
+                            if (!moved && focusNavigator.focusedIndex() < 0) {
+                                focusNavigator.focusFirst()
+                            }
+                        }
+                        FocusAction.Activate -> focusNavigator.activateFocused()
+                        FocusAction.Back -> coordinator.onBack()
+                    }
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .focusable()
                     .focusRequester(shellFocusRequester)
+                    .focusable()
                     .onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when {
@@ -146,66 +164,59 @@ fun RommulusDesktopApp(
                 when (coordinator.appMode) {
                     AppMode.ONBOARDING -> OnboardingScreen(coordinator)
 
-                    AppMode.MAIN -> when (coordinator.currentScreen) {
-                        Screen.HOME -> HomeScreen(coordinator)
+                    AppMode.MAIN -> DesktopLibraryScaffold(
+                        currentScreen = coordinator.currentScreen,
+                        onNavigate = coordinator::navigate,
+                    ) {
+                        when (coordinator.currentScreen) {
+                            Screen.HOME -> HomeScreen(coordinator)
 
-                        // The shared RomQuery model has no "all ROMs" variant; RecentlyAdded
-                        // (created_at desc, no filter) is the full-library grid used for the
-                        // top-level Platforms/Collections browse screens.
-                        Screen.PLATFORMS -> RomGridScreen(
-                            coordinator = coordinator,
-                            title = "Platforms",
-                            query = RomQuery.RecentlyAdded,
-                        )
+                            Screen.PLATFORMS -> PlatformsScreen(coordinator)
+                            Screen.COLLECTIONS -> CollectionsScreen(coordinator)
 
-                        Screen.COLLECTIONS -> RomGridScreen(
-                            coordinator = coordinator,
-                            title = "Collections",
-                            query = RomQuery.RecentlyAdded,
-                        )
+                            Screen.SEARCH -> SearchScreen(coordinator)
+                            Screen.SETTINGS -> SettingsScreen(coordinator)
 
-                        Screen.SEARCH -> SearchScreen(coordinator)
-                        Screen.SETTINGS -> SettingsScreen(coordinator)
+                            Screen.PLATFORM_DETAIL -> {
+                                val platformId = coordinator.selectedPlatformId
+                                RomGridScreen(
+                                    coordinator = coordinator,
+                                    title = if (platformId != null) {
+                                        platformDetailTitle(platformId, coordinator)
+                                    } else {
+                                        "Platform"
+                                    },
+                                    query = platformId?.let { RomQuery.ByPlatform(it) }
+                                        ?: RomQuery.RecentlyAdded,
+                                )
+                            }
 
-                        Screen.PLATFORM_DETAIL -> {
-                            val platformId = coordinator.selectedPlatformId
-                            RomGridScreen(
-                                coordinator = coordinator,
-                                title = if (platformId != null) {
-                                    platformDetailTitle(platformId, coordinator)
-                                } else {
-                                    "Platform"
-                                },
-                                query = platformId?.let { RomQuery.ByPlatform(it) }
-                                    ?: RomQuery.RecentlyAdded,
-                            )
+                            Screen.COLLECTION_DETAIL -> {
+                                val collectionId = coordinator.selectedCollectionId
+                                RomGridScreen(
+                                    coordinator = coordinator,
+                                    title = if (collectionId != null) {
+                                        collectionDetailTitle(collectionId, coordinator)
+                                    } else {
+                                        "Collection"
+                                    },
+                                    query = collectionId?.let { RomQuery.ByCollection(it) }
+                                        ?: RomQuery.RecentlyAdded,
+                                )
+                            }
+
+                            Screen.GAME_DETAIL -> GameDetailScreen(coordinator)
+                            Screen.BIOS_CONFIGURATION -> BiosConfigurationScreen(coordinator)
+
+                            // The licenses dialog is a separate desktop window (its own
+                            // composition); rendering it as the screen content is acceptable —
+                            // the main window sits empty behind it while it is open.
+                            Screen.LICENSE -> LicensesDialog(onDismiss = { coordinator.onBack() })
+
+                            // Defensive: onboarding inside MAIN mode (should not occur — the
+                            // AppMode gate owns that state).
+                            Screen.ONBOARDING -> OnboardingScreen(coordinator)
                         }
-
-                        Screen.COLLECTION_DETAIL -> {
-                            val collectionId = coordinator.selectedCollectionId
-                            RomGridScreen(
-                                coordinator = coordinator,
-                                title = if (collectionId != null) {
-                                    collectionDetailTitle(collectionId, coordinator)
-                                } else {
-                                    "Collection"
-                                },
-                                query = collectionId?.let { RomQuery.ByCollection(it) }
-                                    ?: RomQuery.RecentlyAdded,
-                            )
-                        }
-
-                        Screen.GAME_DETAIL -> GameDetailScreen(coordinator)
-                        Screen.BIOS_CONFIGURATION -> BiosConfigurationScreen(coordinator)
-
-                        // The licenses dialog is a separate desktop window (its own
-                        // composition); rendering it as the screen content is acceptable —
-                        // the main window sits empty behind it while it is open.
-                        Screen.LICENSE -> LicensesDialog(onDismiss = { coordinator.onBack() })
-
-                        // Defensive: onboarding inside MAIN mode (should not occur — the
-                        // AppMode gate owns that state).
-                        Screen.ONBOARDING -> OnboardingScreen(coordinator)
                     }
                 }
             }

@@ -203,13 +203,13 @@ private fun BiosOptionRow(
             .clip(RoundedCornerShape(8.dp))
             .background(if (focused) colors.romm600.copy(alpha = 0.3f) else colors.nightLo)
             .tvFocusRing(shape = RoundedCornerShape(8.dp), enabled = enabled)
+            .focusableItem("bios:${option.firmware.firmwareId}", navigator, onClick)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 enabled = enabled,
                 onClick = onClick,
             )
-            .focusableItem("bios:${option.firmware.firmwareId}", navigator, onClick)
             .semantics { contentDescription = option.displayName }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.CenterStart,

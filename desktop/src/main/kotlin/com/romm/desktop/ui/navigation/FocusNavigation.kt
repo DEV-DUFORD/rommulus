@@ -1,6 +1,5 @@
 package com.romm.desktop.ui.navigation
 
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
@@ -34,8 +33,8 @@ class FocusNavigator {
     /** All registered items, keyed by [Any] and preserved in insertion order. */
     private val entries = LinkedHashMap<Any, Entry>()
 
-    /** The index of the currently-focused item, or `-1` if nothing is focused. */
-    private var focusedIndex: Int = -1
+    /** Stable key of the focused item. Registration indices can shift as lazy items change. */
+    private var focusedKey: Any? = null
 
     /** Data class returned by [snapshot]. */
     data class RegisteredItem(val key: Any, val requester: FocusRequester)
@@ -56,6 +55,7 @@ class FocusNavigator {
     fun nextIndex(focusDirection: FocusDirection): Int {
         val size = entries.size
         if (size < 2) return -1
+        val focusedIndex = focusedIndex()
         return when (focusDirection) {
             FocusDirection.Next, FocusDirection.Right, FocusDirection.Down -> (focusedIndex + 1) % size
             FocusDirection.Previous, FocusDirection.Left, FocusDirection.Up -> {
@@ -84,12 +84,11 @@ class FocusNavigator {
     /** The navigation-order index of [key], or `-1` when it is not registered. */
     fun indexOf(key: Any): Int = entries.keys.indexOf(key)
 
-    /** Remove registration for [key]. If the focused item is removed, [focusedIndex] is cleared. */
+    /** Remove registration for [key]. If the focused item is removed, focus is cleared. */
     fun unregister(key: Any) {
-        val idx = findIndex(key)
-        if (idx >= 0) {
+        if (key in entries) {
             entries.remove(key)
-            if (idx == focusedIndex) focusedIndex = -1
+            if (key == focusedKey) focusedKey = null
         }
     }
 
@@ -100,12 +99,22 @@ class FocusNavigator {
     /** Returns the number of currently registered items. */
     fun size(): Int = entries.size
 
-    /** Returns the focused index, or `-1` if nothing is focused. */
-    fun focusedIndex(): Int = focusedIndex
+    /** Returns the focused item's current index, or `-1` if nothing is focused. */
+    fun focusedIndex(): Int = focusedKey?.let(::findIndex) ?: -1
 
-    /** Mark [focusedIndex] as [index]. Called from Compose scope focus-change callbacks. */
+    /** Mark the item currently at [index] as focused. */
     internal fun setFocused(index: Int) {
-        focusedIndex = index
+        focusedKey = entries.keys.elementAtOrNull(index)
+    }
+
+    /** Mark [key] as focused without relying on its mutable registration index. */
+    internal fun setFocusedKey(key: Any) {
+        if (key in entries) focusedKey = key
+    }
+
+    /** Clear focus ownership only if [key] is still the item recorded as focused. */
+    internal fun clearFocusedKey(key: Any) {
+        if (focusedKey == key) focusedKey = null
     }
 
     // ----------------------------------------------------------------------- move focus
@@ -126,7 +135,7 @@ class FocusNavigator {
             } catch (_: IllegalStateException) {
                 // Unit test environment: FocusRequester is not initialized without a composition.
             }
-            focusedIndex = next
+            focusedKey = entry.key
         }
     }
 
@@ -141,7 +150,7 @@ class FocusNavigator {
         } catch (_: IllegalStateException) {
             // Unit test environment: FocusRequester is not initialized without a composition.
         }
-        focusedIndex = index
+        focusedKey = entry.key
     }
 
     /** Convenience: focus the first registered item. */
@@ -156,10 +165,8 @@ class FocusNavigator {
      * no activation callback.
      */
     fun activateFocused(): Boolean {
-        val idx = focusedIndex
-        if (idx < 0 || idx >= entries.size) return false
-        val entry = entries.entries.toTypedArray()[idx]
-        val action = entry.value.onActivate ?: return false
+        val key = focusedKey ?: return false
+        val action = entries[key]?.onActivate ?: return false
         action()
         return true
     }
@@ -184,9 +191,8 @@ class FocusNavigator {
 fun rememberFocusNavigator(): FocusNavigator = remember { FocusNavigator() }
 
 /**
- * A modifier that makes this composable a stop on the [navigator]'s focus path. Does NOT
- * render a focus ring — screens that want a focus ring should apply a separate ring modifier
- * (see the Android `tvButtonFocus` pattern, which uses `drawRoundRect` with a coloured stroke).
+ * A modifier that makes this composable a stop on the [navigator]'s focus path. Visual focus
+ * treatment belongs to the host component so its border matches the component's shape.
  *
  * Usage:
  * ```
@@ -195,6 +201,9 @@ fun rememberFocusNavigator(): FocusNavigator = remember { FocusNavigator() }
  *     modifier = Modifier.focusableItem("btn-1", navigator),
  * )
  * ```
+ *
+ * The host composable must provide the actual focus target (for example, a clickable, Button,
+ * Switch, or TextField). This modifier deliberately does not add a duplicate focus target.
  *
  * The modifier:
  *  1. Creates a [FocusRequester] scoped to this composition via `remember`.
@@ -237,9 +246,12 @@ fun Modifier.focusableItem(
 
     return this
         .focusRequester(requester)
-        .focusable()
         .onFocusChanged { state ->
-            if (state.isFocused) navigator.setFocused(navigator.indexOf(key))
+            if (state.isFocused) {
+                navigator.setFocusedKey(key)
+            } else {
+                navigator.clearFocusedKey(key)
+            }
         }
 }
 
