@@ -162,6 +162,21 @@ class JInputControllerSource : JInputSource {
             } else {
                 logger.log(Level.INFO, "JInput detected ${names.size} controller(s): $names")
             }
+            // "Detected but unreadable" diagnostic: JInput enumerates controllers from
+            // /dev/input/event* but cannot open them when this process lacks read
+            // permission (open() fails with EACCES) — typically because the user is not
+            // in the `input` group. JInput logs the per-device failures only to
+            // java.util.logging internally, so without this probe the app would just
+            // report "detected N controller(s)" while nothing works.
+            if (names.isNotEmpty() && inputEventDevicesReadable() == false) {
+                logger.log(
+                    Level.WARNING,
+                    "Controllers were detected but no /dev/input/event* device is readable " +
+                        "by this process (opening them fails with permission denied). " +
+                        "Add your user to the 'input' group: sudo usermod -aG input \$USER, " +
+                        "then log out and back in."
+                )
+            }
         }
         return result
     }
@@ -216,6 +231,36 @@ class JInputControllerSource : JInputSource {
         } catch (t: Throwable) {
             nativeBootstrapFailed = true
             logger.log(Level.WARNING, "JInput native extraction failed: $t", t)
+        }
+    }
+
+    /**
+     * Best-effort readability probe for the "detected but unreadable" condition:
+     * returns true if at least one `/dev/input/event*` device node is readable by this
+     * process, false if event devices exist but NONE are readable, and null if the probe
+     * cannot run (non-Linux platform, `/dev/input` missing, no event nodes, or any I/O
+     * failure). Callers treat null as "unknown" and do not warn. [Files.isReadable]
+     * evaluates the permission bits against the current uid/gid — the same check that
+     * makes open() fail with EACCES — so it faithfully predicts JInput's open failures.
+     */
+    private fun inputEventDevicesReadable(): Boolean? {
+        return try {
+            val inputDir = Path.of("/dev/input")
+            if (!Files.isDirectory(inputDir)) return null
+            var found = false
+            var anyReadable = false
+            Files.newDirectoryStream(inputDir, "event*").use { devices ->
+                for (device in devices) {
+                    found = true
+                    if (Files.isReadable(device)) {
+                        anyReadable = true
+                        break
+                    }
+                }
+            }
+            if (!found) null else anyReadable
+        } catch (t: Throwable) {
+            null
         }
     }
 }

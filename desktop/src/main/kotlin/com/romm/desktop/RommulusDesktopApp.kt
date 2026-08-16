@@ -1,5 +1,6 @@
 package com.romm.desktop
 
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -12,6 +13,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -99,11 +102,28 @@ fun RommulusDesktopApp(
     // re-compose (and re-theme the whole app) when the user picks a new theme in Settings.
     val theme = coordinator.settingsAdapter.currentTheme.value
 
+    // The shell Box is the always-present focus anchor. Compose discards key events entirely
+    // when no node in the composition holds focus (FocusOwnerImpl.dispatchKeyEvent finds no
+    // active focus target and aborts before any onPreviewKeyEvent fires), so on screens that
+    // never request initial focus (Home, grids, search) the handler below would never see
+    // Ctrl+Q/Escape/Ctrl+F. Making this Box focusable and giving it initial focus guarantees a
+    // focused node always exists; key events then dispatch top-down through this Box's
+    // onPreviewKeyEvent first — whether the Box itself or a screen item holds focus, since the
+    // Box is an ancestor of every screen. When a screen item later takes focus (e.g. GameDetail
+    // landing on its Favorite button), focus falls back to this Box when that item leaves
+    // composition, so the guarantee holds across navigation.
+    val shellFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching { shellFocusRequester.requestFocus() }
+    }
+
     RommulusTheme(theme = theme) {
         DesktopFocusScope(navigator = focusNavigator) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .focusable()
+                    .focusRequester(shellFocusRequester)
                     .onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when {
