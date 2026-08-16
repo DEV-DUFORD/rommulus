@@ -23,6 +23,17 @@ dependencies {
     // plans/LINUX_X64.md §10.2. Pure-JDBC driver; no Room annotations anywhere on desktop.
     implementation("org.xerial:sqlite-jdbc:3.41.2.2")
     implementation("net.java.jinput:jinput:2.0.10")
+    // JInput's main jar contains ONLY the platform plugin classes — zero native libraries
+    // (verified: jinput-2.0.10.jar has no .so/.dll/.jnilib entries). The natives ship in the
+    // `natives-all` classifier (jinput-2.0.10-natives-all.jar: libjinput-linux64.so,
+    // libjinput-osx.jnilib, jinput-raw_64.dll, jinput-dx8_64.dll, jinput-wintab.dll at the
+    // jar root). JInput 2.0.10 does NOT auto-extract classpath natives (no NativeLibLoader
+    // in the jar); every platform plugin's loadLibrary() first checks the
+    // `net.java.games.input.librarypath` system property and, when set, System.load()s
+    // `<property>/<mapLibraryName(lib)>`. JInputControllerSource.ensureJinputNatives()
+    // extracts the natives from this jar to a temp dir and sets that property before the
+    // first ControllerEnvironment access.
+    implementation("net.java.jinput:jinput:2.0.10:natives-all")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:1.9.23")
     implementation(project(":shared:storage-api"))

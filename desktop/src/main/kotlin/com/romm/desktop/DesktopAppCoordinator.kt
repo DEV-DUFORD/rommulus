@@ -211,6 +211,12 @@ class DesktopAppCoordinator(
         currentScreen = Screen.HOME
         val origin = settingsAdapter.currentProfile().origin
         if (origin.isBlank()) return
+        // Kiosk (anonymous read-only demo) sessions carry no durable client token by design, so
+        // verifyDurableSession would fail locally with VERIFICATION_FAILED and the failure branch
+        // below would delete the just-saved session — the "flash back to onboarding" bug. Kiosk
+        // records are coherent without a token (same rule as computeStartupAppMode /
+        // OnboardingRoutingDecision), so skip verification entirely and stay in MAIN.
+        if (sessionStorage.coherentRecord(origin)?.kioskMode == true) return
         scope.launch {
             when (val result = network.authRepository.verifyDurableSession(origin)) {
                 is AuthFlowResult.Success -> currentScreen = Screen.HOME

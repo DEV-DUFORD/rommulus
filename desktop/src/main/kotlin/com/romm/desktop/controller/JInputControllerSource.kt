@@ -4,9 +4,15 @@ import com.romm.androidtv.controller.model.DeviceSignature
 import com.romm.androidtv.controller.model.NeutralAxis
 import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.controller.util.AxisNormalizer
+import com.romm.desktop.log.DesktopLogger
 import net.java.games.input.Component
 import net.java.games.input.Controller
 import net.java.games.input.ControllerEnvironment
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.util.logging.Level
+import java.util.logging.Logger
 
 /**
  * JInput -> neutral model translation tables (the desktop ingestion boundary,
@@ -23,9 +29,11 @@ import net.java.games.input.ControllerEnvironment
  * START, MODE, LEFT_THUMB/RIGHT_THUMB(2/3), TOOL_* — there are no BUTTON_A-style names,
  * no L/R shoulder constants, and no DPAD_* button constants. We therefore map only the
  * identifiers that exist: A/B/X/Y, SELECT/START, and the thumb clicks. The D-pad is not a
- * button in JInput on this platform; it arrives as X/Y axis movement (hats) and is turned
- * into DPAD logical buttons by [com.romm.androidtv.controller.model.GamepadSnapshot.fromPhysicalInput]'s
- * standard d-pad axis-direction mapping, so no D-pad table entry is needed here.
+ * button in JInput on this platform: the Linux plugin reports the hats (ABS_HAT0X/ABS_HAT0Y)
+ * as two axis components that BOTH carry the [Component.Identifier.Axis.SLIDER] identifier
+ * (LinuxNativeTypesMap.getAbsAxisID falls back to SLIDER for unmapped absolute axes). They
+ * are translated directly into DPAD_* [NeutralKey]s in [LiveJInputController.poll] — not
+ * folded into the X/Y axis map, which would clobber the left-stick values.
  */
 private val BUTTON_TO_NEUTRAL: Map<Component.Identifier.Button, NeutralKey> = mapOf(
     Component.Identifier.Button.A to NeutralKey.BUTTON_A,
@@ -41,7 +49,11 @@ private val BUTTON_TO_NEUTRAL: Map<Component.Identifier.Button, NeutralKey> = ma
 /**
  * JInput -> neutral axis translation. JInput 2.0.10 exposes the six standard stick axes
  * plus slider/acceleration variants and POV; only X/Y/Z/RX/RY/RZ have neutral equivalents
- * here (the SLIDER-family and POV axes are ignored). There are no trigger-like identifiers
+ * here. SLIDER is deliberately NOT in this table: on Linux both D-pad hats arrive as
+ * SLIDER components, and mapping them into NeutralAxis.X/Y would clobber the left-stick
+ * values (the axes map is keyed by NeutralAxis, last write wins). SLIDER components are
+ * handled separately in [LiveJInputController.poll] and become DPAD_* buttons. POV and the
+ * other slider-family axes are ignored. There are no trigger-like identifiers
  * (THROTTLE/GAS/...)
  * in this API version, so every mapped axis normalizes as a stick via
  * [AxisNormalizer.normalize] with the JInput convention that polled analog data is already
@@ -62,6 +74,32 @@ private const val JINPUT_AXIS_MIN = -1f
 private const val JINPUT_AXIS_MAX = 1f
 
 /**
+ * The system property every JInput 2.0.10 platform plugin's `loadLibrary()` checks first
+ * (verified in LinuxEnvironmentPlugin, OSXEnvironmentPlugin, DirectInputEnvironmentPlugin
+ * and RawInputEnvironmentPlugin bytecode): when set, the plugin `System.load()`s
+ * `<property>/<File.separator>/<System.mapLibraryName(lib)>` instead of falling back to
+ * `System.loadLibrary()` (which only searches `java.library.path`).
+ */
+private const val JINPUT_LIBRARYPATH_PROPERTY = "net.java.games.input.librarypath"
+
+/**
+ * Native library files shipped at the ROOT of the `natives-all` classifier jar
+ * (`jinput-2.0.10-natives-all.jar`; verified by jar inspection). Extracted to a temp dir
+ * so the [JINPUT_LIBRARYPATH_PROPERTY] hook above can find them. The per-OS plugin loads
+ * exactly one of these (Linux: `libjinput-linux64.so`, macOS: `libjinput-osx.jnilib`,
+ * Windows: `jinput-raw_64.dll` + `jinput-dx8_64.dll` [+ `jinput-wintab.dll` for the
+ * WinTab plugin]), so extracting all of them is cheap and makes the bootstrap
+ * OS-agnostic.
+ */
+private val JINPUT_NATIVE_RESOURCES = listOf(
+    "libjinput-linux64.so",
+    "libjinput-osx.jnilib",
+    "jinput-raw_64.dll",
+    "jinput-dx8_64.dll",
+    "jinput-wintab.dll",
+)
+
+/**
  * Production [JInputSource] backed by JInput's `ControllerEnvironment` singleton.
  *
  * The environment is obtained lazily on first [enumerate] so that merely
@@ -70,12 +108,32 @@ private const val JINPUT_AXIS_MAX = 1f
  */
 class JInputControllerSource : JInputSource {
 
+    private val logger: Logger = DesktopLogger.get()
+
+    /**
+     * The environment is obtained lazily on first [enumerate] so that merely
+     * constructing this class (e.g. in a headless test JVM) does not load any
+     * platform native. [ensureJinputNatives] must run BEFORE the first environment
+     * access: the platform plugin classes (e.g. `LinuxEnvironmentPlugin`) load their
+     * native in a static initializer, and `DefaultControllerEnvironment.getControllers()`
+     * wraps plugin loading in `catch (Throwable)` — a swallowed `UnsatisfiedLinkError`
+     * leaves the environment reporting zero controllers forever.
+     */
     private val environment: ControllerEnvironment by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        ensureJinputNatives()
         ControllerEnvironment.getDefaultEnvironment()
     }
 
     /** Wrappers are cached per underlying JInput controller instance. */
     private val wrappers = HashMap<Controller, JInputController>()
+
+    /** Set when the native bootstrap could not make the native libraries available. */
+    @Volatile
+    private var nativeBootstrapFailed = false
+
+    /** Last logged controller-name list; bounds the enumeration diagnostic to once (and on change). */
+    @Volatile
+    private var lastLoggedControllers: List<String>? = null
 
     override fun enumerate(): List<JInputController> {
         // getControllers() returns a Controller[] (a snapshot array in 2.0.10).
@@ -88,7 +146,77 @@ class JInputControllerSource : JInputSource {
         }
         // Drop wrappers for controllers that were unplugged since the last tick.
         wrappers.keys.retainAll(seen)
+
+        // Diagnostic: log the detected set once (and whenever it changes) so "no controllers
+        // detected" is distinguishable from "detected but unmapped" in a single run.
+        val names = controllers.map { it.name ?: "<unnamed>" }
+        if (names != lastLoggedControllers) {
+            lastLoggedControllers = names
+            if (names.isEmpty() && nativeBootstrapFailed) {
+                logger.log(
+                    Level.WARNING,
+                    "JInput detected 0 controllers and the native library bootstrap failed; " +
+                        "see the earlier WARNING for the cause. Controllers will not appear " +
+                        "until the JInput native library is loadable."
+                )
+            } else {
+                logger.log(Level.INFO, "JInput detected ${names.size} controller(s): $names")
+            }
+        }
         return result
+    }
+
+    /**
+     * Make the JInput native libraries loadable BEFORE the first [ControllerEnvironment]
+     * access (see [environment]).
+     *
+     * JInput 2.0.10 ships its natives in the `natives-all` classifier jar (a plain
+     * `implementation` dependency in `desktop/build.gradle.kts`) but does NOT extract
+     * them from the classpath — there is no `NativeLibLoader` or equivalent in the jar.
+     * Every platform plugin's `loadLibrary()` first checks the
+     * [JINPUT_LIBRARYPATH_PROPERTY] system property and, when set, `System.load()`s
+     * `<property>/<mapLibraryName(lib)>` (verified in the plugin bytecode). So: extract
+     * the natives from the classpath to a temp dir and point the property at it.
+     *
+     * Best-effort: any failure is logged at WARNING and the environment is still created
+     * afterwards — it may still find the native via `java.library.path` (e.g. when a
+     * distribution installs libjinput into the system loader path), and the enumeration
+     * diagnostic in [enumerate] will surface the resulting empty controller list.
+     */
+    private fun ensureJinputNatives() {
+        if (!System.getProperty(JINPUT_LIBRARYPATH_PROPERTY).isNullOrBlank()) {
+            // Already configured (e.g. by the launcher or a test) — trust it.
+            return
+        }
+        try {
+            val loader = JInputControllerSource::class.java.classLoader
+            val dir: Path = Files.createTempDirectory("jinput-natives")
+            var extracted = 0
+            for (resource in JINPUT_NATIVE_RESOURCES) {
+                loader.getResourceAsStream(resource)?.use { input ->
+                    Files.copy(input, dir.resolve(resource), StandardCopyOption.REPLACE_EXISTING)
+                    extracted++
+                }
+            }
+            if (extracted == 0) {
+                nativeBootstrapFailed = true
+                logger.log(
+                    Level.WARNING,
+                    "JInput natives-all jar not found on the classpath (expected resources: " +
+                        "$JINPUT_NATIVE_RESOURCES). Controllers will not be available unless " +
+                        "the JInput native libraries are on java.library.path."
+                )
+            } else {
+                System.setProperty(JINPUT_LIBRARYPATH_PROPERTY, dir.toString())
+                logger.log(
+                    Level.INFO,
+                    "Extracted $extracted JInput native(s) to $dir; set $JINPUT_LIBRARYPATH_PROPERTY"
+                )
+            }
+        } catch (t: Throwable) {
+            nativeBootstrapFailed = true
+            logger.log(Level.WARNING, "JInput native extraction failed: $t", t)
+        }
     }
 }
 
@@ -116,6 +244,15 @@ private class LiveJInputController(private val controller: Controller) : JInputC
         val buttons = LinkedHashSet<NeutralKey>()
         val axes = HashMap<NeutralAxis, Float>()
 
+        // JInput's Linux plugin reports the D-pad hats (ABS_HAT0X/ABS_HAT0Y) as two
+        // separate components that BOTH carry the Axis.SLIDER identifier. They cannot be
+        // folded into the X/Y axis map (that would clobber the left-stick values), so
+        // they are translated directly into DPAD_* buttons here. Orientation is assigned
+        // by component order: the first SLIDER is the horizontal hat (HAT0X), the second
+        // the vertical (HAT0Y) — matching the kernel's axis enumeration order. Hat poll
+        // data is digital (-1/0/+1); the component dead zone (usually 0) is the threshold.
+        var sliderIndex = 0
+
         // getComponents() returns a Component[] in 2.0.10; the component's identifier
         // (not its runtime class) tells us whether it is a button or an axis.
         for (component in controller.components) {
@@ -127,13 +264,31 @@ private class LiveJInputController(private val controller: Controller) : JInputC
                 }
 
                 is Component.Identifier.Axis -> {
-                    val neutral = AXIS_TO_NEUTRAL[identifier] ?: continue
-                    axes[neutral] = AxisNormalizer.normalize(
-                        rawValue = component.pollData,
-                        rangeMin = JINPUT_AXIS_MIN,
-                        rangeMax = JINPUT_AXIS_MAX,
-                        rangeFlat = component.deadZone,
-                    )
+                    if (identifier == Component.Identifier.Axis.SLIDER) {
+                        val value = component.pollData
+                        val deadZone = component.deadZone
+                        when (sliderIndex) {
+                            0 -> when {
+                                value < -deadZone -> buttons.add(NeutralKey.DPAD_LEFT)
+                                value > deadZone -> buttons.add(NeutralKey.DPAD_RIGHT)
+                                else -> {}
+                            }
+                            1 -> when {
+                                value < -deadZone -> buttons.add(NeutralKey.DPAD_UP)
+                                value > deadZone -> buttons.add(NeutralKey.DPAD_DOWN)
+                                else -> {}
+                            }
+                        }
+                        sliderIndex++
+                    } else {
+                        val neutral = AXIS_TO_NEUTRAL[identifier] ?: continue
+                        axes[neutral] = AxisNormalizer.normalize(
+                            rawValue = component.pollData,
+                            rangeMin = JINPUT_AXIS_MIN,
+                            rangeMax = JINPUT_AXIS_MAX,
+                            rangeFlat = component.deadZone,
+                        )
+                    }
                 }
             }
         }

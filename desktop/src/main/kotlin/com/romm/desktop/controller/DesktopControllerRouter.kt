@@ -7,6 +7,7 @@ import com.romm.androidtv.controller.model.LogicalControl
 import com.romm.androidtv.controller.model.NeutralAxis
 import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.controller.policy.SlotAssignmentPolicy
+import com.romm.desktop.log.DesktopLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -18,6 +19,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.logging.Level
+import java.util.logging.Logger
 
 /**
  * Platform-neutral focus action emitted by [DesktopControllerRouter] when the primary
@@ -125,6 +128,8 @@ class DesktopControllerRouter(
     /** Session-level controller id -> tracked state. */
     private val tracked = LinkedHashMap<String, TrackedController>()
 
+    private val logger: Logger = DesktopLogger.get()
+
     private var pollJob: Job? = null
 
     /**
@@ -132,12 +137,22 @@ class DesktopControllerRouter(
      */
     fun start() {
         if (pollJob != null) return
+        var lastFailureLogMillis = 0L
         pollJob = scope.launch {
             while (isActive) {
                 try {
                     tick()
-                } catch (_: Exception) {
-                    // A transient source failure must not kill the poll loop.
+                } catch (t: Throwable) {
+                    // A transient source failure must not kill the poll loop. Catch
+                    // Throwable (not just Exception): an Error escaping the source — e.g. a
+                    // late UnsatisfiedLinkError from the JInput native — would otherwise
+                    // terminate the loop silently. Throttled so a persistent failure logs
+                    // at most once per [FAILURE_LOG_INTERVAL_MILLIS].
+                    val now = System.currentTimeMillis()
+                    if (now - lastFailureLogMillis >= FAILURE_LOG_INTERVAL_MILLIS) {
+                        lastFailureLogMillis = now
+                        logger.log(Level.WARNING, "Controller poll tick failed (loop continues): $t", t)
+                    }
                 }
                 delay(pollIntervalMillis)
             }
@@ -187,7 +202,14 @@ class DesktopControllerRouter(
 
             val state = controller.poll()
             val slot = _slots.value[t.slotIndex]
-            val snapshot = GamepadSnapshot.fromPhysicalInput(state.buttons, state.axes, slot.mapping)
+            // Slots are created with the default ControllerMapping, whose axisDirections
+            // is empty — without the standard d-pad bindings, left-stick X/Y never derives
+            // DPAD_* buttons and FocusAction.Move is never emitted. Merge the defaults in
+            // for snapshot computation only: the slot's stored mapping is left untouched,
+            // so an explicit user remap always wins (withDefaultAxisDirections never
+            // clobbers existing entries and returns `this` when nothing is missing).
+            val mapping = slot.mapping.withDefaultAxisDirections()
+            val snapshot = GamepadSnapshot.fromPhysicalInput(state.buttons, state.axes, mapping)
 
             val updated = _slots.value.toMutableList()
             updated[t.slotIndex] = slot.updateSnapshot(snapshot)
@@ -268,5 +290,8 @@ class DesktopControllerRouter(
     companion object {
         /** ~60 Hz poll rate. */
         const val DEFAULT_POLL_INTERVAL_MILLIS = 16L
+
+        /** Minimum interval between poll-failure log lines (throttles a persistent failure). */
+        private const val FAILURE_LOG_INTERVAL_MILLIS = 5_000L
     }
 }

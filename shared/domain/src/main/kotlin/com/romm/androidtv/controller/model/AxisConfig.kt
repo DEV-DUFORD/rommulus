@@ -69,6 +69,22 @@ data class ControllerMapping(
     fun getAxisConfig(logical: LogicalControl): AxisConfig =
         axisConfigs[logical] ?: AxisConfig.DEFAULT
 
+    /**
+     * Return a copy with the standard d-pad [DEFAULT_AXIS_DIRECTIONS] merged in.
+     *
+     * Existing entries always win (a user remap of a d-pad direction is never
+     * clobbered); only missing directions are filled with the defaults. Returns
+     * [this] unchanged when nothing is missing, so callers may invoke this on
+     * every poll tick without allocation churn.
+     */
+    fun withDefaultAxisDirections(): ControllerMapping {
+        // Only directions absent from the current mapping are filled in, so an existing
+        // user remap of a d-pad direction always wins.
+        val missing = DEFAULT_AXIS_DIRECTIONS.filterKeys { it !in axisDirections }
+        if (missing.isEmpty()) return this
+        return copy(axisDirections = axisDirections + missing)
+    }
+
     companion object {
         /**
          * Standard default button mapping.
@@ -81,6 +97,18 @@ data class ControllerMapping(
          * Neutral axes map directly to their semantic logical axis.
          */
         val DEFAULT_AXES: Map<NeutralAxis, LogicalControl> = NEUTRAL_AXIS_TO_CONTROL.toMap()
+
+        /**
+         * Standard d-pad axis directions: the left stick's X/Y half-axes map to the four
+         * DPAD buttons. Mirrors the standard directions
+         * [GamepadSnapshot.fromPhysicalInput] expects for its angle-based d-pad path.
+         */
+        val DEFAULT_AXIS_DIRECTIONS: Map<AxisDirection, LogicalControl> = mapOf(
+            AxisDirection(NeutralAxis.Y, -1) to LogicalControl.DPAD_UP,
+            AxisDirection(NeutralAxis.Y, 1) to LogicalControl.DPAD_DOWN,
+            AxisDirection(NeutralAxis.X, -1) to LogicalControl.DPAD_LEFT,
+            AxisDirection(NeutralAxis.X, 1) to LogicalControl.DPAD_RIGHT,
+        )
 
         /** A/ B swap: exchanges BUTTON_A and BUTTON_B assignments. */
         fun swapAB(mapping: ControllerMapping): ControllerMapping {

@@ -8,8 +8,10 @@ import com.romm.androidtv.auth.ServerValidationResult
 import com.romm.androidtv.network.InvalidReason
 import com.romm.androidtv.network.RommServerAddress
 import com.romm.androidtv.network.ServerAddressResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +21,13 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+
+/**
+ * Backstop timeout for server validation: a hung network call must not leave
+ * [OnboardingUiState.serverAction] stuck in Loading forever (fault containment).
+ */
+private const val VALIDATION_TIMEOUT_MILLIS = 20_000L
 
 /**
  * Narrow functional dependencies injected into [OnboardingPresenter] (spec
@@ -172,8 +181,26 @@ class OnboardingPresenter(
                     it.copy(serverAction = AsyncActionState.Loading, serverError = null)
                 }
                 scope.launch {
-                    val result = validateRommServer(origin)
-                    handleServerValidationResult(generation, result)
+                    try {
+                        // Backstop: a hung validation must not spin the UI forever.
+                        val result = withTimeout(VALIDATION_TIMEOUT_MILLIS) { validateRommServer(origin) }
+                        handleServerValidationResult(generation, result)
+                    } catch (error: TimeoutCancellationException) {
+                        // Hung network call — mapped like NetworkFailure (see handleServerValidationResult).
+                        if (generation == serverValidationGeneration) {
+                            setServerError(OnboardingServerError.InvalidAddress)
+                        }
+                    } catch (error: CancellationException) {
+                        throw error // scope teardown — never mask cancellation
+                    } catch (error: Exception) {
+                        // Fault containment: a storage/IO hiccup must surface as an error and
+                        // release the spinner, never leave serverAction stuck in Loading.
+                        if (generation == serverValidationGeneration) {
+                            setServerError(OnboardingServerError.InvalidAddress)
+                        }
+                    } finally {
+                        _uiState.update { it.copy(serverAction = AsyncActionState.Idle) }
+                    }
                 }
             }
         }
@@ -357,27 +384,33 @@ class OnboardingPresenter(
      * skipping the CREDENTIALS step entirely.
      */
     private suspend fun handleKioskValid(origin: String, generation: Int) {
-        val persistedOrigin = persistValidatedOrigin(origin)
-        if (generation != serverValidationGeneration) return // edited meanwhile
-        if (!persistedOrigin) {
-            setServerError(OnboardingServerError.PersistenceFailure)
-            return
-        }
-        val established = establishKioskSession(origin)
-        if (generation != serverValidationGeneration) return // edited meanwhile
-        if (!established) {
-            setServerError(OnboardingServerError.PersistenceFailure)
-            return
-        }
-        if (completedEmitted) return
-        completedEmitted = true
-        _effects.emit(OnboardingEffect.Completed)
-        _uiState.update {
-            it.copy(
-                normalizedOrigin = origin,
-                serverError = null,
-                serverAction = AsyncActionState.Idle,
-            )
+        try {
+            val persistedOrigin = persistValidatedOrigin(origin)
+            if (generation != serverValidationGeneration) return // edited meanwhile
+            if (!persistedOrigin) {
+                setServerError(OnboardingServerError.PersistenceFailure)
+                return
+            }
+            val established = establishKioskSession(origin)
+            if (generation != serverValidationGeneration) return // edited meanwhile
+            if (!established) {
+                setServerError(OnboardingServerError.PersistenceFailure)
+                return
+            }
+            if (completedEmitted) return
+            completedEmitted = true
+            _effects.emit(OnboardingEffect.Completed)
+            _uiState.update {
+                it.copy(
+                    normalizedOrigin = origin,
+                    serverError = null,
+                    serverAction = AsyncActionState.Idle,
+                )
+            }
+        } finally {
+            // Every exit path — including the stale-generation early returns and the one-shot
+            // completed guard — must release the spinner; never leave it stuck in Loading.
+            _uiState.update { it.copy(serverAction = AsyncActionState.Idle) }
         }
     }
 
