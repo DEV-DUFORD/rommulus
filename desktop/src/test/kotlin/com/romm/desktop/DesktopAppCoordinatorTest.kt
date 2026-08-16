@@ -115,21 +115,34 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
-    fun `back from platform detail returns to platforms`(@TempDir dir: Path) {
+    fun `back from platform detail returns home`(@TempDir dir: Path) {
         val c = coordinator(dir.testRoot())
         c.appMode = AppMode.MAIN
         c.openPlatformDetail(1L)
         c.onBack()
+        assertThat(c.currentScreen).isEqualTo(Screen.HOME)
+    }
+
+    @Test
+    fun `back from platform detail returns to platforms when opened there`(@TempDir dir: Path) {
+        val c = coordinator(dir.testRoot())
+        c.appMode = AppMode.MAIN
+        c.navigate(Screen.PLATFORMS)
+        c.openPlatformDetail(1L)
+
+        c.onBack()
+
         assertThat(c.currentScreen).isEqualTo(Screen.PLATFORMS)
     }
 
     @Test
-    fun `back at home requests exit`(@TempDir dir: Path) {
+    fun `back at home stays home without requesting exit`(@TempDir dir: Path) {
         val c = coordinator(dir.testRoot())
         c.appMode = AppMode.MAIN
         c.currentScreen = Screen.HOME
         c.onBack()
-        assertThat(c.exitRequested).isTrue()
+        assertThat(c.currentScreen).isEqualTo(Screen.HOME)
+        assertThat(c.exitRequested).isFalse()
     }
 
     // ---------------------------------------------------------------- settings adapter

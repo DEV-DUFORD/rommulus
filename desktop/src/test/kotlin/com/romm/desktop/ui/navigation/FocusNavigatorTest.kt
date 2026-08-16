@@ -218,6 +218,18 @@ class FocusNavigatorTest {
         }
 
         @Test
+        fun `focus item by stable key`() {
+            navigator.register("nav:HOME", FocusRequester())
+            navigator.register("home:game:1", FocusRequester())
+
+            assertThat(navigator.focusItem("nav:HOME")).isTrue()
+            assertThat(navigator.focusedIndex()).isEqualTo(0)
+            assertThat(navigator.isFocused("nav:HOME")).isTrue()
+            assertThat(navigator.isFocused("home:game:1")).isFalse()
+            assertThat(navigator.focusItem("missing")).isFalse()
+        }
+
+        @Test
         fun `unregister removes item and clears focused index if it was focused`() {
             val r1 = FocusRequester()
             val r2 = FocusRequester()

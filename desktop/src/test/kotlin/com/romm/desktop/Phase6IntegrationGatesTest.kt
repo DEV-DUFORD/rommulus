@@ -146,7 +146,7 @@ class Phase6IntegrationGatesTest {
         assertThat(c.currentScreen).isEqualTo(Screen.COLLECTION_DETAIL)
         assertThat(c.selectedCollectionId).isEqualTo(42L)
         c.onBack()
-        assertThat(c.currentScreen).isEqualTo(Screen.COLLECTIONS)
+        assertThat(c.currentScreen).isEqualTo(Screen.HOME)
 
         c.openPlatformDetail(7L)
         assertThat(c.currentScreen).isEqualTo(Screen.PLATFORM_DETAIL)
@@ -155,9 +155,11 @@ class Phase6IntegrationGatesTest {
         c.openGameDetail(romId = 99L, parent = Screen.PLATFORM_DETAIL)
         assertThat(c.currentScreen).isEqualTo(Screen.GAME_DETAIL)
         assertThat(c.selectedRomId).isEqualTo(99L)
-        // Back returns to the remembered parent that opened the detail.
+        // Back unwinds to the platform detail, then to the view that opened it.
         c.onBack()
         assertThat(c.currentScreen).isEqualTo(Screen.PLATFORM_DETAIL)
+        c.onBack()
+        assertThat(c.currentScreen).isEqualTo(Screen.HOME)
     }
 
     // ------------------------------------------------------------------ Gate 9

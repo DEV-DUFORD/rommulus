@@ -1,11 +1,13 @@
 package com.romm.desktop.ui.image
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -14,10 +16,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+val LocalDesktopImageLoader = compositionLocalOf<DesktopImageLoader> {
+    error("LocalDesktopImageLoader is not provided")
+}
 
 /**
  * Small Composable wrapper around a synchronous [DesktopImageLoader] for loading
@@ -31,43 +38,46 @@ import androidx.compose.ui.unit.dp
  * @param model URL string to load. Null/empty renders the error state.
  * @param contentDescription Accessibility label (reserved for future use).
  * @param modifier Modifier for layout/interaction.
- * @param size Target image size (default 200.dp).
+ * @param size Target image size (default 200.dp), or null to use the caller's constraints.
  * @param contentScale How to resize/rotate image.
- * @param loader The [DesktopImageLoader] (defaults to one built via [buildRomMImageLoader]).
+ * @param loader Optional loader override; the app-provided authenticated loader is used by default.
  */
 @Composable
 fun RommAsyncImage(
     model: String?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    size: Dp = 200.dp,
+    size: Dp? = 200.dp,
     contentScale: ContentScale = ContentScale.Crop,
-    loader: DesktopImageLoader = buildRomMImageLoader(),
+    loader: DesktopImageLoader? = null,
 ) {
+    val imageLoader = loader ?: LocalDesktopImageLoader.current
     var loadResult by remember(model) { mutableStateOf<ImageLoadResult>(ImageLoadResult.Loading) }
 
-    LaunchedEffect(model, loader) {
+    LaunchedEffect(model, imageLoader) {
         val url = model?.takeIf { it.isNotBlank() }
         loadResult = if (url != null) {
-            loader.load(url)
+            withContext(Dispatchers.IO) { imageLoader.load(url) }
         } else {
             ImageLoadResult.Error
         }
     }
 
-    val loadedSize = Modifier.then(Modifier.size(size))
+    val imageModifier = if (size != null) modifier.size(size) else modifier
 
     when (val s = loadResult) {
         is ImageLoadResult.Loading -> {
-            LoadingPlaceholder(modifier = loadedSize)
+            LoadingPlaceholder(modifier = imageModifier)
         }
         is ImageLoadResult.Error -> {
-            ErrorPlaceholder(modifier = loadedSize)
+            ErrorPlaceholder(modifier = imageModifier)
         }
         is ImageLoadResult.Success -> {
-            LoadedImage(
+            Image(
                 bitmap = s.bitmap,
-                modifier = loadedSize,
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                modifier = imageModifier,
             )
         }
     }
@@ -76,18 +86,6 @@ fun RommAsyncImage(
 // ---------------------------------------------------------------------------
 // Drawing helpers
 // ---------------------------------------------------------------------------
-
-@Composable
-private fun LoadedImage(
-    bitmap: androidx.compose.ui.graphics.ImageBitmap,
-    modifier: Modifier,
-) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        androidx.compose.foundation.Canvas(modifier = Modifier.matchParentSize()) {
-            drawImage(bitmap)
-        }
-    }
-}
 
 @Composable
 private fun LoadingPlaceholder(modifier: Modifier = Modifier) {

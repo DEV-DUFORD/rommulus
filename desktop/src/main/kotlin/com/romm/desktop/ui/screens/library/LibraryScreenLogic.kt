@@ -65,7 +65,9 @@ fun gridParentScreen(query: RomQuery): Screen = when (query) {
  * (e.g. an IGDB photo/wordmark) only if the server has neither.
  */
 fun platformTileImageUrl(platform: PlatformSummary): String? =
-    (platform.iconUrlCandidates + listOfNotNull(platform.logoUrl)).firstOrNull { it.isNotBlank() }
+    platform.iconUrlCandidates.firstOrNull { it.isNotBlank() }
+        ?: platform.iconUrl?.takeIf { it.isNotBlank() }
+        ?: platform.logoUrl?.takeIf { it.isNotBlank() }
 
 /** The result-count number to display for a [SearchUiState], mirroring the Android label rule:
  * hide-unsupported ON → visible count; OFF → server total. */

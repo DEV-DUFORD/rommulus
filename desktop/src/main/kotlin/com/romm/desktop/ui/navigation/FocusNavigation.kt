@@ -106,6 +106,9 @@ class FocusNavigator {
     /** Returns the focused item's current index, or `-1` if nothing is focused. */
     fun focusedIndex(): Int = focusedKey?.let(::findIndex) ?: -1
 
+    /** Returns whether [key] is the item currently holding controller/keyboard focus. */
+    fun isFocused(key: Any): Boolean = focusedKey == key
+
     /** Mark the item currently at [index] as focused. */
     internal fun setFocused(index: Int) {
         focusedKey = entries.keys.elementAtOrNull(index)
@@ -186,6 +189,14 @@ class FocusNavigator {
             // Unit test environment: FocusRequester is not initialized without a composition.
         }
         focusedKey = entry.key
+    }
+
+    /** Focus the item registered under [key]. Returns false when it is not currently composed. */
+    fun focusItem(key: Any): Boolean {
+        val index = indexOf(key)
+        if (index < 0) return false
+        focusItem(index)
+        return true
     }
 
     /** Convenience: focus the first registered item. */

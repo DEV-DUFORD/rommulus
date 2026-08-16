@@ -131,7 +131,7 @@ class DesktopAppCoordinator(
         )
     }
 
-    val imageLoader: DesktopImageLoader by lazy { DesktopImageLoader() }
+    val imageLoader: DesktopImageLoader by lazy { DesktopImageLoader(network.okHttpClient) }
 
     // ------------------------------------------------------------------ app mode / navigation
 
@@ -141,7 +141,7 @@ class DesktopAppCoordinator(
     /** The single active main-mode screen (plans/LINUX_X64.md §8.1 — explicit, not a stack). */
     var currentScreen by mutableStateOf(Screen.HOME)
 
-    /** Set true when the user requests exit from the root screen; observed by the shell. */
+    /** Set true only by an explicit flow that requests application shutdown. */
     var exitRequested by mutableStateOf(false)
 
     // Selection state for the detail screens (mirrors MainActivity).
@@ -151,6 +151,10 @@ class DesktopAppCoordinator(
 
     /** Remembers which screen opened GAME_DETAIL so Back returns to the grid that opened it. */
     var gameDetailParent by mutableStateOf(Screen.HOME)
+
+    /** Remembers whether a browse detail was opened from Home or its top-level browse screen. */
+    var platformDetailParent by mutableStateOf(Screen.HOME)
+    var collectionDetailParent by mutableStateOf(Screen.HOME)
 
     /** Which BIOS-required console's configuration screen is active. */
     enum class BiosSystem { SEGA_CD, PLAYSTATION }
@@ -242,13 +246,15 @@ class DesktopAppCoordinator(
 
     // ------------------------------------------------------------------ navigation
 
-    /** Parent-based back: root requests exit; every other screen returns to its parent. */
+    /** Main-mode back moves up one view; Home remains the root and never exits the app. */
     fun onBack() {
         if (appMode != AppMode.MAIN) return
-        when (currentScreen) {
-            Screen.HOME -> exitRequested = true
-            Screen.GAME_DETAIL -> currentScreen = gameDetailParent
-            else -> currentScreen = currentScreen.parent()
+        currentScreen = when (currentScreen) {
+            Screen.HOME -> Screen.HOME
+            Screen.GAME_DETAIL -> gameDetailParent
+            Screen.PLATFORM_DETAIL -> platformDetailParent
+            Screen.COLLECTION_DETAIL -> collectionDetailParent
+            else -> currentScreen.parent()
         }
     }
 
@@ -258,11 +264,17 @@ class DesktopAppCoordinator(
 
     fun openPlatformDetail(platformId: Long) {
         selectedPlatformId = platformId
+        platformDetailParent = currentScreen.takeIf {
+            it == Screen.HOME || it == Screen.PLATFORMS
+        } ?: Screen.PLATFORMS
         currentScreen = Screen.PLATFORM_DETAIL
     }
 
     fun openCollectionDetail(collectionId: Long) {
         selectedCollectionId = collectionId
+        collectionDetailParent = currentScreen.takeIf {
+            it == Screen.HOME || it == Screen.COLLECTIONS
+        } ?: Screen.COLLECTIONS
         currentScreen = Screen.COLLECTION_DETAIL
     }
 

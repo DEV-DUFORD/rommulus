@@ -48,6 +48,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -158,6 +159,7 @@ private fun GameDetailContent(
     // focus on its Favorite button (the Android reference lands it on Play, which is
     // disabled here).
     val favoriteFocusRequester = remember { FocusRequester() }
+    val firstScreenshotFocusRequester = remember { FocusRequester() }
     val detailLoaded = uiState.detail is SectionState.Loaded
     LaunchedEffect(detailLoaded) {
         if (detailLoaded) favoriteFocusRequester.requestFocusSafely()
@@ -198,6 +200,8 @@ private fun GameDetailContent(
                 onOpenSibling = { siblingId ->
                     coordinator.openGameDetail(siblingId, coordinator.gameDetailParent)
                 },
+                firstScreenshotFocusRequester = firstScreenshotFocusRequester,
+                screenshotUpFocusRequester = favoriteFocusRequester,
             )
         }
 
@@ -212,6 +216,9 @@ private fun GameDetailContent(
                     .align(Alignment.TopEnd)
                     .padding(end = 32.dp, top = 24.dp),
                 favoriteFocusRequester = favoriteFocusRequester,
+                downFocusRequester = firstScreenshotFocusRequester.takeIf {
+                    loadedDetail.screenshotUrls.isNotEmpty()
+                },
             )
         }
 
@@ -265,6 +272,8 @@ private fun GameDetailBody(
     rom: RomDetail,
     onOpenScreenshot: (List<String>, Int) -> Unit,
     onOpenSibling: (Long) -> Unit,
+    firstScreenshotFocusRequester: FocusRequester,
+    screenshotUpFocusRequester: FocusRequester,
 ) {
     val colors = LocalRommulusColors.current
 
@@ -333,7 +342,20 @@ private fun GameDetailBody(
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     itemsIndexed(rom.screenshotUrls) { index, url ->
-                        ScreenshotThumbnail(url = url, onClick = { onOpenScreenshot(rom.screenshotUrls, index) })
+                        ScreenshotThumbnail(
+                            url = url,
+                            onClick = { onOpenScreenshot(rom.screenshotUrls, index) },
+                            modifier = Modifier
+                                .then(
+                                    if (index == 0) {
+                                        Modifier
+                                            .focusRequester(firstScreenshotFocusRequester)
+                                            .focusProperties { up = screenshotUpFocusRequester }
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
+                        )
                     }
                 }
             }
@@ -403,6 +425,7 @@ private fun GameDetailActionRail(
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
     favoriteFocusRequester: FocusRequester,
+    downFocusRequester: FocusRequester?,
 ) {
     val navigator = LocalFocusNavigator.current
     Column(
@@ -414,19 +437,30 @@ private fun GameDetailActionRail(
             enabled = favoriteState !is FavoriteUiState.Loading && favoriteState !is FavoriteUiState.Updating,
             modifier = Modifier
                 .focusRequester(favoriteFocusRequester)
+                .then(
+                    downFocusRequester?.let { Modifier.focusProperties { down = it } } ?: Modifier,
+                )
                 .focusableItem("detail:favorite", navigator, onFavoriteClick),
         ) {
             Text(favoriteLabel(favoriteState))
         }
         TvOutlinedButton(
             onClick = onAddClick,
-            modifier = Modifier.focusableItem("detail:add-collection", navigator, onAddClick),
+            modifier = Modifier
+                .then(
+                    downFocusRequester?.let { Modifier.focusProperties { down = it } } ?: Modifier,
+                )
+                .focusableItem("detail:add-collection", navigator, onAddClick),
         ) {
             Text("Add to Collection")
         }
         TvOutlinedButton(
             onClick = onBackClick,
-            modifier = Modifier.focusableItem("detail:back", navigator, onBackClick),
+            modifier = Modifier
+                .then(
+                    downFocusRequester?.let { Modifier.focusProperties { down = it } } ?: Modifier,
+                )
+                .focusableItem("detail:back", navigator, onBackClick),
         ) {
             Text("Back")
         }
@@ -445,14 +479,18 @@ private fun favoriteLabel(state: FavoriteUiState): String = when (state) {
  * full-screen [ScreenshotViewer] overlay at this item's index.
  */
 @Composable
-private fun ScreenshotThumbnail(url: String, onClick: () -> Unit) {
+private fun ScreenshotThumbnail(
+    url: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .width(280.dp)
             .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(8.dp))
@@ -538,7 +576,11 @@ private fun ScreenshotViewer(
             RommAsyncImage(
                 model = url,
                 contentDescription = "Screenshot ${index + 1} of ${screenshotUrls.size}",
-                size = 1280.dp,
+                size = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
             )
         }
         Column(

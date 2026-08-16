@@ -1,12 +1,13 @@
 package com.romm.desktop.ui.image
 
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import okhttp3.OkHttpClient
-import java.awt.image.BufferedImage
+import okhttp3.Request
+import org.jetbrains.skia.Data
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.Surface
+import org.jetbrains.skia.svg.SVGDOM
 import java.io.File
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import javax.imageio.ImageIO
 
 /**
  * Result of a synchronous image load attempt.
@@ -20,10 +21,8 @@ sealed interface ImageLoadResult {
 /**
  * Builds a simple synchronous image loader for the RomM desktop app.
  *
- * Uses `HttpURLConnection` for network fetching (no OkHttp fetcher plugin is
- * available for pure JVM desktop in Compose 1.6.x). The supplied [httpClient]
- * is retained in [cachedClient] so the coordinator can swap in an OkHttp-
- * backed client in a later wave.
+ * Uses the application's OkHttp client directly so same-origin artwork requests receive the
+ * same bearer authentication as library API requests.
  *
  * @param cacheDirBase where on-disk artwork is cached (defaults to JVM temp).
  */
@@ -33,92 +32,118 @@ class DesktopImageLoader(
         File(System.getProperty("java.io.tmpdir"), "romm-desktop-image-cache"),
 ) {
 
-    private val cache: MutableMap<String, File?> = HashMap()
-
-    /** A tiny solid-color placeholder bitmap used when no artwork is available. */
-    private val placeholderBitmap: androidx.compose.ui.graphics.ImageBitmap by lazy {
-        val bmp = androidx.compose.ui.graphics.ImageBitmap(width = 1, height = 1)
-        bmp
-    }
+    private val cache: MutableMap<String, File?> = java.util.concurrent.ConcurrentHashMap()
 
     /**
      * Load an image synchronously from [url]. Returns an [ImageLoadResult].
      *
      * Uses a small on-disk cache under [cacheDirBase] to avoid re-downloading
-     * the same artwork. Reads the URL via [HttpURLConnection] (no OkHttp
-     * integration on pure desktop yet).
+     * the same artwork.
      */
     fun load(url: String): ImageLoadResult {
         val cachedFile = cache[url]
         if (cachedFile != null && cachedFile.exists()) {
             try {
-                val img = ImageIO.read(cachedFile) ?: return ImageLoadResult.Error
-                return ImageLoadResult.Success(awtToComposeBitmap(img))
+                return ImageLoadResult.Success(decodeImage(cachedFile.readBytes(), url))
             } catch (_: Exception) {
                 // stale cache entry — fall through to re-fetch.
             }
         }
 
         return try {
-            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15_000
-                readTimeout = 30_000
-                instanceFollowRedirects = true
-            }
-            conn.connect()
-            val code = conn.responseCode
-            if (code !in 200..299) {
-                conn.disconnect()
-                return ImageLoadResult.Error
+            val request = Request.Builder().url(url).get().build()
+            val bytes = httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return ImageLoadResult.Error
+                response.body?.bytes()
             }
 
-            val img = ImageIO.read(conn.inputStream)
-            conn.disconnect()
+            if (bytes == null) return ImageLoadResult.Error
+            val bitmap = decodeImage(bytes, url)
 
-            if (img == null) return ImageLoadResult.Error
-
-            // Write to cache.
-            val cacheFile = cacheDirBase.resolve("${url.hashCode()}.png")
+            val cacheFile = cacheDirBase.resolve("${url.hashCode()}.image")
             cacheDirBase.mkdirs()
-            ImageIO.write(img, "PNG", cacheFile)
+            cacheFile.writeBytes(bytes)
             cache[url] = cacheFile
 
-            ImageLoadResult.Success(awtToComposeBitmap(img))
-        } catch (_: IOException) {
+            ImageLoadResult.Success(bitmap)
+        } catch (_: Exception) {
             ImageLoadResult.Error
         }
     }
 
-    /**
-     * Convert a `java.awt.image.BufferedImage` to a Compose [androidx.compose.ui.graphics.ImageBitmap].
-     *
-     * Uses the Compose Multiplatform 1.6.x `MutableImage` API to copy AWT
-     * pixels into a Compose [ImageBitmap].
-     */
-    private fun awtToComposeBitmap(img: BufferedImage): androidx.compose.ui.graphics.ImageBitmap {
-        val w = img.width
-        val h = img.height
-        // In Compose 1.6.x the ImageBitmap can be created via ImageBitmap(width, height)
-        // and pixels are copied via the raster's setColor/setPixel.
-        // We use the simplest available API: allocate an ImageBitmap then copy via Canvas.
-        val bitmap = androidx.compose.ui.graphics.ImageBitmap(width = w, height = h)
-        // Canvas-based pixel transfer (Compose Desktop uses ARGB8888 by default).
-        val canvas = androidx.compose.ui.graphics.Canvas(bitmap)
-        val paint = androidx.compose.ui.graphics.Paint()
-        // Draw each pixel via a 1x1 drawRect (slow but correct on desktop).
-        for (y in 0 until h) {
-            for (x in 0 until w) {
-                val argb = img.getRGB(x, y)
-                paint.color = androidx.compose.ui.graphics.Color((argb.toLong() and 0xFFFFFFFFL))
-                canvas.drawRect(
-                    androidx.compose.ui.geometry.Rect(x.toFloat(), y.toFloat(), x + 1f, y + 1f),
-                    paint,
-                )
+    private fun decodeImage(
+        bytes: ByteArray,
+        url: String,
+    ): androidx.compose.ui.graphics.ImageBitmap {
+        val isSvg = url.substringBefore('?').endsWith(".svg", ignoreCase = true) ||
+            bytes.decodeToString(endIndex = minOf(bytes.size, 256)).trimStart().startsWith("<svg")
+        if (!isSvg) {
+            return Image.makeFromEncoded(bytes).toComposeImageBitmap()
+        }
+
+        return Data.makeFromBytes(inlineSvgClassStyles(bytes)).use { data ->
+            SVGDOM(data).use { svg ->
+                val targetSize = 512f
+                svg.setContainerSize(targetSize, targetSize)
+                Surface.makeRasterN32Premul(targetSize.toInt(), targetSize.toInt()).use { surface ->
+                    surface.canvas.clear(0x00000000)
+                    svg.render(surface.canvas)
+                    surface.makeImageSnapshot().toComposeImageBitmap()
+                }
             }
         }
-        return bitmap
     }
 }
+
+/**
+ * Skia's SVG renderer does not apply CSS class rules from embedded `<style>` blocks.
+ * RomM's bundled controller artwork uses those rules for every fill and stroke, so copy
+ * the declarations onto each element as presentation attributes before rendering.
+ */
+internal fun inlineSvgClassStyles(bytes: ByteArray): ByteArray {
+    val svg = bytes.decodeToString()
+    val declarationsByClass = linkedMapOf<String, LinkedHashMap<String, String>>()
+
+    SVG_STYLE_BLOCK.findAll(svg).forEach { styleBlock ->
+        SVG_CSS_RULE.findAll(styleBlock.groupValues[1]).forEach { rule ->
+            val declarations = rule.groupValues[2]
+                .split(';')
+                .mapNotNull { declaration ->
+                    val parts = declaration.split(':', limit = 2)
+                    if (parts.size != 2) null
+                    else parts[0].trim().takeIf(String::isNotEmpty)?.let { it to parts[1].trim() }
+                }
+            rule.groupValues[1].split(',').forEach { selector ->
+                val className = selector.trim().removePrefix(".")
+                if (className.matches(SVG_CLASS_NAME)) {
+                    declarationsByClass.getOrPut(className, ::linkedMapOf).putAll(declarations)
+                }
+            }
+        }
+    }
+
+    if (declarationsByClass.isEmpty()) return bytes
+
+    return SVG_CLASS_ATTRIBUTE.replace(svg) { match ->
+        val attributes = match.groupValues[1]
+            .split(Regex("\\s+"))
+            .flatMap { declarationsByClass[it]?.entries.orEmpty() }
+            .associate { it.key to it.value }
+            .entries
+            .joinToString(separator = " ", prefix = " ") { (name, value) ->
+                """$name="${value.escapeXmlAttribute()}""""
+            }
+        match.value + attributes
+    }.encodeToByteArray()
+}
+
+private fun String.escapeXmlAttribute(): String =
+    replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
+
+private val SVG_STYLE_BLOCK = Regex("""<style\b[^>]*>(.*?)</style>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val SVG_CSS_RULE = Regex("""([^{}]+)\{([^{}]+)}""")
+private val SVG_CLASS_ATTRIBUTE = Regex("""\bclass\s*=\s*"([^"]+)"""")
+private val SVG_CLASS_NAME = Regex("""[A-Za-z_][A-Za-z0-9_-]*""")
 
 /** Convenience function matching the original API. */
 fun buildRomMImageLoader(

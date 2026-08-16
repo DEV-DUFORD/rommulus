@@ -51,6 +51,10 @@ internal enum class DesktopNavDestination(
     COLLECTIONS(Screen.COLLECTIONS, "Collections", Icons.Filled.Collections),
     SEARCH(Screen.SEARCH, "Search", Icons.Filled.Search),
     SETTINGS(Screen.SETTINGS, "Settings", Icons.Filled.Settings),
+    ;
+
+    val focusKey: String
+        get() = "nav:$name"
 }
 
 internal fun topLevelNavDestination(screen: Screen): DesktopNavDestination? =
@@ -134,7 +138,7 @@ private fun DesktopNavRail(
                         },
                     )
                     .onFocusChanged { focused = it.isFocused }
-                    .focusableItem("nav:${destination.name}", navigator) {
+                    .focusableItem(destination.focusKey, navigator) {
                         onNavigate(destination.screen)
                     }
                     .clickable { onNavigate(destination.screen) }

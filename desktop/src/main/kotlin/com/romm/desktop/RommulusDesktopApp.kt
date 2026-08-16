@@ -4,6 +4,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,9 +30,12 @@ import com.romm.desktop.controller.DesktopControllerRouter
 import com.romm.desktop.controller.FocusAction
 import com.romm.desktop.controller.JInputControllerSource
 import com.romm.desktop.ui.components.RommulusTheme
+import com.romm.desktop.ui.image.LocalDesktopImageLoader
 import com.romm.desktop.ui.navigation.DesktopFocusScope
 import com.romm.desktop.ui.navigation.DesktopLibraryScaffold
+import com.romm.desktop.ui.navigation.DesktopNavDestination
 import com.romm.desktop.ui.navigation.FocusNavigator
+import com.romm.desktop.ui.navigation.topLevelNavDestination
 import com.romm.desktop.ui.screens.detail.BiosConfigurationScreen
 import com.romm.desktop.ui.screens.detail.GameDetailScreen
 import com.romm.desktop.ui.screens.detail.LicensesDialog
@@ -63,16 +67,15 @@ import kotlinx.coroutines.withContext
  * the primary controller; this shell maps them onto Compose's spatial focus engine:
  *  - `Move(dir)` → [FocusManager.moveFocus] (D-pad / left-stick follows UI geometry)
  *  - `Activate`  → [FocusNavigator.activateFocused] (A presses the focused item's action)
- *  - `Back`      → [DesktopAppCoordinator.onBack] (B / Escape semantics)
+ *  - `Back`      → the current top-level rail item first, then up one view
  *
  * Keyboard (plans/LINUX_X64.md §8.1):
- *  - Escape → back (parent-based; at HOME it requests exit)
+ *  - Escape → the current top-level rail item first, then up one view
  *  - Ctrl+F → Search screen
  *  - Ctrl+Q → request shutdown
  *
  * @param coordinator the fully-wired [DesktopAppCoordinator].
- * @param onCloseRequest invoked when the shell decides the window should close (Ctrl+Q or
- *                        Escape at the root screen).
+ * @param onCloseRequest invoked when the user explicitly closes the window or presses Ctrl+Q.
  */
 @Composable
 fun RommulusDesktopApp(
@@ -120,8 +123,26 @@ fun RommulusDesktopApp(
     }
 
     RommulusTheme(theme = theme) {
-        DesktopFocusScope(navigator = focusNavigator) {
+        CompositionLocalProvider(LocalDesktopImageLoader provides coordinator.imageLoader) {
+            DesktopFocusScope(navigator = focusNavigator) {
             val focusManager = LocalFocusManager.current
+            val handleBack = {
+                if (!focusNavigator.handleBack()) {
+                    val destination = if (coordinator.appMode == AppMode.MAIN) {
+                        topLevelNavDestination(coordinator.currentScreen)
+                    } else {
+                        null
+                    }
+                    if (destination != null && !focusNavigator.isFocused(destination.focusKey)) {
+                        focusNavigator.focusItem(destination.focusKey)
+                    } else if (destination != DesktopNavDestination.HOME) {
+                        coordinator.onBack()
+                        if (destination != null) {
+                            focusNavigator.focusItem(DesktopNavDestination.HOME.focusKey)
+                        }
+                    }
+                }
+            }
             LaunchedEffect(router, focusManager, focusNavigator) {
                 router.focusActions.collect { action ->
                     when (action) {
@@ -135,9 +156,7 @@ fun RommulusDesktopApp(
                             }
                         }
                         FocusAction.Activate -> focusNavigator.activateFocused()
-                        FocusAction.Back -> {
-                            if (!focusNavigator.handleBack()) coordinator.onBack()
-                        }
+                        FocusAction.Back -> handleBack()
                     }
                 }
             }
@@ -151,7 +170,7 @@ fun RommulusDesktopApp(
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when {
                             event.key == Key.Escape -> {
-                                coordinator.onBack()
+                                handleBack()
                                 true
                             }
                             event.isCtrlPressed && event.key == Key.F -> {
@@ -222,6 +241,7 @@ fun RommulusDesktopApp(
                             // AppMode gate owns that state).
                             Screen.ONBOARDING -> OnboardingScreen(coordinator)
                         }
+                    }
                     }
                 }
             }

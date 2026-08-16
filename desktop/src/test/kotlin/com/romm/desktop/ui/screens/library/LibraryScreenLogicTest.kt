@@ -152,7 +152,7 @@ class LibraryScreenLogicTest {
     inner class PlatformTileImageUrl {
 
         @Test
-        fun `prefers the first bundled glyph candidate`() {
+        fun `prefers bundled platform glyph over external logo`() {
             val platform = PlatformSummary(
                 id = 1L,
                 displayName = "NES",
