@@ -109,11 +109,11 @@ fi
 # --- outer phase ---------------------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
 MISSING=0
-for pkg in gnome-keyring dbus glib2.0-bin python3-dbus; do
+for pkg in gnome-keyring dbus libglib2.0-bin python3-dbus; do
     dpkg -s "$pkg" >/dev/null 2>&1 || MISSING=1
 done
 if [[ "$MISSING" == "1" ]]; then
-    echo "Installing gnome-keyring dbus glib2.0-bin python3-dbus ..." >&2
+    echo "Installing gnome-keyring dbus libglib2.0-bin python3-dbus ..." >&2
     if command -v sudo >/dev/null 2>&1; then
         SUDO=sudo
     elif [[ "$(id -u)" == "0" ]]; then
@@ -122,7 +122,7 @@ if [[ "$MISSING" == "1" ]]; then
         echo "ERROR: missing packages and no sudo/root available." >&2; exit 1
     fi
     $SUDO apt-get update -qq
-    $SUDO apt-get install -y -qq gnome-keyring dbus glib2.0-bin python3-dbus
+    $SUDO apt-get install -y -qq gnome-keyring dbus libglib2.0-bin python3-dbus
 fi
 
 cd "$REPO_ROOT"

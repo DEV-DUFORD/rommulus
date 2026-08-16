@@ -15,7 +15,7 @@ Implements ONLY the methods SecretServiceDbusBackend.kt actually invokes:
     - SearchItems(a{ss}) -> (ao unlocked, ao locked)
   org.freedesktop.Secret.Item (on each item object)
     - Delete()
-    - GetSecret(o session) -> (oayays)
+    - GetSecret(o session) -> (ays)
 
 Behavior is driven by $ROM_SECRET_MODE:
   unavailable -> exit(0) before owning the name (backend sees "name has no owner")
@@ -84,7 +84,7 @@ class Item(dbus.service.Object):
         log(f"deleted item {self.path}")
 
     @dbus.service.method("org.freedesktop.Secret.Item", in_signature="o",
-                         out_signature="(oayays)")
+                          out_signature="(ays)")
     def GetSecret(self, session):
         if self._store.locked:
             raise dbus.exceptions.DBusException(
@@ -92,7 +92,8 @@ class Item(dbus.service.Object):
         if str(session) not in self._store.sessions:
             raise dbus.exceptions.DBusException(
                 f"invalid session {session}", name=ERROR_INVALID_ARGS)
-        return (str(session), b"", self.value, self.content_type)
+        # Spec: Item.GetSecret(in o session) -> (ay value, s content_type).
+        return (self.value, self.content_type)
 
 
 class Collection(dbus.service.Object):

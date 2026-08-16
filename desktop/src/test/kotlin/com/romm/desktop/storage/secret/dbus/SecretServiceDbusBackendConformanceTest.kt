@@ -23,6 +23,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty
  * non-Unit value makes JUnit silently skip the test.
  */
 @EnabledIfSystemProperty(named = "rommulus.secretServiceBus", matches = ".+")
+@EnabledIfSystemProperty(named = "rommulus.secretServiceMode", matches = ".+")
 class SecretServiceDbusBackendConformanceTest {
 
     private val backend = SecretServiceDbusBackend(timeoutMillis = 5_000L)

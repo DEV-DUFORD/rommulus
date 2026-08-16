@@ -1,7 +1,10 @@
 package com.romm.desktop.storage.secret.dbus
 
+import com.romm.desktop.log.DesktopLogger
 import com.romm.desktop.storage.secret.KeyringState
 import com.romm.desktop.storage.secret.SecretBackend
+import java.util.logging.Level
+import java.util.logging.Logger
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.Struct
 import org.freedesktop.dbus.Tuple
@@ -51,6 +54,9 @@ class SecretServiceDbusBackend(
 
         private val EMPTY_PATH = setOf("", "/")
     }
+
+    // JUL via DesktopLogger (token-redacting formatter). Never log secret/token contents here.
+    private val logger: Logger = DesktopLogger.get()
 
     /** Lazily connect to the session bus (reads $DBUS_SESSION_BUS_ADDRESS); null if it fails. */
     private val connection: DBusConnection? by lazy {
@@ -104,6 +110,9 @@ class SecretServiceDbusBackend(
             )
             // A non-empty prompt path means the daemon wants a (host-side) unlock dialog: fail closed.
             EMPTY_PATH.contains(result.prompt.getPath())
+        }.onFailure { e ->
+            // Fail-closed: swallow after logging. Never include the secret value in logs.
+            logger.log(Level.FINE, "secret-service store failed for scope={0}: {1}", listOf(scope, e))
         }.getOrDefault(false)
     }
 
@@ -121,8 +130,12 @@ class SecretServiceDbusBackend(
             val itemPath = result.unlocked.firstOrNull() ?: return null
             val item = conn.getRemoteObject(BUS_NAME, itemPath.getPath(), SecretItem::class.java)
             val session = service.OpenSession(SESSION_ALGORITHM, ByteArray(0))
-            val s = item.GetSecret(session)
-            String(s.value, Charsets.UTF_8)
+            // Spec: Item.GetSecret(in o session) -> (ay value, s content_type).
+            val secretResult = item.GetSecret(session)
+            String(secretResult.value, Charsets.UTF_8)
+        }.onFailure { e ->
+            // Fail-closed: swallow after logging. Never include the secret value in logs.
+            logger.log(Level.FINE, "secret-service retrieve failed for scope={0}: {1}", listOf(scope, e))
         }.getOrNull()
     }
 
@@ -241,7 +254,7 @@ interface SecretCollection : DBusInterface {
 @DBusInterfaceName("org.freedesktop.Secret.Item")
 interface SecretItem : DBusInterface {
     fun Delete()
-    fun GetSecret(session: DBusPath): SecretStruct
+    fun GetSecret(session: DBusPath): GetSecretResult
 }
 
 /** The Secret Service `(oayays)` struct: session, parameters, value, content_type. */
@@ -268,4 +281,10 @@ class CreateItemResult(
 class SearchItemsResult(
     @Position(0) val unlocked: List<DBusPath>,
     @Position(1) val locked: List<DBusPath>,
+) : Tuple()
+
+/** Multi-return DTO for `GetSecret` -> `(ay value, s content_type)` (spec-correct 2-field reply). */
+class GetSecretResult(
+    @Position(0) val value: ByteArray,
+    @Position(1) val contentType: String,
 ) : Tuple()
