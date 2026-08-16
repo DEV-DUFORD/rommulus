@@ -26,8 +26,8 @@ import java.util.concurrent.TimeUnit
  * in `com.romm.desktop.storage` provides the concrete classes; this module only
  * depends on the interfaces from `:shared:network`.
  *
- * The OkHttpClient is configured as a cookie-free bearer client with bounded
- * timeouts, mirroring Android's `nativeOkHttpClient` policy.
+ * The OkHttpClient keeps session cookies only in memory so the onboarding login
+ * can exchange them for a durable bearer token. Cookies are never persisted.
  */
 class DesktopNetworkModule(
     private val sessionStorage: SessionStorage,
@@ -46,21 +46,23 @@ class DesktopNetworkModule(
     val libraryRepository: LibraryRepository = buildLibraryRepository()
 
     private fun buildOkHttpClient(): OkHttpClient {
-        val originResult = originProvider()?.let { RommServerAddress.parseAndNormalize(it) } as? Valid
+        val currentOrigin = {
+            originProvider()?.let { RommServerAddress.parseAndNormalize(it) } as? Valid
+        }
         val tokenProvider: () -> String? = tokenProvider@{
-            val origin = originResult?.origin ?: return@tokenProvider null
+            val origin = currentOrigin()?.origin ?: return@tokenProvider null
             val username = usernameProvider() ?: return@tokenProvider null
             clientTokenStorage.getToken(origin, username)?.raw
         }
 
         return OkHttpClient.Builder()
-            .addInterceptor(BearerAuthInterceptor({ originResult }, tokenProvider))
+            .addInterceptor(BearerAuthInterceptor(currentOrigin, tokenProvider))
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .callTimeout(60, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
-            .cookieJar(okhttp3.CookieJar.NO_COOKIES)
+            .cookieJar(EphemeralCookieJar())
             .build()
     }
 

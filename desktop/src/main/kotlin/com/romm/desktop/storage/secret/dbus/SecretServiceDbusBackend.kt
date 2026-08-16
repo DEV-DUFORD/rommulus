@@ -49,6 +49,7 @@ class SecretServiceDbusBackend(
         const val SECRET_CONTENT_TYPE = "text/plain"
         const val SESSION_ALGORITHM = "plain"
         const val COLLECTION_IFACE = "org.freedesktop.Secret.Collection"
+        const val ITEM_IFACE = "org.freedesktop.Secret.Item"
         // 20s is dbus-java's default reply wait; we bound it so a stalled daemon fails closed.
         const val DEFAULT_TIMEOUT_MILLIS = 5_000L
 
@@ -92,7 +93,7 @@ class SecretServiceDbusBackend(
             if (ref !is CollectionRef.Open) return false
             if (isCollectionLocked(conn, ref.path)) return false
             val col = conn.getRemoteObject(BUS_NAME, ref.path.getPath(), SecretCollection::class.java)
-            val session = service.OpenSession(SESSION_ALGORITHM, ByteArray(0))
+            val session = service.OpenSession(SESSION_ALGORITHM, Variant<String>("")).session
             val secretStruct = SecretStruct(
                 session = session,
                 parameters = ByteArray(0),
@@ -102,8 +103,8 @@ class SecretServiceDbusBackend(
             val attributes = mapOf("application" to APPLICATION, "scope" to scope)
             val result = col.CreateItem(
                 properties = mapOf(
-                    "Label" to Variant<String>(scope),
-                    "Attributes" to Variant<Map<String, String>>(attributes, "a{ss}"),
+                    "$ITEM_IFACE.Label" to Variant<String>(scope),
+                    "$ITEM_IFACE.Attributes" to Variant<Map<String, String>>(attributes, "a{ss}"),
                 ),
                 secret = secretStruct,
                 replace = true,
@@ -112,7 +113,10 @@ class SecretServiceDbusBackend(
             EMPTY_PATH.contains(result.prompt.getPath())
         }.onFailure { e ->
             // Fail-closed: swallow after logging. Never include the secret value in logs.
-            logger.log(Level.FINE, "secret-service store failed for scope={0}: {1}", listOf(scope, e))
+            logger.log(
+                Level.WARNING,
+                "secret-service store failed (${e.javaClass.simpleName}: ${e.message.orEmpty()})",
+            )
         }.getOrDefault(false)
     }
 
@@ -124,18 +128,20 @@ class SecretServiceDbusBackend(
             val ref = resolveCollection(service)
             if (ref !is CollectionRef.Open) return null
             if (isCollectionLocked(conn, ref.path)) return null
-            val col = conn.getRemoteObject(BUS_NAME, ref.path.getPath(), SecretCollection::class.java)
-            val result = col.SearchItems(mapOf("application" to APPLICATION, "scope" to scope))
+            val result = service.SearchItems(mapOf("application" to APPLICATION, "scope" to scope))
             if (result.locked.isNotEmpty()) return null // a matching item is locked -> fail closed
             val itemPath = result.unlocked.firstOrNull() ?: return null
             val item = conn.getRemoteObject(BUS_NAME, itemPath.getPath(), SecretItem::class.java)
-            val session = service.OpenSession(SESSION_ALGORITHM, ByteArray(0))
-            // Spec: Item.GetSecret(in o session) -> (ay value, s content_type).
+            val session = service.OpenSession(SESSION_ALGORITHM, Variant<String>("")).session
+            // Spec: Item.GetSecret(in o session) -> Secret `(oayays)`.
             val secretResult = item.GetSecret(session)
             String(secretResult.value, Charsets.UTF_8)
         }.onFailure { e ->
             // Fail-closed: swallow after logging. Never include the secret value in logs.
-            logger.log(Level.FINE, "secret-service retrieve failed for scope={0}: {1}", listOf(scope, e))
+            logger.log(
+                Level.WARNING,
+                "secret-service retrieve failed (${e.javaClass.simpleName}: ${e.message.orEmpty()})",
+            )
         }.getOrNull()
     }
 
@@ -156,8 +162,7 @@ class SecretServiceDbusBackend(
             if (ref !is CollectionRef.Open) return
             // Deleting from a locked collection would need an unlock prompt: skip, best-effort.
             if (isCollectionLocked(conn, ref.path)) return
-            val col = conn.getRemoteObject(BUS_NAME, ref.path.getPath(), SecretCollection::class.java)
-            val result = col.SearchItems(attributes)
+            val result = service.SearchItems(attributes)
             for (path in result.unlocked + result.locked) {
                 val item = conn.getRemoteObject(BUS_NAME, path.getPath(), SecretItem::class.java)
                 item.Delete()
@@ -180,7 +185,7 @@ class SecretServiceDbusBackend(
         val alias = service.ReadAlias(DEFAULT_COLLECTION_ALIAS)
         if (!EMPTY_PATH.contains(alias.getPath())) return CollectionRef.Open(alias)
         val created = service.CreateCollection(
-            properties = mapOf("Label" to Variant<String>(COLLECTION_LABEL)),
+            properties = mapOf("$COLLECTION_IFACE.Label" to Variant<String>(COLLECTION_LABEL)),
             alias = DEFAULT_COLLECTION_ALIAS,
         )
         // A non-empty prompt means the daemon needs a host-side dialog before it will create the
@@ -238,7 +243,8 @@ class SecretServiceDbusBackend(
 interface SecretService : DBusInterface {
     fun ReadAlias(alias: String): DBusPath
     fun CreateCollection(properties: Map<String, Variant<*>>, alias: String): CreateCollectionResult
-    fun OpenSession(algorithm: String, input: ByteArray): DBusPath
+    fun OpenSession(algorithm: String, input: Variant<*>): OpenSessionResult
+    fun SearchItems(attributes: Map<String, String>): SearchItemsResult
 }
 
 @DBusInterfaceName("org.freedesktop.Secret.Collection")
@@ -248,13 +254,12 @@ interface SecretCollection : DBusInterface {
         secret: SecretStruct,
         replace: Boolean,
     ): CreateItemResult
-    fun SearchItems(attributes: Map<String, String>): SearchItemsResult
 }
 
 @DBusInterfaceName("org.freedesktop.Secret.Item")
 interface SecretItem : DBusInterface {
-    fun Delete()
-    fun GetSecret(session: DBusPath): GetSecretResult
+    fun Delete(): DBusPath
+    fun GetSecret(session: DBusPath): SecretValue
 }
 
 /** The Secret Service `(oayays)` struct: session, parameters, value, content_type. */
@@ -271,20 +276,14 @@ class CreateCollectionResult(
     @Position(1) val prompt: DBusPath,
 ) : Tuple()
 
+/** Multi-return DTO for `OpenSession` -> `(v output, o session)`. */
+class OpenSessionResult(
+    @Position(0) val output: Variant<*>,
+    @Position(1) val session: DBusPath,
+) : Tuple()
+
 /** Multi-return DTO for `CreateItem` -> `(o item, o prompt)`. */
 class CreateItemResult(
     @Position(0) val item: DBusPath,
     @Position(1) val prompt: DBusPath,
-) : Tuple()
-
-/** Multi-return DTO for `SearchItems` -> `(ao unlocked, ao locked)`. */
-class SearchItemsResult(
-    @Position(0) val unlocked: List<DBusPath>,
-    @Position(1) val locked: List<DBusPath>,
-) : Tuple()
-
-/** Multi-return DTO for `GetSecret` -> `(ay value, s content_type)` (spec-correct 2-field reply). */
-class GetSecretResult(
-    @Position(0) val value: ByteArray,
-    @Position(1) val contentType: String,
 ) : Tuple()

@@ -75,11 +75,11 @@ sys.exit(0 if m.NameHasOwner("org.freedesktop.secrets") else 1)' \
 import os, dbus
 bus = dbus.SessionBus()
 svc = bus.get_object("org.freedesktop.secrets", "/org/freedesktop/secrets")
-session = svc.OpenSession("plain", b"", signature="say")
+_, session = svc.OpenSession("plain", dbus.String(""), signature="sv")
 coll = bus.get_object("org.freedesktop.secrets", os.environ["ALIAS_PATH"])
 item, prompt = coll.CreateItem(
-    {dbus.String("Label"): dbus.String("smoke"),
-     dbus.String("Attributes"): dbus.Dictionary(
+    {dbus.String("org.freedesktop.Secret.Item.Label"): dbus.String("smoke"),
+     dbus.String("org.freedesktop.Secret.Item.Attributes"): dbus.Dictionary(
          {dbus.String("application"): dbus.String("rommulus"),
           dbus.String("scope"): dbus.String("smoke")}, signature="ss")},
     (session, b"", b"smoke-secret", "text/plain"),

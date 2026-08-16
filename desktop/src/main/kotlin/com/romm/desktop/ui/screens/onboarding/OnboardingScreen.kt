@@ -2,6 +2,7 @@ package com.romm.desktop.ui.screens.onboarding
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -53,7 +56,13 @@ import com.romm.desktop.ui.components.TvOutlinedButton
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import kotlin.math.ceil
+import org.jetbrains.skia.Paint
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.Surface
 
 /** Amber helper-text color with WCAG AA contrast against the dark background (mirrors Android). */
 private val AmberWarningColor = Color(0xFFFCD34D)
@@ -399,11 +408,7 @@ private fun CredentialsStep(
 // --------------------------------------------------------------------------- QR panel
 
 /**
- * Desktop QR-login panel (mirrors Android's `QrLoginPanel`). ZXing is NOT a desktop dependency
- * (it only exists in the Android app module), so the [QrLoginUiState.Ready] state renders a
- * placeholder "Scan with your phone" box instead of an encoded QR bitmap. Adding
- * `com.google.zxing:core` to the desktop module would let this render the real code from
- * `session.verificationUrl`.
+ * Desktop QR-login panel (mirrors Android's `QrLoginPanel`).
  */
 @Composable
 private fun QrLoginPanel(
@@ -440,20 +445,17 @@ private fun QrLoginPanel(
             }
 
             is QrLoginUiState.Ready -> {
-                // Placeholder for the QR code (ZXing not available on desktop — see kdoc).
-                Box(
+                val qrBitmap = remember(state.session.verificationUrl) {
+                    createQrImageBitmap(state.session.verificationUrl)
+                }
+                Image(
+                    bitmap = qrBitmap,
+                    contentDescription = "QR code for phone sign-in",
                     modifier = Modifier
                         .size(210.dp)
                         .background(Color.White, RoundedCornerShape(8.dp))
                         .border(1.dp, palette.textSecondary.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "Scan with your phone",
-                        color = Color.Black,
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                }
+                )
                 Spacer(modifier = Modifier.size(12.dp))
                 PanelMessage("Open ROMM on your phone and scan this code.")
                 Spacer(modifier = Modifier.size(8.dp))
@@ -565,6 +567,40 @@ internal fun formatUserCode(code: String): String {
         "${normalized.take(4)}-${normalized.drop(4)}"
     } else {
         normalized
+    }
+}
+
+internal fun createQrImageBitmap(content: String, size: Int = 512): ImageBitmap {
+    require(content.isNotBlank()) { "QR content must not be blank" }
+    require(size > 0) { "QR size must be positive" }
+    val matrix = QRCodeWriter().encode(
+        content,
+        BarcodeFormat.QR_CODE,
+        size,
+        size,
+        mapOf(EncodeHintType.MARGIN to 2),
+    )
+    return Surface.makeRasterN32Premul(size, size).use { surface ->
+        surface.canvas.clear(0xffffffff.toInt())
+        Paint().use { paint ->
+            paint.color = 0xff000000.toInt()
+            for (y in 0 until size) {
+                var x = 0
+                while (x < size) {
+                    if (!matrix[x, y]) {
+                        x++
+                        continue
+                    }
+                    val start = x
+                    while (x < size && matrix[x, y]) x++
+                    surface.canvas.drawRect(
+                        Rect.makeLTRB(start.toFloat(), y.toFloat(), x.toFloat(), (y + 1).toFloat()),
+                        paint,
+                    )
+                }
+            }
+        }
+        surface.makeImageSnapshot().toComposeImageBitmap()
     }
 }
 

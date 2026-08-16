@@ -11,6 +11,7 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
+    implementation("com.google.zxing:core:3.5.3")
     // Linux Secret Service transport (freedesktop.org Secret Service over the session bus).
     // Pure-Java D-Bus protocol; the JNR transport is required because dbus-java-core ships no
     // concrete transport implementation. jnr-unixsocket uses JNR FFI (loads a native shim only at

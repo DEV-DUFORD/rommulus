@@ -5,6 +5,8 @@ import com.romm.androidtv.auth.SessionStorage
 import com.romm.androidtv.network.SessionCookieSync
 import com.romm.androidtv.romm.ClientToken
 import com.romm.androidtv.romm.DeviceIdentityStorage
+import okhttp3.Cookie
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -139,6 +141,32 @@ class DesktopNetworkModuleTest {
 
         assertThat(module.okHttpClient.followRedirects).isTrue()
         assertThat(module.okHttpClient.followSslRedirects).isTrue()
+    }
+
+    @Test
+    fun `okhttp client retains login cookies in memory`() {
+        val module = DesktopNetworkModule(
+            sessionStorage = makeFakeSessionStorage(),
+            clientTokenStorage = makeFakeClientTokenStorage(),
+            deviceIdentityStorage = makeFakeDeviceIdentityStorage(),
+            sessionCookieSync = makeFakeSessionCookieSync(),
+            originProvider = { "https://romm.example.com" },
+            usernameProvider = { "user" },
+        )
+        val url = "https://romm.example.com/api/login".toHttpUrl()
+        val cookie = Cookie.Builder()
+            .name("romm_session")
+            .value("session-value")
+            .hostOnlyDomain(url.host)
+            .path("/")
+            .build()
+
+        module.okHttpClient.cookieJar.saveFromResponse(url, listOf(cookie))
+
+        assertThat(module.okHttpClient.cookieJar.loadForRequest(url)).containsExactly(cookie)
+        assertThat(
+            module.okHttpClient.cookieJar.loadForRequest("https://other.example.com/".toHttpUrl()),
+        ).isEmpty()
     }
 
     @Test

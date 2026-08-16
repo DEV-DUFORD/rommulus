@@ -6,7 +6,7 @@ Implements ONLY the methods SecretServiceDbusBackend.kt actually invokes:
   org.freedesktop.Secret.Service (at /org/freedesktop/secrets)
     - ReadAlias(s) -> o
     - CreateCollection(a{sv}, s) -> (o collection, o prompt)
-    - OpenSession(s, ay) -> o                      ("plain" only)
+    - OpenSession(s, v) -> (v output, o session)   ("plain" only)
   org.freedesktop.DBus.Properties (on the collection object)
     - Get(ss) -> v                                 ("Locked", "Label")
     - GetAll(s) -> a{sv}
@@ -15,7 +15,7 @@ Implements ONLY the methods SecretServiceDbusBackend.kt actually invokes:
     - SearchItems(a{ss}) -> (ao unlocked, ao locked)
   org.freedesktop.Secret.Item (on each item object)
     - Delete()
-    - GetSecret(o session) -> (ays)
+    - GetSecret(o session) -> (oayays)
 
 Behavior is driven by $ROM_SECRET_MODE:
   unavailable -> exit(0) before owning the name (backend sees "name has no owner")
@@ -75,16 +75,17 @@ class Item(dbus.service.Object):
         self.value = b""
         self.content_type = "text/plain"
 
-    @dbus.service.method("org.freedesktop.Secret.Item")
+    @dbus.service.method("org.freedesktop.Secret.Item", out_signature="o")
     def Delete(self):
         if self._store.locked:
             raise dbus.exceptions.DBusException(
                 f"collection is locked", name=ERROR_FAILED)
         self._store.items.remove(self)
         log(f"deleted item {self.path}")
+        return "/"
 
     @dbus.service.method("org.freedesktop.Secret.Item", in_signature="o",
-                          out_signature="(ays)")
+                          out_signature="(oayays)")
     def GetSecret(self, session):
         if self._store.locked:
             raise dbus.exceptions.DBusException(
@@ -92,8 +93,7 @@ class Item(dbus.service.Object):
         if str(session) not in self._store.sessions:
             raise dbus.exceptions.DBusException(
                 f"invalid session {session}", name=ERROR_INVALID_ARGS)
-        # Spec: Item.GetSecret(in o session) -> (ay value, s content_type).
-        return (self.value, self.content_type)
+        return (session, b"", self.value, self.content_type)
 
 
 class Collection(dbus.service.Object):
@@ -142,8 +142,10 @@ class Collection(dbus.service.Object):
             raise dbus.exceptions.DBusException(
                 f"invalid session {session}", name=ERROR_INVALID_ARGS)
 
-        label = properties.get("Label")
-        attributes = dict(properties.get("Attributes") or {})
+        label = properties.get("org.freedesktop.Secret.Item.Label")
+        attributes = dict(
+            properties.get("org.freedesktop.Secret.Item.Attributes") or {}
+        )
         label = str(label) if label is not None else ""
         attributes = {str(k): str(v) for k, v in attributes.items()}
 
@@ -243,7 +245,7 @@ class Service(dbus.service.Object):
     @dbus.service.method("org.freedesktop.Secret.Service", in_signature="a{sv}s",
                          out_signature="oo")
     def CreateCollection(self, properties, alias):
-        label = properties.get("Label")
+        label = properties.get("org.freedesktop.Secret.Collection.Label")
         label = str(label) if label is not None else "new collection"
         alias = str(alias)
         if alias in STORE.aliases:
@@ -251,10 +253,20 @@ class Service(dbus.service.Object):
         col = STORE._create_collection(label, alias=alias or None, locked=False)
         return (col.path, "/")
 
-    @dbus.service.method("org.freedesktop.Secret.Service", in_signature="say",
-                         out_signature="o")
+    @dbus.service.method("org.freedesktop.Secret.Service", in_signature="sv",
+                         out_signature="vo")
     def OpenSession(self, algorithm, _input):
-        return STORE.open_session(algorithm, _input)
+        return (dbus.String(""), STORE.open_session(algorithm, _input))
+
+    @dbus.service.method("org.freedesktop.Secret.Service", in_signature="a{ss}",
+                         out_signature="aoao")
+    def SearchItems(self, attributes):
+        wanted = {str(k): str(v) for k, v in attributes.items()}
+        matches = [
+            item.path for item in STORE.items
+            if all(item.attributes.get(k) == v for k, v in wanted.items())
+        ]
+        return ([], matches) if STORE.locked else (matches, [])
 
 
 Service()

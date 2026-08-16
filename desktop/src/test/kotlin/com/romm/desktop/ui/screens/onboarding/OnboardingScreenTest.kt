@@ -128,6 +128,14 @@ class OnboardingScreenTest {
         }
 
         @Test
+        fun `QR image encodes the verification URL at the requested size`() {
+            val image = createQrImageBitmap("https://romm.example.com/device?code=ABCD1234", 96)
+
+            assertThat(image.width).isEqualTo(96)
+            assertThat(image.height).isEqualTo(96)
+        }
+
+        @Test
         fun `existing dashes are normalized`() {
             assertThat(formatUserCode("ABCD-1234")).isEqualTo("ABCD-1234")
             assertThat(formatUserCode("a-b-c-d-1-2-3-4")).isEqualTo("ABCD-1234")

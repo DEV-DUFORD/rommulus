@@ -27,10 +27,10 @@ private fun diagLog(priority: Int, message: String) {
  * that reconnects to a different origin (e.g. switching from a demo/kiosk
  * server to one's own instance) without being rebuilt.
  *
- * Credential-leak guard: requests to any other host (e.g. third-party cover
- * image URLs) never receive the token. Any `Authorization` header already
- * present on such a request (e.g. carried over by a cross-origin redirect) is
- * STRIPPED so the credential is never forwarded cross-origin.
+ * An explicit same-origin `Authorization` header (such as Basic credentials
+ * on `/api/login`) takes precedence over bearer injection. Requests to any
+ * other host have authorization stripped so credentials cannot follow a
+ * cross-origin redirect.
  */
 class BearerAuthInterceptor(
     private val originProvider: () -> ServerAddressResult.Valid?,
@@ -52,13 +52,11 @@ class BearerAuthInterceptor(
         )
 
         val builder = request.newBuilder()
-        if (matchesOrigin && tokenPresent) {
-            // Same-origin native API request: attach the credential.
-            builder.header("Authorization", "Bearer $token")
-        } else {
-            // Non-origin (e.g. third-party cover URL) or no token: strip any
-            // credential a prior hop (redirect) may have carried.
+        if (!matchesOrigin) {
             builder.removeHeader("Authorization")
+        } else if (request.header("Authorization") == null && tokenPresent) {
+            // Same-origin API request without explicit credentials: attach the durable token.
+            builder.header("Authorization", "Bearer $token")
         }
         return chain.proceed(builder.build())
     }

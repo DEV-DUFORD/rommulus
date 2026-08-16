@@ -3,6 +3,7 @@ package com.romm.androidtv.romm
 import com.romm.androidtv.network.RommServerAddress
 import com.romm.androidtv.network.ServerAddressResult
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
@@ -165,6 +166,24 @@ class BearerAuthInterceptorTest {
 
         val recorded = server.takeRequest()
         assertThat(recorded.getHeader("Authorization")).isNull()
+    }
+
+    @Test
+    @DisplayName("Same-origin explicit Basic credentials are preserved for login")
+    fun `preserves explicit Basic credentials for same-origin login`() {
+        server.enqueue(MockResponse().setResponseCode(200))
+        val authorization = "Basic dXNlcjpwYXNz"
+        val client = client(sameOrigin()) { null }
+
+        client.newCall(
+            okhttp3.Request.Builder()
+                .url("${baseUrl()}/base/api/login")
+                .header("Authorization", authorization)
+                .post(ByteArray(0).toRequestBody(null))
+                .build(),
+        ).execute().use { }
+
+        assertThat(server.takeRequest().getHeader("Authorization")).isEqualTo(authorization)
     }
 
     @Test
