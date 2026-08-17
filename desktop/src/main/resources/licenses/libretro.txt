@@ -5068,10 +5068,10 @@ Path: include/libretro.h
 Commit: a76f01d2b11ad9c13cb7457d027e4c9e0ce1ae6e (2026-07-26)
 
 This is the canonical Libretro API header only. It defines the API boundary
-used by app/src/main/cpp/libretro_host and app/src/main/cpp/test_core. No
-RetroArch frontend code is vendored here (see LIBRETRO_REFACTOR.md sections
-4.1 and 5: RetroArch's frontend is GPLv3 and must not be copied into this
-app; libretro.h itself is separately MIT-licensed as stated above).
+used by native/engine and app/src/main/cpp/test_core. No RetroArch frontend
+code is vendored here (see LIBRETRO_REFACTOR.md sections 4.1 and 5:
+RetroArch's frontend is GPLv3 and must not be copied into this app;
+libretro.h itself is separately MIT-licensed as stated above).
 
 === Oboe C++ audio ===
 
