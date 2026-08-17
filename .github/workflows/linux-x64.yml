@@ -10,10 +10,10 @@
 #   clang-18, cmake, ninja-build, libsqlite3-dev, xvfb, pkg-config, zstd
 #   libsdl3-dev — NOT in noble repos; requires PPA or source build.
 #
-# PHASE-0 REALITY:
-#   The native/ directory, rommulus-player, cores, and tarball packaging
-  # do not exist yet (later phases).  Jobs 5-9 are stubbed with
-#   `if: false` and will be enabled when their dependencies land.
+# PHASE-7 STATUS (Wave 9c):
+#   native/ (engine + standalone host CTest project) now exists.  Jobs 5-6
+#   (native-debug-asan-ubsan, native-release-build) are enabled.  Jobs 7-9
+#   remain stubbed with `if: false` until their dependencies land.
 #
 # REQUIRED CI ASSERTIONS (from §15):
 #   • no Android imports in shared modules
@@ -262,26 +262,15 @@ jobs:
           desktop/ci/secret-service/gnome-keyring-smoke.sh
 
   # =================================================================
-  # 5. native-debug-asan-ubsan  — STUBBED (Phase 7+)
+  # 5. native-debug-asan-ubsan  — Phase 7 (enabled in Wave 9c)
   # =================================================================
-  # TODO(phase 7): enable when native/engine/ and native/platform/linux/ land.
-  #   This job will compile the native engine with AddressSanitizer and
-  #   UndefinedBehaviorSanitizer, then run the CTest suite under ASan/UBSan.
-  #   Expected command (once native/ exists):
-  #     cd native && mkdir -p build-debug && cd build-debug
-  #     cmake .. -DCMAKE_BUILD_TYPE=Debug \
-  #             -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
-  #             -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
-  #             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
-  #             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
-  #             -G Ninja
-  #     ninja -j$(nproc)
-  #     ctest --output-on-failure
+  # Compiles the platform-neutral engine unit tests (native/tests, a
+  # standalone CMake/CTest project) with clang-18 under AddressSanitizer
+  # and UndefinedBehaviorSanitizer, then runs the CTest suite.
   native-debug-asan-ubsan:
     name: Native debug (ASan/UBSan)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: false  # TODO(phase 7): remove this guard when native/ lands
 
     steps:
       - name: Check out repository
@@ -298,12 +287,12 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-           sudo apt-get install -y \
-             clang-18 \
-             cmake \
-             ninja-build \
-             libsqlite3-dev
-          # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
+          sudo apt-get install -y \
+            clang-18 \
+            cmake \
+            ninja-build \
+            libsqlite3-dev \
+            pkg-config
 
       - name: Verify toolchain versions
         run: |
@@ -315,27 +304,36 @@ jobs:
           pkg-config --modversion sqlite3
           echo "=========================="
 
-      - name: Stub — native debug with ASan/UBSan
+      - name: Configure engine tests (Debug, ASan+UBSan)
         run: |
-          echo "⏭ native-debug-asan-ubsan is stubbed until Phase 7 (native engine extraction)."
+          set -euo pipefail
+          cmake -S native/tests -B build \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build engine tests
+        run: |
+          set -euo pipefail
+          cmake --build build
+
+      - name: Run engine tests (CTest, ASan/UBSan)
+        run: |
+          set -euo pipefail
+          ctest --test-dir build --output-on-failure
 
   # =================================================================
-  # 6. native-release-build  — STUBBED (Phase 7+)
+  # 6. native-release-build  — Phase 7 (enabled in Wave 9c)
   # =================================================================
-  # TODO(phase 7): enable when native/engine/ and native/platform/linux/ land.
-  #   This job will produce an optimized release build of the player
-  #   binary against SDL3 and POSIX dlopen.
-  #   Expected command (once native/ exists):
-  #     cd native && mkdir -p build-release && cd build-release
-  #     cmake .. -DCMAKE_BUILD_TYPE=Release \
-  #             -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
-  #             -G Ninja
-  #     ninja -j$(nproc) rommulus-player
+  # Builds the platform-neutral engine unit tests (native/tests) as an
+  # optimized Release build with clang-18 (no sanitizers), then runs the
+  # CTest suite.
   native-release-build:
     name: Native release build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: false  # TODO(phase 7): remove this guard when native/ lands
 
     steps:
       - name: Check out repository
@@ -352,12 +350,12 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-           sudo apt-get install -y \
-             clang-18 \
-             cmake \
-             ninja-build \
-             libsqlite3-dev
-          # libsdl3-dev: not in noble; add PPA when Phase 7 lands.
+          sudo apt-get install -y \
+            clang-18 \
+            cmake \
+            ninja-build \
+            libsqlite3-dev \
+            pkg-config
 
       - name: Verify toolchain versions
         run: |
@@ -369,14 +367,29 @@ jobs:
           pkg-config --modversion sqlite3
           echo "=========================="
 
-      - name: Stub — native release build
+      - name: Configure engine tests (Release)
         run: |
-          echo "⏭ native-release-build is stubbed until Phase 7 (native engine extraction)."
+          set -euo pipefail
+          cmake -S native/tests -B build \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build engine tests
+        run: |
+          set -euo pipefail
+          cmake --build build
+
+      - name: Run engine tests (CTest)
+        run: |
+          set -euo pipefail
+          ctest --test-dir build --output-on-failure
 
   # =================================================================
-  # 7. core-smoke-tier-1  — STUBBED (Phase 9+)
+  # 7. core-smoke-tier-1  — STUBBED (Phase 8+)
   # =================================================================
-  # TODO(phase 9): enable when Linux core builds and rommulus-player exist.
+  # TODO(phase 8+): enable when Linux core builds and rommulus-player exist.
+  #   Requires Linux core builds, which are Phase 8+ scope — not Phase 7.
   #   This job will run the per-core smoke gate (§13.2) for Tier 1 cores
   #   (test_core, Gambatte): retro_init/retro_deinit smoke, synthetic
   #   content boot, 10-minute automated frame run, input mapping, and
@@ -389,7 +402,7 @@ jobs:
     name: Core smoke (Tier 1)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    if: false  # TODO(phase 9): remove this guard when Linux core builds land
+    if: false  # TODO(phase 8+): remove this guard when Linux core builds land (Phase 8+, not Phase 7)
 
     steps:
       - name: Check out repository
@@ -425,7 +438,7 @@ jobs:
 
       - name: Stub — core smoke tests
         run: |
-          echo "⏭ core-smoke-tier-1 is stubbed until Phase 9 (Gambatte production integration)."
+          echo "⏭ core-smoke-tier-1 is stubbed until Linux core builds land (Phase 8+)."
 
   # =================================================================
   # 8. package-tarball  — STUBBED (Phase 14)

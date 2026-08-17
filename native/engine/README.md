@@ -1,0 +1,1 @@
+Phase 7 Wave 1 scope: platform-neutral logging only — `LogSink` (Severity/LogSink in `include/native/engine/`) plus the `romm::log::setSink()`/`sink()` registry in `src/log.cpp`; all other engine interfaces (video, audio, files, GL) arrive in later waves.
