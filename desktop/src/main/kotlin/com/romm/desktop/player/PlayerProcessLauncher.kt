@@ -76,8 +76,8 @@ class ProcessBuilderPlayerLauncher(
         /** Allowed cores: `coreId=revision` pairs, semicolon-separated. */
         const val ALLOWED_CORES = "test_core=1"
 
-        /** Default binary location: `rommulus-player` resolved via PATH. */
-        fun defaultFor(journalsRoot: Path, appPaths: AppPaths, playerBinaryPath: Path = Path.of("rommulus-player")): ProcessBuilderPlayerLauncher =
+        /** Default binary location: `rommulus_player` resolved via PATH (matches the CMake executable). */
+        fun defaultFor(journalsRoot: Path, appPaths: AppPaths, playerBinaryPath: Path = Path.of("rommulus_player")): ProcessBuilderPlayerLauncher =
             ProcessBuilderPlayerLauncher(playerBinaryPath, journalsRoot, appPaths)
     }
 }

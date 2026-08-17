@@ -2,6 +2,7 @@ package com.romm.desktop
 
 import com.romm.androidtv.auth.ClientTokenStorage
 import com.romm.androidtv.auth.SessionStorage
+import com.romm.androidtv.emulation.model.CoreLicenseFinding
 import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.library.BiosConfigurationPresenter
 import com.romm.androidtv.library.BiosConfigurationProvider
@@ -188,6 +189,16 @@ class DesktopAppCoordinator(
     enum class BiosSystem { SEGA_CD, PLAYSTATION }
     var selectedBiosSystem by mutableStateOf(BiosSystem.SEGA_CD)
 
+    /**
+     * Memoized [RomDetailPresenter] instances keyed by ROM id so the detail screen's
+     * `remember(romId) { coordinator.romDetailPresenter(romId) }` and [launchPlayer]'s
+     * [detailLookup] share ONE presenter per ROM. Without this, [launchPlayer] built a fresh
+     * presenter whose state is always [SectionState.Loading], so the synchronous read in
+     * [detailLookup] returned null and Play always failed with "detail not loaded". Cleared when
+     * navigation leaves GAME_DETAIL so visited-ROM state does not accumulate.
+     */
+    private val detailPresenters = mutableMapOf<Long, RomDetailPresenter>()
+
     /** Single-instance lock (plans/LINUX_X64.md §10.4). Constructed here; acquired by Main. */
     val appInstanceLock: FileLockAppInstanceLock = FileLockAppInstanceLock(null, paths.stateDir)
 
@@ -238,8 +249,7 @@ class DesktopAppCoordinator(
     fun launchPlayer(romId: Long): PlayerLaunchResult {
         val detail = detailLookup(romId) ?: return PlayerLaunchResult.Failed("detail not loaded")
 
-        val core = CoreManifest.approvedEntries().find { it.supportedSystems.contains(detail.platformSlug) }
-            ?: CoreManifest.findById(TEST_CORE_ID)
+        val core = resolveLaunchCore(detail.platformSlug)
             ?: return PlayerLaunchResult.Failed("no core for platform")
 
         val sessionId = UUID.randomUUID().toString()
@@ -380,6 +390,7 @@ class DesktopAppCoordinator(
     /** Main-mode back moves up one view; Home remains the root and never exits the app. */
     fun onBack() {
         if (appMode != AppMode.MAIN) return
+        if (currentScreen == Screen.GAME_DETAIL) detailPresenters.clear()
         currentScreen = when (currentScreen) {
             Screen.HOME -> Screen.HOME
             Screen.GAME_DETAIL -> gameDetailParent
@@ -449,11 +460,14 @@ class DesktopAppCoordinator(
         hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
     )
 
-    fun romDetailPresenter(romId: Long): RomDetailPresenter = RomDetailPresenter(
-        scope = scope,
-        repository = network.libraryRepository,
-        romId = romId,
-    )
+    fun romDetailPresenter(romId: Long): RomDetailPresenter =
+        detailPresenters.getOrPut(romId) {
+            RomDetailPresenter(
+                scope = scope,
+                repository = network.libraryRepository,
+                romId = romId,
+            )
+        }
 
     fun biosConfigurationPresenter(platformSlug: String): BiosConfigurationPresenter =
         BiosConfigurationPresenter(scope, biosConfigurationProvider(platformSlug))
@@ -467,6 +481,35 @@ class DesktopAppCoordinator(
         )
 
     // ------------------------------------------------------------------ internals
+
+    /**
+     * Resolves the core to launch for a platform slug.
+     *
+     * Prefers the platform's approved core, but ONLY when its shared library is actually
+     * installed in the desktop data root's `cores/` directory. Otherwise it falls back to the
+     * no-content [TEST_CORE_ID] — the only core the desktop player increment builds and
+     * allowlists (`ROMM_PLAYER_ALLOWED_CORES="test_core=1"`). Without the installed-check, a
+     * ROM for an approved-but-not-installed core (e.g. any real system on a dev box that only
+     * shipped `libtest_core.so`) would produce a request the player rejects instantly
+     * (`coreId not in installed metadata`), the session would fast-fail-reconcile, and Play
+     * would appear to do nothing.
+     */
+    private fun resolveLaunchCore(platformSlug: String): CoreLicenseFinding? {
+        val coresDir = paths.dataDir.resolve("cores")
+        val installed: (CoreLicenseFinding) -> Boolean = { core ->
+            Files.exists(coresDir.resolve("lib${core.coreId}.so"))
+        }
+        val platformCore = CoreManifest.approvedEntries().firstOrNull {
+            it.supportedSystems.contains(platformSlug)
+        }
+        val testCore = CoreManifest.findById(TEST_CORE_ID)
+        return when {
+            platformCore != null && installed(platformCore) -> platformCore
+            testCore != null -> testCore
+            platformCore != null -> platformCore
+            else -> null
+        }
+    }
 
     private val onboardingPresenterLazy by lazy {
         OnboardingPresenter(
