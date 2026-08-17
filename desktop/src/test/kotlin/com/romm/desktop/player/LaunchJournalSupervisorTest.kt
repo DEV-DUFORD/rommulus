@@ -32,10 +32,11 @@ class LaunchJournalSupervisorTest {
         liveness: (String) -> PlayerLiveness = { PlayerLiveness.DEAD },
         launchOutcome: (PlayerRequest) -> LaunchOutcome = { LaunchOutcome.Started(pid = 4242L) },
         adoptionPolicy: SaveAdoptionPolicy = DefaultSaveAdoptionPolicy(),
+        fakeLauncher: FakePlayerProcessLauncher? = null,
     ): Fixture {
         val paths = TestAppPaths(tempDir)
         val journalsRoot = paths.stateDir.resolve("journals")
-        val launcher = FakePlayerProcessLauncher(launchOutcome)
+        val launcher = fakeLauncher ?: FakePlayerProcessLauncher(launchOutcome)
         val supervisor = LaunchJournalSupervisor(
             journalsRoot = journalsRoot,
             launcher = launcher,
@@ -108,6 +109,24 @@ class LaunchJournalSupervisorTest {
         assertThat(Files.exists(session.candidateSavePath)).isFalse()
         assertThat(f.supervisor.store.read(session.sessionId).getOrNull()).isNull()
         assertThat(Files.exists(f.journalsRoot.resolve(session.sessionId))).isFalse()
+    }
+
+    @Test
+    fun `prepareLaunch serializes a null contentPath as an empty string`() {
+        val f = fixture()
+        val noContent = f.params.copy(contentPath = null, contentHash = "")
+        val session = when (val result = f.supervisor.prepareLaunch(noContent)) {
+            is PrepareLaunchResult.Ready -> result.session
+            is PrepareLaunchResult.Failed -> error("expected Ready, got Failed: ${result.reason}")
+        }
+
+        // The request on disk carries the empty content path (no-content core, §12.2) and still
+        // round-trips through the strict parser.
+        val json = Files.readString(session.requestPath)
+        assertThat(json).contains("\"contentPath\": \"\"")
+        val parsed = PlayerProtocol.parseRequest(json).getOrThrow()
+        assertThat(parsed.contentPath).isEmpty()
+        assertThat(f.launcher.launches.single().contentPath).isEmpty()
     }
 
     // ------------------------------------------------------------------ crash cases
@@ -423,6 +442,78 @@ class LaunchJournalSupervisorTest {
             assertThat(d.kind).isEqualTo(LaunchRecoveryDiagnostic.Kind.RECONCILE_FAILED)
         }
         assertThat(Files.exists(f.params.savePath)).isFalse()
+    }
+
+    // ------------------------------------------------------------------ no-content core (test_core)
+
+    @Test
+    fun `no-content core checkpoint result without verification data reconciles cleanly`() {
+        // The desktop Play flow for a no-content core: the player writes a 64-byte scratch
+        // candidate and a valid completed result, but never sets saveHash or saveSize. Before
+        // the fix this wedged the session — adoption rejected "no saveHash or saveSize",
+        // RECONCILE_FAILED re-surfaced at every startup scan, and the session dir was never
+        // cleaned. A no-content core has no ROM identity to bind a save to, so reconcile must
+        // skip adoption entirely and clean up the session.
+        val player = FakePlayerProcessLauncher(
+            onLaunch = { request ->
+                Files.write(Path.of(request.candidateSavePath), ByteArray(64))
+                val result = PlayerResult(
+                    sessionId = request.sessionId,
+                    exitKind = PlayerExitKind.COMPLETED,
+                    checkpointWritten = true,
+                    candidateSavePath = request.candidateSavePath,
+                    saveHash = null,
+                    saveSize = null,
+                )
+                Files.writeString(Path.of(request.resultPath), PlayerProtocol.serializeResult(result))
+            },
+        )
+        val f = fixture(fakeLauncher = player)
+        val noContent = f.params.copy(contentPath = null, contentHash = "")
+
+        val session = when (val result = f.supervisor.prepareLaunch(noContent)) {
+            is PrepareLaunchResult.Ready -> result.session
+            is PrepareLaunchResult.Failed -> error("expected Ready, got Failed: ${result.reason}")
+        }
+        // The request on disk carries the empty content path — what reconcile re-reads.
+        assertThat(player.launches.single().contentPath).isEmpty()
+
+        val report = f.supervisor.onPlayerExit(session, exitCode = 0)
+        assertThat(report).isInstanceOf(PlayerExitReport.Reconciled::class.java)
+        assertThat((report as PlayerExitReport.Reconciled).adoption).isNull() // nothing adopted
+
+        // The session is fully cleaned up: journal gone, candidate deleted, session dir removed.
+        assertThat(f.supervisor.store.read(session.sessionId).getOrNull()).isNull()
+        assertThat(Files.exists(session.candidateSavePath)).isFalse()
+        assertThat(Files.exists(f.journalsRoot.resolve(session.sessionId))).isFalse()
+        assertThat(Files.exists(noContent.savePath)).isFalse() // no confirmed save written
+
+        // No wedge: startup scans are clean and never surface RECONCILE_FAILED.
+        assertThat(f.supervisor.scanIncompleteJournals()).isEmpty()
+        assertThat(f.supervisor.scanIncompleteJournals().none { it.kind == LaunchRecoveryDiagnostic.Kind.RECONCILE_FAILED }).isTrue()
+    }
+
+    @Test
+    fun `no-content core crash without result still preserves candidate for inspection`() {
+        // Crash recovery must stay intact for no-content cores: no result + dead player is an
+        // INTERRUPTED session whose candidate is preserved (the skip-adoption fix only applies
+        // to the reconcile path, which a missing result never reaches).
+        val f = fixture()
+        val noContent = f.params.copy(contentPath = null, contentHash = "")
+        val session = when (val result = f.supervisor.prepareLaunch(noContent)) {
+            is PrepareLaunchResult.Ready -> result.session
+            is PrepareLaunchResult.Failed -> error("expected Ready, got Failed: ${result.reason}")
+        }
+        Files.write(session.candidateSavePath, ByteArray(64)) // player died mid-run
+
+        val diagnostics = f.supervisor.scanIncompleteJournals()
+        assertThat(diagnostics).anySatisfy { d ->
+            assertThat(d.sessionId).isEqualTo(session.sessionId)
+            assertThat(d.kind).isEqualTo(LaunchRecoveryDiagnostic.Kind.INTERRUPTED_NO_RESULT)
+        }
+        // Fail-closed: journal marked INTERRUPTED, candidate preserved.
+        assertThat(f.supervisor.store.read(session.sessionId).getOrNull()?.state).isEqualTo(JournalState.INTERRUPTED)
+        assertThat(Files.exists(session.candidateSavePath)).isTrue()
     }
 
     // ------------------------------------------------------------------ crash windows

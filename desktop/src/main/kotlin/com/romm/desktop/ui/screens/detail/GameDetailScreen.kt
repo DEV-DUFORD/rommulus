@@ -33,6 +33,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -61,6 +62,7 @@ import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.library.SiblingRomInfo
 import com.romm.androidtv.library.SectionState
 import com.romm.desktop.DesktopAppCoordinator
+import com.romm.desktop.PlayerLaunchResult
 import com.romm.desktop.Screen
 import com.romm.desktop.ui.components.DesktopTextField
 import com.romm.desktop.ui.components.ErrorBanner
@@ -75,13 +77,17 @@ import com.romm.desktop.ui.navigation.keyboardShortcuts
 import com.romm.desktop.ui.screens.library.RetryButton
 import com.romm.desktop.ui.screens.library.errorMessage
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * Desktop game detail screen (Phase 6, browser-only product): hero cover, title and
- * platform, metadata chips, summary, a screenshot shelf with a full-screen viewer
- * overlay, sibling version rows, a fixed action rail (Favorite / Add-to-collection /
- * Back), and a Play button that is rendered but DISABLED — the desktop product has no
- * emulator process yet (plans/PHASE6.md work item 8: "Linux player not installed yet").
+ * Desktop game detail screen (Phase 6): hero cover, title and platform, metadata chips,
+ * summary, a screenshot shelf with a full-screen viewer overlay, sibling version rows,
+ * a fixed action rail (Favorite / Add-to-collection / Back), and a Play button that
+ * launches the desktop player process via [DesktopAppCoordinator.launchPlayer] and
+ * shows the outcome — a "Launching player…" status line on success, or the failure
+ * reason in error color on failure.
  *
  * Drives the shared [com.romm.androidtv.library.RomDetailPresenter] obtained from the
  * [DesktopAppCoordinator] (`coordinator.romDetailPresenter(romId)`), remembered per ROM id
@@ -155,9 +161,15 @@ private fun GameDetailContent(
     var screenshotsToView by remember { mutableStateOf<List<String>?>(null) }
     var initialScreenshotIndex by remember { mutableStateOf(0) }
 
+    // Outcome of the last Play click (null until the user clicks Play).
+    var playStatus by remember { mutableStateOf<PlayerLaunchResult?>(null) }
+    // launchPlayer does file I/O + a process spawn — run it off the compose UI thread and
+    // publish the result back as state (snapshot state is safe to write from any thread).
+    val launchScope = rememberCoroutineScope()
+
     // Initial focus: once the detail loads, the rail composes — land keyboard/controller
-    // focus on its Favorite button (the Android reference lands it on Play, which is
-    // disabled here).
+    // focus on its Favorite button. The Play button in the body is also focusable
+    // ("detail:play"); the rail keeps initial focus so the primary actions stay reachable.
     val favoriteFocusRequester = remember { FocusRequester() }
     val firstScreenshotFocusRequester = remember { FocusRequester() }
     val detailLoaded = uiState.detail is SectionState.Loaded
@@ -191,6 +203,12 @@ private fun GameDetailContent(
 
             is SectionState.Loaded -> GameDetailBody(
                 rom = section.data,
+                onPlayClick = {
+                    launchScope.launch {
+                        playStatus = withContext(Dispatchers.Default) { coordinator.launchPlayer(romId) }
+                    }
+                },
+                playStatus = playStatus,
                 onOpenScreenshot = { urls, index ->
                     initialScreenshotIndex = index
                     screenshotsToView = urls
@@ -266,10 +284,12 @@ private fun GameDetailContent(
     }
 }
 
-/** Hero cover + title/platform + metadata chips + summary + (disabled) Play. */
+/** Hero cover + title/platform + metadata chips + summary + Play button. */
 @Composable
 private fun GameDetailBody(
     rom: RomDetail,
+    onPlayClick: () -> Unit,
+    playStatus: PlayerLaunchResult?,
     onOpenScreenshot: (List<String>, Int) -> Unit,
     onOpenSibling: (Long) -> Unit,
     firstScreenshotFocusRequester: FocusRequester,
@@ -327,7 +347,7 @@ private fun GameDetailBody(
                         )
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    DisabledPlayState()
+                    PlayButton(status = playStatus, onPlayClick = onPlayClick)
                 }
             }
         }
@@ -380,41 +400,61 @@ private fun GameDetailBody(
 }
 
 /**
- * The Play affordance in its Phase 6 desktop state: rendered but disabled — the
- * browser-only product has no emulator process yet (plans/PHASE6.md work item 8).
- * Mirrors the Android reference's Play position with an explicit "Linux player not
- * installed yet" caption. Deliberately NOT focusable/clickable so keyboard and
- * controller navigation skip it entirely; no staging/save-sync/conflict flows exist.
+ * The Play affordance: a focusable/clickable primary button that launches the desktop
+ * player process ([DesktopAppCoordinator.launchPlayer], wired in by the caller). Below
+ * the button it renders the last launch outcome — "Launching player…" for
+ * [PlayerLaunchResult.Started], or the failure reason in the theme error color for
+ * [PlayerLaunchResult.Failed] (nothing until the first click).
  */
 @Composable
-private fun DisabledPlayState() {
+private fun PlayButton(
+    status: PlayerLaunchResult?,
+    onPlayClick: () -> Unit,
+) {
     val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .background(colors.nightLo)
+                .background(colors.romm500)
                 .border(
-                    width = 1.dp,
-                    color = colors.textSecondary.copy(alpha = 0.4f),
+                    width = if (isFocused) 2.dp else 0.dp,
+                    color = if (isFocused) colors.romm300 else Color.Transparent,
                     shape = RoundedCornerShape(8.dp),
                 )
+                .focusableItem("detail:play", navigator, onPlayClick)
+                .clickable(interactionSource = interactionSource, indication = null, onClick = onPlayClick)
                 .padding(horizontal = 28.dp, vertical = 12.dp),
         ) {
             Text(
                 text = "▶  Play",
                 style = MaterialTheme.typography.titleMedium,
-                color = colors.textSecondary,
+                color = Color.White,
             )
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Linux player not installed yet — this build is browse-only (Phase 6)",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary,
-        )
+        when (status) {
+            is PlayerLaunchResult.Started -> Text(
+                text = "Launching player…",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+            is PlayerLaunchResult.Failed -> Text(
+                text = status.reason,
+                style = MaterialTheme.typography.bodySmall,
+                color = PlayButtonErrorColor,
+            )
+            null -> Unit
+        }
     }
 }
+
+/** Matches the theme error color used by [ErrorBanner] (Feedback.kt). */
+private val PlayButtonErrorColor = Color(0xFFF87171)
 
 /** Fixed action rail: Favorite / Add-to-collection / Back (Android parity). */
 @Composable

@@ -2,14 +2,17 @@ package com.romm.desktop
 
 import com.romm.androidtv.auth.ClientTokenStorage
 import com.romm.androidtv.auth.SessionStorage
+import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.library.BiosConfigurationPresenter
 import com.romm.androidtv.library.BiosConfigurationProvider
 import com.romm.androidtv.library.HomePresenter
+import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.library.RomDetailPresenter
 import com.romm.androidtv.library.RomGridPresenter
 import com.romm.androidtv.library.RomQuery
 import com.romm.androidtv.library.RommTheme
 import com.romm.androidtv.library.SearchPresenter
+import com.romm.androidtv.library.SectionState
 import com.romm.androidtv.library.SettingsPresenter
 import com.romm.androidtv.network.AuthError
 import com.romm.androidtv.network.AuthFlowResult
@@ -33,8 +36,12 @@ import com.romm.androidtv.storage.settingsFile
 import com.romm.desktop.library.DesktopBiosConfigurationProvider
 import com.romm.desktop.network.DesktopNetworkModule
 import com.romm.desktop.player.LaunchJournalSupervisor
+import com.romm.desktop.player.LaunchOutcome
 import com.romm.desktop.player.LaunchRecoveryDiagnostic
 import com.romm.desktop.player.PlayerExitReport
+import com.romm.desktop.player.PlayerLaunchParams
+import com.romm.desktop.player.PrepareLaunchResult
+import com.romm.desktop.player.VideoSettings
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopClientTokenStorage
 import com.romm.desktop.storage.DesktopSessionStorage
@@ -55,6 +62,8 @@ import com.romm.desktop.ui.image.DesktopImageLoader
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.nio.file.Files
+import java.util.UUID
 import java.util.logging.Level
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,13 +96,29 @@ import kotlinx.coroutines.launch
  * @param appVersion       Version string surfaced in Settings.
  * @param buildDefaultOrigin Compiled-in default origin fallback (like Android BuildConfig).
  * @param scope            CoroutineScope for presenter + session-verification work.
+ * @param playerSupervisorOverride Test seam: inject a supervisor backed by a fake launcher;
+ *                                 production uses the real `ProcessBuilder` launcher.
+ * @param romDetailLookup  Test seam: ROM detail without a network fetch; production resolves
+ *                         it from [romDetailPresenter]'s current UI state.
  */
+
+/** Outcome of [DesktopAppCoordinator.launchPlayer]. */
+sealed interface PlayerLaunchResult {
+    /** The player was spawned and its session is supervised; reconciliation happens on exit. */
+    data class Started(val sessionId: String) : PlayerLaunchResult
+
+    /** The launch could not be prepared or the spawn failed. No player is running. */
+    data class Failed(val reason: String) : PlayerLaunchResult
+}
+
 class DesktopAppCoordinator(
     val paths: AppPaths,
     val secretBackend: SecretBackend,
     val appVersion: String,
     val buildDefaultOrigin: String,
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    playerSupervisorOverride: LaunchJournalSupervisor? = null,
+    romDetailLookup: ((Long) -> RomDetail?)? = null,
 ) {
 
     // ------------------------------------------------------------------ storage
@@ -183,10 +208,15 @@ class DesktopAppCoordinator(
      *   first composition.
      * - [onPlayerProcessExited] — post-exit reconciliation hook; call it with the exit code
      *   when a spawned player process terminates.
-     * - [playerSupervisor].prepareLaunch — the launch screen (Phase 8 Wave 3+) calls this to
-     *   commit request + journal atomically and spawn the player.
+     * - [playerSupervisor].prepareLaunch — called by [launchPlayer] to commit request + journal
+     *   atomically and spawn the player.
      */
-    val playerSupervisor: LaunchJournalSupervisor by lazy { LaunchJournalSupervisor.forPaths(paths) }
+    val playerSupervisor: LaunchJournalSupervisor by lazy { playerSupervisorOverride ?: LaunchJournalSupervisor.forPaths(paths) }
+
+    /** ROM detail without a network fetch (test seam); production reads the presenter's current UI state. */
+    private val detailLookup: (Long) -> RomDetail? = romDetailLookup ?: { id ->
+        (romDetailPresenter(id).uiState.value.detail as? SectionState.Loaded)?.data
+    }
 
     /** Startup scan over incomplete launch journals (§12.5). Idempotent; safe to call more than once. */
     fun scanPlayerJournals(): List<LaunchRecoveryDiagnostic> = playerSupervisor.scanIncompleteJournals()
@@ -194,6 +224,82 @@ class DesktopAppCoordinator(
     /** Post-exit reconciliation hook for a spawned player process (pass the process exit code). */
     fun onPlayerProcessExited(sessionId: String, exitCode: Int): PlayerExitReport =
         playerSupervisor.onPlayerExitBySessionId(sessionId, exitCode)
+
+    /**
+     * Launches the desktop player for a ROM (Phase 8): resolves the ROM detail and an approved
+     * core (`test_core` fallback — the only core in `ROMM_PLAYER_ALLOWED_CORES`), commits request
+     * + journal atomically via [playerSupervisor], spawns `rommulus-player`, and starts watching
+     * the process so reconciliation happens when it exits (§12.3/§12.5).
+     *
+     * Minimal increment: `test_core` is a no-content core, so [PlayerLaunchParams.contentPath]
+     * is null (serialized as `""` on the wire); real content paths and per-ROM save layout land
+     * in a later increment.
+     */
+    fun launchPlayer(romId: Long): PlayerLaunchResult {
+        val detail = detailLookup(romId) ?: return PlayerLaunchResult.Failed("detail not loaded")
+
+        val core = CoreManifest.approvedEntries().find { it.supportedSystems.contains(detail.platformSlug) }
+            ?: CoreManifest.findById(TEST_CORE_ID)
+            ?: return PlayerLaunchResult.Failed("no core for platform")
+
+        val sessionId = UUID.randomUUID().toString()
+        val saveDir = paths.dataDir.resolve("saves")
+        runCatching { Files.createDirectories(saveDir) }
+            .getOrElse { return PlayerLaunchResult.Failed("cannot create saves directory: ${it.message}") }
+
+        val params = PlayerLaunchParams(
+            coreId = core.coreId,
+            // The player validates request.coreBuildRevision against ROMM_PLAYER_ALLOWED_CORES
+            // ("test_core=1"), so the manifest's releaseTag is the authoritative revision pin.
+            coreBuildRevision = core.releaseTag.ifBlank { core.commitSha },
+            corePath = paths.dataDir.resolve("cores").resolve("lib${core.coreId}.so"),
+            contentPath = null, // test_core is no-content; real content paths are a later increment
+            systemDir = paths.firmwareDir(),
+            savePath = saveDir.resolve("$sessionId.srm"),
+            video = VideoSettings(),
+        )
+
+        return when (val result = playerSupervisor.prepareLaunch(params, sessionId)) {
+            is PrepareLaunchResult.Ready -> {
+                watchPlayerExit(result.launch, sessionId)
+                PlayerLaunchResult.Started(sessionId)
+            }
+            is PrepareLaunchResult.Failed -> PlayerLaunchResult.Failed(result.reason)
+        }
+    }
+
+    /**
+     * Post-spawn exit watcher (§12.3): a daemon thread blocks on `ProcessHandle.onExit()` for
+     * the spawned pid — which completes immediately if the process has already exited — then
+     * calls [onPlayerProcessExited] so the session is reconciled as soon as the player exits
+     * instead of waiting for the next startup scan. The exit code is always
+     * [UNKNOWN_PLAYER_EXIT_CODE]: `ProcessHandle` does not expose it (only `java.lang.Process`
+     * does) and the supervisor uses the code only in diagnostic strings. If no handle can be
+     * obtained for the pid, the process is already gone and reconciliation runs immediately.
+     * The thread dies with the player (or the JVM); a crash in between is still recoverable by
+     * [scanPlayerJournals] at startup. Known limitation: if the OS reuses the pid before we
+     * attach, we would wait on the wrong process — the startup scan remains the backstop.
+     */
+    private fun watchPlayerExit(launch: LaunchOutcome, sessionId: String) {
+        val pid = (launch as? LaunchOutcome.Started)?.pid ?: return
+        Thread {
+            try {
+                // Wait for the player to exit (completes immediately if it already has).
+                ProcessHandle.of(pid).orElse(null)?.onExit()?.join()
+            } catch (e: InterruptedException) {
+                // Interrupted before exit — still reconcile; the startup scan is the backstop.
+            } catch (e: Exception) {
+                // No such process / platform error: it is already gone.
+            }
+            // ProcessHandle does not expose the exit code (only java.lang.Process does); the
+            // supervisor uses the code only in diagnostic strings, so -1 ("unknown") is safe.
+            onPlayerProcessExited(sessionId, UNKNOWN_PLAYER_EXIT_CODE)
+        }.apply {
+            isDaemon = true
+            name = "player-exit-watch-$sessionId"
+            start()
+        }
+    }
 
     init {
         RommLog.sink = LogSink { level, tag, message ->
@@ -416,6 +522,12 @@ class DesktopAppCoordinator(
 
     private companion object {
         const val DB_FILE_NAME = "rommulus.db"
+
+        /** The no-content test core; the only entry in the `ROMM_PLAYER_ALLOWED_CORES` env var. */
+        const val TEST_CORE_ID = "test_core"
+
+        /** Exit code passed to [onPlayerProcessExited] by the watcher (see [watchPlayerExit]). */
+        const val UNKNOWN_PLAYER_EXIT_CODE = -1
 
         fun defaultDeviceName(): String {
             return try {

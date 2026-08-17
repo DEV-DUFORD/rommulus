@@ -1,10 +1,14 @@
 package com.romm.desktop
 
 import com.romm.androidtv.auth.SessionStorage
+import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.fakes.InMemorySessionRecordStore
+import com.romm.desktop.player.FakePlayerProcessLauncher
+import com.romm.desktop.player.JournalState
+import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopSessionStorage
 import com.romm.desktop.storage.secret.FakeSecretBackend
@@ -14,6 +18,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
 import java.nio.file.Path
 
 @DisplayName("DesktopAppCoordinator — Phase 6 keystone")
@@ -143,6 +148,89 @@ class DesktopAppCoordinatorTest {
         c.onBack()
         assertThat(c.currentScreen).isEqualTo(Screen.HOME)
         assertThat(c.exitRequested).isFalse()
+    }
+
+    // ---------------------------------------------------------------- player launch (Phase 8)
+
+    private fun testRom(platformSlug: String): RomDetail = RomDetail(
+        id = 7L,
+        title = "Test Game",
+        platformDisplayName = "Nintendo Wii",
+        platformSlug = platformSlug,
+        summary = null,
+        coverUrl = null,
+        screenshotUrls = emptyList(),
+        genres = emptyList(),
+        companies = emptyList(),
+        gameModes = emptyList(),
+        playerCount = null,
+        firstReleaseDateEpochMillis = null,
+        averageRating = null,
+        regions = emptyList(),
+        languages = emptyList(),
+        fileSizeBytes = 1234L,
+        lastPlayedIso = null,
+        nowPlaying = false,
+    )
+
+    @Test
+    fun `launchPlayer returns Started and spawns the player with a no-content test_core request`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(
+            journalsRoot = paths.stateDir.resolve("journals"),
+            launcher = launcher,
+        )
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            // No approved core supports "wii" → falls back to the no-content test_core.
+            romDetailLookup = { testRom(platformSlug = "wii") },
+        )
+
+        val result = c.launchPlayer(romId = 7L)
+
+        assertThat(result).isInstanceOf(PlayerLaunchResult.Started::class.java)
+        val started = result as PlayerLaunchResult.Started
+        assertThat(started.sessionId).isNotBlank()
+
+        // Exactly one spawn, for test_core with an empty content path and the pinned revision "1"
+        // (the value ROMM_PLAYER_ALLOWED_CORES validates against).
+        assertThat(launcher.launches).hasSize(1)
+        val request = launcher.launches.single()
+        assertThat(request.coreId).isEqualTo("test_core")
+        assertThat(request.coreBuildRevision).isEqualTo("1")
+        assertThat(request.contentPath).isEmpty()
+        assertThat(request.sessionId).isEqualTo(started.sessionId)
+        // The session journal was committed under the state root.
+        val sessionDir = paths.stateDir.resolve("journals").resolve(started.sessionId)
+        assertThat(Files.exists(sessionDir.resolve("journal.json"))).isTrue()
+        assertThat(Files.readString(sessionDir.resolve("request.json"))).contains("\"contentPath\": \"\"")
+
+        // Wait for the exit watcher to finish: the fake pid does not exist, so it sees the
+        // process as already gone and reconciles immediately (no result file → INTERRUPTED).
+        // Waiting also guarantees no watcher writes race with JUnit's @TempDir cleanup.
+        val deadline = System.currentTimeMillis() + 5_000
+        var state = supervisor.store.read(started.sessionId).getOrNull()?.state
+        while (state != JournalState.INTERRUPTED) {
+            check(System.currentTimeMillis() < deadline) { "exit watcher did not reconcile the session within 5s" }
+            Thread.sleep(10)
+            state = supervisor.store.read(started.sessionId).getOrNull()?.state
+        }
+    }
+
+    @Test
+    fun `launchPlayer fails when the rom detail is not loaded`(@TempDir dir: Path) {
+        // No lookup seam: the presenter starts in Loading and can never reach Loaded in a unit
+        // test (no network session), so launch must fail fast with "detail not loaded".
+        val c = coordinator(dir.testRoot())
+
+        val result = c.launchPlayer(romId = 7L)
+
+        assertThat(result).isEqualTo(PlayerLaunchResult.Failed("detail not loaded"))
     }
 
     // ---------------------------------------------------------------- settings adapter

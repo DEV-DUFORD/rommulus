@@ -16,8 +16,9 @@ data class PlayerLaunchParams(
     val coreId: String,
     val coreBuildRevision: String,
     val corePath: Path,
-    val contentPath: Path,
-    /** SHA-256 of the ROM; empty string → the player skips hash verification (§12.2). */
+    /** ROM to play. Null for no-content cores (e.g. `test_core`); serialized as `""` on the wire. */
+    val contentPath: Path? = null,
+    /** SHA-256 of the ROM; empty string → the player skips hash verification (§12.2). Must be blank when [contentPath] is null. */
     val contentHash: String = "",
     val systemDir: Path,
     /** Confirmed save location (under the data root). Only replaced when every adoption check passes. */
@@ -300,7 +301,9 @@ class LaunchJournalSupervisor(
             coreId = params.coreId,
             coreBuildRevision = params.coreBuildRevision,
             corePath = params.corePath.toAbsolutePath().normalize().toString(),
-            contentPath = params.contentPath.toAbsolutePath().normalize().toString(),
+            // No-content cores (test_core) launch with an empty content path (§12.2: the player
+            // then has no ROM to load/verify).
+            contentPath = params.contentPath?.toAbsolutePath()?.normalize()?.toString().orEmpty(),
             contentHash = params.contentHash,
             systemDir = params.systemDir.toAbsolutePath().normalize().toString(),
             savePath = params.savePath.toAbsolutePath().normalize().toString(),
@@ -539,7 +542,18 @@ class LaunchJournalSupervisor(
         }
 
         val adoption: AdoptionSummary? =
-            if (result.checkpointWritten && result.exitKind in ADOPTABLE_EXIT_KINDS) {
+            if (request.contentPath.isEmpty()) {
+                // No-content core (e.g. test_core): the request carries no ROM identity, so there
+                // is nothing to bind a save to — skip adoption entirely. The player still writes a
+                // scratch candidate and reports checkpointWritten=true but never sets saveHash or
+                // saveSize; running the policy against that result would Reject ("no saveHash or
+                // saveSize") and wedge this journal in RECONCILE_FAILED at every startup scan,
+                // with the session dir never cleaned. The candidate is plain session residue:
+                // once RECONCILED is committed below, cleanupSession removes it with everything
+                // else. Crash recovery is unaffected — INTERRUPTED sessions without a result are
+                // still preserved for inspection (that path never reaches this code).
+                null
+            } else if (result.checkpointWritten && result.exitKind in ADOPTABLE_EXIT_KINDS) {
                 val adoptionResult = adoptOrConfirm(journal, request, result)
                 if (adoptionResult.isFailure) {
                     return ReconcileOutcome.Failed(adoptionResult.exceptionOrNull()?.message ?: "adoption failed")

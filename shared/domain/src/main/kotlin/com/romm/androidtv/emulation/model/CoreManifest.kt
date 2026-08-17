@@ -619,6 +619,28 @@ object CoreManifest {
             reviewedOn = "2026-08-02",
             approved = true,
         ),
+        CoreLicenseFinding(
+            coreName = "RomM Synthetic Test Core",
+            coreId = "test_core",
+            upstreamRepository = "https://github.com/romm-android-tv/rommulus",
+            // Synthetic project-owned core: no upstream commit exists, but approved
+            // entries must record a non-blank commitSha, so a zero placeholder is used.
+            commitSha = "0000000000000000000000000000000000000000",
+            // releaseTag matches the desktop launcher's ALLOWED_CORES ("test_core=1").
+            releaseTag = "1",
+            licenseSummary = "Synthetic test core, project-owned",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = true,
+            // No real platform: the data class requires a non-empty list, so a synthetic
+            // slug is recorded instead of emptyList().
+            supportedSystems = listOf("synthetic"),
+            supportedExtensions = emptyList(),
+            supportedAbis = listOf("linux-x86_64"),
+            reviewedBy = "romm-android-tv",
+            reviewedOn = "2026-08-17",
+            approved = true,
+        ),
     )
 
     /** Cores cleared for use in a production build. Empty until Phase 0 approvals happen. */
