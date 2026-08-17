@@ -386,7 +386,100 @@ jobs:
           ctest --test-dir build --output-on-failure
 
   # =================================================================
-  # 7. core-smoke-tier-1  — STUBBED (Phase 8+)
+  # 7. player-build  — Phase 8 (SDL3 rommulus-player)
+  # =================================================================
+  # Builds rommulus-player from source with a vendored SDL3 build
+  # (release-3.4.14).  SDL3 is not in the noble repos; we build it
+  # from source and install to /usr/local before configuring the player.
+  player-build:
+    name: Player build (SDL3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install native dev packages
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang-18 \
+            cmake \
+            ninja-build \
+            libsqlite3-dev \
+            pkg-config \
+            wget
+
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          clang-18 --version | head -1
+          cmake --version | head -1
+          ninja --version
+          echo "=========================="
+
+      - name: Build and install SDL3 from source (release-3.4.14)
+        run: |
+          set -euo pipefail
+          SDL_VERSION="3.4.14"
+          SDL_TAG="release-${SDL_VERSION}"
+          mkdir -p deps/sdl3
+          echo "Downloading SDL3 ${SDL_TAG}..."
+          wget -qO- "https://github.com/libsdl-org/SDL/releases/download/${SDL_TAG}/SDL3-${SDL_VERSION}.tar.gz" \
+            | tar -xz -C deps/sdl3 --strip-components=1
+          echo "Configuring SDL3 Release build (prefix=/usr/local)..."
+          cmake -S deps/sdl3 -B build/sdl \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build build/sdl -j"$(nproc)"
+          sudo cmake --install build/sdl
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+          export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+          echo "SDL3 installed to /usr/local."
+          pkg-config --modversion SDL3 2>/dev/null && echo "✓ SDL3 pkg-config OK" || echo "⚠ SDL3 pkg-config not found"
+
+      - name: Configure player (Release)
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+          export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+          cmake -S native/player -B build/player \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build player
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+          export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+          cmake --build build/player
+
+      - name: Verify rommulus_player binary exists
+        run: |
+          set -euo pipefail
+          PLAYER_BIN="build/player/rommulus_player"
+          if [ -x "$PLAYER_BIN" ]; then
+            echo "✓ rommulus_player binary found at ${PLAYER_BIN} ($(stat -c%s "$PLAYER_BIN") bytes)"
+            file "$PLAYER_BIN"
+          else
+            echo "::error::rommulus_player binary not found at ${PLAYER_BIN}"
+            ls -la build/player/ 2>/dev/null || echo "(build/player/ directory does not exist)"
+            exit 1
+          fi
+
+  # =================================================================
+  # 8. core-smoke-tier-1  — STUBBED (Phase 8+)
   # =================================================================
   # TODO(phase 8+): enable when Linux core builds and rommulus-player exist.
   #   Requires Linux core builds, which are Phase 8+ scope — not Phase 7.

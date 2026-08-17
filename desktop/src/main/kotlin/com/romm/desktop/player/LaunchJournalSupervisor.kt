@@ -770,7 +770,7 @@ class LaunchJournalSupervisor(
             val journalsRoot = paths.stateDir.resolve("journals")
             return LaunchJournalSupervisor(
                 journalsRoot = journalsRoot,
-                launcher = ProcessBuilderPlayerLauncher.defaultFor(journalsRoot),
+                launcher = ProcessBuilderPlayerLauncher.defaultFor(journalsRoot, paths),
             )
         }
     }
