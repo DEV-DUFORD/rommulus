@@ -63,6 +63,7 @@ import com.romm.androidtv.library.SiblingRomInfo
 import com.romm.androidtv.library.SectionState
 import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.PlayerLaunchResult
+import com.romm.desktop.PlayerSessionEvent
 import com.romm.desktop.Screen
 import com.romm.desktop.ui.components.DesktopTextField
 import com.romm.desktop.ui.components.ErrorBanner
@@ -163,9 +164,25 @@ private fun GameDetailContent(
 
     // Outcome of the last Play click (null until the user clicks Play).
     var playStatus by remember { mutableStateOf<PlayerLaunchResult?>(null) }
+    // The sessionId the current playStatus was set from (null until a launch starts). A stale
+    // PlayerSessionEvent.Ended from an earlier session that is still exiting must not clear a
+    // newer launch's status, so we only react to Ended for the session we actually launched.
+    var launchedSessionId by remember { mutableStateOf<String?>(null) }
     // launchPlayer does file I/O + a process spawn — run it off the compose UI thread and
     // publish the result back as state (snapshot state is safe to write from any thread).
     val launchScope = rememberCoroutineScope()
+
+    // The coordinator publishes PlayerSessionEvent.Ended (from its daemon exit-watcher thread)
+    // when the supervised player process exits and its journal is reconciled — clear the
+    // "Launching player…" status then. LaunchedEffect cancels on dispose, so the flow is
+    // collected only while this detail screen is composed.
+    LaunchedEffect(Unit) {
+        coordinator.playerSessionEvents.collect { event ->
+            if (event is PlayerSessionEvent.Ended && event.sessionId == launchedSessionId) {
+                playStatus = null
+            }
+        }
+    }
 
     // Initial focus: once the detail loads, the rail composes — land keyboard/controller
     // focus on its Favorite button. The Play button in the body is also focusable
@@ -205,7 +222,9 @@ private fun GameDetailContent(
                 rom = section.data,
                 onPlayClick = {
                     launchScope.launch {
-                        playStatus = withContext(Dispatchers.Default) { coordinator.launchPlayer(romId) }
+                        val result = withContext(Dispatchers.Default) { coordinator.launchPlayer(romId) }
+                        playStatus = result
+                        launchedSessionId = (result as? PlayerLaunchResult.Started)?.sessionId
                     }
                 },
                 playStatus = playStatus,

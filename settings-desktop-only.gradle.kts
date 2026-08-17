@@ -1,6 +1,5 @@
-// Desktop-only settings file (NOT part of the repo): excludes the Android :app module
-// so the desktop target builds without an Android SDK. Run with:
-//   ./gradlew -c settings-desktop-only.gradle.kts :desktop:run
+// Opt-in desktop-only settings (excludes :app for machines without an Android SDK).
+// Use: ./gradlew -c settings-desktop-only.gradle.kts :desktop:run
 pluginManagement {
     repositories {
         google()

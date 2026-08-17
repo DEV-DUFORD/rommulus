@@ -64,11 +64,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.nio.file.Files
+import java.util.Collections
 import java.util.UUID
 import java.util.logging.Level
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -110,6 +112,12 @@ sealed interface PlayerLaunchResult {
 
     /** The launch could not be prepared or the spawn failed. No player is running. */
     data class Failed(val reason: String) : PlayerLaunchResult
+}
+
+/** A player session event surfaced to the UI once a supervised process exits. */
+sealed interface PlayerSessionEvent {
+    /** The player process exited and its launch journal was reconciled ([report]). */
+    data class Ended(val sessionId: String, val report: PlayerExitReport) : PlayerSessionEvent
 }
 
 class DesktopAppCoordinator(
@@ -195,9 +203,14 @@ class DesktopAppCoordinator(
      * [detailLookup] share ONE presenter per ROM. Without this, [launchPlayer] built a fresh
      * presenter whose state is always [SectionState.Loading], so the synchronous read in
      * [detailLookup] returned null and Play always failed with "detail not loaded". Cleared when
-     * navigation leaves GAME_DETAIL so visited-ROM state does not accumulate.
-     */
-    private val detailPresenters = mutableMapOf<Long, RomDetailPresenter>()
+      * navigation leaves GAME_DETAIL so visited-ROM state does not accumulate.
+      *
+      * Synchronized: it is touched from the Compose main thread (`remember(romId)`,
+      * [onBack]'s clear) AND from Dispatchers.Default ([launchPlayer] → [detailLookup] →
+      * `getOrPut`), so a plain map would be a data race.
+      */
+    private val detailPresenters: MutableMap<Long, RomDetailPresenter> =
+        Collections.synchronizedMap(mutableMapOf())
 
     /** Single-instance lock (plans/LINUX_X64.md §10.4). Constructed here; acquired by Main. */
     val appInstanceLock: FileLockAppInstanceLock = FileLockAppInstanceLock(null, paths.stateDir)
@@ -212,7 +225,7 @@ class DesktopAppCoordinator(
     // ------------------------------------------------------------------ player supervision (Phase 8 Wave 2)
 
     /**
-     * Launch journal supervisor for the `rommulus-player` process (plans/LINUX_X64.md §12.5).
+      * Launch journal supervisor for the `rommulus_player` process (plans/LINUX_X64.md §12.5).
      *
      * Integration points (the player binary itself lands in Phase 8 Wave 3+):
      * - [scanPlayerJournals] — startup crash-recovery scan; called once by [Main] before the
@@ -232,21 +245,38 @@ class DesktopAppCoordinator(
     /** Startup scan over incomplete launch journals (§12.5). Idempotent; safe to call more than once. */
     fun scanPlayerJournals(): List<LaunchRecoveryDiagnostic> = playerSupervisor.scanIncompleteJournals()
 
+    /**
+     * The most recent player session event for the UI: [PlayerSessionEvent.Ended] is published
+     * when a supervised player process exits and its journal has been reconciled; reset to null
+     * at the start of each new launch. A StateFlow (not Compose snapshot state) because it is
+     * written from the daemon exit-watcher thread. The detail screen collects it while composed
+     * and clears its "Launching player…" status on [PlayerSessionEvent.Ended].
+     */
+    val playerSessionEvents = MutableStateFlow<PlayerSessionEvent?>(null)
+
     /** Post-exit reconciliation hook for a spawned player process (pass the process exit code). */
-    fun onPlayerProcessExited(sessionId: String, exitCode: Int): PlayerExitReport =
-        playerSupervisor.onPlayerExitBySessionId(sessionId, exitCode)
+    fun onPlayerProcessExited(sessionId: String, exitCode: Int): PlayerExitReport {
+        val report = playerSupervisor.onPlayerExitBySessionId(sessionId, exitCode)
+        // Surface the reconciled outcome to the UI so the detail screen can clear its status.
+        // Carry [sessionId] so the UI can ignore a stale Ended from an earlier session that is
+        // still exiting when the user has already launched a new one.
+        playerSessionEvents.value = PlayerSessionEvent.Ended(sessionId, report)
+        return report
+    }
 
     /**
      * Launches the desktop player for a ROM (Phase 8): resolves the ROM detail and an approved
      * core (`test_core` fallback — the only core in `ROMM_PLAYER_ALLOWED_CORES`), commits request
-     * + journal atomically via [playerSupervisor], spawns `rommulus-player`, and starts watching
-     * the process so reconciliation happens when it exits (§12.3/§12.5).
+      * + journal atomically via [playerSupervisor], spawns `rommulus_player`, and starts watching
+      * the process so reconciliation happens when it exits (§12.3/§12.5).
      *
      * Minimal increment: `test_core` is a no-content core, so [PlayerLaunchParams.contentPath]
      * is null (serialized as `""` on the wire); real content paths and per-ROM save layout land
      * in a later increment.
      */
     fun launchPlayer(romId: Long): PlayerLaunchResult {
+        // A new session supersedes any earlier exit event (the UI clears its status on Ended).
+        playerSessionEvents.value = null
         val detail = detailLookup(romId) ?: return PlayerLaunchResult.Failed("detail not loaded")
 
         val core = resolveLaunchCore(detail.platformSlug)
@@ -461,12 +491,17 @@ class DesktopAppCoordinator(
     )
 
     fun romDetailPresenter(romId: Long): RomDetailPresenter =
-        detailPresenters.getOrPut(romId) {
-            RomDetailPresenter(
-                scope = scope,
-                repository = network.libraryRepository,
-                romId = romId,
-            )
+        // synchronized: getOrPut on a Collections.synchronizedMap is not atomic — two threads
+        // could both miss the key and construct two presenters. Lock on the map so the
+        // check-then-put is a single critical section.
+        synchronized(detailPresenters) {
+            detailPresenters.getOrPut(romId) {
+                RomDetailPresenter(
+                    scope = scope,
+                    repository = network.libraryRepository,
+                    romId = romId,
+                )
+            }
         }
 
     fun biosConfigurationPresenter(platformSlug: String): BiosConfigurationPresenter =
@@ -503,10 +538,11 @@ class DesktopAppCoordinator(
             it.supportedSystems.contains(platformSlug)
         }
         val testCore = CoreManifest.findById(TEST_CORE_ID)
+        // NOTE: an approved-but-NOT-installed platform core is deliberately NOT a fallback —
+        // launching it would produce a request the player rejects instantly (see KDoc above).
         return when {
             platformCore != null && installed(platformCore) -> platformCore
             testCore != null -> testCore
-            platformCore != null -> platformCore
             else -> null
         }
     }

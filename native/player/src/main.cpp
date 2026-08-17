@@ -232,7 +232,7 @@ void writeResult(const romm::player::PlayerRequest& request, romm::player::ExitK
 int main(int argc, char* argv[]) {
     // 1. Parse arguments: exactly `--request <file>`.
     if (argc != 3 || std::strcmp(argv[1], "--request") != 0) {
-        std::fprintf(stderr, "usage: %s --request <file>\n", argc > 0 ? argv[0] : "rommulus-player");
+        std::fprintf(stderr, "usage: %s --request <file>\n", argc > 0 ? argv[0] : "rommulus_player");
         return 2;
     }
     const std::string requestPath = argv[2];
@@ -283,7 +283,7 @@ int main(int argc, char* argv[]) {
     romm::video::setSink(std::move(videoSinkOwned));
 
     // 6. Initialize SDL.
-    SDL_SetAppMetadata("rommulus-player", "0.1", "com.romm.player");
+    SDL_SetAppMetadata("rommulus_player", "0.1", "com.romm.player");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         const std::string error = std::string("SDL_Init failed: ") + SDL_GetError();
         std::fprintf(stderr, "error: %s\n", error.c_str());
@@ -303,7 +303,7 @@ int main(int argc, char* argv[]) {
     // 7. Create the window and apply the requested video settings.
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (request.video.fullscreen) windowFlags |= SDL_WINDOW_FULLSCREEN;
-    SDL_Window* window = SDL_CreateWindow("rommulus-player", 1280, 720, windowFlags);
+    SDL_Window* window = SDL_CreateWindow("rommulus_player", 1280, 720, windowFlags);
     if (window == nullptr) {
         const std::string error = std::string("SDL_CreateWindow failed: ") + SDL_GetError();
         std::fprintf(stderr, "error: %s\n", error.c_str());

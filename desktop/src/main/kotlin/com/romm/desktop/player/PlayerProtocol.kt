@@ -9,7 +9,7 @@ import java.io.IOException
 /**
  * The Kotlin side of the v1 player launch request/result file protocol.
  *
- * This is a security boundary with the `rommulus-player` process (plans/LINUX_X64.md
+ * This is a security boundary with the `rommulus_player` process (plans/LINUX_X64.md
  * §12.2/§12.3) and must match the platform-neutral C++ implementation in
  * `native/player/src/protocol.cpp` EXACTLY: same field names, same types, same strictness.
  * The v1 schema deliberately carries no origin, username, token, server save ID, or upload

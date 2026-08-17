@@ -9,6 +9,7 @@ import com.romm.androidtv.storage.fakes.InMemorySessionRecordStore
 import com.romm.desktop.player.FakePlayerProcessLauncher
 import com.romm.desktop.player.JournalState
 import com.romm.desktop.player.LaunchJournalSupervisor
+import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopSessionStorage
 import com.romm.desktop.storage.secret.FakeSecretBackend
@@ -233,6 +234,110 @@ class DesktopAppCoordinatorTest {
         assertThat(result).isEqualTo(PlayerLaunchResult.Failed("detail not loaded"))
     }
 
+    /**
+     * Blocks until the exit watcher has reconciled [sessionId] (INTERRUPTED — no result file).
+     * Without this, the daemon watcher's journal writes race JUnit's @TempDir cleanup and the
+     * test fails intermittently with IOException during temp-dir deletion.
+     */
+    private fun waitForReconciled(supervisor: LaunchJournalSupervisor, sessionId: String) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (supervisor.store.read(sessionId).getOrNull()?.state != JournalState.INTERRUPTED) {
+            check(System.currentTimeMillis() < deadline) { "exit watcher did not reconcile $sessionId within 5s" }
+            Thread.sleep(10)
+        }
+    }
+
+    /** Coordinator wired to a fake launcher; [platformSlug] drives core resolution. */
+    private fun launchCoordinator(
+        paths: AppPaths,
+        platformSlug: String,
+        supervisor: LaunchJournalSupervisor,
+    ): DesktopAppCoordinator = DesktopAppCoordinator(
+        paths = paths,
+        secretBackend = FakeSecretBackend(),
+        appVersion = "test",
+        buildDefaultOrigin = "https://demo.romm.app",
+        playerSupervisorOverride = supervisor,
+        romDetailLookup = { testRom(platformSlug = platformSlug) },
+    )
+
+    @Test
+    fun `launchPlayer selects the installed approved platform core`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        // gambatte is the approved core for gb/gbc; install its shared library in the cores root.
+        val coresDir = paths.dataDir.resolve("cores")
+        Files.createDirectories(coresDir)
+        Files.write(coresDir.resolve("libgambatte.so"), byteArrayOf(0))
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val c = launchCoordinator(paths, platformSlug = "gb", supervisor = supervisor)
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
+
+        assertThat(launcher.launches.single().coreId).isEqualTo("gambatte")
+        waitForReconciled(supervisor, started.sessionId)
+    }
+
+    @Test
+    fun `launchPlayer falls back to test_core when the approved core is not installed`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        // No libgambatte.so in the (nonexistent) cores root → approved-but-absent core must NOT
+        // be launched (instant-reject); the no-content test_core fallback wins.
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val c = launchCoordinator(paths, platformSlug = "gb", supervisor = supervisor)
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
+
+        assertThat(launcher.launches.single().coreId).isEqualTo("test_core")
+        waitForReconciled(supervisor, started.sessionId)
+    }
+
+    @Test
+    fun `playerSessionEvents emits Ended after the fake player process exits`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val c = launchCoordinator(paths, platformSlug = "wii", supervisor = supervisor)
+
+        assertThat(c.playerSessionEvents.value).isNull()
+        assertThat(c.launchPlayer(romId = 7L)).isInstanceOf(PlayerLaunchResult.Started::class.java)
+
+        // The fake pid does not exist, so the exit watcher reconciles immediately (no result
+        // file → CrashInterrupted) and publishes the report to the UI flow. Waiting also
+        // guarantees no watcher writes race with JUnit's @TempDir cleanup.
+        val deadline = System.currentTimeMillis() + 5_000
+        while (c.playerSessionEvents.value !is PlayerSessionEvent.Ended) {
+            check(System.currentTimeMillis() < deadline) { "playerSessionEvents did not emit Ended within 5s" }
+            Thread.sleep(10)
+        }
+        val event = c.playerSessionEvents.value as PlayerSessionEvent.Ended
+        assertThat(event.report).isInstanceOf(PlayerExitReport.CrashInterrupted::class.java)
+
+        // A new launch resets the flow to null (a stale Ended must not clear a fresh status).
+        val second = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        assertThat(c.playerSessionEvents.value).isNull()
+        waitForReconciled(supervisor, second.sessionId)
+    }
+
+    @Test
+    fun `romDetailPresenter is memoized per rom id and cleared on back from game detail`(@TempDir dir: Path) {
+        val c = coordinator(dir.testRoot())
+
+        val first = c.romDetailPresenter(7L)
+        assertThat(c.romDetailPresenter(7L)).isSameAs(first)
+        // A different ROM gets its own presenter.
+        assertThat(c.romDetailPresenter(8L)).isNotSameAs(first)
+
+        // Leaving GAME_DETAIL clears the memoized presenters (visited-ROM state does not accumulate).
+        c.appMode = AppMode.MAIN
+        c.openGameDetail(romId = 7L, parent = Screen.HOME)
+        assertThat(c.currentScreen).isEqualTo(Screen.GAME_DETAIL)
+        c.onBack()
+
+        assertThat(c.romDetailPresenter(7L)).isNotSameAs(first)
+    }
+
     // ---------------------------------------------------------------- settings adapter
 
     private fun adapter(dir: Path): DesktopSettingsAdapter {
@@ -247,13 +352,19 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
-    fun `settings adapter persistValidatedOrigin writes through to the store`(@TempDir dir: Path) = runBlocking {
-        val a = adapter(dir)
-        assertThat(a.persistValidatedOrigin("https://romm.example.com")).isTrue()
-        assertThat(a.currentProfile().origin).isEqualTo("https://romm.example.com")
-        // Invalid origin is rejected and does not overwrite the stored value.
-        assertThat(a.persistValidatedOrigin("not-a-valid-url")).isFalse()
-        assertThat(a.currentProfile().origin).isEqualTo("https://romm.example.com")
+    fun `settings adapter persistValidatedOrigin writes through to the store`(@TempDir dir: Path) {
+        // Block body (not `= runBlocking { ... }`): the expression body made the compiler infer a
+        // non-void return type (AssertJ's isEqualTo returns SELF), and JUnit 5 silently skips
+        // @Test methods that don't return void — so this test never executed.
+        runBlocking {
+            val a = adapter(dir)
+            assertThat(a.persistValidatedOrigin("https://romm.example.com")).isTrue()
+            assertThat(a.currentProfile().origin).isEqualTo("https://romm.example.com")
+            // Invalid origin is rejected and does not overwrite the stored value. (Spaces make it
+            // genuinely unparseable — "not-a-valid-url" is actually a valid hostname, so it parses.)
+            assertThat(a.persistValidatedOrigin("not a valid url")).isFalse()
+            assertThat(a.currentProfile().origin).isEqualTo("https://romm.example.com")
+        }
     }
 
     @Test
