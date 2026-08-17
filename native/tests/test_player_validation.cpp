@@ -159,6 +159,37 @@ int main() {
         expectOk(writeAndValidate(f, r), "empty contentHash");
     }
 
+    // --- Empty contentPath (no-content cores) ---------------------------
+    // No-content cores (e.g. test_core) load with retro_load_game(nullptr);
+    // the engine handles empty contentPath, and the core decides whether
+    // no-content is acceptable — so validation must accept it.
+    {
+        PlayerRequest r = f.request;
+        r.contentPath = "";
+        r.contentHash = "";  // no game -> no hash
+        expectOk(writeAndValidate(f, r), "empty contentPath (no-content core)");
+    }
+
+    // Non-empty contentPath outside cacheRoot is still rejected: the
+    // containment check must not have been weakened.
+    {
+        PlayerRequest r = f.request;
+        r.contentPath = f.outside + "/evil.rom";
+        expectRejected(writeAndValidate(f, r), "contentPath outside cacheRoot");
+    }
+
+    // The other paths must remain non-empty.
+    {
+        PlayerRequest r = f.request;
+        r.corePath = "";
+        expectRejected(writeAndValidate(f, r), "empty corePath");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.resultPath = "";
+        expectRejected(writeAndValidate(f, r), "empty resultPath");
+    }
+
     // Not-yet-existing paths under an approved root are fine (the
     // candidate save does not exist until the player writes it).
     {

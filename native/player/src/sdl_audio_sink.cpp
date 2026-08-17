@@ -18,8 +18,10 @@
 //     the consumer has drained the stream buffer, so the frames being
 //     pushed will be consumed immediately and any producer stall turns
 //     into silence. Those frames are counted as underrun frames, but only
-//     after kUnderrunWarmupFrames have been pushed (the first push always
-//     sees an empty buffer with 0 prebuffer).
+//     after kUnderrunWarmupFrames have been pushed. start() prebuffers the
+//     stream with silence before the device starts consuming (§11.8), so
+//     the startup gap is real prebuffer time, not starvation, and is not
+//     counted.
 //   - overrun: pushSamples() finds the queued audio (device-format bytes)
 //     above a bound of two seconds of audio — the stream buffer is about
 //     to overflow and SDL will drop data. Those frames are counted as
@@ -36,10 +38,21 @@ namespace {
 
 constexpr const char* kTag = "sdl_audio";
 
-// Underrun counting is skipped until this many frames have been pushed: the
-// very first push always sees an empty stream buffer (0 prebuffer) and would
-// otherwise report the entire batch as an underrun.
+// Underrun counting is skipped until this many frames have been pushed: a
+// safety net for the startup window (see the prebuffer below for why the
+// buffer is normally already full by the first push).
 constexpr uint64_t kUnderrunWarmupFrames = 1024;
+
+// StartConfig.prebufferSeconds is 0.0 for most cores (the engine only sets it
+// for Mupen64Plus-Next). §11.8 requires "start after a measured prebuffer",
+// so fall back to this when the engine passes nothing. 100ms comfortably
+// covers the device-open-to-first-push startup gap without adding audible
+// latency.
+constexpr double kDefaultPrebufferSeconds = 0.1;
+
+// Silence is pushed to the stream in chunks of this many source frames so a
+// single SDL_PutAudioStreamData call stays small.
+constexpr int kPrebufferChunkFrames = 4096;
 
 // Two seconds of device-format audio, in bytes.
 int overrunBoundFor(const SDL_AudioSpec& deviceSpec) {
@@ -107,8 +120,47 @@ bool SdlAudioSink::start(const romm::audio::StartConfig& config) {
 
     overrunBoundBytes_ = overrunBoundFor(deviceSpec);
     framesPushed_ = 0;  // restart the underrun warmup window for this device
-    started_ = true;
+
+    // §11.8 "start after a measured prebuffer": in the non-simplified SDL3
+    // form (open + create + bind, no callback) the device starts _unpaused_
+    // and begins draining the moment the stream is bound. The emulation
+    // thread only starts after start() returns, so without a prebuffer the
+    // device would consume silence for the whole startup gap and the stream
+    // would sit near zero bytes — every early push would then register as an
+    // underrun. Pause the device, fill the stream with prebufferSeconds of
+    // silence, then resume so playback begins from a full buffer.
+    const double prebufferSeconds =
+        config.prebufferSeconds > 0.0 ? config.prebufferSeconds : kDefaultPrebufferSeconds;
+    if (!SDL_PauseAudioDevice(device_)) {
+        romm::log::sink().log(romm::log::Severity::Warn, kTag,
+                              std::string("SDL_PauseAudioDevice failed: ") +
+                                  SDL_GetError());
+    }
+    const uint64_t silenceFrames =
+        static_cast<uint64_t>(prebufferSeconds * static_cast<double>(srcSpec.freq));
+    int16_t silence[kPrebufferChunkFrames * 2] = {};  // stereo, zero = silence
+    uint64_t remaining = silenceFrames;
+    while (remaining > 0) {
+        const int thisFrames =
+            remaining < static_cast<uint64_t>(kPrebufferChunkFrames)
+                ? static_cast<int>(remaining)
+                : kPrebufferChunkFrames;
+        if (!SDL_PutAudioStreamData(
+                stream_, silence,
+                thisFrames * 2 * static_cast<int>(sizeof(int16_t)))) {
+            romm::log::sink().log(romm::log::Severity::Warn, kTag,
+                                  std::string("SDL_PutAudioStreamData failed: ") +
+                                      SDL_GetError());
+        }
+        remaining -= static_cast<uint64_t>(thisFrames);
+    }
+    if (!SDL_ResumeAudioDevice(device_)) {
+        romm::log::sink().log(romm::log::Severity::Warn, kTag,
+                              std::string("SDL_ResumeAudioDevice failed: ") +
+                                  SDL_GetError());
+    }
     paused_ = false;
+    started_ = true;
     return true;
 }
 

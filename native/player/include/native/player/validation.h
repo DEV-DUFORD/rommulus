@@ -6,7 +6,9 @@
 //   2. verify request file ownership and non-world-writable mode;
 //   3. canonicalize every path;
 //   4. require core path under the installed trusted core root;
-//   5. require content under approved cache/data roots;
+//   5. require content under approved cache/data roots (an empty
+//      contentPath is admitted: no-content cores load without a game,
+//      and the core decides whether that is acceptable);
 //   6. require system/save/candidate/result paths under approved
 //      data/state roots;
 //   7. reject symlinks and path escapes;

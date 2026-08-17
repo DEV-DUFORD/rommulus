@@ -45,9 +45,9 @@ private:
     uint64_t underrunFrames_ = 0;
     uint64_t overrunFrames_ = 0;
     // Total frames pushed since start(); used to gate underrun counting
-    // until the stream has had a chance to fill (the first push always sees
-    // an empty buffer with 0 prebuffer and would otherwise report the whole
-    // batch as an underrun).
+    // during the startup window (start() prebuffers the stream with silence
+    // before the device starts consuming, so the buffer is normally already
+    // full by the first push; this is a safety net).
     uint64_t framesPushed_ = 0;
     // Device-format bytes of queued audio at/above which a push is counted
     // as an overrun (the stream buffer is about to drop data).

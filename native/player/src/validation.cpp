@@ -178,9 +178,16 @@ ValidationOutcome validateRequest(const PlayerRequest& request,
     auto pathCheck = checkPath("corePath", request.corePath,
                                config.roots.coreRoot);
     if (!pathCheck.ok) return pathCheck;
-    pathCheck = checkPath("contentPath", request.contentPath,
-                          config.roots.cacheRoot);
-    if (!pathCheck.ok) return pathCheck;
+    // An empty contentPath is legal: no-content cores (e.g. test_core)
+    // load with retro_load_game(nullptr), and the engine already handles
+    // that. Whether a given core accepts no game is the core's decision,
+    // so validation admits an empty contentPath unconditionally — the
+    // "under cacheRoot" containment check only applies to real paths.
+    if (!request.contentPath.empty()) {
+        pathCheck = checkPath("contentPath", request.contentPath,
+                              config.roots.cacheRoot);
+        if (!pathCheck.ok) return pathCheck;
+    }
     pathCheck = checkPath("systemDir", request.systemDir,
                           config.roots.dataRoot);
     if (!pathCheck.ok) return pathCheck;
