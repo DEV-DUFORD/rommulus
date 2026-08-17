@@ -32,6 +32,9 @@ import com.romm.androidtv.storage.firmwareDir
 import com.romm.androidtv.storage.settingsFile
 import com.romm.desktop.library.DesktopBiosConfigurationProvider
 import com.romm.desktop.network.DesktopNetworkModule
+import com.romm.desktop.player.LaunchJournalSupervisor
+import com.romm.desktop.player.LaunchRecoveryDiagnostic
+import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopClientTokenStorage
 import com.romm.desktop.storage.DesktopSessionStorage
@@ -169,6 +172,28 @@ class DesktopAppCoordinator(
         // wiring point is unambiguous.
         BackgroundSyncSchedulerImpl(drain = { /* no-op until Phase 9 wires save-sync drain */ }, stateStore = schedulerStateStore)
     }
+
+    // ------------------------------------------------------------------ player supervision (Phase 8 Wave 2)
+
+    /**
+     * Launch journal supervisor for the `rommulus-player` process (plans/LINUX_X64.md §12.5).
+     *
+     * Integration points (the player binary itself lands in Phase 8 Wave 3+):
+     * - [scanPlayerJournals] — startup crash-recovery scan; called once by [Main] before the
+     *   first composition.
+     * - [onPlayerProcessExited] — post-exit reconciliation hook; call it with the exit code
+     *   when a spawned player process terminates.
+     * - [playerSupervisor].prepareLaunch — the launch screen (Phase 8 Wave 3+) calls this to
+     *   commit request + journal atomically and spawn the player.
+     */
+    val playerSupervisor: LaunchJournalSupervisor by lazy { LaunchJournalSupervisor.forPaths(paths) }
+
+    /** Startup scan over incomplete launch journals (§12.5). Idempotent; safe to call more than once. */
+    fun scanPlayerJournals(): List<LaunchRecoveryDiagnostic> = playerSupervisor.scanIncompleteJournals()
+
+    /** Post-exit reconciliation hook for a spawned player process (pass the process exit code). */
+    fun onPlayerProcessExited(sessionId: String, exitCode: Int): PlayerExitReport =
+        playerSupervisor.onPlayerExitBySessionId(sessionId, exitCode)
 
     init {
         RommLog.sink = LogSink { level, tag, message ->

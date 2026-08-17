@@ -4,9 +4,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
+import com.romm.desktop.log.DesktopLogger
 import com.romm.desktop.storage.FileLockAppInstanceLock
 import com.romm.desktop.storage.paths.XdgAppPaths
 import com.romm.desktop.storage.secret.dbus.SecretServiceDbusBackend
+import java.util.logging.Level
 
 /**
  * Desktop entry point: builds the real XDG [XdgAppPaths], the freedesktop Secret Service
@@ -29,6 +31,13 @@ fun main() = application {
         appVersion = APP_VERSION,
         buildDefaultOrigin = BUILD_DEFAULT_ORIGIN,
     )
+    // Phase 8 Wave 2: crash-recovery scan over incomplete player launch journals
+    // (plans/LINUX_X64.md §12.5). Runs before the first composition; diagnostics are logged now
+    // and will be surfaced in the launch screen UI (Phase 8 Wave 3+).
+    coordinator.scanPlayerJournals().forEach { diagnostic ->
+        DesktopLogger.get().log(Level.WARNING, "PlayerJournal", diagnostic.summary)
+    }
+
     // Select the root AppMode synchronously before the first composition so onboarding never
     // flashes Home (mirrors MainActivity).
     coordinator.appMode = coordinator.computeStartupAppMode()
