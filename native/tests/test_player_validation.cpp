@@ -333,5 +333,73 @@ int main() {
         if (missing) CHECK_EQ(*missing, "/definitely/not/here/x/y");
     }
 
+    // --- SessionId validation -----------------------------------------------
+    // sessionId must be non-empty, <=64 chars, [A-Za-z0-9_-] only. This is
+    // checked before sessionActive so a malformed sessionId never builds a
+    // lock path.
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "";
+        expectRejected(writeAndValidate(f, r), "empty sessionId");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "has space";
+        expectRejected(writeAndValidate(f, r), "sessionId with space");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "with/slash";
+        expectRejected(writeAndValidate(f, r), "sessionId with slash");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "../../tmp/x";
+        expectRejected(writeAndValidate(f, r), "sessionId with dotdot");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "a";  // 1 char is fine
+        expectOk(writeAndValidate(f, r), "sessionId single char");
+    }
+    {
+        PlayerRequest r = f.request;
+        // Exactly 64 chars — boundary accept.
+        r.sessionId = std::string(64, 'a');
+        expectOk(writeAndValidate(f, r), "sessionId 64 chars");
+    }
+    {
+        PlayerRequest r = f.request;
+        // 65 chars — boundary reject.
+        r.sessionId = std::string(65, 'a');
+        expectRejected(writeAndValidate(f, r), "sessionId 65 chars");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "uuid-with-dashes-1234-5678";
+        expectOk(writeAndValidate(f, r), "sessionId valid uuid-like");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "has_underscore_ok";
+        expectOk(writeAndValidate(f, r), "sessionId with underscore");
+    }
+    {
+        PlayerRequest r = f.request;
+        // Unicode (multi-byte UTF-8) must be rejected.
+        r.sessionId = "\xc3\xa9t\xc3\xa9";  // "été" in UTF-8
+        expectRejected(writeAndValidate(f, r), "sessionId with unicode");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "has@at-sign";
+        expectRejected(writeAndValidate(f, r), "sessionId with @");
+    }
+    {
+        PlayerRequest r = f.request;
+        r.sessionId = "has;semicolon";
+        expectRejected(writeAndValidate(f, r), "sessionId with semicolon");
+    }
+
     return rommtest::finish("test_player_validation");
 }

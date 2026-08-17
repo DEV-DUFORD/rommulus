@@ -130,8 +130,25 @@ std::optional<std::string> canonicalPath(const std::string& path,
     return canonical;
 }
 
+// sessionId must be a safe identifier before any lock-path is built from it.
+// Alphanumeric + dash/underscore only, non-empty, bounded length.
+bool isValidSessionId(const std::string& id) {
+    if (id.empty() || id.size() > 64) return false;
+    for (char c : id) {
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-'))
+            return false;
+    }
+    return true;
+}
+
 ValidationOutcome validateRequest(const PlayerRequest& request,
                                   const PlayerConfig& config) {
+    // sessionId validation is FIRST — the lock path is built from it, so a
+    // malformed sessionId must never reach sessionActive or any path logic.
+    if (!isValidSessionId(request.sessionId))
+        return fail("invalid sessionId: must be 1-64 chars of [A-Za-z0-9_-]");
+
     if (request.protocolVersion != kProtocolVersion)
         return fail("unsupported protocolVersion: " +
                     std::to_string(request.protocolVersion));
