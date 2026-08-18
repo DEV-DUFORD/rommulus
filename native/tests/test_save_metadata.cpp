@@ -38,6 +38,12 @@ int main() {
             "abc",
             "ba7816bf8f01cfea414140de5dae2223"
             "b00361a396177a9cb410ff61f20015ad");
+    // 56 bytes sits exactly on the SHA-256 padding boundary: the finish block needs both a
+    // length word and a second block (the >56-byte two-block padding path in finish()).
+    checkMetadata(
+            std::string(56, 'a'),
+            "b35439a4ac6f0948b6d6f9e3c6af0f5f"
+            "590ce20f1bde7090ef7970686ec6738a");
     checkMetadata(
             std::string(70'000, 'a'),
             "66915c0872933db504e7578828dd85b7"

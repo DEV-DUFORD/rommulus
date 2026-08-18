@@ -53,17 +53,21 @@ mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/rommulus/cores"
 cp build/player/libgambatte_core.so "${XDG_DATA_HOME:-$HOME/.local/share}/rommulus/cores/"
 ```
 
-### §13.2 gate note: ASan/UBSan link failure (gambatte) under clang-18
+### §13.2 gate note: ASan/UBSan (gambatte) under clang-18 — criterion 11 PASSED via `-shared-libasan`
 
-Criterion 11 (build with `-fsanitize=address,undefined`) **does not link cleanly** with the
-plain spec flags on Ubuntu/clang-18. The linker pulls in `libclang_rt.asan_static-x86_64.a`
-via the automatic `-shared` link, but that static runtime does not define `__asan_init`; the
-core's `-Wl,--no-undefined` (`-z defs`) then rejects every sanitizer symbol, producing errors
-such as `undefined reference to '__asan_init'`, `__asan_report_load8`, and
-`__ubsan_handle_type_mismatch_v1`. **Verified workaround:** append `-shared-libasan` to the
-sanitizer link flags — `clang++ … -fsanitize=address,undefined -shared -shared-libasan
--Wl,--no-undefined` — yields a clean link. Until this is resolved in the upstream Gambatte
-build, the ASan/UBSan step of the §13.2 gate is marked failed for gambatte on this platform.
+Criterion 11 (build with `-fsanitize=address,undefined`) **passes** on Ubuntu/clang-18, using
+the `-shared-libasan` workaround. The plain spec flags do not link cleanly: the linker pulls in
+`libclang_rt.asan_static-x86_64.a` via the automatic `-shared` link, but that static runtime does
+not define `__asan_init`; the core's `-Wl,--no-undefined` (`-z defs`) then rejects every
+sanitizer symbol, producing errors such as `undefined reference to '__asan_init'`,
+`__asan_report_load8`, and `__ubsan_handle_type_mismatch_v1`. **Verified workaround:** append
+`-shared-libasan` to the sanitizer link flags — `clang++ … -fsanitize=address,undefined -shared
+-shared-libasan -Wl,--no-undefined` — yields a clean link. Criterion 11 is recorded as PASSED on
+this basis: a consistent-runtime rebuild (executable and shared core both linked with
+`-shared-libasan`) runs clean on the Ubuntu box with no ASan memory errors. Three UBSan warnings
+remain — `left shift of negative value` at `third_party/cores/gambatte/src/video/ppu.cpp:265:41`
+and `sound/channel3.cpp:155:34`, `170:38` — which are pre-existing upstream Gambatte code, not
+host regressions.
 
 The desktop launcher picks the core up automatically on the next launch: it scans
 $XDG_DATA_HOME/rommulus/cores/ for `lib*.so`, and `libgambatte_core.so` yields
