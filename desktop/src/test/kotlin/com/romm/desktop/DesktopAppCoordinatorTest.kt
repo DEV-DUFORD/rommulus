@@ -3,13 +3,16 @@ package com.romm.desktop
 import com.romm.androidtv.auth.SessionStorage
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
+import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.fakes.InMemorySessionRecordStore
 import com.romm.desktop.player.FakePlayerProcessLauncher
+import com.romm.desktop.player.FakeRomContentStager
 import com.romm.desktop.player.JournalState
 import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.player.PlayerExitReport
+import com.romm.desktop.player.RomContentStagingException
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopSessionStorage
 import com.romm.desktop.storage.secret.FakeSecretBackend
@@ -153,7 +156,7 @@ class DesktopAppCoordinatorTest {
 
     // ---------------------------------------------------------------- player launch (Phase 8)
 
-    private fun testRom(platformSlug: String): RomDetail = RomDetail(
+    private fun testRom(platformSlug: String, fileName: String = "test-game.gb"): RomDetail = RomDetail(
         id = 7L,
         title = "Test Game",
         platformDisplayName = "Nintendo Wii",
@@ -172,6 +175,7 @@ class DesktopAppCoordinatorTest {
         fileSizeBytes = 1234L,
         lastPlayedIso = null,
         nowPlaying = false,
+        fileName = fileName,
     )
 
     @Test
@@ -182,6 +186,7 @@ class DesktopAppCoordinatorTest {
             journalsRoot = paths.stateDir.resolve("journals"),
             launcher = launcher,
         )
+        val stager = FakeRomContentStager()
         val c = DesktopAppCoordinator(
             paths = paths,
             secretBackend = FakeSecretBackend(),
@@ -190,6 +195,7 @@ class DesktopAppCoordinatorTest {
             playerSupervisorOverride = supervisor,
             // No approved core supports "wii" → falls back to the no-content test_core.
             romDetailLookup = { testRom(platformSlug = "wii") },
+            romContentStagerOverride = stager,
         )
 
         val result = c.launchPlayer(romId = 7L)
@@ -198,13 +204,16 @@ class DesktopAppCoordinatorTest {
         val started = result as PlayerLaunchResult.Started
         assertThat(started.sessionId).isNotBlank()
 
-        // Exactly one spawn, for test_core with an empty content path and the pinned revision "1"
-        // (the value ROMM_PLAYER_ALLOWED_CORES validates against).
+        // Exactly one spawn, for test_core with an empty content path + hash and the pinned
+        // revision "1" (the value ROMM_PLAYER_ALLOWED_CORES validates against). No-content cores
+        // never stage: the stager must not even be consulted.
         assertThat(launcher.launches).hasSize(1)
         val request = launcher.launches.single()
         assertThat(request.coreId).isEqualTo("test_core")
         assertThat(request.coreBuildRevision).isEqualTo("1")
         assertThat(request.contentPath).isEmpty()
+        assertThat(request.contentHash).isEmpty()
+        assertThat(stager.calls).isEmpty()
         assertThat(request.sessionId).isEqualTo(started.sessionId)
         // The session journal was committed under the state root.
         val sessionDir = paths.stateDir.resolve("journals").resolve(started.sessionId)
@@ -247,11 +256,15 @@ class DesktopAppCoordinatorTest {
         }
     }
 
-    /** Coordinator wired to a fake launcher; [platformSlug] drives core resolution. */
+    /**
+     * Coordinator wired to a fake launcher; [platformSlug] drives core resolution. [stager] is a
+     * fake by default so real-core launches (which stage content) never touch the network.
+     */
     private fun launchCoordinator(
         paths: AppPaths,
         platformSlug: String,
         supervisor: LaunchJournalSupervisor,
+        stager: FakeRomContentStager = FakeRomContentStager(),
     ): DesktopAppCoordinator = DesktopAppCoordinator(
         paths = paths,
         secretBackend = FakeSecretBackend(),
@@ -259,7 +272,124 @@ class DesktopAppCoordinatorTest {
         buildDefaultOrigin = "https://demo.romm.app",
         playerSupervisorOverride = supervisor,
         romDetailLookup = { testRom(platformSlug = platformSlug) },
+        romContentStagerOverride = stager,
     )
+
+    /** Installs `libgambatte.so` so the approved gb/gbc core resolves to a real-content core. */
+    private fun installGambatte(paths: AppPaths) {
+        val coresDir = paths.dataDir.resolve("cores")
+        Files.createDirectories(coresDir)
+        Files.write(coresDir.resolve("libgambatte.so"), byteArrayOf(0))
+    }
+
+    @Test
+    fun `launchPlayer stages ROM content and pins path and hash on the request for a real core`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val stager = FakeRomContentStager()
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb", fileName = "zelda.gb") },
+            romContentStagerOverride = stager,
+        )
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
+
+        // The ROM was staged once with the detail's file name and server-declared size.
+        assertThat(stager.calls).containsExactly(FakeRomContentStager.Call(romId = 7L, fileName = "zelda.gb", expectedSizeBytes = 1234L))
+        val staged = stager.lastStaged!!
+
+        // The request pins both the staged path and its SHA-256.
+        val request = launcher.launches.single()
+        assertThat(request.coreId).isEqualTo("gambatte")
+        assertThat(request.contentPath).isEqualTo(staged.path.toAbsolutePath().normalize().toString())
+        assertThat(request.contentHash).isEqualTo(sha256Hex("fake-rom-content".toByteArray()))
+        waitForReconciled(supervisor, started.sessionId)
+    }
+
+    @Test
+    fun `launchPlayer fails closed when ROM staging fails and never spawns the player`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val stager = FakeRomContentStager()
+        stager.failure = RomContentStagingException("ROM download failed: HTTP 500")
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb", fileName = "zelda.gb") },
+            romContentStagerOverride = stager,
+        )
+
+        val result = c.launchPlayer(romId = 7L)
+
+        assertThat(result).isEqualTo(PlayerLaunchResult.Failed("failed to stage ROM content: ROM download failed: HTTP 500"))
+        // Never launched without content.
+        assertThat(launcher.launches).isEmpty()
+    }
+
+    @Test
+    fun `savePath is stable across launches of the same rom`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val stager = FakeRomContentStager()
+        val c = launchCoordinator(paths, platformSlug = "gb", supervisor = supervisor, stager = stager)
+
+        val first = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        waitForReconciled(supervisor, first.sessionId)
+        val second = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        waitForReconciled(supervisor, second.sessionId)
+
+        val (firstSave, secondSave) = launcher.launches.map { it.savePath }
+        // Same ROM → same stable save path (the player's restore-on-launch finds the previous SRAM).
+        assertThat(secondSave).isEqualTo(firstSave)
+        // Follows the shared SavePathPolicy layout under the data root and is scoped by the
+        // verified content hash.
+        val savesRoot = paths.dataDir.toAbsolutePath().normalize().toString() + java.io.File.separator + "saves"
+        assertThat(firstSave).startsWith(savesRoot)
+        assertThat(firstSave).contains(stager.lastStaged!!.sha256)
+        assertThat(firstSave).endsWith("autosave" + java.io.File.separator + "srm.srm")
+    }
+
+    @Test
+    fun `savePath differs across different roms`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val stager = FakeRomContentStager()
+        // One coordinator, two ROMs: the lookup is keyed by id so both resolve to real cores.
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { id -> testRom(platformSlug = "gb", fileName = when (id) { 7L -> "a.gb"; else -> "b.gb" }) },
+            romContentStagerOverride = stager,
+        )
+
+        val first = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        waitForReconciled(supervisor, first.sessionId)
+        val second = c.launchPlayer(romId = 8L) as PlayerLaunchResult.Started
+        waitForReconciled(supervisor, second.sessionId)
+
+        val (firstSave, secondSave) = launcher.launches.map { it.savePath }
+        // Same staged bytes (same hash segment), but the romId segment differs.
+        assertThat(secondSave).isNotEqualTo(firstSave)
+    }
 
     @Test
     fun `launchPlayer selects the installed approved platform core`(@TempDir dir: Path) {

@@ -4,6 +4,7 @@ import com.romm.androidtv.auth.ClientTokenStorage
 import com.romm.androidtv.auth.SessionStorage
 import com.romm.androidtv.emulation.model.CoreLicenseFinding
 import com.romm.androidtv.emulation.model.CoreManifest
+import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.library.BiosConfigurationPresenter
 import com.romm.androidtv.library.BiosConfigurationProvider
 import com.romm.androidtv.library.HomePresenter
@@ -33,6 +34,7 @@ import com.romm.androidtv.onboarding.ValidateRommServer
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.databaseDir
 import com.romm.androidtv.storage.firmwareDir
+import com.romm.androidtv.storage.romCacheDir
 import com.romm.androidtv.storage.settingsFile
 import com.romm.desktop.library.DesktopBiosConfigurationProvider
 import com.romm.desktop.network.DesktopNetworkModule
@@ -40,9 +42,12 @@ import com.romm.desktop.player.LINUX_X86_64_ABI
 import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.player.LaunchOutcome
 import com.romm.desktop.player.LaunchRecoveryDiagnostic
+import com.romm.desktop.player.OkHttpRomContentStager
 import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.player.PlayerLaunchParams
 import com.romm.desktop.player.PrepareLaunchResult
+import com.romm.desktop.player.RomContentStager
+import com.romm.desktop.player.StagedContent
 import com.romm.desktop.player.VideoSettings
 import com.romm.desktop.player.coreLibraryFileNames
 import com.romm.desktop.player.resolveCoreLibraryPath
@@ -67,6 +72,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.Collections
 import java.util.UUID
 import java.util.logging.Level
@@ -106,6 +112,8 @@ import kotlinx.coroutines.launch
  *                                 production uses the real `ProcessBuilder` launcher.
  * @param romDetailLookup  Test seam: ROM detail without a network fetch; production resolves
  *                         it from [romDetailPresenter]'s current UI state.
+ * @param romContentStagerOverride Test seam: inject a fake stager so launch tests never touch the
+ *                                 network; production downloads via the authenticated OkHttp client.
  */
 
 /** Outcome of [DesktopAppCoordinator.launchPlayer]. */
@@ -131,6 +139,7 @@ class DesktopAppCoordinator(
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     playerSupervisorOverride: LaunchJournalSupervisor? = null,
     romDetailLookup: ((Long) -> RomDetail?)? = null,
+    romContentStagerOverride: RomContentStager? = null,
 ) {
 
     // ------------------------------------------------------------------ storage
@@ -172,6 +181,20 @@ class DesktopAppCoordinator(
     }
 
     val imageLoader: DesktopImageLoader by lazy { DesktopImageLoader(network.okHttpClient) }
+
+    /**
+     * ROM content stager for real-content launches (tests inject a fake via
+     * [romContentStagerOverride]). Production downloads through the authenticated OkHttp client
+     * into the XDG cache `roms/` root ([AppPaths.romCacheDir] — the "roms" subdirectory Android
+     * maps for ROM content).
+     */
+    val romContentStager: RomContentStager by lazy {
+        romContentStagerOverride ?: OkHttpRomContentStager(
+            client = network.okHttpClient,
+            originProvider = { settingsAdapter.currentProfile().origin },
+            romCacheDir = paths.romCacheDir(),
+        )
+    }
 
     // ------------------------------------------------------------------ app mode / navigation
 
@@ -270,13 +293,26 @@ class DesktopAppCoordinator(
     /**
      * Launches the desktop player for a ROM (Phase 8): resolves the ROM detail and an approved
      * core (`test_core` fallback — the no-content core the player increment always builds and
-     * the derived `ROMM_PLAYER_ALLOWED_CORES` allowlists when installed), commits request
-      * + journal atomically via [playerSupervisor], spawns `rommulus_player`, and starts watching
-      * the process so reconciliation happens when it exits (§12.3/§12.5).
+     * the derived `ROMM_PLAYER_ALLOWED_CORES` allowlists when installed), stages real ROM content
+     * for real-content cores, commits request + journal atomically via [playerSupervisor], spawns
+     * `rommulus_player`, and starts watching the process so reconciliation happens when it exits
+     * (§12.3/§12.5).
      *
-     * Minimal increment: `test_core` is a no-content core, so [PlayerLaunchParams.contentPath]
-     * is null (serialized as `""` on the wire); real content paths and per-ROM save layout land
-     * in a later increment.
+     * Real-content cores: the ROM is staged from the server first ([romContentStager]) and BOTH
+     * [PlayerLaunchParams.contentPath] and [PlayerLaunchParams.contentHash] are pinned on the
+     * request. Staging failure returns [PlayerLaunchResult.Failed] — a real-content core is NEVER
+     * launched without content (fail-closed). `test_core` is no-content: [PlayerLaunchParams.contentPath]
+     * stays null (serialized as `""` on the wire) and [PlayerLaunchParams.contentHash] stays empty.
+     *
+     * Save identity: [PlayerLaunchParams.savePath] follows the shared [SavePathPolicy] layout under
+     * the data root — `saves/<server>/<user>/<romId>/<content-hash>/autosave/srm.srm` — STABLE
+     * across launches of the same ROM so the player's restore-on-launch finds the previous SRAM.
+     * The [sessionId] still scopes the journal/session directory (unchanged). No-content launches
+     * use a fixed placeholder hash segment; their saves are scratch (adoption is skipped for
+     * requests with an empty content path).
+     *
+     * Threading: this function BLOCKS (content download + file I/O + process spawn) and must be
+     * called off the UI thread — [GameDetailScreen] wraps it in `withContext(Dispatchers.Default)`.
      */
     fun launchPlayer(romId: Long): PlayerLaunchResult {
         // A new session supersedes any earlier exit event (the UI clears its status on Ended).
@@ -286,9 +322,34 @@ class DesktopAppCoordinator(
         val core = resolveLaunchCore(detail.platformSlug)
             ?: return PlayerLaunchResult.Failed("no core for platform")
 
+        // Real-content cores stage the ROM before launch; fail-closed — never launch without content.
+        val staged: StagedContent? = if (core.coreId == TEST_CORE_ID) {
+            null
+        } else {
+            try {
+                romContentStager.stage(romId, detail.fileName, detail.fileSizeBytes)
+            } catch (e: Exception) {
+                return PlayerLaunchResult.Failed("failed to stage ROM content: ${e.message}")
+            }
+        }
+
         val sessionId = UUID.randomUUID().toString()
-        val saveDir = paths.dataDir.resolve("saves")
-        runCatching { Files.createDirectories(saveDir) }
+
+        // Stable per-ROM save identity via the shared [SavePathPolicy] (mirrors Android's
+        // files/saves layout under the desktop data root — always under the data root, which the
+        // player validates).
+        val origin = settingsAdapter.currentProfile().origin
+        val username = sessionStorage.coherentRecord(origin)?.username.orEmpty()
+        val savePath = Path.of(
+            SavePathPolicy.autosaveSramPath(
+                filesDir = paths.dataDir.toFile(),
+                serverKey = origin.ifBlank { NO_ORIGIN_KEY },
+                userKey = username.ifBlank { ANONYMOUS_USER_KEY },
+                romId = romId,
+                romHash = (staged?.sha256).orEmpty().ifBlank { NO_CONTENT_ROM_HASH },
+            ),
+        )
+        runCatching { Files.createDirectories(checkNotNull(savePath.parent)) }
             .getOrElse { return PlayerLaunchResult.Failed("cannot create saves directory: ${it.message}") }
 
         val coresDir = paths.dataDir.resolve("cores")
@@ -299,9 +360,10 @@ class DesktopAppCoordinator(
             // commitSha) is the authoritative revision pin.
             coreBuildRevision = core.releaseTag.ifBlank { core.commitSha },
             corePath = resolveCoreLibraryPath(coresDir, core.coreId),
-            contentPath = null, // test_core is no-content; real content paths are a later increment
+            contentPath = staged?.path,
+            contentHash = (staged?.sha256).orEmpty(),
             systemDir = paths.firmwareDir(),
-            savePath = saveDir.resolve("$sessionId.srm"),
+            savePath = savePath,
             video = VideoSettings(),
         )
 
@@ -614,6 +676,15 @@ class DesktopAppCoordinator(
 
         /** The no-content test core; the desktop player's universal fallback (always in the derived `ROMM_PLAYER_ALLOWED_CORES` when installed). */
         const val TEST_CORE_ID = "test_core"
+
+        /** [SavePathPolicy] hash segment for no-content launches (their saves are scratch). */
+        const val NO_CONTENT_ROM_HASH = "no-content"
+
+        /** [SavePathPolicy] server key when no origin is configured. */
+        private const val NO_ORIGIN_KEY = "no-origin"
+
+        /** [SavePathPolicy] user key when the session record carries no username (e.g. kiosk). */
+        private const val ANONYMOUS_USER_KEY = "anonymous"
 
         /** Exit code passed to [onPlayerProcessExited] by the watcher (see [watchPlayerExit]). */
         const val UNKNOWN_PLAYER_EXIT_CODE = -1
