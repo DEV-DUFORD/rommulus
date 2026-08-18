@@ -5,7 +5,7 @@
 //     parameter; pass nullptr for the default renderer.
 //   - SDL_SetRenderLogicalPresentation(renderer, w, h, mode) replaces
 //     SDL2's SDL_RenderSetLogicalSize; modes are
-//     SDL_LOGICAL_PRESENTATION_INTEGER_SCALE / _STRETCH.
+//     SDL_LOGICAL_PRESENTATION_INTEGER_SCALE / _LETTERBOX.
 //   - SDL_RenderLine/SDL_RenderTexture take float coordinates/rects in
 //     SDL3 (not SDL2's int/SDL_Rect).
 //   - SDL_SetWindowFullscreen(window, bool) takes a plain bool in SDL3.
@@ -22,6 +22,9 @@
 
 #include <native/engine/LogSink.h>
 #include "pixel_format.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace romm::player {
 
@@ -110,13 +113,7 @@ void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
         return;
     }
 
-    // If the core already reported a geometry, apply the current scaling
-    // mode now; present() re-applies it after later geometry changes.
-    if (width_ != 0 && height_ != 0 && integerScaling_) {
-        SDL_SetRenderLogicalPresentation(
-            renderer_, static_cast<int>(width_), static_cast<int>(height_),
-            SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
-    }
+    applyLogicalPresentationLocked();
 }
 
 void SdlVideoSink::detachWindow() {
@@ -142,6 +139,32 @@ void SdlVideoSink::destroySurfaceLocked() {
     }
     window_ = nullptr;
     frameReady_ = false;
+}
+
+void SdlVideoSink::setDisplayAspectRatio(double aspectRatio) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    displayAspectRatio_ = aspectRatio > 0.0 && std::isfinite(aspectRatio)
+            ? aspectRatio
+            : 0.0;
+    presentationDirty_ = true;
+}
+
+void SdlVideoSink::applyLogicalPresentationLocked() {
+    if (renderer_ == nullptr || width_ == 0 || height_ == 0) {
+        return;
+    }
+
+    const double aspect = displayAspectRatio_ > 0.0
+            ? displayAspectRatio_
+            : static_cast<double>(width_) / height_;
+    const int logicalHeight = static_cast<int>(height_);
+    const int logicalWidth = std::max(
+            1, static_cast<int>(std::lround(aspect * logicalHeight)));
+    SDL_SetRenderLogicalPresentation(
+            renderer_, logicalWidth, logicalHeight,
+            integerScaling_ ? SDL_LOGICAL_PRESENTATION_INTEGER_SCALE
+                            : SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    presentationDirty_ = false;
 }
 
 bool SdlVideoSink::present() {
@@ -181,12 +204,10 @@ bool SdlVideoSink::present() {
                 frameReady_ = false;
                 return false;
             }
-            if (integerScaling_) {
-                SDL_SetRenderLogicalPresentation(
-                    renderer_, static_cast<int>(width_),
-                    static_cast<int>(height_),
-                    SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
-            }
+            presentationDirty_ = true;
+        }
+        if (presentationDirty_) {
+            applyLogicalPresentationLocked();
         }
 
         // Copy the staging buffer into the texture, then clear the flag
@@ -233,12 +254,8 @@ bool SdlVideoSink::present() {
 void SdlVideoSink::setIntegerScaling(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     integerScaling_ = enabled;
-    if (renderer_ != nullptr && width_ != 0 && height_ != 0) {
-        SDL_SetRenderLogicalPresentation(
-            renderer_, static_cast<int>(width_), static_cast<int>(height_),
-            enabled ? SDL_LOGICAL_PRESENTATION_INTEGER_SCALE
-                    : SDL_LOGICAL_PRESENTATION_STRETCH);
-    }
+    presentationDirty_ = true;
+    applyLogicalPresentationLocked();
 }
 
 void SdlVideoSink::setScanlines(bool enabled) {

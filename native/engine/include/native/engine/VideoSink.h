@@ -49,6 +49,11 @@ public:
     // nothing is attached.
     virtual void detachWindow() = 0;
 
+    // Updates the core's intended display aspect ratio. A value <= 0 means
+    // the sink should derive the ratio from the submitted frame geometry.
+    // Sinks that delegate aspect correction to their platform may ignore it.
+    virtual void setDisplayAspectRatio(double /*aspectRatio*/) {}
+
     // Converts and presents one frame, honoring width/height/pitch and the
     // negotiated pixel format. A null `data` means "duplicate the last
     // frame" (RETRO_ENVIRONMENT_GET_CAN_DUPE) — a deliberate no-op, not an
