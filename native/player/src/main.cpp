@@ -36,6 +36,7 @@
 #include "native/engine/VideoSink.h"
 
 #include "native/player/protocol.h"
+#include "native/player/save_metadata.h"
 #include "native/player/sdl_audio_sink.h"
 #include "native/player/sdl_dynamic_library.h"
 #include "native/player/sdl_input.h"
@@ -218,6 +219,16 @@ void writeResult(const romm::player::PlayerRequest& request, romm::player::ExitK
     result.exitKind = exitKind;
     result.checkpointWritten = checkpointWritten;
     result.candidateSavePath = request.candidateSavePath;
+    if (checkpointWritten) {
+        const auto metadata = romm::player::readSaveMetadata(request.candidateSavePath);
+        if (metadata) {
+            result.saveHash = metadata->sha256;
+            result.saveSize = metadata->size;
+        } else {
+            std::fprintf(stderr, "error: failed to read checkpoint metadata from %s\n",
+                         request.candidateSavePath.c_str());
+        }
+    }
     result.frames = frames;
     result.audioUnderrunFrames = underrunFrames;
     result.audioOverrunFrames = overrunFrames;

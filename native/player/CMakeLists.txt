@@ -53,6 +53,7 @@ add_executable(rommulus_player
     # adapters. main.cpp is owned by a separate worker and is referenced
     # here so the source list is complete.
     ${ROMM_PLAYER_SRC}/protocol.cpp
+    ${ROMM_PLAYER_SRC}/save_metadata.cpp
     ${ROMM_PLAYER_SRC}/validation.cpp
     ${ROMM_PLAYER_SRC}/sdl_log_sink.cpp
     ${ROMM_PLAYER_SRC}/sdl_dynamic_library.cpp

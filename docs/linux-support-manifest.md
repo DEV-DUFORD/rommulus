@@ -16,7 +16,7 @@ gate before its gate status below may move to PASSED.
 | Core | Linux build target | Gate status | Enabled |
 | --- | --- | --- | --- |
 | `test_core` | `native/player/CMakeLists.txt` (`add_library(test_core SHARED …)`) | PASSED — Phase 8 desktop E2E passed on Ubuntu | yes |
-| `gambatte` | `native/cmake/cores/gambatte-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — per-core gate (§13.2) runs on the Ubuntu box | no (pending §13.2 gate) |
+| `gambatte` | `native/cmake/cores/gambatte-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 per-core gate completed on the Ubuntu box | yes |
 
 ## gambatte — §13.1 Linux build identity
 
@@ -40,7 +40,7 @@ Provenance fields from the `CoreManifest` entry (coreId `gambatte`):
 | Saves | SRAM via `RETRO_MEMORY_SAVE_RAM` |
 | `valid_extensions` | `gb\|gbc\|dmg` |
 | No-game support | none — the core needs a real ROM (no no-game boot) |
-| Linux runtime qualification | PENDING — §13.2 per-core gate on the Ubuntu box |
+| Linux runtime qualification | PASSED — §13.2 per-core gate completed on the Ubuntu box |
 
 ## Ubuntu box: build and install
 
@@ -68,6 +68,6 @@ build, the ASan/UBSan step of the §13.2 gate is marked failed for gambatte on t
 The desktop launcher picks the core up automatically on the next launch: it scans
 $XDG_DATA_HOME/rommulus/cores/ for `lib*.so`, and `libgambatte_core.so` yields
 `gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5` in `ROMM_PLAYER_ALLOWED_CORES`.
-Until the §13.2 gate passes, gambatte remains explicitly disabled by this manifest
-(criterion 14: enablement is itself a gate step); the row above flips to Enabled = yes
-only after the gate completes.
+gambatte is now explicitly enabled by this manifest (criterion 14): the §13.2 per-core gate
+passed, including Criterion 13 (E2E boot, controller input, and SRAM save adoption + restore
+across two Play sessions on the Ubuntu box).

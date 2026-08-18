@@ -57,6 +57,7 @@ target_compile_options(romm_engine_under_test PRIVATE -Wall -Wextra)
 # nlohmann/json (MIT, third_party/nlohmann/).
 add_library(romm_player_under_test STATIC
     ${ROMM_PLAYER_SRC}/protocol.cpp
+    ${ROMM_PLAYER_SRC}/save_metadata.cpp
     ${ROMM_PLAYER_SRC}/validation.cpp
 )
 target_include_directories(romm_player_under_test PUBLIC
@@ -87,4 +88,5 @@ function(romm_add_player_test name)
 endfunction()
 
 romm_add_player_test(test_player_protocol)
+romm_add_player_test(test_save_metadata)
 romm_add_player_test(test_player_validation)
