@@ -20,6 +20,13 @@ gate before its gate status below may move to PASSED.
 | `fceumm` | `native/cmake/cores/fceumm-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 | `prosystem` | `native/cmake/cores/prosystem-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 | `handy` | `native/cmake/cores/handy-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `mednafen_ngp` | `native/cmake/cores/mednafen_ngp-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `mednafen_wswan` | `native/cmake/cores/mednafen_wswan-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `stella` | `native/cmake/cores/stella-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `beetle_pce_fast` | `native/cmake/cores/beetle_pce_fast-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `mgba` | `native/cmake/cores/mgba-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `snes9x` | `native/cmake/cores/snes9x-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `genesis_plus_gx` | `native/cmake/cores/genesis_plus_gx-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 
 ## gambatte — §13.1 Linux build identity
 

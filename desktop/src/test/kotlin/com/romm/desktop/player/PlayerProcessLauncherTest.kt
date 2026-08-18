@@ -18,11 +18,11 @@ class PlayerProcessLauncherTest {
 
     @Test
     fun `deriveAllowedCores emits approved linux-x86_64 cores as coreId=revision pairs in sorted order`() {
-        assertThat(deriveAllowedCores(listOf("fceumm", "gambatte", "handy", "prosystem", "test_core")))
-            .isEqualTo("fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;handy=bc55d462f0b2d6b073ea93dc552ebd73cec60fd1;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;test_core=1")
+        assertThat(deriveAllowedCores(listOf("beetle_pce_fast", "fceumm", "gambatte", "genesis_plus_gx", "handy", "mednafen_ngp", "mednafen_wswan", "mgba", "prosystem", "snes9x", "stella", "test_core")))
+            .isEqualTo("beetle_pce_fast=b211204c7026dff6e86e79b00185512e2421fff8;fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;genesis_plus_gx=ca93fec870378f3bff65931bcd828d5e756cce75;handy=bc55d462f0b2d6b073ea93dc552ebd73cec60fd1;mednafen_ngp=a50d5ac288a81f2104ddf43195a4efdd15c72227;mednafen_wswan=4b01295838ea89e3f1355bbe4cb5cf98aa6108cd;mgba=32de792178a3662cd0402c8568fccfaad4a764a1;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;snes9x=1.63;stella=7.0;test_core=1")
         // Input order must not matter: the output is sorted by coreId.
-        assertThat(deriveAllowedCores(listOf("test_core", "prosystem", "handy", "fceumm", "gambatte")))
-            .isEqualTo("fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;handy=bc55d462f0b2d6b073ea93dc552ebd73cec60fd1;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;test_core=1")
+        assertThat(deriveAllowedCores(listOf("test_core", "snes9x", "stella", "prosystem", "mednafen_wswan", "handy", "mgba", "fceumm", "gambatte", "genesis_plus_gx", "beetle_pce_fast", "mednafen_ngp")))
+            .isEqualTo("beetle_pce_fast=b211204c7026dff6e86e79b00185512e2421fff8;fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;genesis_plus_gx=ca93fec870378f3bff65931bcd828d5e756cce75;handy=bc55d462f0b2d6b073ea93dc552ebd73cec60fd1;mednafen_ngp=a50d5ac288a81f2104ddf43195a4efdd15c72227;mednafen_wswan=4b01295838ea89e3f1355bbe4cb5cf98aa6108cd;mgba=32de792178a3662cd0402c8568fccfaad4a764a1;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;snes9x=1.63;stella=7.0;test_core=1")
     }
 
     @Test
@@ -38,8 +38,8 @@ class PlayerProcessLauncherTest {
 
     @Test
     fun `deriveAllowedCores excludes cores whose supportedAbis lack linux-x86_64`() {
-        // stella is approved but ARM-only.
-        assertThat(deriveAllowedCores(listOf("stella"))).isEmpty()
+        // mupen64plus_next is approved but ARM-only.
+        assertThat(deriveAllowedCores(listOf("mupen64plus_next"))).isEmpty()
     }
 
     @Test

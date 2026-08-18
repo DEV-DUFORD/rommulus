@@ -192,7 +192,7 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("genesis", "megadrive", "sms", "gamegear", "segacd"),
             supportedExtensions = listOf(".md", ".gen", ".bin", ".sms", ".gg", ".cue", ".iso", ".chd"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `genesis_plus_gx_core` CMake target " +
                 "in app/src/main/cpp/CMakeLists.txt, compiling " +
@@ -251,7 +251,7 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("snes", "sfc"),
             supportedExtensions = listOf(".sfc", ".smc"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `snes9x_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/snes9x/{core," +
@@ -321,7 +321,7 @@ object CoreManifest {
             commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
             supportedSystems = listOf("gba"),
             supportedExtensions = listOf(".gba", ".agb"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `mgba_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mgba/*.{c,h} with " +
@@ -348,7 +348,7 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("atari2600"),
             supportedExtensions = listOf(".a26", ".bin"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `stella_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/stella/**/* " +
@@ -405,7 +405,7 @@ object CoreManifest {
             supportedSystems = listOf("tg16"),
             supportedExtensions = listOf(".pce"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `beetle_pce_fast_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/beetle_pce_fast/{libretro.c," +
@@ -434,7 +434,7 @@ object CoreManifest {
             supportedSystems = listOf("neo-geo-pocket", "neo-geo-pocket-color"),
             supportedExtensions = listOf(".ngp", ".ngc", ".ngpc", ".npc"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `mednafen_ngp_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mednafen_ngp/{libretro.c," +
@@ -463,7 +463,7 @@ object CoreManifest {
             supportedSystems = listOf("wonderswan", "wonderswan-color"),
             supportedExtensions = listOf(".ws", ".wsc", ".pc2"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `mednafen_wswan_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mednafen_wswan/{libretro.c," +

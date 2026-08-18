@@ -450,17 +450,17 @@ class DesktopAppCoordinatorTest {
     @Test
     fun `launchPlayer falls back to test_core when the platform core is approved only for ARM ABIs`(@TempDir dir: Path) {
         val paths = dir.testRoot()
-        // stella is approved for atari2600 but ARM-only: even with its library installed it must
+        // mupen64plus_next is approved for n64 but ARM-only: even with its library installed it must
         // NOT be selected on the Linux desktop (the derived allowlist would reject it anyway).
         val coresDir = paths.dataDir.resolve("cores")
         Files.createDirectories(coresDir)
-        Files.write(coresDir.resolve("libstella.so"), byteArrayOf(0))
+        Files.write(coresDir.resolve("libmupen64plus_next.so"), byteArrayOf(0))
         // test_core is installed too, so the derived ROMM_PLAYER_ALLOWED_CORES allowlist is
         // non-empty and the fallback launch would actually be accepted by the real player.
         Files.write(coresDir.resolve("libtest_core.so"), byteArrayOf(0))
         val launcher = FakePlayerProcessLauncher()
         val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
-        val c = launchCoordinator(paths, platformSlug = "atari2600", supervisor = supervisor)
+        val c = launchCoordinator(paths, platformSlug = "n64", supervisor = supervisor)
 
         val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
 
