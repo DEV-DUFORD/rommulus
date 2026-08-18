@@ -4,8 +4,8 @@
 # Mirrors native/tests/CMakeLists.txt: a standalone host project that
 # compiles the platform-neutral engine sources directly into the player
 # executable plus the SDL3 platform adapters. It deliberately does NOT
-# build the vendored cores (except the synthetic test_core, which the
-# player loads for end-to-end verification) or anything Android.
+# build the vendored cores (except the synthetic test_core and the vendored
+# Gambatte core, both of which the player loads) or anything Android.
 #
 # SDL3 is found via its installed CMake package (brew on macOS, vendored
 # source build on Linux CI):
@@ -28,6 +28,11 @@ set(ROMM_ENGINE_INCLUDE ${ROMM_NATIVE_ROOT}/engine/include)
 set(ROMM_PLAYER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(ROMM_PLAYER_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(ROMM_LIBRETRO_INCLUDE ${ROMM_REPO_ROOT}/third_party/libretro)
+
+# Anchor for the vendored Gambatte core fragment (cmake/cores/gambatte-linux.cmake),
+# which expects both GAMBATTE_DIR and ROMM_LIBRETRO_INCLUDE defined by the
+# including project (the Android build derives them from ROMM_APP_CPP_DIR).
+set(GAMBATTE_DIR ${ROMM_REPO_ROOT}/third_party/cores/gambatte)
 
 find_package(SDL3 REQUIRED CONFIG)
 
@@ -76,3 +81,10 @@ add_library(test_core SHARED
 target_include_directories(test_core PRIVATE ${ROMM_LIBRETRO_INCLUDE})
 target_link_libraries(test_core PRIVATE m)
 target_compile_options(test_core PRIVATE -Wall -Wextra)
+
+# ---------------------------------------------------------------------------
+# Gambatte (Game Boy / GBC): Linux x86_64 build of the same vendored sources
+# the Android build compiles via cmake/cores/gambatte.cmake. The fragment is
+# identical except for the dropped Android-only `log` link library.
+# ---------------------------------------------------------------------------
+include(${ROMM_NATIVE_ROOT}/cmake/cores/gambatte-linux.cmake)
