@@ -32,6 +32,7 @@ public:
     // Engine seam (main thread unless noted).
     void attachWindow(romm::video::NativeWindowHandle window) override;
     void detachWindow() override;
+    void setDisplayAspectRatio(double aspectRatio) override;
     // Emulation thread.
     void submitFrame(const void* data, unsigned width, unsigned height,
                      size_t pitch, enum retro_pixel_format format) override;
@@ -41,8 +42,7 @@ public:
     // (and leaves the screen untouched) when frameReady_ is not set.
     bool present();
 
-    // Toggles integer scaling via SDL_SetRenderLogicalPresentation
-    // (SDL_LOGICAL_PRESENTATION_INTEGER_SCALE / _STRETCH).
+    // Toggles integer scaling. Non-integer output is letterboxed.
     void setIntegerScaling(bool enabled);
 
     // Toggles a 1-logical-pixel scanline overlay (a 1xH texture of
@@ -55,6 +55,10 @@ public:
 private:
     // Destroys texture/scanline texture/renderer. Call with mutex_ held.
     void destroySurfaceLocked();
+
+    // Applies the core's display aspect ratio and current scaling mode.
+    // Call with mutex_ held on the main thread.
+    void applyLogicalPresentationLocked();
 
     // SDL objects (main thread only, but guarded by mutex_ against the
     // emulation thread's geometry reads).
@@ -71,6 +75,8 @@ private:
     std::vector<uint8_t> staging_;
     unsigned width_ = 0;
     unsigned height_ = 0;
+    double displayAspectRatio_ = 0.0;
+    bool presentationDirty_ = true;
     bool frameReady_ = false;
 
     // Presentation options (main thread).

@@ -49,6 +49,7 @@ EmulationSession::EmulationSession() {
         diagnostics_.displayAspectRatioMicros.store(
                 aspect > 0.0 ? static_cast<uint32_t>(aspect * 1000000.0 + 0.5) : 0,
                 std::memory_order_relaxed);
+        romm::video::sink().setDisplayAspectRatio(aspect);
     });
 }
 
@@ -194,6 +195,7 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
                     ? static_cast<uint32_t>(displayAspect * 1000000.0 + 0.5)
                     : 0,
             std::memory_order_relaxed);
+    romm::video::sink().setDisplayAspectRatio(displayAspect);
     romm::gl::context().setBufferGeometry(av.geometry.base_width, av.geometry.base_height);
 
     romm::audio::StartConfig audioConfig;
