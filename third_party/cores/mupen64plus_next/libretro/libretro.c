@@ -27,7 +27,9 @@
 #include "libretro_private.h"
 #include "libretro_core_options.h"
 
+#ifndef M64P_ANGRYLION_ONLY
 #include "GLideN64_libretro.h"
+#endif
 #include "mupen64plus-next_common.h"
 
 #include <libco.h>
@@ -36,7 +38,9 @@
 #include <switch.h>
 #endif
 #include <pthread.h>
+#ifndef M64P_ANGRYLION_ONLY
 #include <glsm/glsmsym.h>
+#endif
 
 #include "api/m64p_frontend.h"
 #include "api/m64p_types.h"
@@ -941,7 +945,11 @@ static void update_variables(bool startup)
        }
        else
        {
+#ifdef M64P_ANGRYLION_ONLY
+          plugin_connect_rdp_api(RDP_PLUGIN_ANGRYLION);
+#else
           plugin_connect_rdp_api(RDP_PLUGIN_GLIDEN64);
+#endif
        }
 
        var.key = CORE_NAME "-rsp-plugin";
@@ -1803,6 +1811,7 @@ static void format_saved_memory(void)
 
 void context_reset(void)
 {
+#ifndef M64P_ANGRYLION_ONLY
     if(current_rdp_type == RDP_PLUGIN_GLIDEN64)
     {
        log_cb(RETRO_LOG_DEBUG, CORE_NAME ": context_reset()\n");
@@ -1822,16 +1831,19 @@ void context_reset(void)
           gln64ReinitGfxContext();
        }
     }
+#endif
 
     reinit_gfx_plugin();
 }
 
 static void context_destroy(void)
 {
+#ifndef M64P_ANGRYLION_ONLY
     if(current_rdp_type == RDP_PLUGIN_GLIDEN64)
     {
        glsm_ctl(GLSM_CTL_STATE_CONTEXT_DESTROY, NULL);
     }
+#endif
 #ifdef HAVE_PARALLEL_RDP
     if (current_rdp_type == RDP_PLUGIN_PARALLEL)
         parallel_deinit();
@@ -1946,32 +1958,38 @@ bool retro_load_game(const struct retro_game_info *game)
     retro_savestate_complete = true;
     load_game_successful = false;
 
+#ifndef M64P_ANGRYLION_ONLY
     glsm_ctx_params_t params = {0};
+#endif
     format_saved_memory();
 
     update_variables(true);
 
+#ifndef M64P_ANGRYLION_ONLY
     if(current_rdp_type == RDP_PLUGIN_GLIDEN64 && EnableThreadedRenderer)
     {
        initializing = true;
        retro_thread = co_active();
        game_thread = co_create(65536 * sizeof(void*) * 16, gln64_thr_gl_invoke_command_loop);
     }
+#endif
 
     init_audio_libretro(audio_buffer_size);
 
+#ifndef M64P_ANGRYLION_ONLY
     params.context_reset         = context_reset;
     params.context_destroy       = context_destroy;
     params.environ_cb            = environ_cb;
     params.stencil               = false;
-
     params.framebuffer_lock      = context_framebuffer_lock;
+
     if (current_rdp_type == RDP_PLUGIN_GLIDEN64 && !glsm_ctl(GLSM_CTL_STATE_CONTEXT_INIT, &params))
     {
         if (log_cb)
             log_cb(RETRO_LOG_ERROR, CORE_NAME ": libretro frontend doesn't have OpenGL support\n");
         return false;
     }
+#endif
 
 #ifdef HAVE_PARALLEL_RDP
     if (current_rdp_type == RDP_PLUGIN_PARALLEL)
@@ -2008,6 +2026,7 @@ bool retro_load_game(const struct retro_game_info *game)
 
 void retro_unload_game(void)
 {
+#ifndef M64P_ANGRYLION_ONLY
     if(current_rdp_type == RDP_PLUGIN_GLIDEN64 && EnableThreadedRenderer)
     {
        environ_clear_thread_waits_cb(1, NULL);
@@ -2031,6 +2050,7 @@ void retro_unload_game(void)
 
        CoreDoCommand(M64CMD_ROM_CLOSE, 0, NULL);
     }
+#endif
 
     cleanup_global_paths();
     
@@ -2055,6 +2075,7 @@ void retro_run (void)
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
        update_variables(false);
 
+#ifndef M64P_ANGRYLION_ONLY
     if(current_rdp_type == RDP_PLUGIN_GLIDEN64)
     {
        if(EnableThreadedRenderer)
@@ -2068,22 +2089,30 @@ void retro_run (void)
        
        glsm_ctl(GLSM_CTL_STATE_BIND, NULL);
     }
+#endif
 
     co_switch(game_thread);
 
+#ifndef M64P_ANGRYLION_ONLY
     if(current_rdp_type == RDP_PLUGIN_GLIDEN64)
     {
        glsm_ctl(GLSM_CTL_STATE_UNBIND, NULL);
     }
+#endif
     
     if (libretro_video_enabled && libretro_swap_buffer)
     {
+#ifndef M64P_ANGRYLION_ONLY
        if(current_rdp_type == RDP_PLUGIN_GLIDEN64)
        {
           video_cb(RETRO_HW_FRAME_BUFFER_VALID, retro_screen_width, retro_screen_height, 0);
        }
 #ifdef HAVE_THR_AL
-       else if(current_rdp_type == RDP_PLUGIN_ANGRYLION)
+       else
+#endif
+#endif
+#ifdef HAVE_THR_AL
+       if(current_rdp_type == RDP_PLUGIN_ANGRYLION)
        {
           video_cb(prescale, retro_screen_width, retro_screen_height, screen_pitch);
        }
@@ -2150,6 +2179,7 @@ bool retro_serialize(void *data, size_t size)
 
    savestates_set_job(savestates_job_save, savestates_type_m64p, data);
 
+#ifndef M64P_ANGRYLION_ONLY
    if (current_rdp_type == RDP_PLUGIN_GLIDEN64)
    {
       if(EnableThreadedRenderer)
@@ -2159,16 +2189,19 @@ bool retro_serialize(void *data, size_t size)
       }
       glsm_ctl(GLSM_CTL_STATE_BIND, NULL);
    }
+#endif
 
    while (!retro_savestate_complete)
    {
       co_switch(game_thread);
    }
 
+#ifndef M64P_ANGRYLION_ONLY
    if (current_rdp_type == RDP_PLUGIN_GLIDEN64)
    {
       glsm_ctl(GLSM_CTL_STATE_UNBIND, NULL);
    }
+#endif
 
    return !!retro_savestate_result;
 }
@@ -2183,6 +2216,7 @@ bool retro_unserialize(const void *data, size_t size)
 
    savestates_set_job(savestates_job_load, savestates_type_m64p, data);
 
+#ifndef M64P_ANGRYLION_ONLY
    if (current_rdp_type == RDP_PLUGIN_GLIDEN64)
    {
       if(EnableThreadedRenderer)
@@ -2192,16 +2226,19 @@ bool retro_unserialize(const void *data, size_t size)
       }
       glsm_ctl(GLSM_CTL_STATE_BIND, NULL);
    }
+#endif
 
    while (!retro_savestate_complete)
    {
       co_switch(game_thread);
    }
 
+#ifndef M64P_ANGRYLION_ONLY
    if (current_rdp_type == RDP_PLUGIN_GLIDEN64)
    {
       glsm_ctl(GLSM_CTL_STATE_UNBIND, NULL);
    }
+#endif
 
    return true;
 }

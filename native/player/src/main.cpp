@@ -346,6 +346,11 @@ int main(int argc, char* argv[]) {
 
     // 8. Load and start the core.
     romm::EmulationSession session;
+    // Linux currently presents software frames only. Select the vendored
+    // Angrylion renderer so Mupen64Plus-Next does not request EGL or Vulkan;
+    // other cores ignore this unknown option.
+    session.setCoreOptionOverride("mupen64plus-rdp-plugin", "angrylion");
+    session.setCoreOptionOverride("mupen64plus-rsp-plugin", "cxd4");
     if (!session.acquireProcessSlot()) {
         const std::string error = "another emulation session is already active in this process";
         std::fprintf(stderr, "error: %s\n", error.c_str());

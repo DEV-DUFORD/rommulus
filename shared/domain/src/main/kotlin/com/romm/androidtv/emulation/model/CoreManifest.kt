@@ -548,8 +548,11 @@ object CoreManifest {
                 "notice obligations. Dual GPL-2.0-or-later/LGPL-2.1-or-later glue files are used " +
                 "under GPL. Compiled dependencies are libretro-common (MIT), libchdr " +
                 "(BSD-3-Clause), LZMA SDK 25.01 (public domain), and the zstd 1.5.7 decoder " +
-                "(BSD-style option selected). No non-commercial/no-sale restriction was found. " +
-                "Only the ARM/ARM64 Android libretro source/dependency closure is vendored; see " +
+                "(BSD-style option selected). The Linux build additionally uses Lightrec " +
+                "(LGPL-2.1-or-later) and GNU Lightning (LGPL-3.0-or-later); the combined Linux " +
+                "core uses PCSX-ReARMed's GPL later-version option. No non-commercial/no-sale " +
+                "restriction was found. " +
+                "The Android ARM/ARM64 closure and Linux x86_64 Lightrec closure are vendored; see " +
                 "third_party/cores/pcsx_rearmed/VENDORING.md. Memory-card slot 1 is forced to " +
                 "Libretro's 128 KiB RETRO_MEMORY_SAVE_RAM and therefore uses per-ROM save sync; " +
                 "slot 2 is disabled because upstream exposes only unsynchronized serial/shared " +
@@ -566,7 +569,7 @@ object CoreManifest {
                 "scph5500.bin", "scph5501.bin", "scph5502.bin",
                 "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
             ),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds `pcsx_rearmed_core` with upstream's " +
                 "Android.mk source closure and flags: ARM/ARM64 ari64 dynarec, NEON GPU, " +
@@ -595,7 +598,7 @@ object CoreManifest {
                 "GPL-2.0-or-later, which is compatible with a GPLv3 application. No " +
                 "non-commercial/no-sale restriction found anywhere in the compiled closure. The " +
                 "core runs PIF HLE, so no external firmware/BIOS is required. Only the files this " +
-                "core's Android libretro build compiles are vendored; see " +
+                "core's Android and Linux libretro builds compile are vendored; see " +
                 "third_party/cores/mupen64plus_next/VENDORING.md.",
             commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
             sourceOfferSatisfied = true,
@@ -603,7 +606,7 @@ object CoreManifest {
             supportedSystems = listOf("n64"),
             supportedExtensions = listOf(".n64", ".z64", ".v64", ".bin", ".u1"),
             requiredFirmware = emptyList(), // No BIOS required — mupen64plus_next runs PIF HLE; IPL3 is read from the ROM at offset 0x40
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds `mupen64plus_next_core` with upstream's " +
                 "Android.mk/Makefile.common source closure and flags: ARM/ARM64 dynarec " +

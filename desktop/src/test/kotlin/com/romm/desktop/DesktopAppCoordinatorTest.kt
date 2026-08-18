@@ -422,22 +422,20 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
-    fun `launchPlayer rejects a platform core approved only for ARM ABIs`(@TempDir dir: Path) {
+    fun `launchPlayer selects mupen64plus_next for N64 on Linux`(@TempDir dir: Path) {
         val paths = dir.testRoot()
-        // mupen64plus_next is approved for n64 but ARM-only: even with its library installed it must
-        // NOT be selected on the Linux desktop (the derived allowlist would reject it anyway).
         val coresDir = paths.dataDir.resolve("cores")
         Files.createDirectories(coresDir)
         Files.write(coresDir.resolve("libmupen64plus_next.so"), byteArrayOf(0))
-        Files.write(coresDir.resolve("libtest_core.so"), byteArrayOf(0))
         val launcher = FakePlayerProcessLauncher()
         val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
         val c = launchCoordinator(paths, platformSlug = "n64", supervisor = supervisor)
 
-        assertThat(c.isPlatformPlayable("n64")).isFalse()
-        assertThat(c.launchPlayer(romId = 7L))
-            .isEqualTo(PlayerLaunchResult.Failed("console is not supported on desktop"))
-        assertThat(launcher.launches).isEmpty()
+        assertThat(c.isPlatformPlayable("n64")).isTrue()
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+
+        assertThat(launcher.launches.single().coreId).isEqualTo("mupen64plus_next")
+        waitForReconciled(supervisor, started.sessionId)
     }
 
     @Test

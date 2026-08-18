@@ -279,7 +279,8 @@ class CoreManifestTest {
             "scph5500.bin", "scph5501.bin", "scph5502.bin",
             "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
         )
-        assertThat(pcsx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(pcsx.supportedAbis)
+            .containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
         assertThat(pcsx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(pcsx.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64)
@@ -296,7 +297,8 @@ class CoreManifestTest {
         assertThat(mupen64.supportedSystems).contains("n64")
         assertThat(mupen64.supportedExtensions).contains(".n64", ".bin")
         assertThat(mupen64.requiredFirmware).isEmpty()
-        assertThat(mupen64.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(mupen64.supportedAbis)
+            .containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
         assertThat(mupen64.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(mupen64.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest

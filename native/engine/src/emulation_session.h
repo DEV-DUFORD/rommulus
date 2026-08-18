@@ -88,6 +88,12 @@ public:
     bool start(const std::string& corePath, const std::string& systemDir, const std::string& saveDir,
                const std::string& contentPath = "");
 
+    // Supplies a frontend-specific core option before start(). Platform
+    // hosts use this for choices that must not alter another host's defaults.
+    void setCoreOptionOverride(const std::string& key, const std::string& value) {
+        environment_.setCoreOptionOverride(key, value);
+    }
+
     // Stops the emulation thread (bounded wait for in-flight callbacks),
     // calls retro_unload_game()/retro_deinit(), and unloads the core.
     void stop();

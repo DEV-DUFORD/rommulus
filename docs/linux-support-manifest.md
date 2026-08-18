@@ -27,6 +27,8 @@ gate before its gate status below may move to PASSED.
 | `mgba` | `native/cmake/cores/mgba-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 | `snes9x` | `native/cmake/cores/snes9x-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 | `genesis_plus_gx` | `native/cmake/cores/genesis_plus_gx-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `pcsx_rearmed` | `native/cmake/cores/pcsx_rearmed-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box; Lightrec x86_64 dynarec | no |
+| `mupen64plus_next` | `native/cmake/cores/mupen64plus_next-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box; x86 dynarec + software Angrylion | no |
 
 ## gambatte — §13.1 Linux build identity
 
@@ -55,7 +57,7 @@ Provenance fields from the `CoreManifest` entry (coreId `gambatte`):
 ## Ubuntu box: build and install
 
 ```sh
-# From the repository root (Ubuntu, x86_64; SDL3 dev package required):
+# From the repository root (Ubuntu, x86_64; SDL3 dev package and NASM required):
 cmake -S native/player -B build/player && cmake --build build/player
 
 # Install the core into the player's cores root:

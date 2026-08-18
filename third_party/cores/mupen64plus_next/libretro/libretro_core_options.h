@@ -78,10 +78,16 @@ struct retro_core_option_v2_definition option_defs_us[] = {
 #ifdef HAVE_PARALLEL_RDP
             {"parallel", "ParaLLEl-RDP"},
 #endif
+#ifndef M64P_ANGRYLION_ONLY
             {"gliden64", "GLideN64"},
+#endif
             { NULL, NULL },
         },
+#ifdef M64P_ANGRYLION_ONLY
+        "angrylion"
+#else
         "gliden64"
+#endif
     },
     {
         CORE_NAME "-43screensize",
