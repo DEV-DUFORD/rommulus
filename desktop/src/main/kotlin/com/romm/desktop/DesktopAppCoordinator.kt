@@ -36,6 +36,7 @@ import com.romm.androidtv.storage.firmwareDir
 import com.romm.androidtv.storage.settingsFile
 import com.romm.desktop.library.DesktopBiosConfigurationProvider
 import com.romm.desktop.network.DesktopNetworkModule
+import com.romm.desktop.player.LINUX_X86_64_ABI
 import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.player.LaunchOutcome
 import com.romm.desktop.player.LaunchRecoveryDiagnostic
@@ -43,6 +44,8 @@ import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.player.PlayerLaunchParams
 import com.romm.desktop.player.PrepareLaunchResult
 import com.romm.desktop.player.VideoSettings
+import com.romm.desktop.player.coreLibraryFileNames
+import com.romm.desktop.player.resolveCoreLibraryPath
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopClientTokenStorage
 import com.romm.desktop.storage.DesktopSessionStorage
@@ -266,7 +269,8 @@ class DesktopAppCoordinator(
 
     /**
      * Launches the desktop player for a ROM (Phase 8): resolves the ROM detail and an approved
-     * core (`test_core` fallback — the only core in `ROMM_PLAYER_ALLOWED_CORES`), commits request
+     * core (`test_core` fallback — the no-content core the player increment always builds and
+     * the derived `ROMM_PLAYER_ALLOWED_CORES` allowlists when installed), commits request
       * + journal atomically via [playerSupervisor], spawns `rommulus_player`, and starts watching
       * the process so reconciliation happens when it exits (§12.3/§12.5).
      *
@@ -287,12 +291,14 @@ class DesktopAppCoordinator(
         runCatching { Files.createDirectories(saveDir) }
             .getOrElse { return PlayerLaunchResult.Failed("cannot create saves directory: ${it.message}") }
 
+        val coresDir = paths.dataDir.resolve("cores")
         val params = PlayerLaunchParams(
             coreId = core.coreId,
-            // The player validates request.coreBuildRevision against ROMM_PLAYER_ALLOWED_CORES
-            // ("test_core=1"), so the manifest's releaseTag is the authoritative revision pin.
+            // The player validates request.coreBuildRevision against the derived
+            // ROMM_PLAYER_ALLOWED_CORES value, so the manifest's releaseTag (falling back to
+            // commitSha) is the authoritative revision pin.
             coreBuildRevision = core.releaseTag.ifBlank { core.commitSha },
-            corePath = paths.dataDir.resolve("cores").resolve("lib${core.coreId}.so"),
+            corePath = resolveCoreLibraryPath(coresDir, core.coreId),
             contentPath = null, // test_core is no-content; real content paths are a later increment
             systemDir = paths.firmwareDir(),
             savePath = saveDir.resolve("$sessionId.srm"),
@@ -520,22 +526,26 @@ class DesktopAppCoordinator(
     /**
      * Resolves the core to launch for a platform slug.
      *
-     * Prefers the platform's approved core, but ONLY when its shared library is actually
-     * installed in the desktop data root's `cores/` directory. Otherwise it falls back to the
-     * no-content [TEST_CORE_ID] — the only core the desktop player increment builds and
-     * allowlists (`ROMM_PLAYER_ALLOWED_CORES="test_core=1"`). Without the installed-check, a
-     * ROM for an approved-but-not-installed core (e.g. any real system on a dev box that only
-     * shipped `libtest_core.so`) would produce a request the player rejects instantly
-     * (`coreId not in installed metadata`), the session would fast-fail-reconcile, and Play
-     * would appear to do nothing.
+     * Prefers the platform's approved core, but ONLY when it is approved for the
+     * [LINUX_X86_64_ABI] ABI and its shared library is actually installed in the desktop
+     * data root's `cores/` directory. Otherwise it falls back to the no-content [TEST_CORE_ID]
+     * — the core the desktop player increment always builds, which the derived
+     * `ROMM_PLAYER_ALLOWED_CORES` value allowlists whenever `libtest_core.so` is installed.
+     * Without the installed-check, a ROM for an approved-but-not-installed core (e.g. any real
+     * system on a dev box that only shipped `libtest_core.so`) would produce a request the
+     * player rejects instantly (`coreId not in installed metadata`), the session would
+     * fast-fail-reconcile, and Play would appear to do nothing.
      */
     private fun resolveLaunchCore(platformSlug: String): CoreLicenseFinding? {
         val coresDir = paths.dataDir.resolve("cores")
         val installed: (CoreLicenseFinding) -> Boolean = { core ->
-            Files.exists(coresDir.resolve("lib${core.coreId}.so"))
+            coreLibraryFileNames(core.coreId).any { Files.exists(coresDir.resolve(it)) }
         }
         val platformCore = CoreManifest.approvedEntries().firstOrNull {
-            it.supportedSystems.contains(platformSlug)
+            it.supportedSystems.contains(platformSlug) &&
+                // An ARM-only approval does not make the core launchable on the desktop
+                // player: the allowlist (deriveAllowedCores) would reject it anyway.
+                LINUX_X86_64_ABI in it.supportedAbis
         }
         val testCore = CoreManifest.findById(TEST_CORE_ID)
         // NOTE: an approved-but-NOT-installed platform core is deliberately NOT a fallback —
@@ -602,7 +612,7 @@ class DesktopAppCoordinator(
     private companion object {
         const val DB_FILE_NAME = "rommulus.db"
 
-        /** The no-content test core; the only entry in the `ROMM_PLAYER_ALLOWED_CORES` env var. */
+        /** The no-content test core; the desktop player's universal fallback (always in the derived `ROMM_PLAYER_ALLOWED_CORES` when installed). */
         const val TEST_CORE_ID = "test_core"
 
         /** Exit code passed to [onPlayerProcessExited] by the watcher (see [watchPlayerExit]). */

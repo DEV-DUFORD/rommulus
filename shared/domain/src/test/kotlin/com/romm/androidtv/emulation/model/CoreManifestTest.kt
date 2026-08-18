@@ -137,7 +137,8 @@ class CoreManifestTest {
         assertThat(gambatte.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
         assertThat(gambatte.ownerRiskAcceptedBy).isBlank()
         assertThat(gambatte.ownerRiskAcceptedOn).isBlank()
-        assertThat(gambatte.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
+        assertThat(gambatte.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
         assertThat(gambatte.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(gambatte.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest

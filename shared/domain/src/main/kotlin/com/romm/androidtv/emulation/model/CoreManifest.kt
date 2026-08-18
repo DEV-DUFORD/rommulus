@@ -376,7 +376,7 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("gb", "gbc"),
             supportedExtensions = listOf(".gb", ".gbc"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `gambatte_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/gambatte/{libretro," +
@@ -626,7 +626,8 @@ object CoreManifest {
             // Synthetic project-owned core: no upstream commit exists, but approved
             // entries must record a non-blank commitSha, so a zero placeholder is used.
             commitSha = "0000000000000000000000000000000000000000",
-            // releaseTag matches the desktop launcher's ALLOWED_CORES ("test_core=1").
+            // releaseTag is the revision pin emitted for this core in the derived
+            // ROMM_PLAYER_ALLOWED_CORES value ("test_core=1").
             releaseTag = "1",
             licenseSummary = "Synthetic test core, project-owned",
             commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
