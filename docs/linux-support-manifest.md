@@ -27,6 +27,7 @@ gate before its gate status below may move to PASSED.
 | `mgba` | `native/cmake/cores/mgba-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 | `snes9x` | `native/cmake/cores/snes9x-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 | `genesis_plus_gx` | `native/cmake/cores/genesis_plus_gx-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `pcsx_rearmed` | `native/cmake/cores/pcsx_rearmed-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box (interpreter-only: no x86 dynarec at pinned commit) | no |
 
 ## gambatte — §13.1 Linux build identity
 

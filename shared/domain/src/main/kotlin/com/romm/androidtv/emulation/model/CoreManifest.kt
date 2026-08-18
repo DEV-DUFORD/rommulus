@@ -566,7 +566,7 @@ object CoreManifest {
                 "scph5500.bin", "scph5501.bin", "scph5502.bin",
                 "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
             ),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds `pcsx_rearmed_core` with upstream's " +
                 "Android.mk source closure and flags: ARM/ARM64 ari64 dynarec, NEON GPU, " +

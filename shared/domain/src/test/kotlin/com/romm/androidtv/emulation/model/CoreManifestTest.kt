@@ -279,7 +279,8 @@ class CoreManifestTest {
             "scph5500.bin", "scph5501.bin", "scph5502.bin",
             "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
         )
-        assertThat(pcsx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
+        assertThat(pcsx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
         assertThat(pcsx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(pcsx.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64)
