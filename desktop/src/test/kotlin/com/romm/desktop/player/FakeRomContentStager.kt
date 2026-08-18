@@ -12,7 +12,12 @@ class FakeRomContentStager(
     private val contentBytes: ByteArray = "fake-rom-content".toByteArray(),
 ) : RomContentStager {
 
-    data class Call(val romId: Long, val fileName: String, val expectedSizeBytes: Long)
+    data class Call(
+        val romId: Long,
+        val fileName: String,
+        val expectedSizeBytes: Long,
+        val supportedExtensions: Set<String>,
+    )
 
     /** Every [stage] call, in order. */
     val calls: List<Call> get() = recordedCalls.toList()
@@ -28,8 +33,13 @@ class FakeRomContentStager(
 
     private val cacheDir: Path by lazy { Files.createTempDirectory("fake-rom-stager") }
 
-    override fun stage(romId: Long, fileName: String, expectedSizeBytes: Long): StagedContent {
-        recordedCalls += Call(romId, fileName, expectedSizeBytes)
+    override fun stage(
+        romId: Long,
+        fileName: String,
+        expectedSizeBytes: Long,
+        supportedExtensions: Set<String>,
+    ): StagedContent {
+        recordedCalls += Call(romId, fileName, expectedSizeBytes, supportedExtensions)
         failure?.let { throw it }
         val safeName = fileName.replace('/', '_').replace('\\', '_').ifBlank { "rom" }
         val path = cacheDir.resolve("fake-$romId-$safeName")

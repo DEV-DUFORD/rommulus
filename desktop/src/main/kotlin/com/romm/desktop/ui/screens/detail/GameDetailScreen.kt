@@ -65,6 +65,8 @@ import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.PlayerLaunchResult
 import com.romm.desktop.PlayerSessionEvent
 import com.romm.desktop.Screen
+import com.romm.desktop.player.PlayerExitKind
+import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.ui.components.DesktopTextField
 import com.romm.desktop.ui.components.ErrorBanner
 import com.romm.desktop.ui.components.LocalRommulusColors
@@ -173,13 +175,23 @@ private fun GameDetailContent(
     val launchScope = rememberCoroutineScope()
 
     // The coordinator publishes PlayerSessionEvent.Ended (from its daemon exit-watcher thread)
-    // when the supervised player process exits and its journal is reconciled — clear the
-    // "Launching player…" status then. LaunchedEffect cancels on dispose, so the flow is
-    // collected only while this detail screen is composed.
+    // when the supervised player process exits and its journal is reconciled. Clean exits clear
+    // "Launching player…"; launch/runtime failures remain visible. LaunchedEffect cancels on
+    // dispose, so the flow is collected only while this detail screen is composed.
     LaunchedEffect(Unit) {
         coordinator.playerSessionEvents.collect { event ->
             if (event is PlayerSessionEvent.Ended && event.sessionId == launchedSessionId) {
-                playStatus = null
+                playStatus = when (val report = event.report) {
+                    is PlayerExitReport.Reconciled -> report.result.errorMessage
+                        ?.takeIf {
+                            report.result.exitKind == PlayerExitKind.LAUNCH_FAILED ||
+                                report.result.exitKind == PlayerExitKind.RUNTIME_FAILED
+                        }
+                        ?.let(PlayerLaunchResult::Failed)
+                    is PlayerExitReport.CrashInterrupted -> PlayerLaunchResult.Failed(report.reason)
+                    is PlayerExitReport.ReconcileFailed -> PlayerLaunchResult.Failed(report.reason)
+                    is PlayerExitReport.JournalMissing -> PlayerLaunchResult.Failed("player exited without a launch journal")
+                }
             }
         }
     }

@@ -9,6 +9,8 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
+import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.DisplayName
@@ -16,6 +18,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * Tests [OkHttpRomContentStager] against a stubbed HTTP layer: an OkHttp interceptor answers with
@@ -74,6 +78,82 @@ class RomContentStagerTest {
         assertThat(staged.path).isEqualTo(expected)
         assertThat(Files.readAllBytes(staged.path)).containsExactly(*ROM_BYTES)
         assertThat(staged.sha256).isEqualTo(sha256Hex(ROM_BYTES))
+    }
+
+    @Test
+    fun `stage extracts the single core-supported ROM from a 7z download`(@TempDir dir: Path) {
+        val archivedRom = byteArrayOf(1, 2, 3, 4, 5)
+        val archivePath = dir.resolve("fixture.7z")
+        SevenZOutputFile(archivePath.toFile()).use { archive ->
+            val entry = SevenZArchiveEntry().apply {
+                name = "Kirby's Dream Land (USA, Europe).gb"
+                size = archivedRom.size.toLong()
+            }
+
+            @Test
+            fun `stage extracts the single core-supported ROM from a ZIP download`(@TempDir dir: Path) {
+                val archivedRom = byteArrayOf(6, 7, 8, 9)
+                val archivePath = dir.resolve("fixture.zip")
+                ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+                    archive.putNextEntry(ZipEntry("Pokemon Red.gb"))
+                    archive.write(archivedRom)
+                    archive.closeEntry()
+                }
+                val archiveBytes = Files.readAllBytes(archivePath)
+                val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+                val staged = stager(http, dir).stage(
+                    romId = 8L,
+                    fileName = "Pokemon Red",
+                    expectedSizeBytes = archiveBytes.size.toLong(),
+                    supportedExtensions = setOf(".gb", ".gbc"),
+                )
+
+                assertThat(staged.path.fileName.toString()).endsWith(".gb")
+                assertThat(Files.readAllBytes(staged.path)).containsExactly(*archivedRom)
+                assertThat(staged.sha256).isEqualTo(sha256Hex(archivedRom))
+            }
+            archive.putArchiveEntry(entry)
+            archive.write(archivedRom)
+            archive.closeArchiveEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        val staged = stager(http, dir).stage(
+            romId = 7L,
+            fileName = "Kirby's Dream Land (USA, Europe)",
+            expectedSizeBytes = archiveBytes.size.toLong(),
+            supportedExtensions = setOf(".gb", ".gbc"),
+        )
+
+        assertThat(staged.path.fileName.toString()).endsWith(".gb")
+        assertThat(Files.readAllBytes(staged.path)).containsExactly(*archivedRom)
+        assertThat(staged.sha256).isEqualTo(sha256Hex(archivedRom))
+    }
+
+    @Test
+    fun `stage rejects a 7z download with multiple supported ROMs`(@TempDir dir: Path) {
+        val archivePath = dir.resolve("fixture.7z")
+        SevenZOutputFile(archivePath.toFile()).use { archive ->
+            listOf("one.gb", "two.gbc").forEach { name ->
+                val entry = SevenZArchiveEntry().apply {
+                    this.name = name
+                    size = 1
+                }
+                archive.putArchiveEntry(entry)
+                archive.write(byteArrayOf(1))
+                archive.closeArchiveEntry()
+            }
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "game", archiveBytes.size.toLong(), setOf(".gb", ".gbc"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("exactly one")
     }
 
     @Test

@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,6 +103,7 @@ fun RommulusDesktopApp(
 
     // ── Shared focus navigator: the single navigation authority for controller input ──
     val focusNavigator = remember { FocusNavigator() }
+    val activePlayerSessionId by coordinator.activePlayerSessionId.collectAsState()
 
     // Shell-owned theme: reading the settings adapter's observable state here makes the shell
     // re-compose (and re-theme the whole app) when the user picks a new theme in Settings.
@@ -143,8 +145,9 @@ fun RommulusDesktopApp(
                     }
                 }
             }
-            LaunchedEffect(router, focusManager, focusNavigator) {
+            LaunchedEffect(router, focusManager, focusNavigator, activePlayerSessionId) {
                 router.focusActions.collect { action ->
+                    if (activePlayerSessionId != null) return@collect
                     when (action) {
                         is FocusAction.Move -> {
                             val moved = focusNavigator.moveSpatialFocus(

@@ -280,9 +280,16 @@ class DesktopAppCoordinator(
      */
     val playerSessionEvents = MutableStateFlow<PlayerSessionEvent?>(null)
 
+    /**
+     * The currently running external player session, if any. The desktop shell uses this to
+     * suspend its own controller navigation while SDL owns game input.
+     */
+    val activePlayerSessionId = MutableStateFlow<String?>(null)
+
     /** Post-exit reconciliation hook for a spawned player process (pass the process exit code). */
     fun onPlayerProcessExited(sessionId: String, exitCode: Int): PlayerExitReport {
         val report = playerSupervisor.onPlayerExitBySessionId(sessionId, exitCode)
+        activePlayerSessionId.compareAndSet(sessionId, null)
         // Surface the reconciled outcome to the UI so the detail screen can clear its status.
         // Carry [sessionId] so the UI can ignore a stale Ended from an earlier session that is
         // still exiting when the user has already launched a new one.
@@ -327,7 +334,12 @@ class DesktopAppCoordinator(
             null
         } else {
             try {
-                romContentStager.stage(romId, detail.fileName, detail.fileSizeBytes)
+                romContentStager.stage(
+                    romId,
+                    detail.fileName,
+                    detail.fileSizeBytes,
+                    core.supportedExtensions.toSet(),
+                )
             } catch (e: Exception) {
                 return PlayerLaunchResult.Failed("failed to stage ROM content: ${e.message}")
             }
@@ -369,6 +381,7 @@ class DesktopAppCoordinator(
 
         return when (val result = playerSupervisor.prepareLaunch(params, sessionId)) {
             is PrepareLaunchResult.Ready -> {
+                activePlayerSessionId.value = sessionId
                 watchPlayerExit(result.launch, sessionId)
                 PlayerLaunchResult.Started(sessionId)
             }

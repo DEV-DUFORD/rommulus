@@ -302,7 +302,14 @@ class DesktopAppCoordinatorTest {
         val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
 
         // The ROM was staged once with the detail's file name and server-declared size.
-        assertThat(stager.calls).containsExactly(FakeRomContentStager.Call(romId = 7L, fileName = "zelda.gb", expectedSizeBytes = 1234L))
+        assertThat(stager.calls).containsExactly(
+            FakeRomContentStager.Call(
+                romId = 7L,
+                fileName = "zelda.gb",
+                expectedSizeBytes = 1234L,
+                supportedExtensions = setOf(".gb", ".gbc"),
+            ),
+        )
         val staged = stager.lastStaged!!
 
         // The request pins both the staged path and its SHA-256.
@@ -481,6 +488,7 @@ class DesktopAppCoordinatorTest {
         }
         val event = c.playerSessionEvents.value as PlayerSessionEvent.Ended
         assertThat(event.report).isInstanceOf(PlayerExitReport.CrashInterrupted::class.java)
+        assertThat(c.activePlayerSessionId.value).isNull()
 
         // A new launch resets the flow to null (a stale Ended must not clear a fresh status).
         val second = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started

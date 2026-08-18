@@ -36,6 +36,8 @@ dependencies {
     // extracts the natives from this jar to a temp dir and sets that property before the
     // first ControllerEnvironment access.
     implementation("net.java.jinput:jinput:2.0.10:natives-all")
+    implementation("org.apache.commons:commons-compress:1.28.0")
+    implementation("org.tukaani:xz:1.12")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:1.9.23")
     implementation(project(":shared:storage-api"))
