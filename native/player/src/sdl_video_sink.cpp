@@ -34,7 +34,7 @@ constexpr uint8_t kScanlineAlpha = 96;  // ~37% black
 // on failure.
 SDL_Texture* buildScanlineTexture(SDL_Renderer* renderer, unsigned height) {
     SDL_Texture* texture =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
                           SDL_TEXTUREACCESS_STREAMING, 1, static_cast<int>(height));
     if (texture == nullptr) {
         return nullptr;
@@ -168,7 +168,7 @@ bool SdlVideoSink::present() {
                 SDL_DestroyTexture(texture_);
                 texture_ = nullptr;
             }
-            texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA8888,
+            texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32,
                                          SDL_TEXTUREACCESS_STREAMING,
                                          static_cast<int>(width_),
                                          static_cast<int>(height_));
