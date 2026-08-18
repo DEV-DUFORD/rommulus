@@ -50,9 +50,11 @@ public:
 
     // Per-frame poll: re-reads every connected gamepad's buttons and
     // sticks (with a small deadzone applied to the analog axes) into the
-    // per-port snapshot. The keyboard state accumulated by handleEvent()
-    // is left untouched (SDL synthesizes key-up events on focus loss, so
-    // no keys can stick).
+    // per-port snapshot. Gamepad buttons are level-polled fresh each
+    // frame, so released buttons clear immediately — the mask handed to
+    // the core is the current state at poll time. The keyboard state
+    // accumulated by handleEvent() is merged into port 0 (SDL synthesizes
+    // key-up events on focus loss, so no keys can stick).
     void poll();
 
     // Pushes the current four-port snapshot to the session (one
@@ -90,6 +92,12 @@ private:
 
     std::array<PortState, kPorts> ports_{};
     std::array<GamepadSlot, kPorts> gamepads_{};
+
+    // Port 0 bit flags accumulated from KEY_DOWN/KEY_UP events (see
+    // keyboardButtonBit). Merged into port 0's snapshot by poll() each
+    // frame and cleared by reset(). Kept separate from ports_[0] so the
+    // gamepad half of port 0 can be re-polled fresh without latching.
+    int32_t keyboardMask_ = 0;
 };
 
 }  // namespace romm::player

@@ -130,9 +130,9 @@ void SdlInput::handleEvent(const SDL_Event& event) {
             const int bit = keyboardButtonBit(event.key.scancode);
             if (bit < 0) break;
             if (event.type == SDL_EVENT_KEY_DOWN) {
-                ports_[0].buttonsMask |= (1 << bit);
+                keyboardMask_ |= (1 << bit);
             } else {
-                ports_[0].buttonsMask &= ~(1 << bit);
+                keyboardMask_ &= ~(1 << bit);
             }
             break;
         }
@@ -144,61 +144,67 @@ void SdlInput::handleEvent(const SDL_Event& event) {
 void SdlInput::poll() {
     for (int port = 0; port < kPorts; ++port) {
         SDL_Gamepad* gamepad = gamepads_[port].gamepad;
-        if (gamepad == nullptr) continue;
-
         PortState& p = ports_[port];
+
         int32_t mask = 0;
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_A);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_B);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_WEST)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_X);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_NORTH)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_Y);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_SELECT);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_START);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_L);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_R);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_UP);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT);
-        }
-        if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
-            mask |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT);
-        }
-        // Port 0 carries both the gamepad and the keyboard overlay (see
-        // header): OR in the accumulated keyboard state instead of
-        // clobbering it, so keyboard buttons keep working while a pad
-        // occupies port 0. Keyboard bits persist until their KEY_UP event;
-        // gamepad bits are re-polled fresh each frame.
-        if (port == 0) {
-            p.buttonsMask = mask | p.buttonsMask;
-        } else {
-            p.buttonsMask = mask;
+        if (gamepad != nullptr) {
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_A);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_B);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_WEST)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_X);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_NORTH)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_Y);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_SELECT);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_START);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_L);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_R);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_UP);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT);
+            }
+            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
+                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT);
+            }
         }
 
-        p.leftX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
-        p.leftY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
-        p.rightX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-        p.rightY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+        // Port 0 carries both the gamepad and the keyboard overlay (see
+        // header): merge in the event-accumulated keyboard state instead
+        // of clobbering it, so keyboard buttons keep working while a pad
+        // occupies port 0. Both halves are level truth — the gamepad mask
+        // is re-polled fresh each frame and keyboard bits persist only
+        // until their KEY_UP event — so a released button clears on the
+        // very next poll instead of latching into the accumulator.
+        p.buttonsMask = mask | (port == 0 ? keyboardMask_ : 0);
+
+        if (gamepad != nullptr) {
+            p.leftX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
+            p.leftY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
+            p.rightX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
+            p.rightY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+        } else {
+            // No pad on this port: keep the snapshot neutral (closeGamepad
+            // already resets the port when a device is removed).
+            p.leftX = p.leftY = p.rightX = p.rightY = 0;
+        }
     }
 }
 
@@ -210,6 +216,7 @@ void SdlInput::updateSession(romm::EmulationSession& session) {
 }
 
 void SdlInput::reset() {
+    keyboardMask_ = 0;
     for (auto& port : ports_) {
         port = PortState{};
     }

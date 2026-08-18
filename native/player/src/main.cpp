@@ -10,6 +10,7 @@
 
 #include <sys/file.h>
 #include <sys/param.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <pwd.h>
 #include <unistd.h>
@@ -365,13 +366,42 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // 9. Attach the video surface. Software cores do not wait for this in
+    // 9. Restore-on-launch: now that the core is loaded and running, load
+    // the existing save back into the core's RETRO_MEMORY_SAVE_RAM (mirrors
+    // the Android host, which calls nativeRestoreSaveRam right after
+    // loadCore). Without this, a checkpoint written on the previous quit
+    // would never be applied and real saves would not survive a relaunch.
+    //   - Missing or empty file: first launch — skip the restore, start fresh.
+    //   - Present file whose size does not exactly match the core's
+    //     post-retro_load_game() SRAM size (or a core-rejected image): the
+    //     engine's restoreSaveRam() rejects it fail-closed and leaves the
+    //     core's SRAM untouched rather than applying a partial/truncated
+    //     image; we log a clear error and continue with a fresh save —
+    //     never crash, never abort the launch.
+    if (!request.savePath.empty()) {
+        struct stat saveStat {};
+        if (::stat(request.savePath.c_str(), &saveStat) == 0 && saveStat.st_size > 0) {
+            if (!session.restoreSaveRam(request.savePath)) {
+                std::fprintf(stderr,
+                             "error: SRAM restore-on-launch failed for %s (file is %lld bytes; "
+                             "the core's SRAM region is %zu bytes, or the core rejected the "
+                             "image); continuing with a fresh save\n",
+                             request.savePath.c_str(), (long long) saveStat.st_size,
+                             session.memorySize(RETRO_MEMORY_SAVE_RAM));
+            }
+        } else {
+            std::fprintf(stderr, "info: no existing save at %s; starting with fresh SRAM\n",
+                         request.savePath.c_str());
+        }
+    }
+
+    // 10. Attach the video surface. Software cores do not wait for this in
     // runLoop() (only HW-render cores spin on it), so attach promptly —
     // frames submitted before the attach is visible are simply staged/dropped
     // by the sink, but attaching immediately minimizes the blank window.
     session.attachVideoWindow(reinterpret_cast<romm::video::NativeWindowHandle>(window));
 
-    // 10. Main loop.
+    // 11. Main loop.
     bool running = true;
     romm::player::SdlInput input;
     while (running) {
@@ -401,7 +431,7 @@ int main(int argc, char* argv[]) {
         SDL_Delay(1);
     }
 
-    // 11. Shutdown: capture audio diagnostics before stop() tears the sink
+    // 12. Shutdown: capture audio diagnostics before stop() tears the sink
     // down, and write the SRAM checkpoint BEFORE stop() — SRAM access is
     // only valid while the core is loaded (stop() unloads it).
     input.reset();
@@ -441,7 +471,7 @@ int main(int argc, char* argv[]) {
                 static_cast<int64_t>(session.diagnostics().frameCount.load()), underrunFrames,
                 overrunFrames, nullptr);
 
-    // 12. Cleanup.
+    // 13. Cleanup.
     session.releaseProcessSlot();  // stop() already released; idempotent no-op
     SDL_Quit();
     return 0;
