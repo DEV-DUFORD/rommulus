@@ -35,6 +35,7 @@ set(ROMM_LIBRETRO_INCLUDE ${ROMM_REPO_ROOT}/third_party/libretro)
 set(GAMBATTE_DIR ${ROMM_REPO_ROOT}/third_party/cores/gambatte)
 set(FCEUMM_DIR ${ROMM_REPO_ROOT}/third_party/cores/fceumm)
 set(PROSYSTEM_DIR ${ROMM_REPO_ROOT}/third_party/cores/prosystem)
+set(HANDY_DIR ${ROMM_REPO_ROOT}/third_party/cores/handy)
 
 find_package(SDL3 REQUIRED CONFIG)
 
@@ -93,3 +94,4 @@ target_compile_options(test_core PRIVATE -Wall -Wextra)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/gambatte-linux.cmake)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/fceumm-linux.cmake)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/prosystem-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/handy-linux.cmake)
