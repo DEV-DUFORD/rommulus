@@ -33,6 +33,7 @@ set(ROMM_LIBRETRO_INCLUDE ${ROMM_REPO_ROOT}/third_party/libretro)
 # which expects both GAMBATTE_DIR and ROMM_LIBRETRO_INCLUDE defined by the
 # including project (the Android build derives them from ROMM_APP_CPP_DIR).
 set(GAMBATTE_DIR ${ROMM_REPO_ROOT}/third_party/cores/gambatte)
+set(FCEUMM_DIR ${ROMM_REPO_ROOT}/third_party/cores/fceumm)
 
 find_package(SDL3 REQUIRED CONFIG)
 
@@ -89,3 +90,4 @@ target_compile_options(test_core PRIVATE -Wall -Wextra)
 # identical except for the dropped Android-only `log` link library.
 # ---------------------------------------------------------------------------
 include(${ROMM_NATIVE_ROOT}/cmake/cores/gambatte-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/fceumm-linux.cmake)
