@@ -105,3 +105,13 @@ per-ROM restore/checkpoint/server-sync path. Slot 2 has only serial, shared, or
 disabled file modes and defaults to the cross-game `pcsx-card2.mcd`. The
 frontend explicitly sets `pcsx_rearmed_memcard2=none` so no unsynchronized
 shared card can leak across ROM/account scopes; vendored behavior is unchanged.
+
+## Linux x86_64 build provenance (2026-08-18)
+
+The Linux x86_64 build (`native/cmake/cores/pcsx_rearmed-linux.cmake`) compiles
+the same vendored sources as the Android fragment but defines `DRC_DISABLE` to
+force the interpreter (`psxinterpreter.c`). No x86 dynarec backend exists at the
+pinned commit da2cb8e: upstream removed it, and the `#ifdef __x86_64__` includes
+of `assem_x64.{h,c}` in `new_dynarec/new_dynarec.c` are dead code that would fail
+to compile. The `plugins/gpu_neon/` software renderer is kept as-is; it works
+without NEON via its `vector_ops.h` fallback, so no NEON/SIMD defines are set.
