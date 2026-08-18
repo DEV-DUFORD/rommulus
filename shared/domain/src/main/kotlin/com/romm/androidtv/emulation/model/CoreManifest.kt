@@ -521,7 +521,7 @@ object CoreManifest {
             supportedSystems = listOf("atari7800"),
             supportedExtensions = listOf(".a78", ".bin", ".cdf"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `prosystem_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/prosystem/{core,bupboop," +

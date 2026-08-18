@@ -247,34 +247,35 @@ class CoreManifestTest {
         assertThat(prosystem.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
         assertThat(prosystem.ownerRiskAcceptedBy).isBlank()
         assertThat(prosystem.ownerRiskAcceptedOn).isBlank()
-        assertThat(prosystem.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
+        assertThat(prosystem.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
         assertThat(prosystem.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(prosystem.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
         }
-
-        @Test
-        fun `PCSX-ReARMed resolves the RomM PSX platform with the compiled media and BIOS contract`() {
-            val pcsx = CoreManifest.findById("pcsx_rearmed")
-
-            assertThat(pcsx).isNotNull
-            assertThat(pcsx!!.approved).isTrue()
-            assertThat(pcsx.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
-            assertThat(pcsx.supportedSystems).containsExactly("psx")
-            assertThat(pcsx.supportedExtensions).contains(".chd", ".pbp", ".cue", ".bin")
-            assertThat(pcsx.requiredFirmware).containsExactly(
-                "scph5500.bin", "scph5501.bin", "scph5502.bin",
-                "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
-            )
-            assertThat(pcsx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
-            assertThat(pcsx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
-            assertThat(pcsx.binaryChecksums.values).allSatisfy { checksum ->
-                assertThat(checksum).hasSize(64)
-            }
-        }
         assertThat(prosystem.supportedSystems).containsExactly("atari7800")
         assertThat(prosystem.supportedExtensions).containsExactly(".a78", ".bin", ".cdf")
         assertThat(prosystem.requiredFirmware).isEmpty()
+    }
+
+    @Test
+    fun `PCSX-ReARMed resolves the RomM PSX platform with the compiled media and BIOS contract`() {
+        val pcsx = CoreManifest.findById("pcsx_rearmed")
+
+        assertThat(pcsx).isNotNull
+        assertThat(pcsx!!.approved).isTrue()
+        assertThat(pcsx.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(pcsx.supportedSystems).containsExactly("psx")
+        assertThat(pcsx.supportedExtensions).contains(".chd", ".pbp", ".cue", ".bin")
+        assertThat(pcsx.requiredFirmware).containsExactly(
+            "scph5500.bin", "scph5501.bin", "scph5502.bin",
+            "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
+        )
+        assertThat(pcsx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        assertThat(pcsx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
+        assertThat(pcsx.binaryChecksums.values).allSatisfy { checksum ->
+            assertThat(checksum).hasSize(64)
+        }
     }
 
     @Test
