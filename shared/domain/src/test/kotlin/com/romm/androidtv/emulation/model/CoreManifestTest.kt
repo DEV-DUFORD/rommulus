@@ -225,7 +225,8 @@ class CoreManifestTest {
         assertThat(handy.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
         assertThat(handy.ownerRiskAcceptedBy).isBlank()
         assertThat(handy.ownerRiskAcceptedOn).isBlank()
-        assertThat(handy.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
+        assertThat(handy.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
         assertThat(handy.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(handy.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest

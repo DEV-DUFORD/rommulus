@@ -18,11 +18,11 @@ class PlayerProcessLauncherTest {
 
     @Test
     fun `deriveAllowedCores emits approved linux-x86_64 cores as coreId=revision pairs in sorted order`() {
-        assertThat(deriveAllowedCores(listOf("fceumm", "gambatte", "prosystem", "test_core")))
-            .isEqualTo("fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;test_core=1")
+        assertThat(deriveAllowedCores(listOf("fceumm", "gambatte", "handy", "prosystem", "test_core")))
+            .isEqualTo("fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;handy=bc55d462f0b2d6b073ea93dc552ebd73cec60fd1;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;test_core=1")
         // Input order must not matter: the output is sorted by coreId.
-        assertThat(deriveAllowedCores(listOf("test_core", "prosystem", "fceumm", "gambatte")))
-            .isEqualTo("fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;test_core=1")
+        assertThat(deriveAllowedCores(listOf("test_core", "prosystem", "handy", "fceumm", "gambatte")))
+            .isEqualTo("fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;handy=bc55d462f0b2d6b073ea93dc552ebd73cec60fd1;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;test_core=1")
     }
 
     @Test

@@ -19,6 +19,7 @@ gate before its gate status below may move to PASSED.
 | `gambatte` | `native/cmake/cores/gambatte-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 per-core gate completed on the Ubuntu box | yes |
 | `fceumm` | `native/cmake/cores/fceumm-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 | `prosystem` | `native/cmake/cores/prosystem-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
+| `handy` | `native/cmake/cores/handy-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
 
 ## gambatte — §13.1 Linux build identity
 
