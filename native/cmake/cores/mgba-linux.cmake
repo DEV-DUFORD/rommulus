@@ -127,8 +127,11 @@ target_include_directories(mgba_core SYSTEM PRIVATE
 )
 
 target_compile_definitions(mgba_core PRIVATE
-    # Matches upstream libretro/jni/Android.mk's COREFLAGS exactly.
-    HAVE_XLOCALE
+    # glibc exposes locale_t directly from locale.h; unlike Android, modern
+    # Linux distributions do not provide the legacy xlocale.h wrapper.
+    _GNU_SOURCE
+    HAVE_LOCALE
+    HAVE_USELOCALE
     HAVE_STRTOF_L
     DISABLE_THREADING
     MINIMAL_CORE=2
