@@ -53,8 +53,20 @@ mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/rommulus/cores"
 cp build/player/libgambatte_core.so "${XDG_DATA_HOME:-$HOME/.local/share}/rommulus/cores/"
 ```
 
+### §13.2 gate note: ASan/UBSan link failure (gambatte) under clang-18
+
+Criterion 11 (build with `-fsanitize=address,undefined`) **does not link cleanly** with the
+plain spec flags on Ubuntu/clang-18. The linker pulls in `libclang_rt.asan_static-x86_64.a`
+via the automatic `-shared` link, but that static runtime does not define `__asan_init`; the
+core's `-Wl,--no-undefined` (`-z defs`) then rejects every sanitizer symbol, producing errors
+such as `undefined reference to '__asan_init'`, `__asan_report_load8`, and
+`__ubsan_handle_type_mismatch_v1`. **Verified workaround:** append `-shared-libasan` to the
+sanitizer link flags — `clang++ … -fsanitize=address,undefined -shared -shared-libasan
+-Wl,--no-undefined` — yields a clean link. Until this is resolved in the upstream Gambatte
+build, the ASan/UBSan step of the §13.2 gate is marked failed for gambatte on this platform.
+
 The desktop launcher picks the core up automatically on the next launch: it scans
-`$XDG_DATA_HOME/rommulus/cores/` for `lib*.so`, and `libgambatte_core.so` yields
+$XDG_DATA_HOME/rommulus/cores/ for `lib*.so`, and `libgambatte_core.so` yields
 `gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5` in `ROMM_PLAYER_ALLOWED_CORES`.
 Until the §13.2 gate passes, gambatte remains explicitly disabled by this manifest
 (criterion 14: enablement is itself a gate step); the row above flips to Enabled = yes
