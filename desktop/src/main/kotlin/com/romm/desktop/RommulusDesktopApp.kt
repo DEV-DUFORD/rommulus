@@ -193,6 +193,7 @@ fun RommulusDesktopApp(
 
                     AppMode.MAIN -> DesktopLibraryScaffold(
                         currentScreen = coordinator.currentScreen,
+                        gameDetailParent = coordinator.gameDetailParent,
                         onNavigate = coordinator::navigate,
                     ) {
                         when (coordinator.currentScreen) {

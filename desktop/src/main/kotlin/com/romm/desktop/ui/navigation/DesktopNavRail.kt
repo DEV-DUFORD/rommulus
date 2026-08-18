@@ -60,21 +60,33 @@ internal enum class DesktopNavDestination(
 internal fun topLevelNavDestination(screen: Screen): DesktopNavDestination? =
     DesktopNavDestination.entries.firstOrNull { it.screen == screen }
 
+internal fun libraryNavDestination(
+    screen: Screen,
+    gameDetailParent: Screen = Screen.HOME,
+): DesktopNavDestination = when (screen) {
+    Screen.HOME, Screen.ONBOARDING -> DesktopNavDestination.HOME
+    Screen.PLATFORMS, Screen.PLATFORM_DETAIL -> DesktopNavDestination.PLATFORMS
+    Screen.COLLECTIONS, Screen.COLLECTION_DETAIL -> DesktopNavDestination.COLLECTIONS
+    Screen.SEARCH -> DesktopNavDestination.SEARCH
+    Screen.SETTINGS, Screen.BIOS_CONFIGURATION, Screen.LICENSE -> DesktopNavDestination.SETTINGS
+    Screen.GAME_DETAIL -> when (gameDetailParent) {
+        Screen.GAME_DETAIL, Screen.ONBOARDING -> DesktopNavDestination.HOME
+        else -> libraryNavDestination(gameDetailParent)
+    }
+}
+
 /**
- * Desktop counterpart to Android's LibraryScaffold. Top-level library screens retain a
- * collapsible navigation rail; drill-down screens remain full-bleed.
+ * Desktop counterpart to Android's LibraryScaffold. The collapsible navigation rail remains
+ * available throughout the main app, including browse and game detail screens.
  */
 @Composable
 fun DesktopLibraryScaffold(
     currentScreen: Screen,
+    gameDetailParent: Screen = Screen.HOME,
     onNavigate: (Screen) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val selected = topLevelNavDestination(currentScreen)
-    if (selected == null) {
-        content()
-        return
-    }
+    val selected = libraryNavDestination(currentScreen, gameDetailParent)
 
     var railHasFocus by remember { mutableStateOf(false) }
     val railWidth by animateDpAsState(
