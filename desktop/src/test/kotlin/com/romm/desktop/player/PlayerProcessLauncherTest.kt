@@ -18,11 +18,11 @@ class PlayerProcessLauncherTest {
 
     @Test
     fun `deriveAllowedCores emits approved linux-x86_64 cores as coreId=revision pairs in sorted order`() {
-        assertThat(deriveAllowedCores(listOf("gambatte", "test_core")))
-            .isEqualTo("gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;test_core=1")
+        assertThat(deriveAllowedCores(listOf("fceumm", "gambatte", "test_core")))
+            .isEqualTo("fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;test_core=1")
         // Input order must not matter: the output is sorted by coreId.
-        assertThat(deriveAllowedCores(listOf("test_core", "gambatte")))
-            .isEqualTo("gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;test_core=1")
+        assertThat(deriveAllowedCores(listOf("test_core", "fceumm", "gambatte")))
+            .isEqualTo("fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;test_core=1")
     }
 
     @Test

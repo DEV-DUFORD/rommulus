@@ -77,7 +77,8 @@ class CoreManifestTest {
         assertThat(fceumm.commercialUseFinding).isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
         assertThat(fceumm.ownerRiskAcceptedBy).isBlank()
         assertThat(fceumm.ownerRiskAcceptedOn).isBlank()
-        assertThat(fceumm.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a")
+        // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
+        assertThat(fceumm.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
         assertThat(fceumm.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(fceumm.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
