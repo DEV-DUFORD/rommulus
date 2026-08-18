@@ -89,30 +89,6 @@ class RomContentStagerTest {
                 name = "Kirby's Dream Land (USA, Europe).gb"
                 size = archivedRom.size.toLong()
             }
-
-            @Test
-            fun `stage extracts the single core-supported ROM from a ZIP download`(@TempDir dir: Path) {
-                val archivedRom = byteArrayOf(6, 7, 8, 9)
-                val archivePath = dir.resolve("fixture.zip")
-                ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
-                    archive.putNextEntry(ZipEntry("Pokemon Red.gb"))
-                    archive.write(archivedRom)
-                    archive.closeEntry()
-                }
-                val archiveBytes = Files.readAllBytes(archivePath)
-                val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
-
-                val staged = stager(http, dir).stage(
-                    romId = 8L,
-                    fileName = "Pokemon Red",
-                    expectedSizeBytes = archiveBytes.size.toLong(),
-                    supportedExtensions = setOf(".gb", ".gbc"),
-                )
-
-                assertThat(staged.path.fileName.toString()).endsWith(".gb")
-                assertThat(Files.readAllBytes(staged.path)).containsExactly(*archivedRom)
-                assertThat(staged.sha256).isEqualTo(sha256Hex(archivedRom))
-            }
             archive.putArchiveEntry(entry)
             archive.write(archivedRom)
             archive.closeArchiveEntry()
@@ -130,6 +106,58 @@ class RomContentStagerTest {
         assertThat(staged.path.fileName.toString()).endsWith(".gb")
         assertThat(Files.readAllBytes(staged.path)).containsExactly(*archivedRom)
         assertThat(staged.sha256).isEqualTo(sha256Hex(archivedRom))
+    }
+
+    @Test
+    fun `stage extracts the single core-supported ROM from a ZIP download`(@TempDir dir: Path) {
+        val archivedRom = byteArrayOf(6, 7, 8, 9)
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("Pokemon Red.gb"))
+            archive.write(archivedRom)
+            archive.closeEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        val staged = stager(http, dir).stage(
+            romId = 8L,
+            fileName = "Pokemon Red",
+            expectedSizeBytes = archiveBytes.size.toLong(),
+            supportedExtensions = setOf(".gb", ".gbc"),
+        )
+
+        assertThat(staged.path.fileName.toString()).endsWith(".gb")
+        assertThat(Files.readAllBytes(staged.path)).containsExactly(*archivedRom)
+        assertThat(staged.sha256).isEqualTo(sha256Hex(archivedRom))
+    }
+
+    @Test
+    fun `stage rejects a ZIP entry with a path traversal name and writes no file outside the cache`(@TempDir dir: Path) {
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("../evil.gb"))
+            archive.write(byteArrayOf(1, 2, 3))
+            archive.closeEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(9L, "game", archiveBytes.size.toLong(), setOf(".gb"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("unsafe entry path")
+
+        // Fail closed: nothing may be written outside the ROM cache root, and no extracted file or
+        // leftover extraction part may appear inside it.
+        assertThat(Files.exists(dir.resolve("evil.gb"))).isFalse()
+        val roms = dir.resolve("roms")
+        if (Files.exists(roms)) {
+            val names = Files.list(roms).use { stream -> stream.map { it.fileName.toString() }.toList() }
+            assertThat(names.none { it.endsWith(".extract.part") }).isTrue()
+            assertThat(names).doesNotContain("evil.gb")
+        }
     }
 
     @Test

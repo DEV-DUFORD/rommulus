@@ -35,7 +35,9 @@ fun main() = application {
     // (plans/LINUX_X64.md §12.5). Runs before the first composition; diagnostics are logged now
     // and will be surfaced in the launch screen UI (Phase 8 Wave 3+).
     coordinator.scanPlayerJournals().forEach { diagnostic ->
-        DesktopLogger.get().log(Level.WARNING, "PlayerJournal", diagnostic.summary)
+        // The format-specifier path: without "%s" this binds to log(Level, String, Object) and
+        // `diagnostic.summary` is silently dropped (the tag becomes the whole message).
+        DesktopLogger.get().log(Level.WARNING, "PlayerJournal: %s", diagnostic.summary)
     }
 
     // Select the root AppMode synchronously before the first composition so onboarding never

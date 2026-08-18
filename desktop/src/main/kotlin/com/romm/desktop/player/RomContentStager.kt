@@ -214,13 +214,33 @@ class OkHttpRomContentStager(
     }
 
     private fun detectArchiveFormat(path: Path): ArchiveFormat? {
-        val signature = ByteArray(SEVEN_ZIP_SIGNATURE.size)
-        val bytesRead = Files.newInputStream(path).use { it.read(signature) }
-        if (bytesRead == signature.size && signature.contentEquals(SEVEN_ZIP_SIGNATURE)) {
+        val required = maxOf(SEVEN_ZIP_SIGNATURE.size, ZIP_LOCAL_FILE_HEADER_SIGNATURE.size)
+        val signature = ByteArray(required)
+        // readNBytes-equivalent loop: a single read() may return fewer bytes than requested.
+        val bytesRead = Files.newInputStream(path).use { input ->
+            var offset = 0
+            while (offset < signature.size) {
+                val n = input.read(signature, offset, signature.size - offset)
+                if (n < 0) break
+                offset += n
+            }
+            offset
+        }
+        if (bytesRead >= SEVEN_ZIP_SIGNATURE.size &&
+            signature.copyOf(SEVEN_ZIP_SIGNATURE.size).contentEquals(SEVEN_ZIP_SIGNATURE)
+        ) {
             return ArchiveFormat.SEVEN_ZIP
         }
-        if (bytesRead >= ZIP_PREFIX.size && signature.copyOf(ZIP_PREFIX.size).contentEquals(ZIP_PREFIX)) {
-            return ArchiveFormat.ZIP
+        // A bare 2-byte "PK" prefix is not enough — a plain ROM that happens to start with
+        // 0x50 0x4B would be misdetected. Require the full local-file-header signature
+        // (PK\x03\x04), or the end-of-central-directory signature (PK\x05\x06) for edge archives.
+        if (bytesRead >= ZIP_LOCAL_FILE_HEADER_SIGNATURE.size) {
+            val head = signature.copyOf(ZIP_LOCAL_FILE_HEADER_SIGNATURE.size)
+            if (head.contentEquals(ZIP_LOCAL_FILE_HEADER_SIGNATURE) ||
+                head.contentEquals(ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE)
+            ) {
+                return ArchiveFormat.ZIP
+            }
         }
         return null
     }
@@ -314,7 +334,11 @@ class OkHttpRomContentStager(
             if (copied > MAX_EXTRACTED_ROM_BYTES) {
                 throw RomContentStagingException("archived ROM '${selected.name}' exceeds the extraction size limit")
             }
-            if (copied / compressedSize.coerceAtLeast(1L) > MAX_COMPRESSION_RATIO) {
+            // Multiplicative comparison: integer division (`copied / compressedSize`) truncates, so a
+            // ratio marginally above MAX_COMPRESSION_RATIO (e.g. copied=601, compressed=3 → 200) would
+            // slip through. `compressedSize * MAX_COMPRESSION_RATIO` cannot overflow for any realistic
+            // archive size (the 512 MiB extracted-size cap above remains the dominant guard).
+            if (copied > compressedSize.coerceAtLeast(1L) * MAX_COMPRESSION_RATIO) {
                 throw RomContentStagingException("archived ROM '${selected.name}' exceeds the compression ratio limit")
             }
             write(buffer, 0, count)
@@ -336,7 +360,10 @@ class OkHttpRomContentStager(
         }
 
         val SEVEN_ZIP_SIGNATURE = byteArrayOf(0x37, 0x7A, 0xBC.toByte(), 0xAF.toByte(), 0x27, 0x1C)
-        val ZIP_PREFIX = byteArrayOf(0x50, 0x4B)
+        // ZIP local-file-header signature (PK\x03\x04).
+        val ZIP_LOCAL_FILE_HEADER_SIGNATURE = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+        // ZIP end-of-central-directory signature (PK\x05\x06), accepted for empty/edge archives.
+        val ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
         const val MAX_ARCHIVE_ENTRIES = 4096
         const val MAX_EXTRACTED_ROM_BYTES = 512L * 1024 * 1024
         const val MAX_COMPRESSION_RATIO = 200L

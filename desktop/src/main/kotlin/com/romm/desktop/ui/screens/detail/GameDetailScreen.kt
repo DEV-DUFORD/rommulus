@@ -182,12 +182,18 @@ private fun GameDetailContent(
         coordinator.playerSessionEvents.collect { event ->
             if (event is PlayerSessionEvent.Ended && event.sessionId == launchedSessionId) {
                 playStatus = when (val report = event.report) {
-                    is PlayerExitReport.Reconciled -> report.result.errorMessage
-                        ?.takeIf {
-                            report.result.exitKind == PlayerExitKind.LAUNCH_FAILED ||
-                                report.result.exitKind == PlayerExitKind.RUNTIME_FAILED
-                        }
-                        ?.let(PlayerLaunchResult::Failed)
+                    is PlayerExitReport.Reconciled -> if (
+                        report.result.exitKind == PlayerExitKind.LAUNCH_FAILED ||
+                            report.result.exitKind == PlayerExitKind.RUNTIME_FAILED
+                    ) {
+                        // A failed exit with a null errorMessage must still surface a visible error —
+                        // mapping it to null would silently swallow the failure.
+                        PlayerLaunchResult.Failed(
+                            report.result.errorMessage ?: "Player exited with ${report.result.exitKind}",
+                        )
+                    } else {
+                        null
+                    }
                     is PlayerExitReport.CrashInterrupted -> PlayerLaunchResult.Failed(report.reason)
                     is PlayerExitReport.ReconcileFailed -> PlayerLaunchResult.Failed(report.reason)
                     is PlayerExitReport.JournalMissing -> PlayerLaunchResult.Failed("player exited without a launch journal")
