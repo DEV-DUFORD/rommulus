@@ -285,6 +285,11 @@ int main(int argc, char* argv[]) {
 
     // 6. Initialize SDL.
     SDL_SetAppMetadata("rommulus_player", "0.1", "com.romm.player");
+    // The Compose shell remains alive while this child player runs. Some
+    // Linux window managers can return focus to the shell after the player
+    // is created; SDL otherwise stops refreshing gamepad state until another
+    // player-window interaction (such as resize) briefly restores focus.
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         const std::string error = std::string("SDL_Init failed: ") + SDL_GetError();
         std::fprintf(stderr, "error: %s\n", error.c_str());
@@ -413,7 +418,11 @@ int main(int argc, char* argv[]) {
                     running = false;
                     break;
                 case SDL_EVENT_KEY_DOWN:
-                    if (event.key.key == SDLK_ESCAPE) running = false;  // quit
+                    if (event.key.key == SDLK_ESCAPE) {
+                        running = false;  // quit
+                    } else {
+                        input.handleEvent(event);
+                    }
                     break;
                 case SDL_EVENT_WINDOW_FOCUS_LOST:
                     input.reset();
