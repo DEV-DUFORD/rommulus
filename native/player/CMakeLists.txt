@@ -37,6 +37,18 @@ set(FCEUMM_DIR ${ROMM_REPO_ROOT}/third_party/cores/fceumm)
 set(PROSYSTEM_DIR ${ROMM_REPO_ROOT}/third_party/cores/prosystem)
 set(HANDY_DIR ${ROMM_REPO_ROOT}/third_party/cores/handy)
 
+# Anchors for the 7 new Linux cores (stella, mednafen_wswan, mednafen_ngp,
+# snes9x, mgba, beetle_pce_fast, genesis_plus_gx). Each android fragment
+# (cmake/cores/<core>.cmake) sets the corresponding variable; the Linux
+# fragment (cmake/cores/<core>-linux.cmake) consumes it.
+set(STELLA_DIR ${ROMM_REPO_ROOT}/third_party/cores/stella)
+set(MEDNAFEN_WSWAN_DIR ${ROMM_REPO_ROOT}/third_party/cores/mednafen_wswan)
+set(MEDNAFEN_NGP_DIR ${ROMM_REPO_ROOT}/third_party/cores/mednafen_ngp)
+set(SNES9X_DIR ${ROMM_REPO_ROOT}/third_party/cores/snes9x)
+set(MGBA_DIR ${ROMM_REPO_ROOT}/third_party/cores/mgba)
+set(BEETLE_PCE_FAST_DIR ${ROMM_REPO_ROOT}/third_party/cores/beetle_pce_fast)
+set(GENESIS_PLUS_GX_DIR ${ROMM_REPO_ROOT}/third_party/cores/genesis_plus_gx)
+
 find_package(SDL3 REQUIRED CONFIG)
 
 add_executable(rommulus_player
@@ -95,3 +107,12 @@ include(${ROMM_NATIVE_ROOT}/cmake/cores/gambatte-linux.cmake)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/fceumm-linux.cmake)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/prosystem-linux.cmake)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/handy-linux.cmake)
+# 7 new Linux cores: stella, mednafen_wswan, mednafen_ngp, snes9x, mgba,
+# beetle_pce_fast, genesis_plus_gx.
+include(${ROMM_NATIVE_ROOT}/cmake/cores/stella-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/mednafen_wswan-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/mednafen_ngp-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/snes9x-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/mgba-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/beetle_pce_fast-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/genesis_plus_gx-linux.cmake)
