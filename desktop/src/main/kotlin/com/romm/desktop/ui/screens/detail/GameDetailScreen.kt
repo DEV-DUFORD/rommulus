@@ -238,6 +238,7 @@ private fun GameDetailContent(
 
             is SectionState.Loaded -> GameDetailBody(
                 rom = section.data,
+                playEnabled = coordinator.isPlatformPlayable(section.data.platformSlug),
                 onPlayClick = {
                     launchScope.launch {
                         val result = withContext(Dispatchers.Default) { coordinator.launchPlayer(romId) }
@@ -325,6 +326,7 @@ private fun GameDetailContent(
 @Composable
 private fun GameDetailBody(
     rom: RomDetail,
+    playEnabled: Boolean,
     onPlayClick: () -> Unit,
     playStatus: PlayerLaunchResult?,
     onOpenScreenshot: (List<String>, Int) -> Unit,
@@ -384,7 +386,11 @@ private fun GameDetailBody(
                         )
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    PlayButton(status = playStatus, onPlayClick = onPlayClick)
+                    PlayButton(
+                        enabled = playEnabled,
+                        status = playStatus,
+                        onPlayClick = onPlayClick,
+                    )
                 }
             }
         }
@@ -445,6 +451,7 @@ private fun GameDetailBody(
  */
 @Composable
 private fun PlayButton(
+    enabled: Boolean,
     status: PlayerLaunchResult?,
     onPlayClick: () -> Unit,
 ) {
@@ -457,20 +464,33 @@ private fun PlayButton(
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .background(colors.romm500)
+                .background(
+                    if (enabled) colors.romm500 else colors.textSecondary.copy(alpha = 0.25f),
+                )
                 .border(
-                    width = if (isFocused) 2.dp else 0.dp,
-                    color = if (isFocused) colors.romm300 else Color.Transparent,
+                    width = if (enabled && isFocused) 2.dp else 0.dp,
+                    color = if (enabled && isFocused) colors.romm300 else Color.Transparent,
                     shape = RoundedCornerShape(8.dp),
                 )
-                .focusableItem("detail:play", navigator, onPlayClick)
-                .clickable(interactionSource = interactionSource, indication = null, onClick = onPlayClick)
+                .then(
+                    if (enabled) {
+                        Modifier.focusableItem("detail:play", navigator, onPlayClick)
+                    } else {
+                        Modifier
+                    },
+                )
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    enabled = enabled,
+                    onClick = onPlayClick,
+                )
                 .padding(horizontal = 28.dp, vertical = 12.dp),
         ) {
             Text(
                 text = "▶  Play",
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
+                color = if (enabled) Color.White else Color.White.copy(alpha = 0.4f),
             )
         }
         Spacer(modifier = Modifier.height(8.dp))

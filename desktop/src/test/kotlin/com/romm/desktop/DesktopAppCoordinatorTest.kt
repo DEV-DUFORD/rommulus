@@ -179,7 +179,7 @@ class DesktopAppCoordinatorTest {
     )
 
     @Test
-    fun `launchPlayer returns Started and spawns the player with a no-content test_core request`(@TempDir dir: Path) {
+    fun `launchPlayer rejects an unsupported platform without spawning test_core`(@TempDir dir: Path) {
         val paths = dir.testRoot()
         val launcher = FakePlayerProcessLauncher()
         val supervisor = LaunchJournalSupervisor(
@@ -193,43 +193,17 @@ class DesktopAppCoordinatorTest {
             appVersion = "test",
             buildDefaultOrigin = "https://demo.romm.app",
             playerSupervisorOverride = supervisor,
-            // No approved core supports "wii" → falls back to the no-content test_core.
+            // No approved Linux core supports Wii.
             romDetailLookup = { testRom(platformSlug = "wii") },
             romContentStagerOverride = stager,
         )
 
         val result = c.launchPlayer(romId = 7L)
 
-        assertThat(result).isInstanceOf(PlayerLaunchResult.Started::class.java)
-        val started = result as PlayerLaunchResult.Started
-        assertThat(started.sessionId).isNotBlank()
-
-        // Exactly one spawn, for test_core with an empty content path + hash and the pinned
-        // revision "1" (the value ROMM_PLAYER_ALLOWED_CORES validates against). No-content cores
-        // never stage: the stager must not even be consulted.
-        assertThat(launcher.launches).hasSize(1)
-        val request = launcher.launches.single()
-        assertThat(request.coreId).isEqualTo("test_core")
-        assertThat(request.coreBuildRevision).isEqualTo("1")
-        assertThat(request.contentPath).isEmpty()
-        assertThat(request.contentHash).isEmpty()
+        assertThat(result).isEqualTo(PlayerLaunchResult.Failed("console is not supported on desktop"))
+        assertThat(c.isPlatformPlayable("wii")).isFalse()
+        assertThat(launcher.launches).isEmpty()
         assertThat(stager.calls).isEmpty()
-        assertThat(request.sessionId).isEqualTo(started.sessionId)
-        // The session journal was committed under the state root.
-        val sessionDir = paths.stateDir.resolve("journals").resolve(started.sessionId)
-        assertThat(Files.exists(sessionDir.resolve("journal.json"))).isTrue()
-        assertThat(Files.readString(sessionDir.resolve("request.json"))).contains("\"contentPath\": \"\"")
-
-        // Wait for the exit watcher to finish: the fake pid does not exist, so it sees the
-        // process as already gone and reconciles immediately (no result file → INTERRUPTED).
-        // Waiting also guarantees no watcher writes race with JUnit's @TempDir cleanup.
-        val deadline = System.currentTimeMillis() + 5_000
-        var state = supervisor.store.read(started.sessionId).getOrNull()?.state
-        while (state != JournalState.INTERRUPTED) {
-            check(System.currentTimeMillis() < deadline) { "exit watcher did not reconcile the session within 5s" }
-            Thread.sleep(10)
-            state = supervisor.store.read(started.sessionId).getOrNull()?.state
-        }
     }
 
     @Test
@@ -416,18 +390,17 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
-    fun `launchPlayer falls back to test_core when the approved core is not installed`(@TempDir dir: Path) {
+    fun `launchPlayer rejects an approved core that is not installed`(@TempDir dir: Path) {
         val paths = dir.testRoot()
-        // No libgambatte.so in the (nonexistent) cores root → approved-but-absent core must NOT
-        // be launched (instant-reject); the no-content test_core fallback wins.
+        // No libgambatte.so in the cores root.
         val launcher = FakePlayerProcessLauncher()
         val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
         val c = launchCoordinator(paths, platformSlug = "gb", supervisor = supervisor)
 
-        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
-
-        assertThat(launcher.launches.single().coreId).isEqualTo("test_core")
-        waitForReconciled(supervisor, started.sessionId)
+        assertThat(c.isPlatformPlayable("gb")).isFalse()
+        assertThat(c.launchPlayer(romId = 7L))
+            .isEqualTo(PlayerLaunchResult.Failed("console is not supported on desktop"))
+        assertThat(launcher.launches).isEmpty()
     }
 
     @Test
@@ -441,6 +414,7 @@ class DesktopAppCoordinatorTest {
         val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
         val c = launchCoordinator(paths, platformSlug = "gb", supervisor = supervisor)
 
+        assertThat(c.isPlatformPlayable("gb")).isTrue()
         val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
 
         assertThat(launcher.launches.single().coreId).isEqualTo("gambatte")
@@ -448,32 +422,31 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
-    fun `launchPlayer falls back to test_core when the platform core is approved only for ARM ABIs`(@TempDir dir: Path) {
+    fun `launchPlayer rejects a platform core approved only for ARM ABIs`(@TempDir dir: Path) {
         val paths = dir.testRoot()
         // mupen64plus_next is approved for n64 but ARM-only: even with its library installed it must
         // NOT be selected on the Linux desktop (the derived allowlist would reject it anyway).
         val coresDir = paths.dataDir.resolve("cores")
         Files.createDirectories(coresDir)
         Files.write(coresDir.resolve("libmupen64plus_next.so"), byteArrayOf(0))
-        // test_core is installed too, so the derived ROMM_PLAYER_ALLOWED_CORES allowlist is
-        // non-empty and the fallback launch would actually be accepted by the real player.
         Files.write(coresDir.resolve("libtest_core.so"), byteArrayOf(0))
         val launcher = FakePlayerProcessLauncher()
         val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
         val c = launchCoordinator(paths, platformSlug = "n64", supervisor = supervisor)
 
-        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
-
-        assertThat(launcher.launches.single().coreId).isEqualTo("test_core")
-        waitForReconciled(supervisor, started.sessionId)
+        assertThat(c.isPlatformPlayable("n64")).isFalse()
+        assertThat(c.launchPlayer(romId = 7L))
+            .isEqualTo(PlayerLaunchResult.Failed("console is not supported on desktop"))
+        assertThat(launcher.launches).isEmpty()
     }
 
     @Test
     fun `playerSessionEvents emits Ended after the fake player process exits`(@TempDir dir: Path) {
         val paths = dir.testRoot()
+        installGambatte(paths)
         val launcher = FakePlayerProcessLauncher()
         val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
-        val c = launchCoordinator(paths, platformSlug = "wii", supervisor = supervisor)
+        val c = launchCoordinator(paths, platformSlug = "gb", supervisor = supervisor)
 
         assertThat(c.playerSessionEvents.value).isNull()
         assertThat(c.launchPlayer(romId = 7L)).isInstanceOf(PlayerLaunchResult.Started::class.java)

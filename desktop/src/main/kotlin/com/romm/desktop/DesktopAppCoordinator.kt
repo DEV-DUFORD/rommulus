@@ -299,24 +299,19 @@ class DesktopAppCoordinator(
 
     /**
      * Launches the desktop player for a ROM (Phase 8): resolves the ROM detail and an approved
-     * core (`test_core` fallback — the no-content core the player increment always builds and
-     * the derived `ROMM_PLAYER_ALLOWED_CORES` allowlists when installed), stages real ROM content
-     * for real-content cores, commits request + journal atomically via [playerSupervisor], spawns
+     * core, stages real ROM content, commits request + journal atomically via [playerSupervisor], spawns
      * `rommulus_player`, and starts watching the process so reconciliation happens when it exits
      * (§12.3/§12.5).
      *
-     * Real-content cores: the ROM is staged from the server first ([romContentStager]) and BOTH
+     * The ROM is staged from the server first ([romContentStager]) and BOTH
      * [PlayerLaunchParams.contentPath] and [PlayerLaunchParams.contentHash] are pinned on the
-     * request. Staging failure returns [PlayerLaunchResult.Failed] — a real-content core is NEVER
-     * launched without content (fail-closed). `test_core` is no-content: [PlayerLaunchParams.contentPath]
-     * stays null (serialized as `""` on the wire) and [PlayerLaunchParams.contentHash] stays empty.
+     * request. Staging failure returns [PlayerLaunchResult.Failed] — a core is NEVER launched
+     * without content (fail-closed).
      *
      * Save identity: [PlayerLaunchParams.savePath] follows the shared [SavePathPolicy] layout under
      * the data root — `saves/<server>/<user>/<romId>/<content-hash>/autosave/srm.srm` — STABLE
      * across launches of the same ROM so the player's restore-on-launch finds the previous SRAM.
-     * The [sessionId] still scopes the journal/session directory (unchanged). No-content launches
-     * use a fixed placeholder hash segment; their saves are scratch (adoption is skipped for
-     * requests with an empty content path).
+     * The [sessionId] still scopes the journal/session directory (unchanged).
      *
      * Threading: this function BLOCKS (content download + file I/O + process spawn) and must be
      * called off the UI thread — [GameDetailScreen] wraps it in `withContext(Dispatchers.Default)`.
@@ -327,22 +322,17 @@ class DesktopAppCoordinator(
         val detail = detailLookup(romId) ?: return PlayerLaunchResult.Failed("detail not loaded")
 
         val core = resolveLaunchCore(detail.platformSlug)
-            ?: return PlayerLaunchResult.Failed("no core for platform")
+            ?: return PlayerLaunchResult.Failed("console is not supported on desktop")
 
-        // Real-content cores stage the ROM before launch; fail-closed — never launch without content.
-        val staged: StagedContent? = if (core.coreId == TEST_CORE_ID) {
-            null
-        } else {
-            try {
-                romContentStager.stage(
-                    romId,
-                    detail.fileName,
-                    detail.fileSizeBytes,
-                    core.supportedExtensions.toSet(),
-                )
-            } catch (e: Exception) {
-                return PlayerLaunchResult.Failed("failed to stage ROM content: ${e.message}")
-            }
+        val staged: StagedContent = try {
+            romContentStager.stage(
+                romId,
+                detail.fileName,
+                detail.fileSizeBytes,
+                core.supportedExtensions.toSet(),
+            )
+        } catch (e: Exception) {
+            return PlayerLaunchResult.Failed("failed to stage ROM content: ${e.message}")
         }
 
         val sessionId = UUID.randomUUID().toString()
@@ -358,7 +348,7 @@ class DesktopAppCoordinator(
                 serverKey = origin.ifBlank { NO_ORIGIN_KEY },
                 userKey = username.ifBlank { ANONYMOUS_USER_KEY },
                 romId = romId,
-                romHash = (staged?.sha256).orEmpty().ifBlank { NO_CONTENT_ROM_HASH },
+                romHash = staged.sha256,
             ),
         )
         runCatching { Files.createDirectories(checkNotNull(savePath.parent)) }
@@ -372,8 +362,8 @@ class DesktopAppCoordinator(
             // commitSha) is the authoritative revision pin.
             coreBuildRevision = core.releaseTag.ifBlank { core.commitSha },
             corePath = resolveCoreLibraryPath(coresDir, core.coreId),
-            contentPath = staged?.path,
-            contentHash = (staged?.sha256).orEmpty(),
+            contentPath = staged.path,
+            contentHash = staged.sha256,
             systemDir = paths.firmwareDir(),
             savePath = savePath,
             video = VideoSettings(),
@@ -601,36 +591,24 @@ class DesktopAppCoordinator(
     /**
      * Resolves the core to launch for a platform slug.
      *
-     * Prefers the platform's approved core, but ONLY when it is approved for the
+     * Resolves the platform's approved core, but ONLY when it is approved for the
      * [LINUX_X86_64_ABI] ABI and its shared library is actually installed in the desktop
-     * data root's `cores/` directory. Otherwise it falls back to the no-content [TEST_CORE_ID]
-     * — the core the desktop player increment always builds, which the derived
-     * `ROMM_PLAYER_ALLOWED_CORES` value allowlists whenever `libtest_core.so` is installed.
-     * Without the installed-check, a ROM for an approved-but-not-installed core (e.g. any real
-     * system on a dev box that only shipped `libtest_core.so`) would produce a request the
-     * player rejects instantly (`coreId not in installed metadata`), the session would
-     * fast-fail-reconcile, and Play would appear to do nothing.
+     * data root's `cores/` directory. Unsupported and uninstalled platforms return null.
      */
     private fun resolveLaunchCore(platformSlug: String): CoreLicenseFinding? {
         val coresDir = paths.dataDir.resolve("cores")
         val installed: (CoreLicenseFinding) -> Boolean = { core ->
             coreLibraryFileNames(core.coreId).any { Files.exists(coresDir.resolve(it)) }
         }
-        val platformCore = CoreManifest.approvedEntries().firstOrNull {
+        return CoreManifest.approvedEntries().firstOrNull {
             it.supportedSystems.contains(platformSlug) &&
-                // An ARM-only approval does not make the core launchable on the desktop
-                // player: the allowlist (deriveAllowedCores) would reject it anyway.
-                LINUX_X86_64_ABI in it.supportedAbis
-        }
-        val testCore = CoreManifest.findById(TEST_CORE_ID)
-        // NOTE: an approved-but-NOT-installed platform core is deliberately NOT a fallback —
-        // launching it would produce a request the player rejects instantly (see KDoc above).
-        return when {
-            platformCore != null && installed(platformCore) -> platformCore
-            testCore != null -> testCore
-            else -> null
+                LINUX_X86_64_ABI in it.supportedAbis &&
+                installed(it)
         }
     }
+
+    /** Whether [platformSlug] has an approved, installed Linux desktop core. */
+    fun isPlatformPlayable(platformSlug: String): Boolean = resolveLaunchCore(platformSlug) != null
 
     private val onboardingPresenterLazy by lazy {
         OnboardingPresenter(
@@ -686,12 +664,6 @@ class DesktopAppCoordinator(
 
     private companion object {
         const val DB_FILE_NAME = "rommulus.db"
-
-        /** The no-content test core; the desktop player's universal fallback (always in the derived `ROMM_PLAYER_ALLOWED_CORES` when installed). */
-        const val TEST_CORE_ID = "test_core"
-
-        /** [SavePathPolicy] hash segment for no-content launches (their saves are scratch). */
-        const val NO_CONTENT_ROM_HASH = "no-content"
 
         /** [SavePathPolicy] server key when no origin is configured. */
         private const val NO_ORIGIN_KEY = "no-origin"
