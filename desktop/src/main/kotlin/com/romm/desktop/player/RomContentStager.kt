@@ -49,9 +49,15 @@ interface RomContentStager {
 
 /**
  * Production [RomContentStager]: downloads via the authenticated OkHttp client (the same Bearer +
- * cookie + CSRF stack as images and BIOS staging) and stages under `cacheDir/roms/<fileName>` —
- * the "roms" cache subdirectory Android maps for ROM content, mirrored on desktop (§9: ROM content
- * is rebuildable cache; saves never live here).
+ * cookie + CSRF stack as images and BIOS staging) and stages under
+ * `cacheDir/roms/<origin-key>/<romId>/<fileName>` — the "roms" cache subdirectory Android maps for
+ * ROM content, mirrored on desktop (§9: ROM content is rebuildable cache; saves never live here).
+ * The origin key sanitizes the server-origin string for path safety (letters and digits are kept,
+ * every other character maps to `_`), so cache identity is isolated per origin and per ROM: two
+ * different ROMs that share a server file name — within or across servers — can never collide on one
+ * cached file, because the size-only reuse gate below cannot tell same-size different content apart.
+ * The layout is deterministic, so the same ROM always resolves to the same staged path across launches
+ * (CHD content included: its `.chd` sibling lives in the same dir).
  *
  * Reuse rule: a non-symlink regular file already at the destination is reused WITHOUT a network
  * round trip when its size matches [expectedSizeBytes] (or the expected size is unknown). The
@@ -93,10 +99,15 @@ class OkHttpRomContentStager(
         // inside the ROM cache root.
         val safeName = fileName.replace('/', '_').replace('\\', '_')
             .takeIf { it.isNotEmpty() && it != "." && it != ".." } ?: "_"
-        val destination = romCacheDir.resolve(safeName)
 
-        runCatching { Files.createDirectories(romCacheDir) }
-            .getOrElse { throw RomContentStagingException("cannot create ROM cache directory ${romCacheDir}: ${it.message}", it) }
+        // Cache identity is scoped by (origin, romId): deterministic per-ROM directory, so the same
+        // ROM always stages to the same path across launches and a different ROM can never reuse
+        // another ROM's cached file even when the server file names collide.
+        val contentDir = romCacheDir.resolve(originKey(origin)).resolve(romId.toString())
+        val destination = contentDir.resolve(safeName)
+
+        runCatching { Files.createDirectories(contentDir) }
+            .getOrElse { throw RomContentStagingException("cannot create ROM cache directory $contentDir: ${it.message}", it) }
 
         // Reuse: already staged and the size matches (or is unknown) — skip the download.
         if (!Files.isSymbolicLink(destination) && Files.isRegularFile(destination)) {
@@ -104,11 +115,11 @@ class OkHttpRomContentStager(
             if (existingSize != null && (expectedSizeBytes <= 0 || existingSize == expectedSizeBytes)) {
                 // Hash from disk every time: correctness first. Caching the hash persistently is a
                 // later optimization for large cores — GB-class ROMs make re-hashing expensive.
-                return prepareContent(destination, safeName, supportedExtensions)
+                return prepareContent(destination, safeName, contentDir, supportedExtensions)
             }
         }
 
-        val part = romCacheDir.resolve("$safeName.part")
+        val part = contentDir.resolve("$safeName.part")
         try {
             val url = RommApi.romContentUrl(origin, romId, fileName)
             val request = Request.Builder().url(url).get().build()
@@ -154,12 +165,13 @@ class OkHttpRomContentStager(
             throw RomContentStagingException("failed to stage ROM '$fileName': ${it.message}", it)
         }
 
-        return prepareContent(destination, safeName, supportedExtensions)
+        return prepareContent(destination, safeName, contentDir, supportedExtensions)
     }
 
     private fun prepareContent(
         downloadedFile: Path,
         safeName: String,
+        contentDir: Path,
         supportedExtensions: Set<String>,
     ): StagedContent {
         val archiveFormat = detectArchiveFormat(downloadedFile)
@@ -197,8 +209,8 @@ class OkHttpRomContentStager(
                 "archived ROM '${selected.name}' has an invalid or unsupported size: ${selected.size} bytes",
             )
         }
-        val extracted = romCacheDir.resolve("$safeName$extension")
-        val part = romCacheDir.resolve("$safeName$extension.extract.part")
+        val extracted = contentDir.resolve("$safeName$extension")
+        val part = contentDir.resolve("$safeName$extension.extract.part")
 
         try {
             extractArchiveEntry(downloadedFile, archiveFormat, selected, part)
@@ -385,6 +397,10 @@ class OkHttpRomContentStager(
             )
         }
     }
+
+    /** Deterministic directory name for a server origin (non-alphanumerics → `_`; no traversal possible). */
+    private fun originKey(origin: String): String =
+        origin.map { if (it.isLetterOrDigit()) it else '_' }.joinToString("")
 
     private fun dropPart(part: Path) = runCatching { Files.deleteIfExists(part) }
 

@@ -58,11 +58,18 @@ class RomContentStagerTest {
         }
     }
 
-    private fun stager(http: StubHttp, cacheRoot: Path) = OkHttpRomContentStager(
+    private fun stager(http: StubHttp, cacheRoot: Path, origin: String = ORIGIN) = OkHttpRomContentStager(
         client = http.client,
-        originProvider = { ORIGIN },
+        originProvider = { origin },
         romCacheDir = cacheRoot.resolve("roms"),
     )
+
+    /** Mirrors [OkHttpRomContentStager]'s origin-key sanitization (non-alphanumerics → `_`). */
+    private fun originKey(origin: String) = origin.map { if (it.isLetterOrDigit()) it else '_' }.joinToString("")
+
+    /** The per-ROM cache directory: `roms/<origin-key>/<romId>`. */
+    private fun romDir(dir: Path, romId: Long, origin: String = ORIGIN) =
+        dir.resolve("roms").resolve(originKey(origin)).resolve(romId.toString())
 
     @Test
     fun `stage downloads the ROM to the roms cache dir and returns its sha256`(@TempDir dir: Path) {
@@ -73,8 +80,8 @@ class RomContentStagerTest {
         // Exactly one GET against the exact RomM content URL.
         assertThat(http.requests).hasSize(1)
         assertThat(http.requests.single().url.toString()).isEqualTo(RommApi.romContentUrl(ORIGIN, 7L, "zelda.gb"))
-        // File written under <cacheRoot>/roms/<fileName> with the served bytes and matching hash.
-        val expected = dir.resolve("roms").resolve("zelda.gb")
+        // File written under <cacheRoot>/roms/<origin-key>/<romId>/<fileName> with the served bytes.
+        val expected = romDir(dir, 7L).resolve("zelda.gb")
         assertThat(staged.path).isEqualTo(expected)
         assertThat(Files.readAllBytes(staged.path)).containsExactly(*ROM_BYTES)
         assertThat(staged.sha256).isEqualTo(sha256Hex(ROM_BYTES))
@@ -94,7 +101,7 @@ class RomContentStagerTest {
 
         assertThat(staged.path.fileName.toString()).isEqualTo("Sonic CD (USA).chd")
         assertThat(Files.readAllBytes(staged.path)).containsExactly(*chd)
-        assertThat(Files.readAllBytes(dir.resolve("roms").resolve("Sonic CD (USA)"))).containsExactly(*chd)
+        assertThat(Files.readAllBytes(romDir(dir, 7L).resolve("Sonic CD (USA)"))).containsExactly(*chd)
     }
 
     @Test
@@ -167,11 +174,13 @@ class RomContentStagerTest {
             .hasMessageContaining("unsafe entry path")
 
         // Fail closed: nothing may be written outside the ROM cache root, and no extracted file or
-        // leftover extraction part may appear inside it.
+        // leftover extraction part may appear inside it (the per-ROM subdirectories included).
         assertThat(Files.exists(dir.resolve("evil.gb"))).isFalse()
         val roms = dir.resolve("roms")
         if (Files.exists(roms)) {
-            val names = Files.list(roms).use { stream -> stream.map { it.fileName.toString() }.toList() }
+            val names = Files.walk(roms).use { stream ->
+                stream.filter { Files.isRegularFile(it) }.map { it.fileName.toString() }.toList()
+            }
             assertThat(names.none { it.endsWith(".extract.part") }).isTrue()
             assertThat(names).doesNotContain("evil.gb")
         }
@@ -203,10 +212,9 @@ class RomContentStagerTest {
 
     @Test
     fun `stage reuses the cached file when its size matches and does not hit the network`(@TempDir dir: Path) {
-        val roms = dir.resolve("roms")
-        Files.createDirectories(roms)
         val existing = "existing-bytes".toByteArray()
-        Files.write(roms.resolve("zelda.gb"), existing)
+        Files.createDirectories(romDir(dir, 7L))
+        Files.write(romDir(dir, 7L).resolve("zelda.gb"), existing)
 
         val http = StubHttp { req -> StubHttp.response(req.url.toString()) }
 
@@ -218,10 +226,9 @@ class RomContentStagerTest {
 
     @Test
     fun `stage reuses the cached file when the expected size is unknown`(@TempDir dir: Path) {
-        val roms = dir.resolve("roms")
-        Files.createDirectories(roms)
         val existing = "existing-bytes".toByteArray()
-        Files.write(roms.resolve("zelda.gb"), existing)
+        Files.createDirectories(romDir(dir, 7L))
+        Files.write(romDir(dir, 7L).resolve("zelda.gb"), existing)
 
         val http = StubHttp { req -> StubHttp.response(req.url.toString()) }
 
@@ -233,9 +240,8 @@ class RomContentStagerTest {
 
     @Test
     fun `stage re-downloads when the cached file size does not match`(@TempDir dir: Path) {
-        val roms = dir.resolve("roms")
-        Files.createDirectories(roms)
-        Files.write(roms.resolve("zelda.gb"), "short".toByteArray())
+        Files.createDirectories(romDir(dir, 7L))
+        Files.write(romDir(dir, 7L).resolve("zelda.gb"), "short".toByteArray())
 
         val http = StubHttp { req -> StubHttp.response(req.url.toString()) }
 
@@ -254,10 +260,10 @@ class RomContentStagerTest {
             .isInstanceOf(RomContentStagingException::class.java)
             .hasMessageContaining("HTTP 500")
 
-        val roms = dir.resolve("roms")
-        assertThat(Files.exists(roms.resolve("zelda.gb"))).isFalse()
-        if (Files.exists(roms)) {
-            assertThat(Files.list(roms).count()).isZero() // no leftover .part file
+        val romsDir = romDir(dir, 7L)
+        assertThat(Files.exists(romsDir.resolve("zelda.gb"))).isFalse()
+        if (Files.exists(romsDir)) {
+            assertThat(Files.list(romsDir).count()).isZero() // no leftover .part file
         }
     }
 
@@ -269,7 +275,7 @@ class RomContentStagerTest {
             .isInstanceOf(RomContentStagingException::class.java)
             .hasMessageContaining("empty")
 
-        assertThat(Files.exists(dir.resolve("roms").resolve("zelda.gb"))).isFalse()
+        assertThat(Files.exists(romDir(dir, 7L).resolve("zelda.gb"))).isFalse()
     }
 
     @Test
@@ -280,7 +286,7 @@ class RomContentStagerTest {
             .isInstanceOf(RomContentStagingException::class.java)
             .hasMessageContaining("size mismatch")
 
-        assertThat(Files.exists(dir.resolve("roms").resolve("zelda.gb"))).isFalse()
+        assertThat(Files.exists(romDir(dir, 7L).resolve("zelda.gb"))).isFalse()
     }
 
     @Test
@@ -292,5 +298,69 @@ class RomContentStagerTest {
             .hasMessageContaining("blank")
 
         assertThat(http.requests).isEmpty()
+    }
+
+    // ---------------------------------------------------------------- cache identity (Phase 11 work item 5)
+
+    @Test
+    fun `CHD staging is stable across launches and reuses the cache without a network round trip`(@TempDir dir: Path) {
+        val chd = "MComprHD".toByteArray() + ByteArray(64)
+        val httpFirst = StubHttp { req -> StubHttp.response(req.url.toString(), body = chd) }
+        val first = stager(httpFirst, dir).stage(7L, "Sonic CD (USA)", chd.size.toLong(), setOf(".bin", ".chd"))
+
+        // A second launch: a fresh stager instance over the same cache root must not re-download.
+        val httpSecond = StubHttp { req -> StubHttp.response(req.url.toString(), body = chd) }
+        val second = stager(httpSecond, dir).stage(7L, "Sonic CD (USA)", chd.size.toLong(), setOf(".bin", ".chd"))
+
+        assertThat(httpSecond.requests).isEmpty()
+        // Same ROM → same staged path and same content hash across launches.
+        assertThat(second.path).isEqualTo(first.path)
+        assertThat(second.sha256).isEqualTo(first.sha256)
+        // The .chd sibling is stable and holds the served bytes.
+        val romsDir = romDir(dir, 7L)
+        assertThat(Files.isRegularFile(romsDir.resolve("Sonic CD (USA).chd"))).isTrue()
+        assertThat(Files.readAllBytes(second.path)).containsExactly(*chd)
+    }
+
+    @Test
+    fun `different roms sharing a file name stage to isolated paths and never reuse each other's bytes`(@TempDir dir: Path) {
+        // Same file name, same size, different content — the size-only reuse gate cannot tell them
+        // apart, so the per-ROM cache directory is what keeps the identities apart (CHD included).
+        val rom7Bytes = "MComprHD".toByteArray() + ByteArray(32) { 1 }
+        val rom8Bytes = "MComprHD".toByteArray() + ByteArray(32) { 2 }
+        val http = StubHttp { req ->
+            if (req.url.toString().contains("/api/roms/7/content/")) {
+                StubHttp.response(req.url.toString(), body = rom7Bytes)
+            } else {
+                StubHttp.response(req.url.toString(), body = rom8Bytes)
+            }
+        }
+
+        val first = stager(http, dir).stage(7L, "Sonic CD (USA)", rom7Bytes.size.toLong(), setOf(".bin", ".chd"))
+        val second = stager(http, dir).stage(8L, "Sonic CD (USA)", rom8Bytes.size.toLong(), setOf(".bin", ".chd"))
+
+        assertThat(second.path).isNotEqualTo(first.path)
+        assertThat(first.path).isEqualTo(romDir(dir, 7L).resolve("Sonic CD (USA).chd"))
+        assertThat(second.path).isEqualTo(romDir(dir, 8L).resolve("Sonic CD (USA).chd"))
+        assertThat(Files.readAllBytes(first.path)).containsExactly(*rom7Bytes)
+        assertThat(Files.readAllBytes(second.path)).containsExactly(*rom8Bytes)
+    }
+
+    @Test
+    fun `the same rom id on different server origins stages to isolated paths`(@TempDir dir: Path) {
+        val otherOrigin = "https://other.example.com"
+        val bytesA = "MComprHD".toByteArray() + ByteArray(16) { 1 }
+        val bytesB = "MComprHD".toByteArray() + ByteArray(16) { 2 }
+        val httpA = StubHttp { req -> StubHttp.response(req.url.toString(), body = bytesA) }
+        val httpB = StubHttp { req -> StubHttp.response(req.url.toString(), body = bytesB) }
+
+        val a = stager(httpA, dir, origin = ORIGIN).stage(7L, "Sonic CD (USA)", bytesA.size.toLong(), setOf(".bin", ".chd"))
+        val b = stager(httpB, dir, origin = otherOrigin).stage(7L, "Sonic CD (USA)", bytesB.size.toLong(), setOf(".bin", ".chd"))
+
+        assertThat(a.path).isEqualTo(romDir(dir, 7L, ORIGIN).resolve("Sonic CD (USA).chd"))
+        assertThat(b.path).isEqualTo(romDir(dir, 7L, otherOrigin).resolve("Sonic CD (USA).chd"))
+        assertThat(b.path).isNotEqualTo(a.path)
+        assertThat(Files.readAllBytes(a.path)).containsExactly(*bytesA)
+        assertThat(Files.readAllBytes(b.path)).containsExactly(*bytesB)
     }
 }

@@ -7,6 +7,7 @@ import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.romm.FirmwareStagingOutcome
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.TestAppPaths
+import com.romm.androidtv.storage.firmwareDir
 import com.romm.androidtv.storage.fakes.InMemorySessionRecordStore
 import com.romm.androidtv.storage.ports.SettingsKeys
 import com.romm.desktop.library.StubServer
@@ -380,6 +381,64 @@ class DesktopAppCoordinatorTest {
         val (firstSave, secondSave) = launcher.launches.map { it.savePath }
         // Same staged bytes (same hash segment), but the romId segment differs.
         assertThat(secondSave).isNotEqualTo(firstSave)
+    }
+
+    @Test
+    fun `savePath is stable and isolated for Sega CD CHD launches`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGenesisPlusGx(paths)
+        val server = StubServer().apply { start() }
+        try {
+            server.platformsJson(5L, "segacd")
+            // Pre-stage the selected BIOS file so prepareForLaunch succeeds without a download
+            // (the staged file on disk is the selection source of truth).
+            val firmwareDir = paths.firmwareDir()
+            Files.createDirectories(firmwareDir)
+            val biosBytes = "fake-sega-cd-bios".toByteArray()
+            Files.write(firmwareDir.resolve("41_bios_CD_USA.bin"), biosBytes)
+            server.firmwareJson(
+                """{"id": 41, "file_name": "bios_CD_USA.bin", "file_size_bytes": ${biosBytes.size}, """ +
+                    """"sha1_hash": "0000000000000000000000000000000000000000", "is_verified": true}""",
+            )
+            // CHD-shaped content: the save path must be scoped by this staged content's hash.
+            val chdBytes = "MComprHD".toByteArray() + ByteArray(32) { it.toByte() }
+            val stager = FakeRomContentStager(contentBytes = chdBytes)
+            val launcher = FakePlayerProcessLauncher()
+            val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+            val c = DesktopAppCoordinator(
+                paths = paths,
+                secretBackend = FakeSecretBackend(),
+                appVersion = "test",
+                buildDefaultOrigin = "https://demo.romm.app",
+                playerSupervisorOverride = supervisor,
+                romDetailLookup = { testRom(platformSlug = "segacd", fileName = "Sonic CD (USA)") },
+                romContentStagerOverride = stager,
+            )
+            c.settingsStore.write(mapOf(SettingsKeys.ORIGIN to server.origin))
+
+            val first = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
+            waitForReconciled(supervisor, first.sessionId)
+            val second = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+            waitForReconciled(supervisor, second.sessionId)
+            val other = c.launchPlayer(romId = 8L) as PlayerLaunchResult.Started
+            waitForReconciled(supervisor, other.sessionId)
+
+            val (firstSave, secondSave, otherSave) = launcher.launches.map { it.savePath }
+            // Same Sega CD ROM + same staged CHD bytes → the identical stable save path across launches.
+            assertThat(secondSave).isEqualTo(firstSave)
+            // A different ROM never shares a save, even for CHD content.
+            assertThat(otherSave).isNotEqualTo(firstSave)
+            // Follows the shared SavePathPolicy layout under the data root, scoped by the staged
+            // CHD content's SHA-256 and the server origin.
+            val savesRoot = paths.dataDir.toAbsolutePath().normalize().toString() + java.io.File.separator + "saves"
+            assertThat(firstSave).startsWith(savesRoot)
+            // Server segment sanitized exactly like SavePathPolicy (only '/' and '\' → '_').
+            assertThat(firstSave).contains(server.origin.replace('/', '_').replace('\\', '_'))
+            assertThat(firstSave).contains(sha256Hex(chdBytes))
+            assertThat(firstSave).endsWith("autosave" + java.io.File.separator + "srm.srm")
+        } finally {
+            server.close()
+        }
     }
 
     @Test
