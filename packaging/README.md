@@ -41,6 +41,7 @@ Notes:
 - `PACKAGE.sha256` provides internal integrity checking (the launcher verifies
   against it at startup). It is NOT a substitute for the release signature —
   GPG signing of the tarball is a later Phase 14 sub-unit (§16 work item 4).
+- User-facing documentation: see [docs/linux-support.md](docs/linux-support.md) — supported distributions, GPU expectations, and diagnostics.
 
 ## Assembling the tarball (Linux only)
 
