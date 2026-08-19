@@ -47,6 +47,8 @@ import com.romm.desktop.player.OkHttpRomContentStager
 import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.player.PlayerLaunchParams
 import com.romm.desktop.player.PrepareLaunchResult
+import com.romm.desktop.player.RomContentStagingException
+import com.romm.desktop.player.RomContentStagingFailure
 import com.romm.desktop.player.RomContentStager
 import com.romm.desktop.player.StagedContent
 import com.romm.desktop.player.VideoSettings
@@ -167,6 +169,39 @@ internal fun firmwareLaunchFailureReason(
         is FirmwareStagingOutcome.InsufficientSpace ->
             "Not enough storage to download the $systemName BIOS."
     }
+}
+
+/**
+ * Maps a [RomContentStagingException] from launch-time ROM staging to a focused, user-facing
+ * reason for [PlayerLaunchResult.Failed] (plans/LINUX_X64.md Phase 11, work item 6) — the
+ * content-side counterpart of [firmwareLaunchFailureReason]. The distinct staging failures are
+ * kept separate and actionable:
+ *
+ *  - malformed CHD ([RomContentStagingFailure.InvalidChdSignature]: a `.chd` file without the
+ *    MComprHD signature);
+ *  - empty or size-mismatched download ([RomContentStagingFailure.SizeMismatch] — an incomplete
+ *    or corrupt transfer; re-downloading may heal it);
+ *  - corrupt or unusable content ([RomContentStagingFailure.CorruptContent]: malformed archive,
+ *    truncated entry, payload the core cannot load);
+ *  - security rejection ([RomContentStagingFailure.UnsafeContent]: path-escape archive entries,
+ *    extraction-limit trips);
+ *  - download / write / configuration failures (infrastructure problems, surfaced with detail).
+ */
+internal fun romContentLaunchFailureReason(
+    e: RomContentStagingException,
+    fileName: String,
+): String = when (e.failure) {
+    RomContentStagingFailure.InvalidChdSignature ->
+        "Content verification failed: '$fileName' is not a valid CHD file (missing MComprHD signature). Re-upload this ROM in your RomM library."
+    RomContentStagingFailure.SizeMismatch ->
+        "Content verification failed: '$fileName' is incomplete or does not match its expected size. The download may be corrupt — try launching again, or re-upload this ROM in your RomM library."
+    RomContentStagingFailure.CorruptContent ->
+        "Content verification failed: '$fileName' is corrupt or unreadable. Re-upload this ROM in your RomM library, or try a different file version."
+    RomContentStagingFailure.UnsafeContent ->
+        "Content verification failed: '$fileName' contains unsafe content and was rejected. Re-upload this ROM in your RomM library."
+    RomContentStagingFailure.DownloadFailed -> "Could not download the ROM content: ${e.message}."
+    RomContentStagingFailure.WriteFailed -> "Could not save the ROM content to disk: ${e.message}."
+    RomContentStagingFailure.Misconfigured -> "The ROM content for this game is not available: ${e.message}."
 }
 
 class DesktopAppCoordinator(
@@ -369,6 +404,10 @@ class DesktopAppCoordinator(
                 detail.fileSizeBytes,
                 core.supportedExtensions.toSet(),
             )
+        } catch (e: RomContentStagingException) {
+            // Focused, user-facing states for malformed / undownloadable ROM content
+            // (Phase 11 work item 6) — mirrors [firmwareLaunchFailureReason] for BIOS.
+            return PlayerLaunchResult.Failed(romContentLaunchFailureReason(e, detail.fileName))
         } catch (e: Exception) {
             return PlayerLaunchResult.Failed("failed to stage ROM content: ${e.message}")
         }

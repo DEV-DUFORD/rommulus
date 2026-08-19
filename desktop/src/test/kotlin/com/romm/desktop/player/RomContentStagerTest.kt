@@ -105,6 +105,46 @@ class RomContentStagerTest {
     }
 
     @Test
+    fun `stage rejects a chd-named file without the MComprHD signature and leaves no cache behind`(@TempDir dir: Path) {
+        val notChd = "definitely-not-a-chd".toByteArray()
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = notChd) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "Sonic CD (USA).chd", notChd.size.toLong(), setOf(".bin", ".chd"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("not a valid CHD file")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.InvalidChdSignature }
+
+        // Fail closed: no destination or part file is left behind.
+        val romsDir = romDir(dir, 7L)
+        assertThat(Files.exists(romsDir.resolve("Sonic CD (USA).chd"))).isFalse()
+        if (Files.exists(romsDir)) {
+            assertThat(Files.list(romsDir).count()).isZero() // no leftover .part file
+        }
+    }
+
+    @Test
+    fun `stage rejects a cached chd file without the MComprHD signature on reuse`(@TempDir dir: Path) {
+        val notChd = "cached-but-malformed".toByteArray()
+        Files.createDirectories(romDir(dir, 7L))
+        Files.write(romDir(dir, 7L).resolve("Sonic CD (USA).chd"), notChd)
+
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = notChd) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "Sonic CD (USA).chd", notChd.size.toLong(), setOf(".bin", ".chd"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.InvalidChdSignature }
+
+        // The size-matching cache file is not re-downloaded (the server would serve the same bytes)…
+        assertThat(http.requests).isEmpty()
+        // …but the poisoned entry is discarded, so a fixed ROM re-uploaded to RomM fetches fresh.
+        assertThat(Files.exists(romDir(dir, 7L).resolve("Sonic CD (USA).chd"))).isFalse()
+    }
+
+    @Test
     fun `stage extracts the single core-supported ROM from a 7z download`(@TempDir dir: Path) {
         val archivedRom = byteArrayOf(1, 2, 3, 4, 5)
         val archivePath = dir.resolve("fixture.7z")
@@ -154,6 +194,33 @@ class RomContentStagerTest {
         assertThat(staged.path.fileName.toString()).endsWith(".gb")
         assertThat(Files.readAllBytes(staged.path)).containsExactly(*archivedRom)
         assertThat(staged.sha256).isEqualTo(sha256Hex(archivedRom))
+    }
+
+    @Test
+    fun `stage rejects a ZIP entry with a CHD name without the MComprHD signature and leaves no staged CHD behind`(@TempDir dir: Path) {
+        val notChd = "definitely-not-a-chd".toByteArray()
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("Sonic CD (USA).chd"))
+            archive.write(notChd)
+            archive.closeEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "Sonic CD (USA)", archiveBytes.size.toLong(), setOf(".bin", ".chd"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("not a valid CHD file")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.InvalidChdSignature }
+
+        // Fail closed: no staged .chd and no leftover extraction part remain in the ROM cache.
+        val romsDir = romDir(dir, 7L)
+        assertThat(Files.exists(romsDir.resolve("Sonic CD (USA).chd"))).isFalse()
+        if (Files.exists(romsDir)) {
+            assertThat(Files.list(romsDir).count()).isZero() // no leftover .extract.part file
+        }
     }
 
     @Test
@@ -285,6 +352,7 @@ class RomContentStagerTest {
         assertThatThrownBy { stager(http, dir).stage(7L, "zelda.gb", expectedSizeBytes = ROM_BYTES.size.toLong()) }
             .isInstanceOf(RomContentStagingException::class.java)
             .hasMessageContaining("size mismatch")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.SizeMismatch }
 
         assertThat(Files.exists(romDir(dir, 7L).resolve("zelda.gb"))).isFalse()
     }

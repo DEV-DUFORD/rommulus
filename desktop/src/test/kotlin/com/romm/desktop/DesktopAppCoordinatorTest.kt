@@ -17,6 +17,7 @@ import com.romm.desktop.player.JournalState
 import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.player.RomContentStagingException
+import com.romm.desktop.player.RomContentStagingFailure
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopSessionStorage
 import com.romm.desktop.storage.secret.FakeSecretBackend
@@ -319,7 +320,10 @@ class DesktopAppCoordinatorTest {
         val launcher = FakePlayerProcessLauncher()
         val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
         val stager = FakeRomContentStager()
-        stager.failure = RomContentStagingException("ROM download failed: HTTP 500")
+        stager.failure = RomContentStagingException(
+            "HTTP 500 for 'zelda.gb'",
+            failure = RomContentStagingFailure.DownloadFailed,
+        )
         val c = DesktopAppCoordinator(
             paths = paths,
             secretBackend = FakeSecretBackend(),
@@ -332,8 +336,74 @@ class DesktopAppCoordinatorTest {
 
         val result = c.launchPlayer(romId = 7L)
 
-        assertThat(result).isEqualTo(PlayerLaunchResult.Failed("failed to stage ROM content: ROM download failed: HTTP 500"))
+        // Focused user-facing state (Phase 11 work item 6), not the raw exception message.
+        assertThat(result).isEqualTo(PlayerLaunchResult.Failed("Could not download the ROM content: HTTP 500 for 'zelda.gb'."))
         // Never launched without content.
+        assertThat(launcher.launches).isEmpty()
+    }
+
+    @Test
+    fun `launchPlayer surfaces a focused reason when staged content is not a valid CHD`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val stager = FakeRomContentStager()
+        stager.failure = RomContentStagingException(
+            "ROM content 'Sonic CD (USA).chd' is not a valid CHD file (missing MComprHD signature)",
+            failure = RomContentStagingFailure.InvalidChdSignature,
+        )
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb", fileName = "Sonic CD (USA).chd") },
+            romContentStagerOverride = stager,
+        )
+
+        val result = c.launchPlayer(romId = 7L)
+
+        assertThat(result).isEqualTo(
+            PlayerLaunchResult.Failed(
+                "Content verification failed: 'Sonic CD (USA).chd' is not a valid CHD file " +
+                    "(missing MComprHD signature). Re-upload this ROM in your RomM library.",
+            ),
+        )
+        // Never launched with unverified content.
+        assertThat(launcher.launches).isEmpty()
+    }
+
+    @Test
+    fun `launchPlayer surfaces a focused reason when the staged ROM size does not match`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val stager = FakeRomContentStager()
+        stager.failure = RomContentStagingException(
+            "ROM size mismatch for 'zelda.gb': expected 1234 bytes, got 5",
+            failure = RomContentStagingFailure.SizeMismatch,
+        )
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb", fileName = "zelda.gb") },
+            romContentStagerOverride = stager,
+        )
+
+        val result = c.launchPlayer(romId = 7L)
+
+        assertThat(result).isEqualTo(
+            PlayerLaunchResult.Failed(
+                "Content verification failed: 'zelda.gb' is incomplete or does not match its expected size. " +
+                    "The download may be corrupt — try launching again, or re-upload this ROM in your RomM library.",
+            ),
+        )
         assertThat(launcher.launches).isEmpty()
     }
 

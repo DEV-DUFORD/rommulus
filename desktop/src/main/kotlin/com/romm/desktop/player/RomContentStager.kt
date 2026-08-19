@@ -20,8 +20,41 @@ data class StagedContent(
     val sha256: String,
 )
 
+/**
+ * The distinct fail-closed ROM staging failures. Each maps to a focused, user-facing message in
+ * the launch flow ([com.romm.desktop.DesktopAppCoordinator] — plans/LINUX_X64.md Phase 11 work
+ * item 6), mirroring how [com.romm.androidtv.romm.FirmwareStagingOutcome] variants map for BIOS.
+ */
+enum class RomContentStagingFailure {
+    /** A `.chd` file was expected but the MComprHD signature is missing (malformed CHD). */
+    InvalidChdSignature,
+
+    /** The served bytes are empty or do not match the server-declared size. */
+    SizeMismatch,
+
+    /** Content is corrupt or unusable: malformed archive, truncated entry, payload the core cannot load. */
+    CorruptContent,
+
+    /** Content was rejected for safety: unsafe archive entry path, extraction-limit trip. */
+    UnsafeContent,
+
+    /** The download itself failed (HTTP error, transport failure). */
+    DownloadFailed,
+
+    /** A local filesystem write/staging failure. */
+    WriteFailed,
+
+    /** Configuration problem (blank file name, missing server origin, core without extensions). */
+    Misconfigured,
+}
+
 /** Fail-closed ROM staging failure: HTTP error, empty body, size mismatch, or write failure. */
-class RomContentStagingException(message: String, cause: Throwable? = null) : IOException(message, cause)
+class RomContentStagingException(
+    message: String,
+    cause: Throwable? = null,
+    /** The distinct failure reason; the launch flow maps it to a focused user-facing message. */
+    val failure: RomContentStagingFailure,
+) : IOException(message, cause)
 
 /**
  * Seam for staging a ROM's content before player launch (Phase 8 real-content increment).
@@ -88,11 +121,17 @@ class OkHttpRomContentStager(
         supportedExtensions: Set<String>,
     ): StagedContent {
         if (fileName.isBlank()) {
-            throw RomContentStagingException("ROM file name is blank; cannot stage content for rom $romId")
+            throw RomContentStagingException(
+                "ROM file name is blank; cannot stage content for rom $romId",
+                failure = RomContentStagingFailure.Misconfigured,
+            )
         }
         val origin = originProvider().orEmpty()
         if (origin.isBlank()) {
-            throw RomContentStagingException("RomM origin not configured; cannot download ROM content")
+            throw RomContentStagingException(
+                "RomM origin not configured; cannot download ROM content",
+                failure = RomContentStagingFailure.Misconfigured,
+            )
         }
 
         // Defend against path traversal in a server-provided file name: the cached file must stay
@@ -107,7 +146,13 @@ class OkHttpRomContentStager(
         val destination = contentDir.resolve(safeName)
 
         runCatching { Files.createDirectories(contentDir) }
-            .getOrElse { throw RomContentStagingException("cannot create ROM cache directory $contentDir: ${it.message}", it) }
+            .getOrElse {
+                throw RomContentStagingException(
+                    "cannot create the ROM cache directory: ${it.message}",
+                    it,
+                    failure = RomContentStagingFailure.WriteFailed,
+                )
+            }
 
         // Reuse: already staged and the size matches (or is unknown) — skip the download.
         if (!Files.isSymbolicLink(destination) && Files.isRegularFile(destination)) {
@@ -115,7 +160,7 @@ class OkHttpRomContentStager(
             if (existingSize != null && (expectedSizeBytes <= 0 || existingSize == expectedSizeBytes)) {
                 // Hash from disk every time: correctness first. Caching the hash persistently is a
                 // later optimization for large cores — GB-class ROMs make re-hashing expensive.
-                return prepareContent(destination, safeName, contentDir, supportedExtensions)
+                return prepareOrDiscard(destination, safeName, contentDir, supportedExtensions)
             }
         }
 
@@ -126,9 +171,15 @@ class OkHttpRomContentStager(
             client.newCall(request).execute().use { response ->
                 when {
                     !response.isSuccessful ->
-                        throw RomContentStagingException("ROM download failed: HTTP ${response.code} for $url")
+                        throw RomContentStagingException(
+                            "HTTP ${response.code} for '$fileName'",
+                            failure = RomContentStagingFailure.DownloadFailed,
+                        )
                     response.body == null ->
-                        throw RomContentStagingException("ROM download returned no body: $url")
+                        throw RomContentStagingException(
+                            "no response body for '$fileName'",
+                            failure = RomContentStagingFailure.DownloadFailed,
+                        )
                     else -> response.body!!.byteStream().use { input ->
                         Files.newOutputStream(part, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
                             .use { output -> input.copyTo(output) }
@@ -140,21 +191,33 @@ class OkHttpRomContentStager(
             throw e
         } catch (e: IOException) {
             dropPart(part)
-            throw RomContentStagingException("ROM download failed for '$fileName': ${e.message}", e)
+            throw RomContentStagingException(
+                "${e.message ?: "network error"} while downloading '$fileName'",
+                e,
+                failure = RomContentStagingFailure.DownloadFailed,
+            )
         }
 
         val size = runCatching { Files.size(part) }.getOrElse {
             dropPart(part)
-            throw RomContentStagingException("staged ROM unreadable: '$fileName'", it)
+            throw RomContentStagingException(
+                "the staged file could not be read back for '$fileName'",
+                it,
+                failure = RomContentStagingFailure.WriteFailed,
+            )
         }
         if (size == 0L) {
             dropPart(part)
-            throw RomContentStagingException("ROM download was empty: '$fileName'")
+            throw RomContentStagingException(
+                "ROM download was empty: '$fileName'",
+                failure = RomContentStagingFailure.SizeMismatch,
+            )
         }
         if (expectedSizeBytes > 0 && size != expectedSizeBytes) {
             dropPart(part)
             throw RomContentStagingException(
                 "ROM size mismatch for '$fileName': expected $expectedSizeBytes bytes, got $size",
+                failure = RomContentStagingFailure.SizeMismatch,
             )
         }
 
@@ -162,10 +225,40 @@ class OkHttpRomContentStager(
             Files.move(part, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         }.getOrElse {
             dropPart(part)
-            throw RomContentStagingException("failed to stage ROM '$fileName': ${it.message}", it)
+            throw RomContentStagingException(
+                "finalizing the staged file failed for '$fileName': ${it.message}",
+                it,
+                failure = RomContentStagingFailure.WriteFailed,
+            )
         }
 
-        return prepareContent(destination, safeName, contentDir, supportedExtensions)
+        return prepareOrDiscard(destination, safeName, contentDir, supportedExtensions)
+    }
+
+    /**
+     * Runs [prepareContent] and, when it fails because the staged BYTES are at fault (malformed
+     * CHD, corrupt archive, unsafe entry, size mismatch), discards the cache entry. A poisoned
+     * entry would otherwise be rejected from disk on every launch — even after the user re-uploads
+     * a fixed ROM to RomM; deleting it lets the next launch fetch fresh content. Infrastructure
+     * and configuration failures ([RomContentStagingFailure.WriteFailed],
+     * [RomContentStagingFailure.DownloadFailed], [RomContentStagingFailure.Misconfigured]) keep
+     * the cache untouched: the bytes are not the problem.
+     */
+    private fun prepareOrDiscard(
+        destination: Path,
+        safeName: String,
+        contentDir: Path,
+        supportedExtensions: Set<String>,
+    ): StagedContent = try {
+        prepareContent(destination, safeName, contentDir, supportedExtensions)
+    } catch (e: RomContentStagingException) {
+        if (e.failure != RomContentStagingFailure.Misconfigured &&
+            e.failure != RomContentStagingFailure.DownloadFailed &&
+            e.failure != RomContentStagingFailure.WriteFailed
+        ) {
+            runCatching { Files.deleteIfExists(destination) }
+        }
+        throw e
     }
 
     private fun prepareContent(
@@ -188,6 +281,7 @@ class OkHttpRomContentStager(
         if (normalizedExtensions.isEmpty()) {
             throw RomContentStagingException(
                 "downloaded ROM '$safeName' is an archive, but the selected core declares no supported file extensions",
+                failure = RomContentStagingFailure.Misconfigured,
             )
         }
 
@@ -195,6 +289,7 @@ class OkHttpRomContentStager(
         if (entries.size != 1) {
             throw RomContentStagingException(
                 "downloaded ${archiveFormat.label} ROM '$safeName' must contain exactly one file; found ${entries.size}",
+                failure = RomContentStagingFailure.CorruptContent,
             )
         }
 
@@ -203,10 +298,12 @@ class OkHttpRomContentStager(
             selected.name.lowercase(Locale.ROOT).endsWith(it)
         } ?: throw RomContentStagingException(
             "archived file '${selected.name}' is not supported by the selected core",
+            failure = RomContentStagingFailure.CorruptContent,
         )
         if (selected.size < 0 || selected.size > MAX_EXTRACTED_ROM_BYTES) {
             throw RomContentStagingException(
                 "archived ROM '${selected.name}' has an invalid or unsupported size: ${selected.size} bytes",
+                failure = RomContentStagingFailure.CorruptContent,
             )
         }
         val extracted = contentDir.resolve("$safeName$extension")
@@ -220,7 +317,21 @@ class OkHttpRomContentStager(
             throw e
         } catch (e: IOException) {
             dropPart(part)
-            throw RomContentStagingException("failed to extract archived ROM '${selected.name}': ${e.message}", e)
+            throw RomContentStagingException(
+                "failed to extract archived ROM '${selected.name}': ${e.message}",
+                e,
+                failure = RomContentStagingFailure.CorruptContent,
+            )
+        }
+
+        // A `.chd` extracted from an archive must carry the MComprHD signature just like a directly
+        // downloaded one — fail closed instead of handing malformed bytes to the core's loader.
+        if (extension.equals(CHD_EXTENSION, ignoreCase = true) && !hasChdSignature(extracted)) {
+            runCatching { Files.deleteIfExists(extracted) }
+            throw RomContentStagingException(
+                "ROM content '$safeName' is not a valid CHD file (missing MComprHD signature)",
+                failure = RomContentStagingFailure.InvalidChdSignature,
+            )
         }
 
         return StagedContent(extracted, SecureFiles.sha256Hex(extracted))
@@ -261,28 +372,29 @@ class OkHttpRomContentStager(
     /**
      * RomM metadata can omit a raw image's suffix. Preserve the cached source name, but provide
      * Libretro a correctly suffixed sibling for formats whose loaders dispatch by extension.
+     *
+     * A file that CLAIMS to be a CHD (its name ends in `.chd`) must carry the MComprHD signature —
+     * malformed content is rejected fail-closed here instead of being handed to the core's loader,
+     * which would only surface the failure later as an opaque player crash (Phase 11 work item 6).
      */
     private fun addRecognizedContentExtension(
         downloadedFile: Path,
         safeName: String,
         supportedExtensions: Set<String>,
     ): Path {
-        if (safeName.lowercase(Locale.ROOT).endsWith(CHD_EXTENSION) ||
-            CHD_EXTENSION !in supportedExtensions.map { it.lowercase(Locale.ROOT) }
-        ) {
+        if (safeName.lowercase(Locale.ROOT).endsWith(CHD_EXTENSION)) {
+            if (!hasChdSignature(downloadedFile)) {
+                throw RomContentStagingException(
+                    "ROM content '$safeName' is not a valid CHD file (missing MComprHD signature)",
+                    failure = RomContentStagingFailure.InvalidChdSignature,
+                )
+            }
             return downloadedFile
         }
-        val signature = ByteArray(CHD_SIGNATURE.size)
-        val bytesRead = Files.newInputStream(downloadedFile).use { input ->
-            var offset = 0
-            while (offset < signature.size) {
-                val count = input.read(signature, offset, signature.size - offset)
-                if (count < 0) break
-                offset += count
-            }
-            offset
+        if (CHD_EXTENSION !in supportedExtensions.map { it.lowercase(Locale.ROOT) }) {
+            return downloadedFile
         }
-        if (bytesRead != CHD_SIGNATURE.size || !signature.contentEquals(CHD_SIGNATURE)) {
+        if (!hasChdSignature(downloadedFile)) {
             return downloadedFile
         }
 
@@ -291,6 +403,22 @@ class OkHttpRomContentStager(
             Files.copy(downloadedFile, corePath, StandardCopyOption.REPLACE_EXISTING)
         }
         return corePath
+    }
+
+    /** True when [path] starts with the CHD magic ("MComprHD"). */
+    private fun hasChdSignature(path: Path): Boolean {
+        val signature = ByteArray(CHD_SIGNATURE.size)
+        // readNBytes-equivalent loop: a single read() may return fewer bytes than requested.
+        val bytesRead = Files.newInputStream(path).use { input ->
+            var offset = 0
+            while (offset < signature.size) {
+                val count = input.read(signature, offset, signature.size - offset)
+                if (count < 0) break
+                offset += count
+            }
+            offset
+        }
+        return bytesRead == CHD_SIGNATURE.size && signature.contentEquals(CHD_SIGNATURE)
     }
 
     @Suppress("DEPRECATION")
@@ -312,6 +440,7 @@ class OkHttpRomContentStager(
         if (entries.size > MAX_ARCHIVE_ENTRIES) {
             throw RomContentStagingException(
                 "downloaded ${format.label} ROM '$safeName' has ${entries.size} entries; limit is $MAX_ARCHIVE_ENTRIES",
+                failure = RomContentStagingFailure.UnsafeContent,
             )
         }
         entries.forEach { entry ->
@@ -321,7 +450,10 @@ class OkHttpRomContentStager(
                 entry.name.split('/', '\\').any { it == ".." } ||
                 (entry.name.length >= 2 && entry.name[1] == ':')
             ) {
-                throw RomContentStagingException("archive contains an unsafe entry path: ${entry.name}")
+                throw RomContentStagingException(
+                    "archive contains an unsafe entry path: ${entry.name}",
+                    failure = RomContentStagingFailure.UnsafeContent,
+                )
             }
         }
         entries.filterNot { it.isDirectory }
@@ -331,6 +463,7 @@ class OkHttpRomContentStager(
         throw RomContentStagingException(
             "cannot read downloaded ${format.label} ROM '$safeName': ${e.message}",
             e,
+            failure = RomContentStagingFailure.CorruptContent,
         )
     }
 
@@ -348,14 +481,20 @@ class OkHttpRomContentStager(
                     entry = archive.nextEntry
                 }
                 if (entry == null) {
-                    throw RomContentStagingException("archived ROM '${selected.name}' cannot be read")
+                    throw RomContentStagingException(
+                        "archived ROM '${selected.name}' cannot be read",
+                        failure = RomContentStagingFailure.CorruptContent,
+                    )
                 }
                 Files.newOutputStream(destination, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
                     .use { output -> copyArchiveBytes(archive::read, output::write, selected, Files.size(archivePath)) }
             }
             ArchiveFormat.ZIP -> ZipFile(archivePath.toFile()).use { archive ->
                 val entry = archive.getEntry(selected.name)
-                    ?: throw RomContentStagingException("archived ROM '${selected.name}' cannot be read")
+                    ?: throw RomContentStagingException(
+                        "archived ROM '${selected.name}' cannot be read",
+                        failure = RomContentStagingFailure.CorruptContent,
+                    )
                 Files.newOutputStream(destination, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
                     .use { output ->
                         archive.getInputStream(entry).use { input ->
@@ -380,20 +519,27 @@ class OkHttpRomContentStager(
             if (count < 0) break
             copied += count
             if (copied > MAX_EXTRACTED_ROM_BYTES) {
-                throw RomContentStagingException("archived ROM '${selected.name}' exceeds the extraction size limit")
+                throw RomContentStagingException(
+                    "archived ROM '${selected.name}' exceeds the extraction size limit",
+                    failure = RomContentStagingFailure.UnsafeContent,
+                )
             }
             // Multiplicative comparison: integer division (`copied / compressedSize`) truncates, so a
             // ratio marginally above MAX_COMPRESSION_RATIO (e.g. copied=601, compressed=3 → 200) would
             // slip through. `compressedSize * MAX_COMPRESSION_RATIO` cannot overflow for any realistic
             // archive size (the 512 MiB extracted-size cap above remains the dominant guard).
             if (copied > compressedSize.coerceAtLeast(1L) * MAX_COMPRESSION_RATIO) {
-                throw RomContentStagingException("archived ROM '${selected.name}' exceeds the compression ratio limit")
+                throw RomContentStagingException(
+                    "archived ROM '${selected.name}' exceeds the compression ratio limit",
+                    failure = RomContentStagingFailure.UnsafeContent,
+                )
             }
             write(buffer, 0, count)
         }
         if (copied == 0L || copied != selected.size) {
             throw RomContentStagingException(
                 "archived ROM '${selected.name}' was truncated: expected ${selected.size} bytes, got $copied",
+                failure = RomContentStagingFailure.CorruptContent,
             )
         }
     }
