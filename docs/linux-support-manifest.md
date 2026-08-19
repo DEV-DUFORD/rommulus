@@ -17,18 +17,31 @@ gate before its gate status below may move to PASSED.
 | --- | --- | --- | --- |
 | `test_core` | `native/player/CMakeLists.txt` (`add_library(test_core SHARED …)`) | PASSED — Phase 8 desktop E2E passed on Ubuntu | yes |
 | `gambatte` | `native/cmake/cores/gambatte-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 per-core gate completed on the Ubuntu box | yes |
-| `fceumm` | `native/cmake/cores/fceumm-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `prosystem` | `native/cmake/cores/prosystem-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `handy` | `native/cmake/cores/handy-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `mednafen_ngp` | `native/cmake/cores/mednafen_ngp-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `mednafen_wswan` | `native/cmake/cores/mednafen_wswan-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `stella` | `native/cmake/cores/stella-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `beetle_pce_fast` | `native/cmake/cores/beetle_pce_fast-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `mgba` | `native/cmake/cores/mgba-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `snes9x` | `native/cmake/cores/snes9x-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `genesis_plus_gx` | `native/cmake/cores/genesis_plus_gx-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box | no |
-| `pcsx_rearmed` | `native/cmake/cores/pcsx_rearmed-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box; Lightrec x86_64 dynarec | no |
-| `mupen64plus_next` | `native/cmake/cores/mupen64plus_next-linux.cmake` (included by `native/player/CMakeLists.txt`) | PENDING — §13.2 gate on Ubuntu box; x86 dynarec + software Angrylion | no |
+| `fceumm` | `native/cmake/cores/fceumm-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `prosystem` | `native/cmake/cores/prosystem-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `handy` | `native/cmake/cores/handy-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `mednafen_ngp` | `native/cmake/cores/mednafen_ngp-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `mednafen_wswan` | `native/cmake/cores/mednafen_wswan-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `stella` | `native/cmake/cores/stella-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `beetle_pce_fast` | `native/cmake/cores/beetle_pce_fast-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `mgba` | `native/cmake/cores/mgba-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `snes9x` | `native/cmake/cores/snes9x-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `genesis_plus_gx` | `native/cmake/cores/genesis_plus_gx-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
+| `pcsx_rearmed` | `native/cmake/cores/pcsx_rearmed-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box; Lightrec x86_64 dynarec (criterion 9 deferred — see note) | yes |
+| `mupen64plus_next` | `native/cmake/cores/mupen64plus_next-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box; x86 dynarec + software Angrylion (criterion 9 deferred — see note) | yes |
+
+### Deferred verification: save round-trip (criterion 9)
+
+All 12 cores above passed the §13.2 per-core gate on the Ubuntu box for criteria
+1–8 and 10–13 (clean compile, no unresolved Android symbols, export check,
+`retro_init`/`retro_deinit` smoke, legal content boot, 10-min frame run,
+software-renderer checks, input mapping, clean unload + repeated launch,
+ASan/UBSan, notice/provenance/package check, manual runtime qualification).
+Criterion 9 (SRAM/file-save round trip) is **DEFERRED** for all 12 pending the
+Linux desktop saves UI, which does not yet exist for easy testing. Saves are
+known to work on Linux from the earlier gambatte gate (SRAM save adoption +
+restore across two Play sessions on the Ubuntu box). When the Linux saves UI
+lands, re-run criterion 9 for each core and record the result here.
 
 ## gambatte — §13.1 Linux build identity
 
