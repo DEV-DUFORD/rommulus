@@ -111,6 +111,7 @@ object DescriptorProfileValidator {
         val warnings = mutableListOf<String>()
 
         for (control in profile.controls) {
+            if (control.id.isPauseMenuControl) continue
             val target = retroTarget(control.target)
             val advertised = descriptors.any { d ->
                 d.port in activePorts &&

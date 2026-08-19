@@ -71,6 +71,46 @@ class RoomControllerConfigRepositoryTest {
     }
 
     @Test
+    fun `clearBinding explicitly unmaps only the selected control slot`() = runTest {
+        repository.clearBinding("snes9x", player0, CoreControlId.BUTTON_A, BindingSlot.PRIMARY)
+        val player = repository.loadCore("snes9x").players.getValue(player0)
+
+        assertThat(player.get(CoreControlId.BUTTON_A, BindingSlot.PRIMARY)).isNull()
+        assertThat(player.get(CoreControlId.BUTTON_A, BindingSlot.SECONDARY))
+            .isEqualTo(snesProfile.defaults.getValue(player0).get(CoreControlId.BUTTON_A, BindingSlot.SECONDARY))
+        assertThat(player.get(CoreControlId.BUTTON_B, BindingSlot.PRIMARY))
+            .isEqualTo(snesProfile.defaults.getValue(player0).get(CoreControlId.BUTTON_B, BindingSlot.PRIMARY))
+    }
+
+    @Test
+    fun `pause menu combination persists independently of core controls`() = runTest {
+        repository.setBinding(
+            "snes9x",
+            player0,
+            CoreControlId.PAUSE_MENU,
+            PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_L2),
+            BindingSlot.PRIMARY,
+        )
+        repository.setBinding(
+            "snes9x",
+            player0,
+            CoreControlId.PAUSE_MENU,
+            PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_R2),
+            BindingSlot.SECONDARY,
+        )
+
+        val config = repository.loadCore("snes9x")
+        val pauseBindings = config.players.getValue(player0).bindings.getValue(CoreControlId.PAUSE_MENU)
+
+        assertThat(pauseBindings.primary)
+            .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_L2))
+        assertThat(pauseBindings.secondary)
+            .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_R2))
+        assertThat(config.toRouterMappings(snesProfile).getValue(player0).pauseMenuCombination)
+            .isNotNull()
+    }
+
+    @Test
     fun `swapBindings exchanges individual slots`() = runTest {
         val secondary = PhysicalBinding.Key(14)
         repository.setBinding(
@@ -162,6 +202,20 @@ class RoomControllerConfigRepositoryTest {
         assertThat(config.players[player0]!![CoreControlId.BUTTON_A])
             .isEqualTo(snesProfile.defaults[player0]!![CoreControlId.BUTTON_A])
         assertThat(config.players[player1]!![CoreControlId.BUTTON_A]).isEqualTo(binding)
+    }
+
+    @Test
+    fun `clearPlayerMappings unmaps every control only for that player`() = runTest {
+        repository.clearPlayerMappings("snes9x", player0)
+        val config = repository.loadCore("snes9x")
+
+        assertThat(config.players.getValue(player0).bindings.values)
+            .allSatisfy { bindings ->
+                assertThat(bindings.primary).isNull()
+                assertThat(bindings.secondary).isNull()
+            }
+        assertThat(config.players.getValue(player1)[CoreControlId.BUTTON_A])
+            .isEqualTo(snesProfile.defaults.getValue(player1)[CoreControlId.BUTTON_A])
     }
 
     @Test

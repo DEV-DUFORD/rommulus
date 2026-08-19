@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -30,14 +31,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -52,6 +57,19 @@ import com.romm.androidtv.library.PlatformSummary
 import com.romm.androidtv.library.SectionState
 import com.romm.androidtv.platform.currentDeviceProfile
 
+/** Identifies the Home shelf that opened a game-detail screen. */
+enum class HomeShelf {
+    CONTINUE_PLAYING,
+    RECENTLY_ADDED,
+    FAVORITES,
+}
+
+/** Horizontal viewport to restore after leaving a game-detail screen. */
+data class HomeShelfViewport(
+    val firstVisibleItemIndex: Int,
+    val firstVisibleItemScrollOffset: Int,
+)
+
 /**
  * Top-level Home content: a vertically scrollable stack of horizontally
  * scrollable shelves. A shelf is omitted entirely when it has no items (e.g.
@@ -64,13 +82,25 @@ import com.romm.androidtv.platform.currentDeviceProfile
 @Composable
 fun NativeHomeScreen(
     viewModel: HomeViewModel,
-    onOpenGameDetail: (Long) -> Unit,
+    onOpenGameDetail: (Long, HomeShelf, HomeShelfViewport) -> Unit,
+    restoreFocusRomId: Long? = null,
+    restoreFocusShelf: HomeShelf? = null,
+    restoreShelfViewport: HomeShelfViewport? = null,
+    onFocusRestored: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val portraitTouchLayout = currentDeviceProfile().usePortraitTouchLayout
+    val homeListState = rememberLazyListState()
+
+    LaunchedEffect(restoreFocusRomId, restoreFocusShelf) {
+        if (restoreFocusRomId != null && restoreFocusShelf != null) {
+            homeListState.scrollToItem(restoreFocusShelf.ordinal)
+        }
+    }
 
     LazyColumn(
+        state = homeListState,
         modifier = modifier
             .fillMaxSize()
             .background(
@@ -93,7 +123,10 @@ fun NativeHomeScreen(
                 title = "Continue Playing",
                 state = uiState.continuePlaying,
                 onRetry = viewModel::retryContinuePlaying,
-                onCardClick = { onOpenGameDetail(it.id) },
+                restoreFocusRomId = restoreFocusRomId.takeIf { restoreFocusShelf == HomeShelf.CONTINUE_PLAYING },
+                restoreViewport = restoreShelfViewport.takeIf { restoreFocusShelf == HomeShelf.CONTINUE_PLAYING },
+                onFocusRestored = onFocusRestored,
+                onCardClick = { rom, viewport -> onOpenGameDetail(rom.id, HomeShelf.CONTINUE_PLAYING, viewport) },
             )
         }
         item {
@@ -101,7 +134,10 @@ fun NativeHomeScreen(
                 title = "Recently Added",
                 state = uiState.recentlyAdded,
                 onRetry = viewModel::retryRecentlyAdded,
-                onCardClick = { onOpenGameDetail(it.id) },
+                restoreFocusRomId = restoreFocusRomId.takeIf { restoreFocusShelf == HomeShelf.RECENTLY_ADDED },
+                restoreViewport = restoreShelfViewport.takeIf { restoreFocusShelf == HomeShelf.RECENTLY_ADDED },
+                onFocusRestored = onFocusRestored,
+                onCardClick = { rom, viewport -> onOpenGameDetail(rom.id, HomeShelf.RECENTLY_ADDED, viewport) },
             )
         }
         item {
@@ -109,7 +145,10 @@ fun NativeHomeScreen(
                 title = "Favorites",
                 state = uiState.favorites,
                 onRetry = viewModel::retryFavorites,
-                onCardClick = { onOpenGameDetail(it.id) },
+                restoreFocusRomId = restoreFocusRomId.takeIf { restoreFocusShelf == HomeShelf.FAVORITES },
+                restoreViewport = restoreShelfViewport.takeIf { restoreFocusShelf == HomeShelf.FAVORITES },
+                onFocusRestored = onFocusRestored,
+                onCardClick = { rom, viewport -> onOpenGameDetail(rom.id, HomeShelf.FAVORITES, viewport) },
             )
         }
     }
@@ -120,9 +159,14 @@ private fun RomShelf(
     title: String,
     state: SectionState<List<LibraryRom>>,
     onRetry: () -> Unit,
-    onCardClick: (LibraryRom) -> Unit,
+    restoreFocusRomId: Long?,
+    restoreViewport: HomeShelfViewport?,
+    onFocusRestored: () -> Unit,
+    onCardClick: (LibraryRom, HomeShelfViewport) -> Unit,
 ) {
     val portraitTouchLayout = currentDeviceProfile().usePortraitTouchLayout
+    val rowState = rememberLazyListState()
+    val cardFocusRequesters = remember { mutableMapOf<Long, FocusRequester>() }
 
     // Omit the shelf entirely once we know it's empty — never render an empty row.
     if (state is SectionState.Loaded && state.data.isEmpty()) return
@@ -154,16 +198,41 @@ private fun RomShelf(
             }
 
             is SectionState.Loaded -> {
+                LaunchedEffect(restoreFocusRomId, restoreViewport, state.data) {
+                    val restoreIndex = restoreFocusRomId?.let { id ->
+                        state.data.indexOfFirst { it.id == id }.takeIf { it >= 0 }
+                    } ?: return@LaunchedEffect
+                    val viewport = restoreViewport
+                    rowState.scrollToItem(
+                        index = viewport?.firstVisibleItemIndex?.coerceIn(0, state.data.lastIndex) ?: restoreIndex,
+                        scrollOffset = viewport?.firstVisibleItemScrollOffset ?: 0,
+                    )
+                    withFrameNanos { }
+                    withFrameNanos { }
+                    cardFocusRequesters[state.data[restoreIndex].id]?.requestFocus()
+                    onFocusRestored()
+                }
                 LazyRow(
+                    state = rowState,
                     contentPadding = PaddingValues(horizontal = if (portraitTouchLayout) 12.dp else 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (portraitTouchLayout) 12.dp else 16.dp),
                 ) {
                     items(state.data, key = { it.id }) { rom ->
+                        val focusRequester = cardFocusRequesters.getOrPut(rom.id) { FocusRequester() }
                         GameCard(
                             title = rom.title,
                             subtitle = rom.platformDisplayName,
                             coverUrl = rom.coverUrl,
-                            onClick = { onCardClick(rom) },
+                            modifier = Modifier.focusRequester(focusRequester),
+                            onClick = {
+                                onCardClick(
+                                    rom,
+                                    HomeShelfViewport(
+                                        firstVisibleItemIndex = rowState.firstVisibleItemIndex,
+                                        firstVisibleItemScrollOffset = rowState.firstVisibleItemScrollOffset,
+                                    ),
+                                )
+                            },
                         )
                     }
                 }

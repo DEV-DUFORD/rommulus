@@ -3,6 +3,7 @@ package com.romm.androidtv.library.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,9 +30,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -40,6 +50,7 @@ import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.SearchUiState
 import com.romm.androidtv.library.SearchViewModel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 
 /**
  * Full search screen for the native browsing UI (UI_REFACTOR.md section 4).
@@ -54,6 +65,8 @@ fun SearchScreen(
     repository: LibraryRepository,
     modifier: Modifier = Modifier,
     onGameSelected: (Long) -> Unit = {},
+    restoreFocusRomId: Long? = null,
+    onFocusRestored: () -> Unit = {},
     hideUnsupportedSystems: () -> Boolean = { true },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
@@ -142,6 +155,8 @@ fun SearchScreen(
                     compact = portraitTouchLayout,
                     onLoadMore = viewModel::loadMore,
                     onGameSelected = onGameSelected,
+                    restoreFocusRomId = restoreFocusRomId,
+                    onFocusRestored = onFocusRestored,
                 )
             }
         }
@@ -204,24 +219,71 @@ private fun SearchResultsGrid(
     compact: Boolean,
     onLoadMore: () -> Unit,
     onGameSelected: (Long) -> Unit,
+    restoreFocusRomId: Long?,
+    onFocusRestored: () -> Unit,
 ) {
     LoadMoreOnScrollEnd(gridState = gridState, itemCount = roms.size, onLoadMore = onLoadMore)
+    val cardFocusRequesters = remember { mutableMapOf<Long, FocusRequester>() }
+    val focusScope = rememberCoroutineScope()
+    val cardWidth = if (compact) 112.dp else 136.dp
+    val itemSpacing = if (compact) 12.dp else 16.dp
 
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Adaptive(minSize = if (compact) 112.dp else 136.dp),
-        contentPadding = PaddingValues(bottom = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 16.dp),
-        verticalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 16.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        items(roms, key = { it.id }) { rom ->
-            GameCard(
-                title = rom.title,
-                subtitle = rom.platformDisplayName,
-                coverUrl = rom.coverUrl,
-                onClick = { onGameSelected(rom.id) },
-            )
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val columnCount = maxOf(1, ((maxWidth + itemSpacing) / (cardWidth + itemSpacing)).toInt())
+
+        LaunchedEffect(restoreFocusRomId, roms) {
+            val restoreIndex = restoreFocusRomId?.let { id ->
+                roms.indexOfFirst { it.id == id }.takeIf { it >= 0 }
+            } ?: return@LaunchedEffect
+            gridState.scrollToItem(restoreIndex)
+            withFrameNanos { }
+            withFrameNanos { }
+            cardFocusRequesters[roms[restoreIndex].id]?.requestFocus()
+            onFocusRestored()
+        }
+
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Adaptive(minSize = cardWidth),
+            contentPadding = PaddingValues(bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(itemSpacing),
+            verticalArrangement = Arrangement.spacedBy(itemSpacing),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(roms, key = { it.id }) { rom ->
+                val itemIndex = roms.indexOf(rom)
+                val focusRequester = cardFocusRequesters.getOrPut(rom.id) { FocusRequester() }
+                GameCard(
+                    title = rom.title,
+                    subtitle = rom.platformDisplayName,
+                    coverUrl = rom.coverUrl,
+                    modifier = Modifier
+                        .focusRequester(focusRequester)
+                        .onPreviewKeyEvent { event ->
+                            val moveDown = event.key == Key.DirectionDown
+                            val moveUp = event.key == Key.DirectionUp
+                            if (event.type != KeyEventType.KeyDown || (!moveDown && !moveUp)) {
+                                return@onPreviewKeyEvent false
+                            }
+                            val targetIndex = positionalGridNeighbor(
+                                currentIndex = itemIndex,
+                                columnCount = columnCount,
+                                itemCount = roms.size,
+                                moveDown = moveDown,
+                            ) ?: return@onPreviewKeyEvent false
+                            focusScope.launch {
+                                if (gridState.layoutInfo.visibleItemsInfo.none { it.index == targetIndex }) {
+                                    gridState.scrollToItem(targetIndex)
+                                    withFrameNanos { }
+                                    withFrameNanos { }
+                                }
+                                cardFocusRequesters[roms[targetIndex].id]?.requestFocus()
+                            }
+                            true
+                        },
+                    onClick = { onGameSelected(rom.id) },
+                )
+            }
         }
     }
 }

@@ -11,3 +11,6 @@ data class CoreControllerConfig(
     val coreId: String,
     val players: Map<Int, PlayerControllerConfig>,
 )
+
+internal val CoreControlId.isPauseMenuControl: Boolean
+    get() = this == CoreControlId.PAUSE_MENU

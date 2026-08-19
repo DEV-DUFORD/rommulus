@@ -74,6 +74,8 @@ enum class CoreControlId(val id: String) {
     OPTION_1("option_1"),
     OPTION_2("option_2"),
     PAUSE("pause"),
+    /** App-level two-button shortcut; never forwarded to a Libretro core. */
+    PAUSE_MENU("pause_menu"),
 
     // WonderSwan
     X1("x1"),

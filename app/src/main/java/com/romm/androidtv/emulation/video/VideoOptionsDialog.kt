@@ -50,7 +50,6 @@ import androidx.compose.ui.window.DialogProperties
 import com.romm.androidtv.R
 import com.romm.androidtv.library.ui.RommTvColors
 import com.romm.androidtv.library.ui.TvOutlinedButton
-import com.romm.androidtv.platform.rememberDeviceProfile
 
 @Composable
 private fun VideoOptionToggleRow(
@@ -132,16 +131,17 @@ private fun VideoOptionToggleRow(
 internal fun VideoOptionsDialog(
     scanlinesEnabled: Boolean,
     integerScalingEnabled: Boolean,
+    sharpFilterEnabled: Boolean,
     persistenceError: Boolean,
     onScanlinesChanged: (Boolean) -> Boolean,
     onIntegerScalingChanged: (Boolean) -> Boolean,
+    onSharpFilterChanged: (Boolean) -> Boolean,
     onDismiss: () -> Unit,
 ) {
-    val deviceProfile = rememberDeviceProfile()
     val scrollState = rememberScrollState()
-    val shouldScroll = deviceProfile.hasTouchscreen && deviceProfile.isCompactHeight
     val scanlinesFocusRequester = remember { FocusRequester() }
     val integerScalingFocusRequester = remember { FocusRequester() }
+    val sharpFilterFocusRequester = remember { FocusRequester() }
     var firstToggleReady by remember { mutableStateOf(false) }
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.7f
 
@@ -158,7 +158,7 @@ internal fun VideoOptionsDialog(
         Box(
             modifier = Modifier
                 .width(540.dp)
-                .height(maxHeight)
+                .heightIn(max = maxHeight)
                 .clip(RoundedCornerShape(16.dp))
                 .background(RommTvColors.NightLo)
                 .border(
@@ -170,13 +170,7 @@ internal fun VideoOptionsDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .then(
-                        if (shouldScroll) {
-                            Modifier.verticalScroll(scrollState)
-                        } else {
-                            Modifier
-                        },
-                    ),
+                    .verticalScroll(scrollState),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
@@ -208,6 +202,17 @@ internal fun VideoOptionsDialog(
                     checked = integerScalingEnabled,
                     onChanged = onIntegerScalingChanged,
                     focusRequester = integerScalingFocusRequester,
+                    onReady = { /* no-op, only track first */ },
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                VideoOptionToggleRow(
+                    label = stringResource(R.string.video_options_sharp_filter),
+                    description = stringResource(R.string.video_options_sharp_filter_description),
+                    checked = sharpFilterEnabled,
+                    onChanged = onSharpFilterChanged,
+                    focusRequester = sharpFilterFocusRequester,
                     onReady = { /* no-op, only track first */ },
                 )
 

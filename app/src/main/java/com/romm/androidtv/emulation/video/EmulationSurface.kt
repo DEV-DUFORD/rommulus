@@ -1,6 +1,7 @@
 package com.romm.androidtv.emulation.video
 
 import android.content.Context
+import android.graphics.PixelFormat
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.layout.Box
@@ -56,9 +57,31 @@ internal fun computeIntegerScale(
 private class EmulationSurfaceView(context: Context) : SurfaceView(context) {
     private var bufferWidth = 0
     private var bufferHeight = 0
+    private var sourceWidth = 0
+    private var sourceHeight = 0
+    private var sharpFilterEnabled = false
 
-    fun setBufferSize(width: Int, height: Int) {
-        if (width <= 0 || height <= 0 || (width == bufferWidth && height == bufferHeight)) return
+    init {
+        holder.setFormat(PixelFormat.RGBA_8888)
+    }
+
+    fun setVideoConfiguration(width: Int, height: Int, sharpFilterEnabled: Boolean) {
+        sourceWidth = width
+        sourceHeight = height
+        this.sharpFilterEnabled = sharpFilterEnabled
+        applyBufferSize()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        applyBufferSize()
+    }
+
+    private fun applyBufferSize() {
+        if (sourceWidth <= 0 || sourceHeight <= 0) return
+        val width = if (sharpFilterEnabled && this.width > 0) this.width else sourceWidth
+        val height = if (sharpFilterEnabled && this.height > 0) this.height else sourceHeight
+        if (width == bufferWidth && height == bufferHeight) return
         bufferWidth = width
         bufferHeight = height
         holder.setFixedSize(width, height)
@@ -86,9 +109,9 @@ private class EmulationSurfaceView(context: Context) : SurfaceView(context) {
  * clean integer multiple of the core's native resolution that fits entirely on
  * screen. Only the VERTICAL scale is guaranteed integer: the horizontal width
  * is aspect-corrected (multiplied by [displayAspectRatio]) to preserve the
- * display aspect ratio when it differs from the native pixel aspect. The buffer
- * is sized to match the box exactly so the compositor maps each buffer pixel
- * 1:1 to the box (no fractional upscale or downscale).
+ * display aspect ratio when it differs from the native pixel aspect. Sharp
+ * filtering remains independent: unless [sharpFilterEnabled] is on, the
+ * compositor scales the native-resolution buffer normally.
  */
 @Composable
 fun EmulationSurface(
@@ -98,6 +121,7 @@ fun EmulationSurface(
     displayAspectRatio: Float,
     scanlinesEnabled: Boolean = false,
     integerScalingEnabled: Boolean = false,
+    sharpFilterEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val aspect = resolveDisplayAspectRatio(coreWidth, coreHeight, displayAspectRatio)
@@ -114,10 +138,9 @@ fun EmulationSurface(
 
                 // Size the box from the buffer (not the other way around) so the buffer can
                 // never exceed the box: vertical is an integer multiple of coreHeight, and the
-                // width is aspect-corrected (coreHeight * aspect * scale). This preserves the
-                // display aspect ratio while keeping the compositor at a 1:1 pixel mapping.
+                // width is aspect-corrected (coreHeight * aspect * scale), preserving the
+                // display aspect ratio while keeping the display box at an integer scale.
                 val scaledWidthPx = if (useIntegerScale) (coreHeight * aspect * scale).roundToInt() else coreWidth
-                val bufferW = scaledWidthPx
                 val bufferH = if (useIntegerScale) coreHeight * scale else coreHeight
 
                 // When integer scaling is active and valid, size the box to exact scaled px;
@@ -156,7 +179,7 @@ fun EmulationSurface(
                             }
                         },
                         update = { surfaceView ->
-                            surfaceView.setBufferSize(bufferW, bufferH)
+                            surfaceView.setVideoConfiguration(coreWidth, coreHeight, sharpFilterEnabled)
                         },
                         modifier = Modifier.matchParentSize(),
                     )
@@ -191,7 +214,7 @@ fun EmulationSurface(
                         }
                     },
                     update = { surfaceView ->
-                        surfaceView.setBufferSize(coreWidth, coreHeight)
+                        surfaceView.setVideoConfiguration(coreWidth, coreHeight, sharpFilterEnabled)
                     },
                     modifier = Modifier.matchParentSize(),
                 )

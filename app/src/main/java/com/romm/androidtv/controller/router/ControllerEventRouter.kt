@@ -43,6 +43,10 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     private val _physicalInputActivity = MutableSharedFlow<Int>(extraBufferCapacity = 8)
     val physicalInputActivity: SharedFlow<Int> = _physicalInputActivity.asSharedFlow()
 
+    private val _pauseMenuRequests = MutableSharedFlow<Int>(extraBufferCapacity = 8)
+    /** Emits a slot index once when that controller newly holds its pause-menu combination. */
+    val pauseMenuRequests: SharedFlow<Int> = _pauseMenuRequests.asSharedFlow()
+
     /** Whether the router is actively capturing events. */
     private var isActive = false
 
@@ -57,6 +61,9 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
 
     /** Current axis values per device ID. */
     private val axisValuesPerDevice = mutableMapOf<Int, MutableMap<Int, Float>>()
+
+    /** Whether a device's configured pause combination was pressed on the prior rebuild. */
+    private val pauseCombinationPressedPerDevice = mutableMapOf<Int, Boolean>()
 
     /** Capability-resolved physical-to-logical axes per device ID. */
     private val resolvedAxesPerDevice = mutableMapOf<Int, Map<Int, LogicalControl>>()
@@ -92,6 +99,21 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
             !deviceIdToSignature[deviceId].isAndroidTvVirtualController()
         ) {
             _physicalInputActivity.tryEmit(deviceId)
+        }
+    }
+
+    /**
+     * Releases live input while preserving connected devices and their mappings.
+     * Pausing stops normal event routing, so this prevents the key-up events for
+     * a pause shortcut from being missed and leaving core buttons stuck on resume.
+     */
+    fun releaseAllInputs() {
+        pressedKeysPerDevice.values.forEach { it.clear() }
+        hatDpadKeysPerDevice.values.forEach { it.clear() }
+        axisValuesPerDevice.values.forEach { it.clear() }
+        pauseCombinationPressedPerDevice.keys.forEach { pauseCombinationPressedPerDevice[it] = false }
+        for (slotIndex in _slotsFlow.value.indices) {
+            updateSlot(slotIndex) { it.updateSnapshot(GamepadSnapshot.EMPTY) }
         }
     }
 
@@ -163,6 +185,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         pressedKeysPerDevice.clear()
         hatDpadKeysPerDevice.clear()
         axisValuesPerDevice.clear()
+        pauseCombinationPressedPerDevice.clear()
         resolvedAxesPerDevice.clear()
         deviceIdToSlotIndex.clear()
         deviceIdToSignature.clear()
@@ -188,6 +211,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         pressedKeysPerDevice[deviceId] = mutableSetOf()
         hatDpadKeysPerDevice[deviceId] = mutableSetOf()
         axisValuesPerDevice[deviceId] = mutableMapOf()
+        pauseCombinationPressedPerDevice[deviceId] = false
 
         // Assign to slot using deterministic policy
         assignDeviceToSlot(deviceId, signature)
@@ -218,6 +242,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         pressedKeysPerDevice.remove(deviceId)
         hatDpadKeysPerDevice.remove(deviceId)
         axisValuesPerDevice.remove(deviceId)
+        pauseCombinationPressedPerDevice.remove(deviceId)
         resolvedAxesPerDevice.remove(deviceId)
 
         val slotIdx = deviceIdToSlotIndex.remove(deviceId)
@@ -512,6 +537,24 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
 
         val snapshot = GamepadSnapshot.fromPhysicalInput(mergedKeys, axisValues, mapping)
         updateSlot(slotIdx) { it.updateSnapshot(snapshot) }
+        evaluatePauseMenuCombination(deviceId, slotIdx, mapping.pauseMenuCombination, mergedKeys, axisValues)
+    }
+
+    private fun evaluatePauseMenuCombination(
+        deviceId: Int,
+        slotIndex: Int,
+        combination: PauseMenuCombination?,
+        pressedKeys: Set<Int>,
+        axisValues: Map<Int, Float>,
+    ) {
+        val pressed = combination?.let {
+            isPauseMenuCombinationPressed(it, pressedKeys, axisValues)
+        } ?: false
+        val wasPressed = pauseCombinationPressedPerDevice[deviceId] ?: false
+        pauseCombinationPressedPerDevice[deviceId] = pressed
+        if (pressed && !wasPressed) {
+            _pauseMenuRequests.tryEmit(slotIndex)
+        }
     }
 
     /**
@@ -580,6 +623,17 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
                 )
             }
         }
+        mapping.pauseMenuCombination
+            ?.let { listOf(it.first, it.second) }
+            ?.filterIsInstance<PhysicalControl.AxisDirection>()
+            ?.forEach { control ->
+                if (control.axis in supportedAxes) {
+                    resolved.putIfAbsent(
+                        control.axis,
+                        AXIS_TO_CONTROL[control.axis] ?: LogicalControl.AXIS_LX,
+                    )
+                }
+            }
         return resolved
     }
 
@@ -674,9 +728,43 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
             effectiveMapping
         )
         updateSlot(slotIndex) { it.remap(newMapping).updateSnapshot(snapshot) }
+        if (deviceId != null) {
+            evaluatePauseMenuCombination(
+                deviceId,
+                slotIndex,
+                newMapping.pauseMenuCombination,
+                pressedKeys + hatKeys,
+                axisValues,
+            )
+        }
     }
 
 }
+
+/**
+ * True when both configured inputs are active. Axis values are normalized by
+ * [ControllerEventRouter] before reaching this function; a half-axis becomes
+ * a button at the same 0.5 threshold used by the Libretro mapping path.
+ */
+internal fun isPauseMenuCombinationPressed(
+    combination: PauseMenuCombination,
+    pressedKeys: Set<Int>,
+    axisValues: Map<Int, Float>,
+): Boolean = combination.first.isPressed(pressedKeys, axisValues) &&
+    combination.second.isPressed(pressedKeys, axisValues)
+
+private fun PhysicalControl.isPressed(
+    pressedKeys: Set<Int>,
+    axisValues: Map<Int, Float>,
+): Boolean = when (this) {
+    is PhysicalControl.Key -> keyCode in pressedKeys
+    is PhysicalControl.AxisDirection -> {
+        val value = axisValues[axis] ?: 0f
+        if (polarity > 0) value >= PAUSE_AXIS_PRESS_THRESHOLD else value <= -PAUSE_AXIS_PRESS_THRESHOLD
+    }
+}
+
+private const val PAUSE_AXIS_PRESS_THRESHOLD = 0.5f
 
 internal fun physicalDeviceIdForEffectiveSlot(
     slotIndex: Int,

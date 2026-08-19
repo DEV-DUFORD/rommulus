@@ -70,6 +70,7 @@
             android:process=":emulation"
             android:exported="false"
             android:hardwareAccelerated="true"
+            android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|uiMode|density"
             android:screenOrientation="sensorLandscape" />
 
         <!--

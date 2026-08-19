@@ -49,8 +49,6 @@ public:
 private:
     std::mutex mutex_;
     ANativeWindow* window_ = nullptr;
-    int32_t lastBufferWidth_ = 0;
-    int32_t lastBufferHeight_ = 0;
 };
 
 }  // namespace romm

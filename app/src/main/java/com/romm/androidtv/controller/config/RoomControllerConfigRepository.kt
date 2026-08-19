@@ -34,6 +34,21 @@ class RoomControllerConfigRepository(
         dao.upsert(ControllerBindingCodec.encode(coreId, playerIndex, controlId, binding, bindingSlot))
     }
 
+    override suspend fun clearBinding(
+        coreId: String,
+        playerIndex: Int,
+        controlId: CoreControlId,
+        bindingSlot: BindingSlot,
+    ) {
+        dao.upsert(
+            ControllerBindingCodec.encodeUnmapped(
+                coreId,
+                playerIndex,
+                BindingAddress(controlId, bindingSlot),
+            ),
+        )
+    }
+
     override suspend fun swapBindings(
         coreId: String,
         playerIndex: Int,
@@ -72,6 +87,7 @@ class RoomControllerConfigRepository(
             val effective = resolve(coreId, playerRows).players[playerIndex] ?: PlayerControllerConfig()
             val updates = mutableListOf<ControllerBindingEntity>()
             for ((controlId, bindings) in effective.bindings) {
+                if (controlId.isPauseMenuControl || address.controlId.isPauseMenuControl) continue
                 for ((slot, currentBinding) in bindings.entries()) {
                     val currentAddress = BindingAddress(controlId, slot)
                     if (currentAddress != address && currentBinding == binding) {
@@ -90,6 +106,21 @@ class RoomControllerConfigRepository(
 
     override suspend fun resetPlayer(coreId: String, playerIndex: Int) {
         dao.deletePlayer(coreId, playerIndex)
+    }
+
+    override suspend fun clearPlayerMappings(coreId: String, playerIndex: Int) {
+        val profile = profiles.byCoreId(coreId) ?: return
+        dao.upsertAll(
+            profile.controls.flatMap { control ->
+                BindingSlot.entries.map { slot ->
+                    ControllerBindingCodec.encodeUnmapped(
+                        coreId,
+                        playerIndex,
+                        BindingAddress(control.id, slot),
+                    )
+                }
+            },
+        )
     }
 
     override suspend fun resetCore(coreId: String) {

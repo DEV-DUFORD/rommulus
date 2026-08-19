@@ -46,6 +46,31 @@ data class AxisDirection(
     }
 }
 
+/** A physical digital input used by an app-level controller shortcut. */
+sealed interface PhysicalControl {
+    data class Key(val keyCode: Int) : PhysicalControl
+    data class AxisDirection(val axis: Int, val polarity: Int) : PhysicalControl {
+        init {
+            require(polarity == -1 || polarity == 1) {
+                "polarity must be -1 or 1, was $polarity"
+            }
+        }
+    }
+}
+
+/**
+ * Two physical inputs that must be held together to open the in-game pause
+ * menu. This is deliberately separate from a core's RetroPad mappings.
+ */
+data class PauseMenuCombination(
+    val first: PhysicalControl,
+    val second: PhysicalControl,
+) {
+    init {
+        require(first != second) { "pause menu combination requires two distinct inputs" }
+    }
+}
+
 /**
  * Mapping configuration for a single logical player slot.
  *
@@ -64,7 +89,10 @@ data class ControllerMapping(
     val axisConfigs: Map<LogicalControl, AxisConfig> = emptyMap(),
 
     /** Physical axis+polarity -> digital LogicalControl mapping (half-axis to button). */
-    val axisDirections: Map<AxisDirection, LogicalControl> = emptyMap()
+    val axisDirections: Map<AxisDirection, LogicalControl> = emptyMap(),
+
+    /** Optional app-level two-button shortcut, excluded from RetroPad output. */
+    val pauseMenuCombination: PauseMenuCombination? = null,
 ) {
     /** Retrieve the deadzone/inversion config for a given logical axis. Defaults to standard. */
     fun getAxisConfig(logical: LogicalControl): AxisConfig =
@@ -103,7 +131,8 @@ data class ControllerMapping(
                 buttons = newButtons,
                 axes = mapping.axes,
                 axisConfigs = mapping.axisConfigs,
-                axisDirections = mapping.axisDirections
+                axisDirections = mapping.axisDirections,
+                pauseMenuCombination = mapping.pauseMenuCombination,
             )
         }
     }

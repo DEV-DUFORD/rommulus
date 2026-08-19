@@ -1,10 +1,7 @@
 #include "video_output.h"
 
-#include <android/log.h>
 #include <algorithm>
-
-#define LOG_TAG "romm_video_output"
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#include <vector>
 
 namespace romm {
 
@@ -62,10 +59,6 @@ void VideoOutput::attachWindow(ANativeWindow* window) {
         ANativeWindow_release(window_);
     }
     window_ = window;
-    // Force ANativeWindow_setBuffersGeometry to run again on the next frame,
-    // since a fresh Surface has no geometry set yet.
-    lastBufferWidth_ = 0;
-    lastBufferHeight_ = 0;
 }
 
 void VideoOutput::detachWindow() {
@@ -83,18 +76,6 @@ void VideoOutput::submitFrame(const void* data, unsigned width, unsigned height,
     if (data == nullptr) return;  // frame duplication: keep showing the last posted buffer
     if (width == 0 || height == 0) return;
 
-    const auto bufferWidth = static_cast<int32_t>(width);
-    const auto bufferHeight = static_cast<int32_t>(height);
-    if (bufferWidth != lastBufferWidth_ || bufferHeight != lastBufferHeight_) {
-        if (ANativeWindow_setBuffersGeometry(window_, bufferWidth, bufferHeight,
-                                              WINDOW_FORMAT_RGBA_8888) != 0) {
-            LOGE("ANativeWindow_setBuffersGeometry failed for %dx%d", bufferWidth, bufferHeight);
-            return;
-        }
-        lastBufferWidth_ = bufferWidth;
-        lastBufferHeight_ = bufferHeight;
-    }
-
     ANativeWindow_Buffer buffer;
     if (ANativeWindow_lock(window_, &buffer, nullptr) != 0) {
         // Transient failure (e.g. compositor busy). Drop this frame rather
@@ -104,24 +85,68 @@ void VideoOutput::submitFrame(const void* data, unsigned width, unsigned height,
 
     const auto* srcBytes = static_cast<const uint8_t*>(data);
     auto* dstBytes = static_cast<uint8_t*>(buffer.bits);
-    const uint32_t rows = std::min(static_cast<uint32_t>(height), static_cast<uint32_t>(buffer.height));
-    const uint32_t cols = std::min(static_cast<uint32_t>(width), static_cast<uint32_t>(buffer.width));
+    const uint32_t rows = static_cast<uint32_t>(buffer.height);
+    const uint32_t cols = static_cast<uint32_t>(buffer.width);
     const size_t dstStrideBytes = static_cast<size_t>(buffer.stride) * 4;
 
+    if (rows == height && cols == width) {
+        for (uint32_t y = 0; y < rows; ++y) {
+            const uint8_t* srcRow = srcBytes + static_cast<size_t>(y) * pitch;
+            auto* dstRow = reinterpret_cast<uint32_t*>(
+                dstBytes + static_cast<size_t>(y) * dstStrideBytes);
+            switch (format) {
+                case RETRO_PIXEL_FORMAT_0RGB1555:
+                    convertRow0RGB1555(reinterpret_cast<const uint16_t*>(srcRow), dstRow, cols);
+                    break;
+                case RETRO_PIXEL_FORMAT_RGB565:
+                    convertRowRGB565(reinterpret_cast<const uint16_t*>(srcRow), dstRow, cols);
+                    break;
+                case RETRO_PIXEL_FORMAT_XRGB8888:
+                default:
+                    convertRowXRGB8888(reinterpret_cast<const uint32_t*>(srcRow), dstRow, cols);
+                    break;
+            }
+        }
+        ANativeWindow_unlockAndPost(window_);
+        return;
+    }
+
+    std::vector<uint32_t> sourceXs(cols);
+    for (uint32_t x = 0; x < cols; ++x) {
+        sourceXs[x] = std::min(
+            static_cast<uint32_t>((static_cast<uint64_t>(x) * width) / cols),
+            static_cast<uint32_t>(width - 1));
+    }
+
     for (uint32_t y = 0; y < rows; ++y) {
-        const uint8_t* srcRow = srcBytes + static_cast<size_t>(y) * pitch;
+        const uint32_t sourceY = std::min(
+            static_cast<uint32_t>((static_cast<uint64_t>(y) * height) / rows),
+            static_cast<uint32_t>(height - 1));
+        const uint8_t* srcRow = srcBytes + static_cast<size_t>(sourceY) * pitch;
         auto* dstRow = reinterpret_cast<uint32_t*>(dstBytes + static_cast<size_t>(y) * dstStrideBytes);
-        switch (format) {
-            case RETRO_PIXEL_FORMAT_0RGB1555:
-                convertRow0RGB1555(reinterpret_cast<const uint16_t*>(srcRow), dstRow, cols);
-                break;
-            case RETRO_PIXEL_FORMAT_RGB565:
-                convertRowRGB565(reinterpret_cast<const uint16_t*>(srcRow), dstRow, cols);
-                break;
-            case RETRO_PIXEL_FORMAT_XRGB8888:
-            default:
-                convertRowXRGB8888(reinterpret_cast<const uint32_t*>(srcRow), dstRow, cols);
-                break;
+        for (uint32_t x = 0; x < cols; ++x) {
+            const uint32_t sourceX = sourceXs[x];
+            switch (format) {
+                case RETRO_PIXEL_FORMAT_0RGB1555:
+                    convertRow0RGB1555(
+                        reinterpret_cast<const uint16_t*>(srcRow) + sourceX,
+                        dstRow + x,
+                        1);
+                    break;
+                case RETRO_PIXEL_FORMAT_RGB565:
+                    convertRowRGB565(
+                        reinterpret_cast<const uint16_t*>(srcRow) + sourceX,
+                        dstRow + x,
+                        1);
+                    break;
+                case RETRO_PIXEL_FORMAT_XRGB8888:
+                default:
+                    convertRowXRGB8888(
+                        reinterpret_cast<const uint32_t*>(srcRow) + sourceX,
+                        dstRow + x,
+                        1);
+                    break;
+            }
         }
     }
 

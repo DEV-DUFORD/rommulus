@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import com.romm.androidtv.controller.config.PhysicalBinding
 import com.romm.androidtv.controller.policy.SourceFilterPolicy
+import com.romm.androidtv.controller.util.AxisNormalizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -212,14 +213,33 @@ class ControllerBindingCaptureCoordinator(
         if (deviceId !in eligibleDeviceIds) return null
         if (!isGamepadSource(sourceProvider(deviceId))) return null
 
-        val axisConstants = InputDevice.getDevice(deviceId)?.motionRanges?.map { it.axis }.orEmpty()
+        val ranges = InputDevice.getDevice(deviceId)?.motionRanges.orEmpty()
         for (h in 0 until event.historySize) {
             onAxisSamples(
                 deviceId,
-                axisConstants.map { it to event.getHistoricalAxisValue(it, h) },
+                ranges.map { range ->
+                    range.axis to normalizeCaptureAxis(
+                        range.axis,
+                        event.getHistoricalAxisValue(range.axis, h),
+                        range.min,
+                        range.max,
+                        range.flat,
+                    )
+                },
             )
         }
-        onAxisSamples(deviceId, axisConstants.map { it to event.getAxisValue(it) })
+        onAxisSamples(
+            deviceId,
+            ranges.map { range ->
+                range.axis to normalizeCaptureAxis(
+                    range.axis,
+                    event.getAxisValue(range.axis),
+                    range.min,
+                    range.max,
+                    range.flat,
+                )
+            },
+        )
         return true
     }
 
@@ -397,6 +417,23 @@ class ControllerBindingCaptureCoordinator(
     }
 
     /**
+     * MotionEvent trigger ranges are not uniform: some devices rest at zero,
+     * while others rest at -1. Normalize them before neutral gating so L2/R2
+     * can always arm and capture. Stick axes retain their signed normalization.
+     */
+    private fun normalizeCaptureAxis(
+        axis: Int,
+        rawValue: Float,
+        min: Float,
+        max: Float,
+        flat: Float,
+    ): Float = if (axis in TRIGGER_AXES) {
+        AxisNormalizer.normalizeTrigger(rawValue, min, max, flat)
+    } else {
+        AxisNormalizer.normalize(rawValue, min, max, flat)
+    }
+
+    /**
      * True only for real gamepad/joystick devices (rule 10). Delegates the
      * controller classification to the codebase-wide [SourceFilterPolicy]
      * (consistent with `ControllerEventRouter`) and additionally requires the
@@ -422,5 +459,12 @@ class ControllerBindingCaptureCoordinator(
 
         const val SOURCE_GAMEPAD = InputDevice.SOURCE_GAMEPAD
         const val SOURCE_JOYSTICK = InputDevice.SOURCE_JOYSTICK
+
+        private val TRIGGER_AXES = setOf(
+            MotionEvent.AXIS_LTRIGGER,
+            MotionEvent.AXIS_RTRIGGER,
+            MotionEvent.AXIS_BRAKE,
+            MotionEvent.AXIS_GAS,
+        )
     }
 }

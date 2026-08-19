@@ -16,6 +16,7 @@ import com.romm.androidtv.controller.config.CoreControllerProfile
 import com.romm.androidtv.controller.config.CoreControlId
 import com.romm.androidtv.controller.config.InputKind
 import com.romm.androidtv.controller.config.PhysicalBinding
+import com.romm.androidtv.controller.config.isPauseMenuControl
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +65,9 @@ internal fun decideApply(
     playerBindings: Map<CoreControlId, ControlBindings>,
 ): BindingApplyDecision {
     val colliding = playerBindings.entries.firstNotNullOfOrNull { (controlId, bindings) ->
+        if (controlId.isPauseMenuControl || targetAddress.controlId.isPauseMenuControl) {
+            return@firstNotNullOfOrNull null
+        }
         bindings.entries()
             .firstOrNull { (slot, binding) ->
                 BindingAddress(controlId, slot) != targetAddress && binding == capturedBinding
@@ -146,6 +150,8 @@ data class ControllerConfigUiState(
     val conflict: ConflictDialogInfo? = null,
     /** True while the "Reset All Controllers" confirmation is pending. */
     val resetAllAwaitingConfirmation: Boolean = false,
+    /** True while the selected controller's clear-mappings confirmation is pending. */
+    val clearMappingsAwaitingConfirmation: Boolean = false,
     /** Brief non-blocking confirmation such as "A mapped to Button X". */
     val lastAppliedMessage: String? = null,
 )
@@ -299,6 +305,20 @@ class ControllerSettingsViewModel(
         )
     }
 
+    fun clearPendingBinding() {
+        val address = pendingAddress ?: return
+        val playerIndex = _uiState.value.selectedPlayerIndex
+        val controlLabel = profile.controls.firstOrNull { it.id == address.controlId }?.label ?: address.controlId.id
+        pendingAddress = null
+        pendingConflictBinding = null
+        captureCoordinator.cancel()
+        _uiState.update { it.copy(capture = null, conflict = null) }
+        viewModelScope.launch {
+            repository.clearBinding(coreId, playerIndex, address.controlId, address.slot)
+            showMessage("$controlLabel ${address.slot.displayName.lowercase()} mapping cleared")
+        }
+    }
+
     fun dismissCaptureDialog() {
         cancelCapture()
         pendingAddress = null
@@ -345,6 +365,23 @@ class ControllerSettingsViewModel(
             repository.resetPlayer(coreId, playerIndex)
             showMessage("Controller ${playerIndex + 1} reset to defaults")
         }
+    }
+
+    fun requestClearMappings() {
+        _uiState.update { it.copy(clearMappingsAwaitingConfirmation = true) }
+    }
+
+    fun confirmClearMappings() {
+        val playerIndex = _uiState.value.selectedPlayerIndex
+        _uiState.update { it.copy(clearMappingsAwaitingConfirmation = false) }
+        viewModelScope.launch {
+            repository.clearPlayerMappings(coreId, playerIndex)
+            showMessage("Controller ${playerIndex + 1} mappings cleared")
+        }
+    }
+
+    fun cancelClearMappings() {
+        _uiState.update { it.copy(clearMappingsAwaitingConfirmation = false) }
     }
 
     /** Reset All Controllers — requires confirmation first. */

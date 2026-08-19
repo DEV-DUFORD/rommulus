@@ -37,6 +37,14 @@ interface ControllerConfigRepository {
         bindingSlot: BindingSlot = BindingSlot.PRIMARY,
     )
 
+    /** Explicitly unmap one binding slot without restoring its catalog default. */
+    suspend fun clearBinding(
+        coreId: String,
+        playerIndex: Int,
+        controlId: CoreControlId,
+        bindingSlot: BindingSlot,
+    )
+
     /**
      * Atomically swap the bindings of [controlIdA] and [controlIdB] within one player.
      *
@@ -66,6 +74,13 @@ interface ControllerConfigRepository {
 
     /** Delete every override for one player port of [coreId]; defaults are restored on next read. */
     suspend fun resetPlayer(coreId: String, playerIndex: Int)
+
+    /**
+     * Explicitly unmap every control for one player port of [coreId], including
+     * the pause-menu shortcut. Unlike [resetPlayer], this does not restore
+     * catalog defaults.
+     */
+    suspend fun clearPlayerMappings(coreId: String, playerIndex: Int)
 
     /** Delete every override for [coreId] across all players; defaults are restored on next read. */
     suspend fun resetCore(coreId: String)

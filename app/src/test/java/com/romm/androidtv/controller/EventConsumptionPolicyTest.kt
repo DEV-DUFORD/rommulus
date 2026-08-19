@@ -65,6 +65,17 @@ class EventConsumptionPolicyTest {
         }
 
         @Test
+        @DisplayName("KEYCODE_BUTTON_L2 and KEYCODE_BUTTON_R2 are consumed")
+        fun `trigger buttons`() {
+            assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(
+                android.view.KeyEvent.KEYCODE_BUTTON_L2,
+            )).isTrue()
+            assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(
+                android.view.KeyEvent.KEYCODE_BUTTON_R2,
+            )).isTrue()
+        }
+
+        @Test
         @DisplayName("KEYCODE_BUTTON_SELECT is consumed")
         fun `button select`() {
             assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(
