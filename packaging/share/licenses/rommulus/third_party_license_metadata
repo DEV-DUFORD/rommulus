@@ -1,0 +1,46 @@
+# RomMulus — third-party license metadata (desktop / JVM closure)
+#
+# Scope: the :desktop Gradle module and its first-party :shared:* project
+# dependencies — i.e. the JVM dependency closure shipped in
+# lib/rommulus/app.jar — as declared in desktop/build.gradle.kts and
+# shared/*/build.gradle.kts.
+#
+# STATUS (pre-release): the list below covers every DIRECT dependency declared
+# in those build files (verified against them). The FULL transitive closure —
+# Compose Multiplatform desktop runtime jars + Skiko native libraries, the JNR
+# FFI libraries pulled in by dbus-java-transport-jnr-unixsocket, okio, and the
+# exact Kotlin stdlib versions — has NOT yet been enumerated from a Gradle
+# runtimeClasspath report and MUST be finalized before release (see
+# packaging/README.md, "Known follow-ups").
+#
+# HISTORY: this file previously listed the ANDROID app's dependency tree
+# (AndroidX leanback, TV Material, Room, WorkManager, coil, Accompanist,
+# AndroidSVG, ...). Those artifacts are not part of the Linux desktop bundle;
+# that list was removed and replaced with the desktop closure above.
+
+:desktop direct dependencies (desktop/build.gradle.kts)
+- compose.desktop.currentOs — Compose Multiplatform desktop runtime + Skiko native renderer — Apache-2.0
+- compose.material3 — Compose Material 3 components — Apache-2.0
+- compose.materialIconsExtended — Compose Material Icons Extended — Apache-2.0
+- com.google.zxing:core:3.5.3 — ZXing barcode core — Apache-2.0
+- com.github.hypfvieh:dbus-java-core:5.2.0 — D-Bus protocol (Secret Service transport); depends on org.slf4j:slf4j-api (MIT) — license to be confirmed before release
+- com.github.hypfvieh:dbus-java-transport-jnr-unixsocket:5.2.0 — JNR FFI Unix-socket transport; pulls in jnr-* native bridge libraries (transitive list to be finalized) — license to be confirmed before release
+- org.slf4j:slf4j-nop:2.0.17 — NOP logging binding (runtimeOnly; keeps the JVM quiet without a logging backend) — MIT
+- org.xerial:sqlite-jdbc:3.41.2.2 — Xerial SQLite JDBC driver (bundles public-domain SQLite) — Apache-2.0
+- net.java.jinput:jinput:2.0.10 (+ :natives-all classifier, ships libjinput-linux64.so) — JInput game controller library — LGPL-3.0
+- org.apache.commons:commons-compress:1.28.0 — Apache Commons Compress — Apache-2.0
+- org.tukaani:xz:1.12 — XZ for Java (used via commons-compress integration) — license to be confirmed before release
+- com.squareup.okhttp3:okhttp:4.12.0 — OkHttp HTTP client (pulls in okio + Kotlin stdlib) — Apache-2.0
+
+First-party project dependencies (:shared:* modules; GPL-3.0, this project)
+- :shared:storage-api — no external dependencies
+- :shared:domain — com.squareup.moshi:moshi:1.15.1 + moshi-kotlin:1.15.1 (Apache-2.0); okhttp 4.12.0 (above)
+- :shared:network — okhttp 4.12.0; moshi + moshi-kotlin 1.15.1 (api); org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1 (Apache-2.0)
+- :shared:presentation — kotlinx-coroutines-core 1.8.1 (above)
+
+Transitive closure (NOT yet fully enumerated — finalize before release)
+Compose Multiplatform desktop runtime jars and Skiko native libraries, the JNR
+FFI stack (jnr-ffi, jnr-unixsocket, ...) required by the dbus-java transport,
+okio, and exact Kotlin stdlib/reflect versions must be enumerated from a Gradle
+:desktop runtimeClasspath dependency report, with license texts added to
+third_party_licenses, before release.

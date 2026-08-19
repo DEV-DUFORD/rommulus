@@ -1,0 +1,61 @@
+RomMulus — NOTICE (Linux x86_64 package)
+=========================================
+
+This package bundles the components listed below. Full license texts are in
+this directory (share/licenses/rommulus/): libretro.txt (Libretro API),
+third_party_license_metadata and third_party_licenses (Java dependency list).
+Per-core provenance (exact upstream commit, vendored source subset, patches,
+compiler/flags, checksums) is recorded in share/rommulus/core-manifest.json.
+
+1. RomMulus application (desktop app, player, launcher)
+   License: GNU GPL v3 (see LICENSE at the root of the source repository,
+   https://github.com/romm-android-tv/rommulus).
+
+2. OpenJDK 17 JVM runtime (lib/runtime/, produced with jlink)
+   License: GPL v2 with the Classpath Exception (OpenJDK / Eclipse Temurin
+   build). See lib/runtime/legal/ inside the bundled image for per-module
+   attributions.
+
+3. SDL3 (Simple DirectMedia Layer) 3.4.14 — used by rommulus-player
+   License: zlib license. https://github.com/libsdl-org/SDL
+
+4. Libretro cores (lib/rommulus/cores/), each a separately-licensed,
+   dynamically-loaded shared object. Effective licenses:
+   - gambatte (libgambatte_core.so) — GPL-2.0-only; blipper.c MIT
+   - fceumm (libfceumm_core.so) — GPL-2.0-or-later; Blargg NTSC filter LGPL-2.1-or-later
+   - prosystem (libprosystem_core.so) — GPL-2.0-or-later effective; bupboop zlib
+   - handy (libhandy_core.so) — GPL-2.0-or-later effective; Blip_Buffer LGPL-2.1-or-later
+   - mednafen_ngp (libmednafen_ngp_core.so) — GPL-2.0-or-later; z80-fuse GPL-2.0-or-later
+   - mednafen_wswan (libmednafen_wswan_core.so) — GPL-2.0-or-later; v30mz permissive (Cygne)
+   - stella (libstella_core.so) — GPL-2.0-only (NOT GPL-3-compatible; shipped as a
+     separately-licensed dynamically-loaded .so behind the plugin boundary);
+     nlohmann/json MIT, NanoJPEG MIT
+   - beetle_pce_fast (libbeetle_pce_fast_core.so) — GPL-2.0-or-later
+   - mgba (libmgba_core.so) — MPL-2.0; inih BSD-3-Clause
+   - snes9x (libsnes9x_core.so) — non-commercial "personal use only" license
+     (additional restriction under GPLv3 §10); shipped under a dated owner risk
+     acceptance (PROJECT-OWNER, 2026-07-31, see core-manifest.json and
+     docs/PHASE0_DECISIONS.md); snes_ntsc LGPL-2.1
+   - genesis_plus_gx (libgenesis_plus_gx_core.so) — custom BSD-style license with a
+     no-sale/no-commercial-use condition (additional restriction under GPLv3 §10);
+     shipped under a dated owner risk acceptance (PROJECT-OWNER, 2026-07-31);
+     Nuked OPN2 LGPL-2.1-or-later, Tremor BSD-style/Xiph, minimp3 CC0 1.0, zlib,
+     libchdr (zlib license), LZMA SDK (public domain), zstd (BSD-2-Clause)
+   - pcsx_rearmed (libpcsx_rearmed_core.so) — GPL-2.0-or-later effective; Lightrec
+     LGPL-2.1-or-later and GNU Lightning LGPL-3.0-or-later (Linux dynarec); libchdr
+     BSD-3-Clause, LZMA SDK public domain, zstd 1.5.7
+   - mupen64plus_next (libmupen64plus_next_core.so) — GPL-2.0-or-later effective;
+     rsp-cxd4 CC0 1.0, paraLLEl RSP built under its MIT option, xxHash CC0
+   - test_core (libtest_core.so) — synthetic project-owned core (GPLv3, this project)
+
+5. libretro-common (vendored helper sources inside the cores above)
+   License: MIT (per file header). See libretro.txt for the Libretro API notice.
+
+6. Java libraries inside lib/rommulus/app.jar (Compose Multiplatform, OkHttp,
+   SQLite JDBC, JInput, zxing, commons-compress, XZ for Java, and others)
+   Licenses: see third_party_license_metadata / third_party_licenses in this
+   directory (Apache-2.0 bundle list).
+
+No firmware/BIOS is bundled. Where a core requires BIOS (e.g. pcsx_rearmed),
+the user must supply the files themselves; they are listed in
+share/rommulus/core-manifest.json under "requiredFirmware".

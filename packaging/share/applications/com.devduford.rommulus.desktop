@@ -1,0 +1,22 @@
+# RomMulus — freedesktop application entry (plans/LINUX_X64.md §16.1)
+#
+# Exec below contains the placeholder __ROMMULUS_INSTALL_PREFIX__. This is NOT
+# a freedesktop field code (the spec defines no %h), and desktop environments
+# do not expand shell variables in Exec — therefore the install step MUST
+# rewrite it to the actual absolute install prefix before installing this file:
+#   per-user install:  <abs $HOME>/.local/share/rommulus
+#   system-wide:       /opt/rommulus
+# The launcher itself (bin/rommulus) is fully relocatable and resolves every
+# bundled path relative to its own location.
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=RomMulus
+GenericName=ROM Collection Player
+Comment=Browse and play your ROM collections from a RomM server (Linux x86_64)
+Exec=__ROMMULUS_INSTALL_PREFIX__/bin/rommulus
+Icon=com.devduford.rommulus
+Terminal=false
+Categories=Game;Emulator;
+Keywords=rom;retro;emulation;romm;libretro;
+StartupNotify=true
