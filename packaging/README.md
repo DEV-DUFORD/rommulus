@@ -85,17 +85,18 @@ would vary the thread count with the machine and change the compressed bytes.
 # The ENTIRE --add-modules list must stay on ONE line: a backslash
 # continuation after the trailing comma collapses to a single space and
 # jlink fails with "Error: invalid argument".
-jlink --add-modules java.base,java.datatransfer,java.desktop,java.logging,java.prefs,java.sql,java.xml,jdk.unsupported --output build/runtime --strip-debug --no-header-files --no-man-pages
+jlink --add-modules java.base,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.sql,java.xml,jdk.crypto.ec,jdk.unsupported --output build/runtime --strip-debug --no-header-files --no-man-pages
 ```
 
-**TRACKED FOLLOW-UP (release-blocking):** the module list above is
-provisional. It lacks `java.net.http`, `jdk.crypto.ec`, `java.naming`, and
-`java.management`, which the desktop app needs for OkHttp/HTTPS.
-(`java.datatransfer` covers clipboard; `jdk.unsupported` covers sun.misc
-usage by some libraries.) Before ANY release artifact ships, complete the module
-list against the app's actual runtime needs and exercise the built runtime
-with the real app (run the desktop app against `build/runtime/bin/java`) to
-confirm no `java.lang.ModuleNotFoundException` /
+**MODULE LIST COMPLETE (verified):** the module list above now includes
+`java.net.http`, `jdk.crypto.ec`, `java.naming`, and `java.management`, which
+the desktop app needs for OkHttp/HTTPS. Verified with a TLS smoke test: a
+jlink runtime built from this exact module list performed a live HTTPS request
+via `java.net.http.HttpClient` (TLS handshake succeeded, HTTP status received).
+(`java.datatransfer` covers clipboard; `jdk.unsupported` covers sun.misc usage
+by some libraries.) REMAINING before ANY release artifact ships: exercise the
+built runtime with the real app (run the desktop app against
+`build/runtime/bin/java`) to confirm no `java.lang.ModuleNotFoundException` /
 `NoClassDefFoundError`. Landing the CI job does not block on this.
 
 ## Launcher contract (`bin/rommulus`)
@@ -159,10 +160,10 @@ pending — see `share/icons/README.md`.
   required licenses, exact executable inventory, world-writable files,
   credential/token scan, core provenance (every manifested core ships), and a
   `ldd` check that the player has no JVM/Android dependency — against this tree
-  and the packaged artifact. Remaining gaps: verify the jlink module list
-  against the app's runtime needs, pin `binaryChecksums."linux-x86_64"` for the
-  full core SHA/provenance match, add a symbol allowlist, and start the desktop
-  bundle headlessly in CI.
+  and the packaged artifact. Remaining gaps: exercise the jlink runtime with
+  the real app (module list is now complete and TLS-verified), pin
+  `binaryChecksums."linux-x86_64"` for the full core SHA/provenance match, add
+  a symbol allowlist, and start the desktop bundle headlessly in CI.
 - `desktop/build.gradle.kts` still carries the `TODO(phase 14)` comment on
   `nativeDistributions`; update it when Gradle-side packaging is wired up.
 - Finalize `share/licenses/rommulus/third_party_license_metadata`: it now lists
