@@ -164,7 +164,8 @@ class OkHttpRomContentStager(
     ): StagedContent {
         val archiveFormat = detectArchiveFormat(downloadedFile)
         if (archiveFormat == null) {
-            return StagedContent(downloadedFile, SecureFiles.sha256Hex(downloadedFile))
+            val corePath = addRecognizedContentExtension(downloadedFile, safeName, supportedExtensions)
+            return StagedContent(corePath, SecureFiles.sha256Hex(corePath))
         }
 
         val normalizedExtensions = supportedExtensions
@@ -243,6 +244,41 @@ class OkHttpRomContentStager(
             }
         }
         return null
+    }
+
+    /**
+     * RomM metadata can omit a raw image's suffix. Preserve the cached source name, but provide
+     * Libretro a correctly suffixed sibling for formats whose loaders dispatch by extension.
+     */
+    private fun addRecognizedContentExtension(
+        downloadedFile: Path,
+        safeName: String,
+        supportedExtensions: Set<String>,
+    ): Path {
+        if (safeName.lowercase(Locale.ROOT).endsWith(CHD_EXTENSION) ||
+            CHD_EXTENSION !in supportedExtensions.map { it.lowercase(Locale.ROOT) }
+        ) {
+            return downloadedFile
+        }
+        val signature = ByteArray(CHD_SIGNATURE.size)
+        val bytesRead = Files.newInputStream(downloadedFile).use { input ->
+            var offset = 0
+            while (offset < signature.size) {
+                val count = input.read(signature, offset, signature.size - offset)
+                if (count < 0) break
+                offset += count
+            }
+            offset
+        }
+        if (bytesRead != CHD_SIGNATURE.size || !signature.contentEquals(CHD_SIGNATURE)) {
+            return downloadedFile
+        }
+
+        val corePath = downloadedFile.resolveSibling("$safeName$CHD_EXTENSION")
+        if (!Files.isRegularFile(corePath) || Files.size(corePath) != Files.size(downloadedFile)) {
+            Files.copy(downloadedFile, corePath, StandardCopyOption.REPLACE_EXISTING)
+        }
+        return corePath
     }
 
     @Suppress("DEPRECATION")
@@ -364,6 +400,8 @@ class OkHttpRomContentStager(
         val ZIP_LOCAL_FILE_HEADER_SIGNATURE = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
         // ZIP end-of-central-directory signature (PK\x05\x06), accepted for empty/edge archives.
         val ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
+        val CHD_SIGNATURE = "MComprHD".toByteArray(Charsets.US_ASCII)
+        const val CHD_EXTENSION = ".chd"
         const val MAX_ARCHIVE_ENTRIES = 4096
         const val MAX_EXTRACTED_ROM_BYTES = 512L * 1024 * 1024
         const val MAX_COMPRESSION_RATIO = 200L

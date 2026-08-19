@@ -80,7 +80,7 @@ class DesktopBiosConfigurationProviderTest {
 
     private val firmwareDir: Path get() = root.resolve("data").resolve("firmware")
 
-    private fun provider(origin: String? = server.origin, slug: String = "sega_cd") =
+    private fun provider(origin: String? = server.origin, slug: String = "segacd") =
         DesktopBiosConfigurationProvider(client, { origin }, firmwareDir, quietLogger(), slug)
 
     private fun quietLogger(): Logger {
@@ -104,7 +104,7 @@ class DesktopBiosConfigurationProviderTest {
 
     @Test
     fun `valid 200 catalog maps to Success with file-name options`() {
-        server.platformsJson(7L, "sega_cd")
+        server.platformsJson(7L, "segacd")
         server.firmwareJson(
             json(41L, "bios_CD_Europe.bin", biosContents.size.toLong(), biosSha1),
             json(42L, "bios_CD_USA.bin", biosSha1.length.toLong(), biosSha1),
@@ -130,7 +130,7 @@ class DesktopBiosConfigurationProviderTest {
 
     @Test
     fun `404 on firmware list maps to Error NOT_FOUND`() {
-        server.platformsJson(7L, "sega_cd")
+        server.platformsJson(7L, "segacd")
         server.firmwareStatus = 404
 
         val catalog = runBlocking { provider().fetchCatalog() } as BiosConfigurationCatalog.Error
@@ -139,7 +139,7 @@ class DesktopBiosConfigurationProviderTest {
 
     @Test
     fun `empty firmware list maps to Success(empty)`() {
-        server.platformsJson(7L, "sega_cd")
+        server.platformsJson(7L, "segacd")
         server.firmwareBody = "[]"
 
         val catalog = runBlocking { provider().fetchCatalog() } as BiosConfigurationCatalog.Success
@@ -149,7 +149,7 @@ class DesktopBiosConfigurationProviderTest {
 
     @Test
     fun `malformed firmware JSON maps to Error PARSE_ERROR`() {
-        server.platformsJson(7L, "sega_cd")
+        server.platformsJson(7L, "segacd")
         server.firmwareBody = "{this is not a list"
 
         val catalog = runBlocking { provider().fetchCatalog() } as BiosConfigurationCatalog.Error
@@ -164,7 +164,7 @@ class DesktopBiosConfigurationProviderTest {
 
     @Test
     fun `a previously staged file is reported as selected`() {
-        server.platformsJson(7L, "sega_cd")
+        server.platformsJson(7L, "segacd")
         server.firmwareJson(
             json(41L, "bios_CD_Europe.bin", biosContents.size.toLong(), biosSha1),
             json(42L, "bios_CD_USA.bin", 16L, biosSha1),
@@ -198,6 +198,38 @@ class DesktopBiosConfigurationProviderTest {
             .containsExactlyInAnyOrder(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE)
         assertThat(Files.getPosixFilePermissions(expected))
             .containsExactlyInAnyOrder(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+    }
+
+    @Test
+    fun `Sega CD launch preparation copies an already selected BIOS under all core filenames`() {
+        val firmware = firmware()
+        Files.createDirectories(firmwareDir)
+        Files.write(stagedDestination(firmware), biosContents)
+        server.platformsJson(7L, "segacd")
+        server.firmwareJson(json(firmware.firmwareId, firmware.fileName, firmware.sizeBytes, firmware.sha1Hash))
+
+        val outcome = runBlocking { provider().prepareForLaunch(firmwareDir) }
+
+        assertThat(outcome).isInstanceOf(FirmwareStagingOutcome.Success::class.java)
+        for (fileName in listOf("bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin")) {
+            assertThat(Files.readAllBytes(firmwareDir.resolve(fileName))).isEqualTo(biosContents)
+        }
+    }
+
+    @Test
+    fun `PlayStation launch preparation copies an already selected BIOS under all core filenames`() {
+        val firmware = firmware(fileName = "scph5501.bin")
+        Files.createDirectories(firmwareDir)
+        Files.write(stagedDestination(firmware), biosContents)
+        server.platformsJson(7L, "psx")
+        server.firmwareJson(json(firmware.firmwareId, firmware.fileName, firmware.sizeBytes, firmware.sha1Hash))
+
+        val outcome = runBlocking { provider(slug = "psx").prepareForLaunch(firmwareDir) }
+
+        assertThat(outcome).isInstanceOf(FirmwareStagingOutcome.Success::class.java)
+        for (fileName in listOf("scph5500.bin", "scph5501.bin", "scph5502.bin", "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin")) {
+            assertThat(Files.readAllBytes(firmwareDir.resolve(fileName))).isEqualTo(biosContents)
+        }
     }
 
     @Test

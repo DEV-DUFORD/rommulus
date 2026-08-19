@@ -76,6 +76,7 @@ import java.nio.file.Path
 import java.util.Collections
 import java.util.UUID
 import java.util.logging.Level
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -335,6 +336,15 @@ class DesktopAppCoordinator(
             return PlayerLaunchResult.Failed("failed to stage ROM content: ${e.message}")
         }
 
+        if (detail.platformSlug in BIOS_PLATFORM_SLUGS) {
+            val firmware = runBlocking {
+                biosConfigurationProvider(detail.platformSlug).prepareForLaunch(paths.firmwareDir())
+            }
+            if (firmware !is com.romm.androidtv.romm.FirmwareStagingOutcome.Success) {
+                return PlayerLaunchResult.Failed("failed to prepare BIOS: $firmware")
+            }
+        }
+
         val sessionId = UUID.randomUUID().toString()
 
         // Stable per-ROM save identity via the shared [SavePathPolicy] (mirrors Android's
@@ -578,7 +588,7 @@ class DesktopAppCoordinator(
     fun biosConfigurationPresenter(platformSlug: String): BiosConfigurationPresenter =
         BiosConfigurationPresenter(scope, biosConfigurationProvider(platformSlug))
 
-    fun biosConfigurationProvider(platformSlug: String): BiosConfigurationProvider =
+    fun biosConfigurationProvider(platformSlug: String): DesktopBiosConfigurationProvider =
         DesktopBiosConfigurationProvider(
             client = network.okHttpClient,
             originProvider = { settingsAdapter.currentProfile().origin },
@@ -673,6 +683,7 @@ class DesktopAppCoordinator(
 
         /** Exit code passed to [onPlayerProcessExited] by the watcher (see [watchPlayerExit]). */
         const val UNKNOWN_PLAYER_EXIT_CODE = -1
+        val BIOS_PLATFORM_SLUGS = setOf("segacd", "psx")
 
         fun defaultDeviceName(): String {
             return try {

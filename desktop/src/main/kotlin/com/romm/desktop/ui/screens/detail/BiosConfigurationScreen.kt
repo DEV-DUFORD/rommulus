@@ -45,10 +45,10 @@ import com.romm.desktop.ui.navigation.keyboardShortcuts
 /**
  * RomM platform slug for a [DesktopAppCoordinator.BiosSystem]. The desktop
  * [com.romm.desktop.library.DesktopBiosConfigurationProvider] is constructed with the slug
- * ("sega_cd" / "psx"), exactly like the Android BIOS managers.
+ * ("segacd" / "psx"), exactly like the Android BIOS managers.
  */
 private fun slugFor(system: DesktopAppCoordinator.BiosSystem): String = when (system) {
-    DesktopAppCoordinator.BiosSystem.SEGA_CD -> "sega_cd"
+    DesktopAppCoordinator.BiosSystem.SEGA_CD -> "segacd"
     DesktopAppCoordinator.BiosSystem.PLAYSTATION -> "psx"
 }
 

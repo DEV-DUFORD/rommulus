@@ -24,6 +24,7 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
+import java.util.UUID
 import java.util.logging.Level
 import java.util.logging.Logger
 import javax.net.ssl.SSLException
@@ -35,7 +36,7 @@ import okhttp3.Request
 /**
  * Plain-JVM [BiosConfigurationProvider] for the desktop port (plans/LINUX_X64.md §9,
  * Phase 6). One instance serves one BIOS-required console (each gets its own
- * [platformSlug], e.g. "sega_cd" / "psx").
+ * [platformSlug], e.g. "segacd" / "psx").
  *
  * Catalog: resolves the platform id by slug (`GET /api/platforms`), then lists the
  * platform's firmware (`GET /api/firmware?platform_id=...`). Each [FirmwareInfo] maps to a
@@ -74,7 +75,7 @@ class DesktopBiosConfigurationProvider(
 ) : BiosConfigurationProvider {
 
     private val systemName: String = when (platformSlug) {
-        "sega_cd" -> "SEGA CD"
+        "segacd" -> "SEGA CD"
         "psx" -> "PlayStation"
         else -> platformSlug.replaceFirstChar { it.uppercase() }
     }
@@ -164,6 +165,67 @@ class DesktopBiosConfigurationProvider(
 
         logger.log(Level.INFO, "Staged BIOS {0} -> {1}", listOf(firmware.fileName, destination))
         FirmwareStagingOutcome.Success(mapOf(fileName to destination.toAbsolutePath().toString()))
+    }
+
+    /**
+     * Ensures launch-time firmware is available under the filenames the Libretro core requires.
+     *
+     * The configuration screen retains the original server filename under [firmwareDir], while
+     * the player-facing copies use the Libretro core's fixed regional names. This matches the
+     * Android launch preparation behavior and lets a BIOS-backed launch retrieve recognized
+     * firmware on demand when the user has not configured one explicitly.
+     */
+    suspend fun prepareForLaunch(systemDirectory: Path): FirmwareStagingOutcome = withContext(Dispatchers.IO) {
+        val requirements = when (platformSlug) {
+            SEGA_CD_PLATFORM_SLUG -> FirmwareRequirements(
+                preferredSha1 = listOf(SEGA_CD_US_SHA1, SEGA_CD_EU_SHA1, SEGA_CD_JP_SHA1),
+                canonicalFileNames = CANONICAL_SEGA_CD_FILENAMES,
+            )
+            PSX_PLATFORM_SLUG -> FirmwareRequirements(
+                preferredSha1 = listOf(PSX_US_SHA1, PSX_EU_SHA1, PSX_JP_SHA1),
+                canonicalFileNames = CANONICAL_PSX_FILENAMES,
+            )
+            else -> return@withContext FirmwareStagingOutcome.Missing(emptyList())
+        }
+
+        val catalog = when (val result = fetchCatalog()) {
+            is BiosConfigurationCatalog.Success -> result
+            BiosConfigurationCatalog.AuthExpired -> return@withContext FirmwareStagingOutcome.AuthExpired
+            is BiosConfigurationCatalog.Error -> return@withContext FirmwareStagingOutcome.NetworkError(result.message)
+        }
+
+        val stagedSelection = catalog.selectedFirmwareId?.let { selectedId ->
+            catalog.options.firstOrNull { it.firmware.firmwareId == selectedId }?.firmware
+        }
+        val firmware = stagedSelection
+            ?: requirements.preferredSha1.firstNotNullOfOrNull { sha1 ->
+                catalog.options.firstOrNull { it.firmware.sha1Hash.equals(sha1, ignoreCase = true) }?.firmware
+            }
+            ?: return@withContext FirmwareStagingOutcome.Missing(requirements.canonicalFileNames)
+
+        val source = stagedFileFor(firmware)?.takeIf {
+            Files.isRegularFile(it) && !Files.isSymbolicLink(it)
+        } ?: when (val outcome = select(firmware)) {
+            is FirmwareStagingOutcome.Success -> Path.of(outcome.stagedPaths.getValue(firmware.fileName))
+            else -> return@withContext outcome
+        }
+
+        try {
+            ensureFirmwareDir()
+            for (fileName in requirements.canonicalFileNames) {
+                atomicCopy(source, systemDirectory.resolve(fileName))
+            }
+        } catch (e: IOException) {
+            return@withContext FirmwareStagingOutcome.NetworkError(
+                e.message ?: "Could not stage BIOS",
+            )
+        }
+
+        FirmwareStagingOutcome.Success(
+            requirements.canonicalFileNames.associateWith {
+                systemDirectory.resolve(it).toAbsolutePath().toString()
+            },
+        )
     }
 
     /**
@@ -275,6 +337,17 @@ class DesktopBiosConfigurationProvider(
         }
     }
 
+    private fun atomicCopy(source: Path, destination: Path) {
+        Files.createDirectories(destination.parent)
+        val temp = destination.resolveSibling(".tmp-${UUID.randomUUID()}-${destination.fileName}")
+        try {
+            Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING)
+            movePart(temp, destination)
+        } finally {
+            Files.deleteIfExists(temp)
+        }
+    }
+
     /** Carries a pre-built staging outcome past the [stageDownload] catch without losing it. */
     private class StageWriteException(cause: IOException, val outcome: FirmwareStagingOutcome) :
         IOException(cause.message, cause)
@@ -284,6 +357,11 @@ class DesktopBiosConfigurationProvider(
         val digest: MessageDigest = MessageDigest.getInstance("SHA-1")
         var bytes: Long = 0
     }
+
+    private data class FirmwareRequirements(
+        val preferredSha1: List<String>,
+        val canonicalFileNames: List<String>,
+    )
 
     /**
      * Canonical staging location: `{firmwareDir}/{firmwareId}_{fileName}`.
@@ -413,6 +491,24 @@ class DesktopBiosConfigurationProvider(
 
 private const val PART_SUFFIX = ".part"
 private const val CHUNK_SIZE = 16 * 1024
+private const val SEGA_CD_PLATFORM_SLUG = "segacd"
+private const val SEGA_CD_US_SHA1 = "f4f315adcef9b8feb0364c21ab7f0eaf5457f3ed"
+private const val SEGA_CD_EU_SHA1 = "f891e0ea651e2232af0c5c4cb46a0cae2ee8f356"
+private const val SEGA_CD_JP_SHA1 = "4846f448160059a7da0215a5df12ca160f26dd69"
+private val CANONICAL_SEGA_CD_FILENAMES = listOf("bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin")
+private const val PSX_PLATFORM_SLUG = "psx"
+private const val PSX_US_SHA1 = "0555c6fae8906f3f09baf5988f00e55f88e9f30b"
+private const val PSX_EU_SHA1 = "f6bc2d1f5eb6593de7d089c425ac681d6fffd3f0"
+private const val PSX_JP_SHA1 = "b05def971d8ec59f346f2d9ac21fb742e3eb6917"
+private val CANONICAL_PSX_FILENAMES = listOf(
+    "scph5500.bin",
+    "scph5501.bin",
+    "scph5502.bin",
+    "psxonpsp660.bin",
+    "scph101.bin",
+    "scph7001.bin",
+    "scph1001.bin",
+)
 
 private val USER_ONLY_DIR_PERMS: Set<PosixFilePermission> = setOf(
     PosixFilePermission.OWNER_READ,

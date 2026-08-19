@@ -81,6 +81,23 @@ class RomContentStagerTest {
     }
 
     @Test
+    fun `stage adds a CHD suffix when RomM metadata omits it`(@TempDir dir: Path) {
+        val chd = "MComprHD".toByteArray() + ByteArray(64)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = chd) }
+
+        val staged = stager(http, dir).stage(
+            romId = 7L,
+            fileName = "Sonic CD (USA)",
+            expectedSizeBytes = chd.size.toLong(),
+            supportedExtensions = setOf(".bin", ".chd"),
+        )
+
+        assertThat(staged.path.fileName.toString()).isEqualTo("Sonic CD (USA).chd")
+        assertThat(Files.readAllBytes(staged.path)).containsExactly(*chd)
+        assertThat(Files.readAllBytes(dir.resolve("roms").resolve("Sonic CD (USA)"))).containsExactly(*chd)
+    }
+
+    @Test
     fun `stage extracts the single core-supported ROM from a 7z download`(@TempDir dir: Path) {
         val archivedRom = byteArrayOf(1, 2, 3, 4, 5)
         val archivePath = dir.resolve("fixture.7z")
