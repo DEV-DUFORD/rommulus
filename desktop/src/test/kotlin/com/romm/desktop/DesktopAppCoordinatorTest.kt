@@ -267,6 +267,13 @@ class DesktopAppCoordinatorTest {
         Files.write(coresDir.resolve("libgenesis_plus_gx.so"), byteArrayOf(0))
     }
 
+    /** Installs `libpcsx_rearmed.so` so the approved psx core resolves to a real-content core. */
+    private fun installPcsxRearmed(paths: AppPaths) {
+        val coresDir = paths.dataDir.resolve("cores")
+        Files.createDirectories(coresDir)
+        Files.write(coresDir.resolve("libpcsx_rearmed.so"), byteArrayOf(0))
+    }
+
     @Test
     fun `launchPlayer stages ROM content and pins path and hash on the request for a real core`(@TempDir dir: Path) {
         val paths = dir.testRoot()
@@ -434,6 +441,81 @@ class DesktopAppCoordinatorTest {
             assertThat(firstSave).startsWith(savesRoot)
             // Server segment sanitized exactly like SavePathPolicy (only '/' and '\' → '_').
             assertThat(firstSave).contains(server.origin.replace('/', '_').replace('\\', '_'))
+            assertThat(firstSave).contains(sha256Hex(chdBytes))
+            assertThat(firstSave).endsWith("autosave" + java.io.File.separator + "srm.srm")
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `savePath is stable and isolated for PlayStation CHD launches`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installPcsxRearmed(paths)
+        val server = StubServer().apply { start() }
+        try {
+            server.platformsJson(5L, "psx")
+            // Pre-stage the selected BIOS file (the preferred US scph5500.bin) so prepareForLaunch
+            // succeeds without a download (the staged file on disk is the selection source of truth).
+            val firmwareDir = paths.firmwareDir()
+            Files.createDirectories(firmwareDir)
+            val biosBytes = "fake-playstation-bios".toByteArray()
+            Files.write(firmwareDir.resolve("41_scph5500.bin"), biosBytes)
+            server.firmwareJson(
+                """{"id": 41, "file_name": "scph5500.bin", "file_size_bytes": ${biosBytes.size}, """ +
+                    """"sha1_hash": "0555c6fae8906f3f09baf5988f00e55f88e9f30b", "is_verified": true}""",
+            )
+            // CHD-shaped content (MComprHD signature): the save path must be scoped by this staged
+            // content's hash.
+            val chdBytes = "MComprHD".toByteArray() + ByteArray(32) { it.toByte() }
+            val stager = FakeRomContentStager(contentBytes = chdBytes)
+            val launcher = FakePlayerProcessLauncher()
+            val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+            val c = DesktopAppCoordinator(
+                paths = paths,
+                secretBackend = FakeSecretBackend(),
+                appVersion = "test",
+                buildDefaultOrigin = "https://demo.romm.app",
+                playerSupervisorOverride = supervisor,
+                romDetailLookup = { testRom(platformSlug = "psx", fileName = "Final Fantasy VII (USA).chd") },
+                romContentStagerOverride = stager,
+            )
+            c.settingsStore.write(mapOf(SettingsKeys.ORIGIN to server.origin))
+
+            val first = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
+            val stagedFirst = stager.lastStaged!!
+            waitForReconciled(supervisor, first.sessionId)
+            val second = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+            waitForReconciled(supervisor, second.sessionId)
+            val other = c.launchPlayer(romId = 8L) as PlayerLaunchResult.Started
+            val stagedOther = stager.lastStaged!!
+            waitForReconciled(supervisor, other.sessionId)
+
+            // pcsx_rearmed is the approved core for psx on Linux.
+            assertThat(launcher.launches.map { it.coreId }).containsOnly("pcsx_rearmed")
+            // Each launch pins the CHD-staged path of its own ROM; both pin the same staged bytes.
+            assertThat(launcher.launches[0].contentPath)
+                .isEqualTo(stagedFirst.path.toAbsolutePath().normalize().toString())
+            assertThat(launcher.launches[1].contentPath)
+                .isEqualTo(stagedFirst.path.toAbsolutePath().normalize().toString())
+            assertThat(launcher.launches[2].contentPath)
+                .isEqualTo(stagedOther.path.toAbsolutePath().normalize().toString())
+            assertThat(stagedOther.path).isNotEqualTo(stagedFirst.path)
+            assertThat(launcher.launches.map { it.contentHash }).containsOnly(sha256Hex(chdBytes))
+
+            val (firstSave, secondSave, otherSave) = launcher.launches.map { it.savePath }
+            // Same PlayStation ROM + same staged CHD bytes → the identical stable save path across launches.
+            assertThat(secondSave).isEqualTo(firstSave)
+            // A different ROM never shares a save, even for CHD content.
+            assertThat(otherSave).isNotEqualTo(firstSave)
+            // Follows the shared SavePathPolicy layout under the data root, scoped by the staged
+            // CHD content's SHA-256 and the server origin.
+            val savesRoot = paths.dataDir.toAbsolutePath().normalize().toString() + java.io.File.separator + "saves"
+            assertThat(firstSave).startsWith(savesRoot)
+            // Server segment sanitized exactly like SavePathPolicy (only '/' and '\' → '_').
+            assertThat(firstSave).contains(server.origin.replace('/', '_').replace('\\', '_'))
+            // The romId segment scopes the save per ROM.
+            assertThat(firstSave).contains(java.io.File.separator + "7" + java.io.File.separator)
             assertThat(firstSave).contains(sha256Hex(chdBytes))
             assertThat(firstSave).endsWith("autosave" + java.io.File.separator + "srm.srm")
         } finally {
