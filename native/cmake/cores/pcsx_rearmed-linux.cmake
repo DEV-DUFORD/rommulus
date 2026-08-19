@@ -126,6 +126,34 @@ set(PCSX_REARMED_SOURCES
     ${PCSX_COMMON_DIR}/features/features_cpu.c
 )
 
+# Apple Silicon verification build: Lightrec/Lightning are x86_64-only JITs
+# (lightrec/mem.c uses Linux memfd/hugetlb unconditionally), so drop them and
+# the dynarec glue; the core then falls back to its built-in interpreter via
+# DRC_DISABLE (see the definitions block below).
+if(APPLE)
+list(REMOVE_ITEM PCSX_REARMED_SOURCES
+    ${PCSX_CORE_DIR}/lightrec/mem.c
+    ${PCSX_CORE_DIR}/lightrec/plugin.c
+    ${PCSX_LIGHTREC_DIR}/tlsf/tlsf.c
+    ${PCSX_LIGHTREC_DIR}/blockcache.c
+    ${PCSX_LIGHTREC_DIR}/constprop.c
+    ${PCSX_LIGHTREC_DIR}/disassembler.c
+    ${PCSX_LIGHTREC_DIR}/emitter.c
+    ${PCSX_LIGHTREC_DIR}/interpreter.c
+    ${PCSX_LIGHTREC_DIR}/lightrec.c
+    ${PCSX_LIGHTREC_DIR}/memmanager.c
+    ${PCSX_LIGHTREC_DIR}/optimizer.c
+    ${PCSX_LIGHTREC_DIR}/regcache.c
+    ${PCSX_LIGHTNING_DIR}/lib/jit_disasm.c
+    ${PCSX_LIGHTNING_DIR}/lib/jit_memory.c
+    ${PCSX_LIGHTNING_DIR}/lib/jit_names.c
+    ${PCSX_LIGHTNING_DIR}/lib/jit_note.c
+    ${PCSX_LIGHTNING_DIR}/lib/jit_print.c
+    ${PCSX_LIGHTNING_DIR}/lib/jit_size.c
+    ${PCSX_LIGHTNING_DIR}/lib/lightning.c
+)
+endif()
+
 add_library(pcsx_rearmed_core SHARED ${PCSX_REARMED_SOURCES})
 
 target_include_directories(pcsx_rearmed_core SYSTEM PRIVATE
@@ -141,7 +169,7 @@ target_include_directories(pcsx_rearmed_core SYSTEM PRIVATE
     ${PCSX_CHDR_DIR}/deps/miniz-3.1.1
 )
 
-target_compile_definitions(pcsx_rearmed_core PRIVATE
+set(PCSX_REARMED_DEFINES
     NDEBUG
     P_HAVE_MMAP=1
     P_HAVE_POSIX_MEMALIGN=1
@@ -164,13 +192,34 @@ target_compile_definitions(pcsx_rearmed_core PRIVATE
     GIT_VERSION=" da2cb8e"
 )
 
+# Apple-only: drop the Lightrec x86_64 JIT defines (its sources are excluded
+# above) and select DRC_DISABLE so r3000a.c uses the built-in interpreter.
+if(APPLE)
+list(REMOVE_ITEM PCSX_REARMED_DEFINES
+    LIGHTREC
+    LIGHTREC_STATIC
+    LIGHTREC_CUSTOM_MAP=1
+    LIGHTREC_CODE_INV=0
+    LIGHTREC_ENABLE_THREADED_COMPILER=0
+    LIGHTREC_ENABLE_DISASSEMBLER=0
+    LIGHTREC_NO_DEBUG=1
+)
+list(APPEND PCSX_REARMED_DEFINES DRC_DISABLE)
+endif()
+
+target_compile_definitions(pcsx_rearmed_core PRIVATE ${PCSX_REARMED_DEFINES})
+
 target_compile_options(pcsx_rearmed_core PRIVATE
     -O3
     -ffast-math
     -ffunction-sections
     -fdata-sections
-    -mssse3
 )
+
+# x86_64-only tuning; not applicable to Apple Silicon verification builds.
+if(NOT APPLE)
+target_compile_options(pcsx_rearmed_core PRIVATE -mssse3)
+endif()
 
 set(PCSX_DFSOUND_SOURCES
     ${PCSX_PLUGINS_DIR}/dfsound/dma.c
@@ -233,15 +282,28 @@ set_property(SOURCE
     ${PCSX_LIGHTREC_DIR}/regcache.c
     APPEND PROPERTY COMPILE_OPTIONS -Wno-uninitialized)
 
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(pcsx_rearmed_core PRIVATE
     "-Wl,--version-script=${PCSX_FRONTEND_DIR}/libretro-version-script"
     "-Wl,--gc-sections"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(pcsx_rearmed_core
     pthread
     m
     dl
-    rt
 )
+
+# librt has no macOS counterpart (its symbols live in libSystem); the Apple
+# cdrom.c path instead needs IOKit/CoreFoundation for physical CD-ROM.
+if(NOT APPLE)
+target_link_libraries(pcsx_rearmed_core rt)
+else()
+target_link_libraries(pcsx_rearmed_core
+    "-framework CoreFoundation"
+    "-framework IOKit"
+)
+endif()

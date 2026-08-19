@@ -95,10 +95,13 @@ target_compile_definitions(snes9x_core PRIVATE
 # Vendored third-party source: not held to this project's own -Wall -Wextra
 # (matches sameboy_core/genesis_plus_gx_core), linked with upstream's own
 # version script so only the standard retro_* Libretro ABI is exported.
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(snes9x_core PRIVATE
     "-Wl,--version-script=${SNES9X_DIR}/libretro/link.T"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(snes9x_core
     m

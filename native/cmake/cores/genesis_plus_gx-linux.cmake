@@ -181,10 +181,13 @@ target_compile_options(genesis_plus_gx_core PRIVATE -ffast-math -funroll-loops)
 # Vendored third-party source: not held to this project's own -Wall -Wextra
 # (matches sameboy_core), linked with upstream's own version script so only
 # the standard retro_* Libretro ABI is exported.
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(genesis_plus_gx_core PRIVATE
     "-Wl,--version-script=${GENESIS_PLUS_GX_DIR}/libretro/link.T"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(genesis_plus_gx_core
     m

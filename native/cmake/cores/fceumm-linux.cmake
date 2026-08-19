@@ -540,10 +540,13 @@ target_compile_options(fceumm_core PRIVATE -Wno-write-strings -Wsign-compare -Wu
 # Vendored third-party source: not held to this project's own -Wall -Wextra
 # (matches sameboy_core/genesis_plus_gx_core), linked with upstream's own
 # version script so only the standard retro_* Libretro ABI is exported.
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(fceumm_core PRIVATE
     "-Wl,--version-script=${FCEUMM_DIR}/src/drivers/libretro/link.T"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(fceumm_core
     m

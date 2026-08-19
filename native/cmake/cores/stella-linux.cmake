@@ -200,10 +200,13 @@ target_compile_options(stella_core PRIVATE -fexceptions)
 
 # Linked with upstream's own version script so only the standard retro_*
 # Libretro ABI is exported — never Stella's internal symbols.
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(stella_core PRIVATE
     "-Wl,--version-script=${STELLA_DIR}/link.T"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(stella_core
     m

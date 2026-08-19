@@ -83,10 +83,13 @@ target_compile_definitions(mednafen_ngp_core PRIVATE
 
 # Linked with upstream's own version script so only the standard retro_*
 # Libretro ABI is exported — never Beetle NeoPop's internal symbols.
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(mednafen_ngp_core PRIVATE
     "-Wl,--version-script=${MEDNAFEN_NGP_DIR}/link.T"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(mednafen_ngp_core
     m

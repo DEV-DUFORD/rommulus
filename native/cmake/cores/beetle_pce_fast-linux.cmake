@@ -99,10 +99,13 @@ target_compile_definitions(beetle_pce_fast_core PRIVATE
 
 # Linked with upstream's own version script so only the standard retro_*
 # Libretro ABI is exported — never Beetle PCE Fast's internal symbols.
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(beetle_pce_fast_core PRIVATE
     "-Wl,--version-script=${BEETLE_PCE_FAST_DIR}/link.T"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(beetle_pce_fast_core
     m

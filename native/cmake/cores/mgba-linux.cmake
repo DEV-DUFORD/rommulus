@@ -126,7 +126,7 @@ target_include_directories(mgba_core SYSTEM PRIVATE
     ${MGBA_DIR}/src/platform/libretro
 )
 
-target_compile_definitions(mgba_core PRIVATE
+set(MGBA_LINUX_DEFINES
     # glibc exposes locale_t directly from locale.h; unlike Android, modern
     # Linux distributions do not provide the legacy xlocale.h wrapper.
     _GNU_SOURCE
@@ -155,13 +155,30 @@ target_compile_definitions(mgba_core PRIVATE
     GIT_VERSION="32de792"
 )
 
+# Apple-only feature fixes (Linux keeps the exact list above):
+# - macOS's fortified <string.h> defines strlcpy as a function-like macro,
+#   which breaks mgba-util/string.h's own declaration; the system provides
+#   strlcpy (10.13+), so select it (matches upstream mGBA's HAVE_STRLCPY
+#   feature check; Linux glibc lacks strlcpy and keeps its own).
+# - The macOS C SDK does not provide strtof_l, so drop HAVE_STRTOF_L and let
+#   mgba use its own uselocale-based wrapper (HAVE_USELOCALE above).
+if(APPLE)
+list(REMOVE_ITEM MGBA_LINUX_DEFINES HAVE_STRTOF_L)
+list(APPEND MGBA_LINUX_DEFINES HAVE_STRLCPY)
+endif()
+
+target_compile_definitions(mgba_core PRIVATE ${MGBA_LINUX_DEFINES})
+
 # Vendored third-party source: not held to this project's own -Wall -Wextra
 # (matches sameboy_core/genesis_plus_gx_core), linked with upstream's own
 # version script so only the standard retro_* Libretro ABI is exported.
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(mgba_core PRIVATE
     "-Wl,--version-script=${MGBA_DIR}/link.T"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(mgba_core
     m

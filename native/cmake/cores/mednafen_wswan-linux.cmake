@@ -59,10 +59,13 @@ target_compile_definitions(mednafen_wswan_core PRIVATE
 
 # Linked with upstream's own version script so only the standard retro_*
 # Libretro ABI is exported — never Beetle WonderSwan's internal symbols.
+# GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
+if(NOT APPLE)
 target_link_options(mednafen_wswan_core PRIVATE
     "-Wl,--version-script=${MEDNAFEN_WSWAN_DIR}/link.T"
     "-Wl,--no-undefined"
 )
+endif()
 
 target_link_libraries(mednafen_wswan_core
     m
