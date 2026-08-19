@@ -43,8 +43,8 @@ android {
         applicationId = "com.devduford.tv.rommulus"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2006
-        versionName = "0.2.6"
+        versionCode = 2007
+        versionName = "0.2.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
