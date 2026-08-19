@@ -192,6 +192,10 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("genesis", "megadrive", "sms", "gamegear", "segacd"),
             supportedExtensions = listOf(".md", ".gen", ".bin", ".sms", ".gg", ".cue", ".iso", ".chd"),
+            // Sega CD (segacd) needs the regional BIOS files; Genesis/Mega Drive/SMS/Game Gear do not.
+            requiredFirmware = listOf(
+                "bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin",
+            ),
             supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `genesis_plus_gx_core` CMake target " +

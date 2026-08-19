@@ -7,11 +7,6 @@ package com.romm.desktop.library
 import com.romm.androidtv.library.BiosConfigurationCatalog
 import com.romm.androidtv.romm.FirmwareInfo
 import com.romm.androidtv.romm.FirmwareStagingOutcome
-import com.sun.net.httpserver.HttpExchange
-import com.sun.net.httpserver.HttpServer
-import java.io.IOException
-import java.io.InputStream
-import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFileAttributeView
@@ -34,9 +29,9 @@ import org.junit.jupiter.api.io.TempDir
  * Tests for [DesktopBiosConfigurationProvider] against a local in-JVM HTTP stub.
  *
  * NOTE: `:desktop` does not declare `mockwebserver` (and the module's build file is
- * pinned by task constraints), so the stub below uses the JDK's built-in
- * [HttpServer] instead of OkHttp's MockWebServer; it plays the exact same role:
- * a local, in-process HTTP server with per-test response configuration.
+ * pinned by task constraints), so the shared [StubServer] stub uses the JDK's built-in
+ * HttpServer instead of OkHttp's MockWebServer; it plays the exact same role: a local,
+ * in-process HTTP server with per-test response configuration.
  */
 @DisplayName("DesktopBiosConfigurationProvider")
 class DesktopBiosConfigurationProviderTest {
@@ -346,72 +341,7 @@ class DesktopBiosConfigurationProviderTest {
         assertThat(Files.exists(firmwareDir)).isFalse() // nothing was written at all
     }
 
-    // ── stub server ──────────────────────────────────────────────────────────
-
-    /** Per-endpoint, per-test-response stub (see class KDoc for the MockWebServer note). */
-    private class StubServer : AutoCloseable {
-        private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-
-        @Volatile var platformsStatus = 200
-        @Volatile var platformsBody = "[]"
-        @Volatile var firmwareStatus = 200
-        @Volatile var firmwareBody = "[]"
-        @Volatile var contentStatus = 200
-        @Volatile var contentBytes = ByteArray(0)
-
-        @Volatile var lastFirmwarePath: String? = null
-        @Volatile var lastContentPath: String? = null
-
-        val origin: String
-            get() = "http://127.0.0.1:" + (server.address as InetSocketAddress).port
-
-        fun start() {
-            server.createContext("/api/platforms") { exchange ->
-                respond(exchange, platformsStatus, platformsBody, json = true)
-            }
-            server.createContext("/api/firmware") { exchange ->
-                val path = exchange.requestURI.toString()
-                if (path == "/api/firmware" || path.startsWith("/api/firmware?")) {
-                    lastFirmwarePath = path
-                    respond(exchange, firmwareStatus, firmwareBody, json = true)
-                } else {
-                    lastContentPath = path
-                    respond(exchange, contentStatus, contentBytes)
-                }
-            }
-            server.start()
-        }
-
-        /** Convenience: 200 `[{id, slug}]` platform-list body. */
-        fun platformsJson(id: Long, slug: String) {
-            platformsBody = """[{"id": $id, "slug": "$slug", "fs_slug": "$slug"}]"""
-            platformsStatus = 200
-        }
-
-        fun firmwareJson(vararg entries: String) {
-            firmwareBody = "[${entries.joinToString(",")}]"
-            firmwareStatus = 200
-        }
-
-        fun content(bytes: ByteArray, status: Int = 200) {
-            contentBytes = bytes
-            contentStatus = status
-        }
-
-        private fun respond(exchange: HttpExchange, status: Int, body: Any, json: Boolean = false) {
-            val bytes = if (body is ByteArray) body else body.toString().toByteArray()
-            try {
-                exchange.responseHeaders.add("Content-Type", if (json) "application/json" else "application/octet-stream")
-                exchange.sendResponseHeaders(status, bytes.size.toLong())
-                exchange.responseBody.use { it.write(bytes) }
-            } catch (_: IOException) {
-                // Client went away mid-test; the assertion failure (if any) is what matters.
-                exchange.close()
-            }
-        }
-
-        override fun close() = server.stop(0)
-    }
+    // The per-endpoint HTTP stub lives in StubServer.kt (shared with the coordinator tests).
 
     private fun json(id: Long, fileName: String, size: Long, sha1: String) =
         """{"id": $id, "file_name": "$fileName", "file_size_bytes": $size, "sha1_hash": "$sha1", "is_verified": true}"""

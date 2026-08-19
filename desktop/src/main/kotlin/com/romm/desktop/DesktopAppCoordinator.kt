@@ -31,6 +31,7 @@ import com.romm.androidtv.onboarding.PersistValidatedOrigin
 import com.romm.androidtv.onboarding.PollQrLogin
 import com.romm.androidtv.onboarding.RemoveOldestClientToken
 import com.romm.androidtv.onboarding.ValidateRommServer
+import com.romm.androidtv.romm.FirmwareStagingOutcome
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.databaseDir
 import com.romm.androidtv.storage.firmwareDir
@@ -130,6 +131,42 @@ sealed interface PlayerLaunchResult {
 sealed interface PlayerSessionEvent {
     /** The player process exited and its launch journal was reconciled ([report]). */
     data class Ended(val sessionId: String, val report: PlayerExitReport) : PlayerSessionEvent
+}
+
+/**
+ * Maps a failed [FirmwareStagingOutcome] from launch-time BIOS staging to a focused,
+ * user-facing reason for [PlayerLaunchResult.Failed] (plans/LINUX_X64.md Phase 11, work
+ * item 6). The three required states are kept distinct and actionable:
+ *
+ *  - BIOS missing / not configured ([FirmwareStagingOutcome.Missing]) — names the files the
+ *    core needs and points the user at System Settings;
+ *  - BIOS corrupt or wrong ([FirmwareStagingOutcome.CorruptedDownload], e.g. a SHA-1 mismatch);
+ *  - BIOS download failed ([FirmwareStagingOutcome.NetworkError]).
+ *
+ * [platformSlug] selects the console display name ("segacd" → "SEGA CD", "psx" →
+ * "PlayStation") so the message names the system the user is launching for.
+ */
+internal fun firmwareLaunchFailureReason(
+    outcome: FirmwareStagingOutcome,
+    platformSlug: String,
+): String {
+    val systemName = when (platformSlug) {
+        "segacd" -> "SEGA CD"
+        "psx" -> "PlayStation"
+        else -> platformSlug.replaceFirstChar { it.uppercase() }
+    }
+    return when (outcome) {
+        is FirmwareStagingOutcome.Success -> "" // unreachable: callers pass failures only
+        is FirmwareStagingOutcome.Missing ->
+            "${systemName} requires a BIOS (${outcome.fileNames.joinToString(", ")}). Configure it in System Settings."
+        is FirmwareStagingOutcome.CorruptedDownload ->
+            "The configured BIOS failed verification (${outcome.reason})."
+        is FirmwareStagingOutcome.NetworkError -> "Could not download the BIOS: ${outcome.message}."
+        FirmwareStagingOutcome.AuthExpired ->
+            "Session expired; log in again to configure the $systemName BIOS."
+        is FirmwareStagingOutcome.InsufficientSpace ->
+            "Not enough storage to download the $systemName BIOS."
+    }
 }
 
 class DesktopAppCoordinator(
@@ -340,8 +377,10 @@ class DesktopAppCoordinator(
             val firmware = runBlocking {
                 biosConfigurationProvider(detail.platformSlug).prepareForLaunch(paths.firmwareDir())
             }
-            if (firmware !is com.romm.androidtv.romm.FirmwareStagingOutcome.Success) {
-                return PlayerLaunchResult.Failed("failed to prepare BIOS: $firmware")
+            if (firmware !is FirmwareStagingOutcome.Success) {
+                // Focused, user-facing states for missing / corrupted / undownloadable BIOS
+                // (Phase 11 work item 6) — never the raw outcome's toString().
+                return PlayerLaunchResult.Failed(firmwareLaunchFailureReason(firmware, detail.platformSlug))
             }
         }
 

@@ -4,9 +4,12 @@ import com.romm.androidtv.auth.SessionStorage
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
 import com.romm.androidtv.emulation.model.sha256Hex
+import com.romm.androidtv.romm.FirmwareStagingOutcome
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.fakes.InMemorySessionRecordStore
+import com.romm.androidtv.storage.ports.SettingsKeys
+import com.romm.desktop.library.StubServer
 import com.romm.desktop.player.FakePlayerProcessLauncher
 import com.romm.desktop.player.FakeRomContentStager
 import com.romm.desktop.player.JournalState
@@ -256,6 +259,13 @@ class DesktopAppCoordinatorTest {
         Files.write(coresDir.resolve("libgambatte.so"), byteArrayOf(0))
     }
 
+    /** Installs `libgenesis_plus_gx.so` so the approved segacd core resolves to a real-content core. */
+    private fun installGenesisPlusGx(paths: AppPaths) {
+        val coresDir = paths.dataDir.resolve("cores")
+        Files.createDirectories(coresDir)
+        Files.write(coresDir.resolve("libgenesis_plus_gx.so"), byteArrayOf(0))
+    }
+
     @Test
     fun `launchPlayer stages ROM content and pins path and hash on the request for a real core`(@TempDir dir: Path) {
         val paths = dir.testRoot()
@@ -436,6 +446,103 @@ class DesktopAppCoordinatorTest {
 
         assertThat(launcher.launches.single().coreId).isEqualTo("mupen64plus_next")
         waitForReconciled(supervisor, started.sessionId)
+    }
+
+    // ---------------------------------------------------------------- BIOS launch failures (Phase 11 work item 6)
+
+    @Test
+    fun `firmwareLaunchFailureReason distinguishes missing, corrupted, and network BIOS failures`() {
+        assertThat(firmwareLaunchFailureReason(
+            FirmwareStagingOutcome.Missing(listOf("bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin")),
+            platformSlug = "segacd",
+        )).isEqualTo(
+            "SEGA CD requires a BIOS (bios_CD_U.bin, bios_CD_E.bin, bios_CD_J.bin). Configure it in System Settings.",
+        )
+        assertThat(firmwareLaunchFailureReason(
+            FirmwareStagingOutcome.CorruptedDownload("scph5500.bin", "SHA-1 mismatch"),
+            platformSlug = "psx",
+        )).isEqualTo("The configured BIOS failed verification (SHA-1 mismatch).")
+        assertThat(firmwareLaunchFailureReason(
+            FirmwareStagingOutcome.NetworkError("HTTP 503"),
+            platformSlug = "segacd",
+        )).isEqualTo("Could not download the BIOS: HTTP 503.")
+    }
+
+    @Test
+    fun `firmwareLaunchFailureReason covers auth expiry, insufficient space, and unknown slugs`() {
+        assertThat(firmwareLaunchFailureReason(FirmwareStagingOutcome.AuthExpired, platformSlug = "psx"))
+            .isEqualTo("Session expired; log in again to configure the PlayStation BIOS.")
+        assertThat(firmwareLaunchFailureReason(
+            FirmwareStagingOutcome.InsufficientSpace(requiredBytes = 1024L, availableBytes = 10L),
+            platformSlug = "segacd",
+        )).isEqualTo("Not enough storage to download the SEGA CD BIOS.")
+        assertThat(firmwareLaunchFailureReason(
+            FirmwareStagingOutcome.Missing(listOf("bios_CD_U.bin")),
+            platformSlug = "dreamcast",
+        )).isEqualTo("Dreamcast requires a BIOS (bios_CD_U.bin). Configure it in System Settings.")
+    }
+
+    @Test
+    fun `launchPlayer surfaces the focused missing-BIOS message when the server has no Sega CD firmware`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGenesisPlusGx(paths)
+        val server = StubServer().apply { start() }
+        try {
+            server.platformsJson(5L, "segacd")
+            // Default firmwareBody is "[]" — the platform exists but offers no BIOS files.
+            val launcher = FakePlayerProcessLauncher()
+            val supervisor = LaunchJournalSupervisor(
+                journalsRoot = paths.stateDir.resolve("journals"),
+                launcher = launcher,
+            )
+            val c = launchCoordinator(paths, platformSlug = "segacd", supervisor = supervisor)
+            c.settingsStore.write(mapOf(SettingsKeys.ORIGIN to server.origin))
+
+            val result = c.launchPlayer(romId = 7L)
+
+            assertThat(result).isEqualTo(
+                PlayerLaunchResult.Failed(
+                    "SEGA CD requires a BIOS (bios_CD_U.bin, bios_CD_E.bin, bios_CD_J.bin). Configure it in System Settings.",
+                ),
+            )
+            assertThat(launcher.launches).isEmpty() // fail-closed: no player without a verified BIOS
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `launchPlayer surfaces the focused corrupted-BIOS message when the download fails SHA-1 verification`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGenesisPlusGx(paths)
+        val server = StubServer().apply { start() }
+        try {
+            server.platformsJson(5L, "segacd")
+            // The entry matches the preferred US SHA-1 (so launch preparation selects it), but the
+            // served bytes do not hash to it — size is declared correctly so only the hash check fails.
+            val contents = "NOT-A-REAL-BIOS".toByteArray()
+            server.firmwareJson(
+                """{"id": 41, "file_name": "bios_CD_USA.bin", "file_size_bytes": ${contents.size}, """ +
+                    """"sha1_hash": "f4f315adcef9b8feb0364c21ab7f0eaf5457f3ed", "is_verified": true}""",
+            )
+            server.content(contents)
+            val launcher = FakePlayerProcessLauncher()
+            val supervisor = LaunchJournalSupervisor(
+                journalsRoot = paths.stateDir.resolve("journals"),
+                launcher = launcher,
+            )
+            val c = launchCoordinator(paths, platformSlug = "segacd", supervisor = supervisor)
+            c.settingsStore.write(mapOf(SettingsKeys.ORIGIN to server.origin))
+
+            val result = c.launchPlayer(romId = 7L)
+
+            assertThat(result).isEqualTo(
+                PlayerLaunchResult.Failed("The configured BIOS failed verification (SHA-1 mismatch)."),
+            )
+            assertThat(launcher.launches).isEmpty() // fail-closed: no player without a verified BIOS
+        } finally {
+            server.close()
+        }
     }
 
     @Test

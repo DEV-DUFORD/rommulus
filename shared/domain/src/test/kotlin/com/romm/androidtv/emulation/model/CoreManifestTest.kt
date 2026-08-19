@@ -39,6 +39,9 @@ class CoreManifestTest {
         assertThat(gpgx.commercialUseFinding).isEqualTo(CommercialUseFinding.NON_COMMERCIAL_RESTRICTED)
         assertThat(gpgx.ownerRiskAcceptedBy).isNotBlank()
         assertThat(gpgx.ownerRiskAcceptedOn).isNotBlank()
+        // Sega CD (segacd) needs the regional BIOS files; Genesis/Mega Drive/SMS/Game Gear do not.
+        // Must stay in sync with DesktopBiosConfigurationProvider's canonical segacd staging names.
+        assertThat(gpgx.requiredFirmware).containsExactly("bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin")
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
         assertThat(gpgx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
         assertThat(gpgx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")

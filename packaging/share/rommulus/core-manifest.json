@@ -453,7 +453,7 @@
       },
       "supportedSystems": ["genesis", "megadrive", "sms", "gamegear", "segacd"],
       "supportedExtensions": [".md", ".gen", ".bin", ".sms", ".gg", ".cue", ".iso", ".chd"],
-      "requiredFirmware": [],
+      "requiredFirmware": ["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"],
       "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
       "renderer": "software",
       "binaryChecksums": {
