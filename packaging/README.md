@@ -26,7 +26,9 @@ rommulus-<version>-linux-x86_64.tar.zst
     │                            third_party_licenses, NOTICE
     └── rommulus/
         ├── core-manifest.json   §13.1 Linux build identity for all 14 cores
-        └── PACKAGE.sha256       generated at package time (every file except itself)
+        ├── PACKAGE.sha256       generated at package time (every file except itself)
+        └── PACKAGE.sha256.asc   OPTIONAL detached GPG signature over PACKAGE.sha256
+                                 (present only when built with ROMMULUS_SIGN_KEY / --sign)
 ```
 
 Notes:
@@ -39,8 +41,9 @@ Notes:
   (`desktop/src/main/kotlin/com/romm/desktop/player/PlayerProcessLauncher.kt`).
   Remove it once the desktop resolves the bundled player path directly.
 - `PACKAGE.sha256` provides internal integrity checking (the launcher verifies
-  against it at startup). It is NOT a substitute for the release signature —
-  GPG signing of the tarball is a later Phase 14 sub-unit (§16 work item 4).
+  against it at startup). The optional GPG signature (`PACKAGE.sha256.asc`,
+  §"Signing") is NOT checked by the launcher — it exists for distribution-
+  integrity verification by users and inspectors (§16 work item 4).
 - User-facing documentation: see [docs/linux-support.md](docs/linux-support.md) — supported distributions, GPU expectations, and diagnostics.
 
 ## Assembling the tarball (Linux only)
@@ -67,7 +70,8 @@ packaging/build-tarball.sh 0.1.0
 ```
 
 Overrides: `PLAYER_BUILD_DIR`, `APP_JAR`, `RUNTIME_DIR`, `OUT_DIR`,
-`ROMMULUS_VERSION` (or the positional `VERSION` argument).
+`ROMMULUS_VERSION` (or the positional `VERSION` argument), and
+`ROMMULUS_SIGN_KEY` (or the `--sign <keyid>` flag) for optional GPG signing.
 
 The script fails fast if any input is missing, validates
 `core-manifest.json` as JSON, asserts no world-writable files in the package,
@@ -76,6 +80,50 @@ review), and writes a deterministic tar (`--sort=name --owner=0 --group=0
 --numeric-owner --mtime=@0`) compressed with zstd pinned to `-T1` (single
 thread) so the artifact is byte-for-byte reproducible across hosts — `-T0`
 would vary the thread count with the machine and change the compressed bytes.
+
+## Signing (optional GPG)
+
+Builds are **unsigned by default** (a note is logged). To sign a release:
+
+```sh
+# One-time setup on the signing machine / CI: create or import the release key
+gpg --full-generate-key          # e.g. "RomMulus Release <release@example.com>"
+
+# Sign at package time (key id or full fingerprint):
+ROMMULUS_SIGN_KEY=<keyid-or-fingerprint> packaging/build-tarball.sh 0.1.0
+# equivalent flag form:
+packaging/build-tarball.sh --sign <keyid-or-fingerprint> 0.1.0
+```
+
+Behavior:
+
+- The script signs `share/rommulus/PACKAGE.sha256` (the checksum manifest),
+  not the tarball bytes: `gpg --detach-sign --armor --local-user <key>
+  -o PACKAGE.sha256.asc`. The `.asc` is written into the staging tree after
+  the manifest exists, so it ships inside the tarball but — like
+  `PACKAGE.sha256` itself — is not listed in the manifest.
+- **Fail-closed:** if `ROMMULUS_SIGN_KEY`/`--sign` is set but gpg is missing or
+  cannot resolve the key in the local keyring, the build FAILS with a clear
+  message. An unsigned artifact is never produced when signing was explicitly
+  requested; "no key configured" is the only path to an unsigned build.
+- A PGP signature embeds a creation timestamp, so **signed artifacts are not
+  byte-for-byte reproducible** (unsigned builds remain deterministic).
+- The launcher does NOT need the signature and never checks it at runtime —
+  it verifies checksums against `PACKAGE.sha256` (exit 4 on mismatch), which
+  is what protects users at launch. The signature is for distribution-integrity
+  verification by users/inspectors:
+
+  ```sh
+  tar --zstd -xf rommulus-<version>-linux-x86_64.tar.zst \
+      share/rommulus/PACKAGE.sha256 share/rommulus/PACKAGE.sha256.asc
+  gpg --verify share/rommulus/PACKAGE.sha256.asc share/rommulus/PACKAGE.sha256
+  ```
+
+  Because `PACKAGE.sha256` covers every shipped file, a valid signature over
+  it transitively covers the whole tarball.
+- CI note: the script does not manage passphrases. A passphrase-protected key
+  needs an unlocked `gpg-agent` (e.g. secret key imported with the agent
+  loaded, or pinentry loopback) at build time.
 
 ## JVM runtime (jlink)
 
@@ -147,7 +195,9 @@ pending — see `share/icons/README.md`.
 
 ## Known follow-ups (later Phase 14 sub-units)
 
-- GPG signature over the tarball + publish flow (`release.yml`).
+- Release publish flow (`release.yml`): upload the tarball +
+  `PACKAGE.sha256.asc` and publish the release key fingerprint. (GPG signing
+  itself is implemented in `build-tarball.sh` — see §"Signing".)
 - Pin Linux x86_64 core `.so` SHA-256s into `CoreManifest.kt` and
   `core-manifest.json` (`binaryChecksums."linux-x86_64"` is currently null).
 - The `package-tarball` / `license-and-provenance-audit` CI jobs in
