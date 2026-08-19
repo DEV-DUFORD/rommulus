@@ -61,6 +61,7 @@ import com.romm.androidtv.library.GameDetailAlert
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.library.SiblingRomInfo
 import com.romm.androidtv.library.SectionState
+import com.romm.androidtv.storage.records.SaveSyncStatus
 import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.PlayerLaunchResult
 import com.romm.desktop.PlayerSessionEvent
@@ -159,6 +160,16 @@ private fun GameDetailContent(
     val uiState by presenter.uiState.collectAsState()
     val colors = LocalRommulusColors.current
 
+    // Read-only save-sync status (first piece of the Linux saves UI): refresh on show / ROM
+    // change, and after every player session ends (see the playerSessionEvents collector below).
+    // Dispatched to a worker — currentProfile() touches the JSON settings store and the replica
+    // read is local I/O that should not sit on the compose thread.
+    val saveStatusPresenter = remember { coordinator.saveSyncStatusPresenter() }
+    val saveUiState by saveStatusPresenter.uiState.collectAsState()
+    LaunchedEffect(romId) {
+        launch(Dispatchers.Default) { saveStatusPresenter.refresh(romId) }
+    }
+
     // Full-screen screenshot viewer (local overlay — Phase 6 desktop has no separate
     // ScreenshotViewerScreen; mirrors the Android viewer's left/right stepping).
     var screenshotsToView by remember { mutableStateOf<List<String>?>(null) }
@@ -180,23 +191,30 @@ private fun GameDetailContent(
     // dispose, so the flow is collected only while this detail screen is composed.
     LaunchedEffect(Unit) {
         coordinator.playerSessionEvents.collect { event ->
-            if (event is PlayerSessionEvent.Ended && event.sessionId == launchedSessionId) {
-                playStatus = when (val report = event.report) {
-                    is PlayerExitReport.Reconciled -> if (
-                        report.result.exitKind == PlayerExitKind.LAUNCH_FAILED ||
-                            report.result.exitKind == PlayerExitKind.RUNTIME_FAILED
-                    ) {
-                        // A failed exit with a null errorMessage must still surface a visible error —
-                        // mapping it to null would silently swallow the failure.
-                        PlayerLaunchResult.Failed(
-                            report.result.errorMessage ?: "Player exited with ${report.result.exitKind}",
-                        )
-                    } else {
-                        null
+            if (event is PlayerSessionEvent.Ended) {
+                // An ended session may have just adopted a checkpoint (the post-play enqueue runs
+                // right after this event publishes), so re-read the autosave status. Any Ended
+                // qualifies — the refresh is an idempotent local read keyed by [romId]. If this
+                // read wins the race against the enqueue, the next refresh corrects it.
+                launch(Dispatchers.Default) { saveStatusPresenter.refresh(romId) }
+                if (event.sessionId == launchedSessionId) {
+                    playStatus = when (val report = event.report) {
+                        is PlayerExitReport.Reconciled -> if (
+                            report.result.exitKind == PlayerExitKind.LAUNCH_FAILED ||
+                                report.result.exitKind == PlayerExitKind.RUNTIME_FAILED
+                        ) {
+                            // A failed exit with a null errorMessage must still surface a visible error —
+                            // mapping it to null would silently swallow the failure.
+                            PlayerLaunchResult.Failed(
+                                report.result.errorMessage ?: "Player exited with ${report.result.exitKind}",
+                            )
+                        } else {
+                            null
+                        }
+                        is PlayerExitReport.CrashInterrupted -> PlayerLaunchResult.Failed(report.reason)
+                        is PlayerExitReport.ReconcileFailed -> PlayerLaunchResult.Failed(report.reason)
+                        is PlayerExitReport.JournalMissing -> PlayerLaunchResult.Failed("player exited without a launch journal")
                     }
-                    is PlayerExitReport.CrashInterrupted -> PlayerLaunchResult.Failed(report.reason)
-                    is PlayerExitReport.ReconcileFailed -> PlayerLaunchResult.Failed(report.reason)
-                    is PlayerExitReport.JournalMissing -> PlayerLaunchResult.Failed("player exited without a launch journal")
                 }
             }
         }
@@ -247,6 +265,7 @@ private fun GameDetailContent(
                     }
                 },
                 playStatus = playStatus,
+                saveUiState = saveUiState,
                 onOpenScreenshot = { urls, index ->
                     initialScreenshotIndex = index
                     screenshotsToView = urls
@@ -322,13 +341,14 @@ private fun GameDetailContent(
     }
 }
 
-/** Hero cover + title/platform + metadata chips + summary + Play button. */
+/** Hero cover + title/platform + metadata chips + summary + Play button (+ save-sync status). */
 @Composable
 private fun GameDetailBody(
     rom: RomDetail,
     playEnabled: Boolean,
     onPlayClick: () -> Unit,
     playStatus: PlayerLaunchResult?,
+    saveUiState: SaveSyncUiState,
     onOpenScreenshot: (List<String>, Int) -> Unit,
     onOpenSibling: (Long) -> Unit,
     firstScreenshotFocusRequester: FocusRequester,
@@ -391,6 +411,7 @@ private fun GameDetailBody(
                         status = playStatus,
                         onPlayClick = onPlayClick,
                     )
+                    SaveStatusLine(state = saveUiState)
                 }
             }
         }
@@ -512,6 +533,36 @@ private fun PlayButton(
 
 /** Matches the theme error color used by [ErrorBanner] (Feedback.kt). */
 private val PlayButtonErrorColor = Color(0xFFF87171)
+
+/** Sync states that require explicit user action — rendered in the theme error color. */
+private val NEEDS_ATTENTION_SYNC_STATUSES = setOf(SaveSyncStatus.CONFLICT, SaveSyncStatus.QUARANTINED)
+
+/**
+ * Read-only save-sync status line under the Play button (first piece of the Linux saves UI).
+ * Neutral secondary text for healthy/in-flight states; the theme error color for CONFLICT and
+ * QUARANTINED (both block automatic sync until a later save-management screen acts on them). An
+ * optional second line carries [SaveSyncUiState.Replica.lastError] when the drain recorded one.
+ */
+@Composable
+private fun SaveStatusLine(state: SaveSyncUiState) {
+    val colors = LocalRommulusColors.current
+    val needsAttention = state is SaveSyncUiState.Replica &&
+        state.syncStatus in NEEDS_ATTENTION_SYNC_STATUSES
+    Text(
+        text = saveStatusLabel(state),
+        style = MaterialTheme.typography.bodySmall,
+        color = if (needsAttention) PlayButtonErrorColor else colors.textSecondary,
+    )
+    (state as? SaveSyncUiState.Replica)?.lastError?.let { error ->
+        Text(
+            text = error,
+            style = MaterialTheme.typography.labelSmall,
+            color = PlayButtonErrorColor,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 /** Fixed action rail: Favorite / Add-to-collection / Back (Android parity). */
 @Composable

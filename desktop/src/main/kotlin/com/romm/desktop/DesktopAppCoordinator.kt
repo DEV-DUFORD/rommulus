@@ -87,6 +87,7 @@ import com.romm.desktop.sync.SaveSyncDrainExecutor
 import com.romm.desktop.sync.SaveSyncSession
 import com.romm.desktop.sync.SaveSyncSessionReader
 import com.romm.desktop.ui.image.DesktopImageLoader
+import com.romm.desktop.ui.screens.detail.SaveSyncStatusPresenter
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -937,6 +938,43 @@ class DesktopAppCoordinator(
                 )
             }
         }
+
+    /**
+     * Read-only save-sync status for the game detail screen (first piece of the Linux saves UI):
+     * whether the current ROM's autosave is synced / pending upload / in conflict, etc. One
+     * app-wide instance — the screen calls [SaveSyncStatusPresenter.refresh] on show and after
+     * every player-session end, so no per-ROM memoization is needed (its state always reflects
+     * the most recent refresh).
+     */
+    private val saveSyncStatusPresenterLazy by lazy {
+        SaveSyncStatusPresenter(
+            store = saveStateStore,
+            sessionKeysProvider = { currentSaveSessionKeys() },
+        )
+    }
+
+    fun saveSyncStatusPresenter(): SaveSyncStatusPresenter = saveSyncStatusPresenterLazy
+
+    /**
+     * The save-scope keys for the current session — [SavePathPolicy.sanitizeSegment] applied to
+     * origin + username, exactly as [launchPlayer] persists them (via
+     * `SavePathPolicy.autosaveSramPath`) and [enqueuePostPlaySync] parses them back off disk.
+     * Null when there is no coherent non-kiosk session: blank origin, a kiosk/anonymous record
+     * ([SessionStorage.coherentRecord] returns null for a blank username), or an origin that does
+     * not match the profile. Those sessions never enqueue save-sync operations, so their saves
+     * render as NoSave in the UI.
+     */
+    internal fun currentSaveSessionKeys(): Pair<String, String>? {
+        val origin = settingsAdapter.currentProfile().origin
+        if (origin.isBlank()) return null
+        val record = sessionStorage.coherentRecord(origin) ?: return null
+        // Defensive: coherentRecord already requires a non-blank username, so kiosk records never
+        // reach here — but the UI must not query with an anonymous key anyway (no replicas exist
+        // for those; enqueuePostPlaySync drops them).
+        val username = record.username ?: return null
+        if (record.kioskMode || username.isBlank()) return null
+        return SavePathPolicy.sanitizeSegment(origin) to SavePathPolicy.sanitizeSegment(username)
+    }
 
     fun biosConfigurationPresenter(platformSlug: String): BiosConfigurationPresenter =
         BiosConfigurationPresenter(scope, biosConfigurationProvider(platformSlug))

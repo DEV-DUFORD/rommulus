@@ -69,8 +69,13 @@ object SavePathPolicy {
      * practice (they come from an authenticated session and a locally
      * verified SHA-256), but this makes that escape structurally impossible
      * rather than merely unlikely.
+     *
+     * Also the canonical key derivation for save-scope keys: replicas are
+     * PERSISTED under sanitized keys, so any caller that queries a store or
+     * path by a raw origin/username (e.g. the desktop save-status lookup)
+     * must apply this too — an unsanitized query can never match.
      */
-    private fun sanitizeSegment(segment: String): String =
+    fun sanitizeSegment(segment: String): String =
         segment.map { c -> if (c == '/' || c == '\\' || c == '\u0000') '_' else c }
             .joinToString("")
             .let { if (it == "." || it == "..") "_" else it }
