@@ -3,9 +3,9 @@
 #
 # Mirrors native/tests/CMakeLists.txt: a standalone host project that
 # compiles the platform-neutral engine sources directly into the player
-# executable plus the SDL3 platform adapters. It deliberately does NOT
-# build the vendored cores (except the synthetic test_core and the vendored
-# Gambatte core, both of which the player loads) or anything Android.
+# executable plus the SDL3 platform adapters. It also builds the synthetic
+# test_core and all 13 vendored cores (via the cmake/cores/*-linux.cmake
+# fragments) so the player can load them, but nothing Android.
 #
 # SDL3 is found via its installed CMake package (brew on macOS, vendored
 # source build on Linux CI):

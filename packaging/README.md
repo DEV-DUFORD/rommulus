@@ -81,14 +81,21 @@ would vary the thread count with the machine and change the compressed bytes.
 `lib/runtime/` must be a jlink image from JDK 17 (Temurin in CI):
 
 ```sh
-jlink --add-modules java.base,java.datatransfer,java.desktop,java.logging,\
-java.prefs,java.sql,java.xml,jdk.unsupported \
-      --output build/runtime --strip-debug --no-header-files --no-man-pages
+# The ENTIRE --add-modules list must stay on ONE line: a backslash
+# continuation after the trailing comma collapses to a single space and
+# jlink fails with "Error: invalid argument".
+jlink --add-modules java.base,java.datatransfer,java.desktop,java.logging,java.prefs,java.sql,java.xml,jdk.unsupported --output build/runtime --strip-debug --no-header-files --no-man-pages
 ```
 
-(The exact module list must be verified against the desktop app's runtime
-needs — e.g. `java.datatransfer` for clipboard, `jdk.unsupported` for
-sun.misc usage by some libraries — when the runtime sub-unit lands.)
+**TRACKED FOLLOW-UP (release-blocking):** the module list above is
+provisional. It lacks `java.net.http`, `jdk.crypto.ec`, `java.naming`, and
+`java.management`, which the desktop app needs for OkHttp/HTTPS.
+(`java.datatransfer` covers clipboard; `jdk.unsupported` covers sun.misc
+usage by some libraries.) Before ANY release artifact ships, complete the module
+list against the app's actual runtime needs and exercise the built runtime
+with the real app (run the desktop app against `build/runtime/bin/java`) to
+confirm no `java.lang.ModuleNotFoundException` /
+`NoClassDefFoundError`. Landing the CI job does not block on this.
 
 ## Launcher contract (`bin/rommulus`)
 
@@ -141,9 +148,20 @@ pending — see `share/icons/README.md`.
 - GPG signature over the tarball + publish flow (`release.yml`).
 - Pin Linux x86_64 core `.so` SHA-256s into `CoreManifest.kt` and
   `core-manifest.json` (`binaryChecksums."linux-x86_64"` is currently null).
-- Wire the `package-tarball` / `license-and-provenance-audit` CI jobs in
-  `.github/workflows/linux-x64.yml` (currently `if: false` stubs) to call this
-  script and assert §15.
+- The `package-tarball` / `license-and-provenance-audit` CI jobs in
+  `.github/workflows/linux-x64.yml` are wired (Phase 14 sub-unit 2): the former
+  builds player + cores (Release), the desktop app jar, and a jlink runtime
+  (command above), assembles via this script, verifies/uploads the tarball, and
+  smoke-tests the launcher fail-fast (exit 5 with a clear message when the
+  bundled runtime is absent); the latter runs the executable §15 assertions —
+  shared-module Android imports, native-engine JNI/Android/SDL references,
+  required licenses, exact executable inventory, world-writable files,
+  credential/token scan, core provenance (every manifested core ships), and a
+  `ldd` check that the player has no JVM/Android dependency — against this tree
+  and the packaged artifact. Remaining gaps: verify the jlink module list
+  against the app's runtime needs, pin `binaryChecksums."linux-x86_64"` for the
+  full core SHA/provenance match, add a symbol allowlist, and start the desktop
+  bundle headlessly in CI.
 - `desktop/build.gradle.kts` still carries the `TODO(phase 14)` comment on
   `nativeDistributions`; update it when Gradle-side packaging is wired up.
 - Finalize `share/licenses/rommulus/third_party_license_metadata`: it now lists
