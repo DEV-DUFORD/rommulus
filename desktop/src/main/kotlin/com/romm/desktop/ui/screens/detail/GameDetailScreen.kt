@@ -72,6 +72,7 @@ import com.romm.desktop.sync.SaveConflictResolutionResult
 import com.romm.desktop.ui.components.DesktopTextField
 import com.romm.desktop.ui.components.ErrorBanner
 import com.romm.desktop.ui.components.LocalRommulusColors
+import com.romm.desktop.ui.components.LocalRommulusTheme
 import com.romm.desktop.ui.components.LoadingIndicator
 import com.romm.desktop.ui.components.TvButton
 import com.romm.desktop.ui.components.TvOutlinedButton
@@ -174,6 +175,20 @@ private fun GameDetailContent(
     LaunchedEffect(romId) {
         saveActionMessage = null
         launch(Dispatchers.Default) { saveStatusPresenter.refresh(romId) }
+    }
+
+    // Quarantine drill-down (F2): "View quarantine" on the status line opens a read-only dialog
+    // for this ROM's quarantined save. The model is built off the compose thread (store read +
+    // quarantine-dir scan) and cleared when the dialog closes. Dismissing is non-mutating — the
+    // quarantined copy stays preserved on disk.
+    var showQuarantineDialog by remember { mutableStateOf(false) }
+    var quarantineModel by remember { mutableStateOf<SaveQuarantineUiModel?>(null) }
+    LaunchedEffect(showQuarantineDialog) {
+        if (showQuarantineDialog) {
+            quarantineModel = withContext(Dispatchers.Default) { saveStatusPresenter.quarantineView(romId) }
+        } else {
+            quarantineModel = null
+        }
     }
 
     // Full-screen screenshot viewer (local overlay — Phase 6 desktop has no separate
@@ -296,6 +311,7 @@ private fun GameDetailContent(
                 },
                 onSaveKeepLocal = { resolveSaveConflict(keepLocal = true) },
                 onSaveKeepServer = { resolveSaveConflict(keepLocal = false) },
+                onViewQuarantine = { showQuarantineDialog = true },
                 onOpenScreenshot = { urls, index ->
                     initialScreenshotIndex = index
                     screenshotsToView = urls
@@ -368,6 +384,17 @@ private fun GameDetailContent(
                 onClose = { screenshotsToView = null },
             )
         }
+
+        // ── Quarantine drill-down (read-only; acknowledge only) ──────────
+        if (showQuarantineDialog) {
+            quarantineModel?.let { model ->
+                SaveQuarantineDialog(
+                    model = model,
+                    theme = LocalRommulusTheme.current,
+                    onDismiss = { showQuarantineDialog = false },
+                )
+            }
+        }
     }
 }
 
@@ -383,6 +410,7 @@ private fun GameDetailBody(
     onSaveSyncNow: () -> Unit,
     onSaveKeepLocal: () -> Unit,
     onSaveKeepServer: () -> Unit,
+    onViewQuarantine: () -> Unit,
     onOpenScreenshot: (List<String>, Int) -> Unit,
     onOpenSibling: (Long) -> Unit,
     firstScreenshotFocusRequester: FocusRequester,
@@ -451,6 +479,7 @@ private fun GameDetailBody(
                         onSyncNow = onSaveSyncNow,
                         onKeepLocal = onSaveKeepLocal,
                         onKeepServer = onSaveKeepServer,
+                        onViewQuarantine = onViewQuarantine,
                     )
                 }
             }
@@ -581,10 +610,11 @@ private val NEEDS_ATTENTION_SYNC_STATUSES = setOf(SaveSyncStatus.CONFLICT, SaveS
  * Save-sync status line under the Play button, with actions (actionable half of the Linux saves UI).
  * Neutral secondary text for healthy/in-flight states; the theme error color for CONFLICT and
  * QUARANTINED. Actions are offered per [saveSyncUiActions]: "Sync now" (force a drain) whenever a
- * replica exists in any non-conflict status, and Keep-local / Keep-server ONLY on CONFLICT — the
- * user's explicit choice of which copy wins ("conflict preserves both copies"). An optional second
- * line carries the last action failure ([actionMessage]) or [SaveSyncUiState.Replica.lastError]
- * when the drain recorded one.
+ * replica exists in any non-conflict, non-quarantined status; Keep-local / Keep-server ONLY on
+ * CONFLICT — the user's explicit choice of which copy wins ("conflict preserves both copies"); and
+ * "View quarantine" ONLY on QUARANTINED — a quarantined save needs an explicit compatibility/import
+ * decision and is never auto-redrained. An optional second line carries the last action failure
+ * ([actionMessage]) or [SaveSyncUiState.Replica.lastError] when the drain recorded one.
  */
 @Composable
 private fun SaveStatusLine(
@@ -593,6 +623,7 @@ private fun SaveStatusLine(
     onSyncNow: () -> Unit,
     onKeepLocal: () -> Unit,
     onKeepServer: () -> Unit,
+    onViewQuarantine: () -> Unit,
 ) {
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
@@ -614,6 +645,11 @@ private fun SaveStatusLine(
         if (actions.canResolveConflict) {
             SaveActionButton("Keep local", "detail:keep-local", onKeepLocal, navigator)
             SaveActionButton("Keep server", "detail:keep-server", onKeepServer, navigator)
+        }
+        if (actions.canViewQuarantine) {
+            // QUARANTINED offers ONLY this action — never "Sync now" (a quarantined save needs an
+            // explicit compatibility/import decision; auto-redraining could undo that choice).
+            SaveActionButton("View quarantine", "detail:view-quarantine", onViewQuarantine, navigator)
         }
     }
     val detailLine = actionMessage ?: (state as? SaveSyncUiState.Replica)?.lastError

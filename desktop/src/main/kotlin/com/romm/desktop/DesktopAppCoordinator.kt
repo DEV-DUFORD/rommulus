@@ -1102,12 +1102,15 @@ class DesktopAppCoordinator(
      * whether the current ROM's autosave is synced / pending upload / in conflict, etc. One
      * app-wide instance — the screen calls [SaveSyncStatusPresenter.refresh] on show and after
      * every player-session end, so no per-ROM memoization is needed (its state always reflects
-     * the most recent refresh).
+     * the most recent refresh). Also backs the "View quarantine" drill-down: [filesDir] is the
+     * same data root [FileSaveContentGateway] writes under, so the presenter's quarantine-dir
+     * scan resolves exactly where preserved copies live.
      */
     private val saveSyncStatusPresenterLazy by lazy {
         SaveSyncStatusPresenter(
             store = saveStateStore,
             sessionKeysProvider = { currentSaveSessionKeys() },
+            filesDir = paths.dataDir.toFile(),
         )
     }
 
