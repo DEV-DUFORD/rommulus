@@ -1,9 +1,11 @@
 // test_pause_menu.cpp — host unit tests for the SDL-free pause overlay state
 // machine (native/player/include/native/player/pause_menu.h). Covers open/
-// close, D-pad navigation with disabled-item skipping and wrapping, Resume,
-// the "Quit game?" confirm dialog (Yes/No/cancel), the Video Options submenu
-// (enter/focus, toggle rows via confirm or left/right, Return to menu), and
-// effect reporting.
+// close, D-pad navigation with wrapping, Resume, the "Quit game?" confirm
+// dialog (Yes/No/cancel), the Video Options submenu (enter/focus, toggle
+// rows via confirm or left/right, Return to menu), the Controller Settings
+// submenu (enter/focus, navigation, the Return item and Back to menu, the
+// read-only physical binding placeholder and its return paths), and effect
+// reporting.
 
 #include <string>
 
@@ -54,9 +56,18 @@ PauseMenuActions rightAction() {
     return a;
 }
 
-// Opens the menu and navigates to Quit (two Downs: Resume -> Video Options
-// -> [skips disabled Controller Settings] -> Quit).
+// Opens the menu and navigates to Quit (three Downs: Resume -> Video Options
+// -> Controller Settings -> Quit).
 void selectQuit(PauseMenu& menu) {
+    menu.open();
+    menu.handle(downAction());
+    menu.handle(downAction());
+    menu.handle(downAction());
+}
+
+// Opens the menu and navigates to Controller Settings (two Downs: Resume ->
+// Video Options -> Controller Settings).
+void selectControllerSettings(PauseMenu& menu) {
     menu.open();
     menu.handle(downAction());
     menu.handle(downAction());
@@ -84,20 +95,21 @@ void testOpenFocusesResume() {
     CHECK(menu.state() == PauseMenuState::kOpen);
 }
 
-void testNavigationSkipsDisabledAndWraps() {
+void testNavigationWalksAllItemsAndWraps() {
     PauseMenu menu;
     menu.open();
-    // Resume(0) and Video Options(1) are enabled; Controller Settings(2) is a
-    // disabled placeholder, so Down from Video Options skips it to Quit(3).
+    // All four items are enabled: Down walks Resume -> Video Options ->
+    // Controller Settings -> Quit, then wraps back to Resume.
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kVideoOptionsItem);
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kControllerSettingsItem);
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kQuitItem);
     // Wrap: Down from Quit returns to Resume.
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kResumeItem);
-    // Wrap the other way: Up from Resume lands on Quit (skipping the disabled
-    // Controller Settings).
+    // Wrap the other way: Up from Resume lands on Quit.
     CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kQuitItem);
     CHECK(menu.state() == PauseMenuState::kOpen);  // navigation never closes
@@ -191,8 +203,8 @@ void testLabels() {
           "Controller Settings");
     CHECK(std::string(PauseMenu::itemLabel(PauseMenu::kQuitItem)) == "Quit");
     CHECK(PauseMenu::itemEnabled(PauseMenu::kResumeItem));
-    CHECK(PauseMenu::itemEnabled(PauseMenu::kVideoOptionsItem));  // live submenu now
-    CHECK(!PauseMenu::itemEnabled(PauseMenu::kControllerSettingsItem));
+    CHECK(PauseMenu::itemEnabled(PauseMenu::kVideoOptionsItem));  // live submenu
+    CHECK(PauseMenu::itemEnabled(PauseMenu::kControllerSettingsItem));  // live submenu now
     CHECK(PauseMenu::itemEnabled(PauseMenu::kQuitItem));
     CHECK(std::string(PauseMenu::confirmOptionLabel(PauseMenu::kConfirmYes)) == "Yes");
     CHECK(std::string(PauseMenu::confirmOptionLabel(PauseMenu::kConfirmNo)) == "No");
@@ -200,6 +212,9 @@ void testLabels() {
     CHECK(std::string(PauseMenu::videoOptionLabel(PauseMenu::kIntegerScalingItem)) ==
           "Integer Scaling");
     CHECK(std::string(PauseMenu::videoOptionLabel(PauseMenu::kSharpFilterItem)) == "Sharp Filter");
+    CHECK(std::string(PauseMenu::controllerOptionLabel(PauseMenu::kPhysicalItem)) ==
+          "Physical Controller Settings");
+    CHECK(std::string(PauseMenu::controllerOptionLabel(PauseMenu::kReturnItem)) == "Return");
 }
 
 void testCloseResetsFocus() {
@@ -330,12 +345,118 @@ void testCloseFromVideoOptionsResetsFocus() {
     CHECK_EQ(menu.selection(), PauseMenu::kResumeItem);  // fresh open focuses Resume
 }
 
+// ---------------------------------------------------------------------------
+// Controller Settings submenu (mirrors Android's controller-settings subpage,
+// minus its touch-only rows) and the read-only physical binding placeholder.
+
+void testControllerSettingsOpensFocusedOnPhysical() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kControllerSettings);
+    CHECK(menu.isOpen());
+    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);  // first row focused
+}
+
+void testControllerSettingsNavigationWraps() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());  // -> submenu, Physical selected
+    // Down walks to Return; Up wraps Return -> Physical and Down wraps
+    // Physical -> Return.
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kReturnItem);
+    CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);  // wrap the other way
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kReturnItem);  // wrap
+    CHECK(menu.state() == PauseMenuState::kControllerSettings);  // never leaves
+}
+
+void testControllerSettingsLeftRightIgnored() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());  // -> submenu
+    CHECK_EQ(menu.handle(leftAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.handle(rightAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);  // unchanged
+}
+
+void testControllerSettingsReturnItemToMenu() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());  // -> submenu, Physical selected
+    menu.handle(downAction());     // -> Return
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kOpen);
+    CHECK(menu.isOpen());
+    CHECK_EQ(menu.selection(), PauseMenu::kControllerSettingsItem);  // back on the item
+}
+
+void testControllerSettingsCancelToMenuThenClose() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());  // -> submenu
+    // Back/Escape returns to the MAIN menu (does not close it), focused on
+    // Controller Settings.
+    CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kOpen);
+    CHECK(menu.isOpen());
+    CHECK_EQ(menu.selection(), PauseMenu::kControllerSettingsItem);
+    // A second Back closes the whole menu and resumes.
+    CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kResume);
+    CHECK(!menu.isOpen());
+}
+
+void testPhysicalPlaceholderOpensFromSubmenu() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());  // -> submenu, Physical selected
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
+    CHECK(menu.isOpen());
+}
+
+void testPhysicalPlaceholderConfirmReturnsToSubmenu() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());  // -> submenu
+    menu.handle(confirmAction());  // -> placeholder
+    // Confirm (the on-screen Return action) goes back to the submenu,
+    // focused on Physical Controller Settings.
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kControllerSettings);
+    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);
+}
+
+void testPhysicalPlaceholderCancelReturnsToSubmenu() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());  // -> submenu
+    menu.handle(confirmAction());  // -> placeholder
+    // Back/Escape likewise returns to the submenu (it never closes the pause
+    // menu itself).
+    CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kControllerSettings);
+    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);
+}
+
+void testCloseFromControllerSettingsResetsFocus() {
+    PauseMenu menu;
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());  // -> submenu
+    menu.close();
+    CHECK(!menu.isOpen());
+    menu.open();
+    CHECK_EQ(menu.selection(), PauseMenu::kResumeItem);  // fresh open focuses Resume
+}
+
 }  // namespace
 
 int main() {
     testInitialAndClosedNoop();
     testOpenFocusesResume();
-    testNavigationSkipsDisabledAndWraps();
+    testNavigationWalksAllItemsAndWraps();
     testLeftRightIgnoredInMenu();
     testResumeClosesAndReports();
     testCancelClosesAndResumes();
@@ -355,5 +476,14 @@ int main() {
     testVideoOptionsReturnToMenu();
     testVideoOptionsCancelThenMenuCancelCloses();
     testCloseFromVideoOptionsResetsFocus();
+    testControllerSettingsOpensFocusedOnPhysical();
+    testControllerSettingsNavigationWraps();
+    testControllerSettingsLeftRightIgnored();
+    testControllerSettingsReturnItemToMenu();
+    testControllerSettingsCancelToMenuThenClose();
+    testPhysicalPlaceholderOpensFromSubmenu();
+    testPhysicalPlaceholderConfirmReturnsToSubmenu();
+    testPhysicalPlaceholderCancelReturnsToSubmenu();
+    testCloseFromControllerSettingsResetsFocus();
     return rommtest::finish("test_pause_menu");
 }

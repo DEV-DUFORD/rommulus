@@ -3,7 +3,10 @@
 // See pause_overlay.h for the contract. Deliberately minimal: rectangles
 // plus an embedded 5x7 bitmap font (no SDL_ttf dependency). Everything is
 // drawn in the renderer's logical presentation coordinates so the overlay
-// scales and letterboxes together with the game frame.
+// scales and letterboxes together with the game frame. Draws the main menu,
+// the Video Options submenu, the Controller Settings submenu, the read-only
+// Physical Controller Settings binding placeholder, and the "Quit game?"
+// confirm dialog on top when active.
 #include "native/player/pause_overlay.h"
 
 #include <SDL3/SDL.h>
@@ -136,6 +139,31 @@ constexpr unsigned kAccentR = 47, kAccentG = 111, kAccentB = 237;  // selection 
 constexpr unsigned kDialogBgR = 26, kDialogBgG = 32, kDialogBgB = 38;
 constexpr unsigned kButtonIdleR = 42, kButtonIdleG = 49, kButtonIdleB = 56;
 
+// The built-in gamepad -> RetroPad mapping as displayed by the Physical
+// Controller Settings placeholder (kPhysicalBindings). This mirrors
+// SdlInput::poll() (native/player/src/sdl_input.cpp), which is the single
+// source of truth for what the core actually receives — when the remapping
+// editor lands, replace this table with a live read from SdlInput.
+struct BindingRow {
+    const char* retroPad;   // RetroPad button the core sees (display label)
+    const char* sdlButton;  // SDL gamepad button it is bound to (display label)
+};
+constexpr BindingRow kBindingRows[] = {
+    {"A (South)", "SOUTH"},
+    {"B (East)", "EAST"},
+    {"X (West)", "WEST"},
+    {"Y (North)", "NORTH"},
+    {"Select", "BACK"},
+    {"Start", "START"},
+    {"Left Shoulder", "LEFT SHOULDER"},
+    {"Right Shoulder", "RIGHT SHOULDER"},
+    {"D-Pad Up", "DPAD UP"},
+    {"D-Pad Down", "DPAD DOWN"},
+    {"D-Pad Left", "DPAD LEFT"},
+    {"D-Pad Right", "DPAD RIGHT"},
+};
+constexpr int kBindingRowCount = sizeof(kBindingRows) / sizeof(kBindingRows[0]);
+
 void fillRect(SDL_Renderer* renderer, float x, float y, float w, float h,
               unsigned r, unsigned g, unsigned b, unsigned a) {
     SDL_SetRenderDrawColor(renderer, static_cast<Uint8>(r), static_cast<Uint8>(g),
@@ -209,12 +237,12 @@ void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu) const {
     const float rowH = 9.0f * s;
     const float titleH = 8.0f * s;
     const float gap = 2.0f * s;
+    const float hintH = 7.0f * s;
 
     // 2a. Video Options submenu: title + three toggle rows (label left,
     // ON/OFF state right) + a "BACK TO RETURN" hint. Replaces the main menu
     // panel while visible (the Quit dialog is never shown at the same time).
     if (menu.state() == PauseMenuState::kVideoOptions) {
-        const float hintH = 7.0f * s;
         const float panelW = std::min(Wf * 0.85f, 132.0f * s);
         const float panelH = pad * 2.0f + titleH + gap +
                              static_cast<float>(PauseMenu::kVideoOptionCount) * rowH +
@@ -254,8 +282,83 @@ void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu) const {
         return;
     }
 
-    // 2b. Menu panel: title + four items (Controller Settings is a disabled
-    // placeholder drawn dimmed; see PauseMenu::itemEnabled).
+    // 2b. Controller Settings submenu: title + two items (Physical
+    // Controller Settings / Return — Android's subpage minus its touch-only
+    // rows) + a "BACK TO RETURN" hint. Replaces the main menu panel while
+    // visible.
+    if (menu.state() == PauseMenuState::kControllerSettings) {
+        const float panelW = std::min(Wf * 0.9f, 185.0f * s);
+        const float panelH = pad * 2.0f + titleH + gap +
+                             static_cast<float>(PauseMenu::kControllerOptionCount) * rowH +
+                             gap + hintH;
+        const float px = (Wf - panelW) / 2.0f;
+        const float py = (Hf - panelH) / 2.0f;
+        fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
+
+        const char* title = "CONTROLLER SETTINGS";
+        drawText(renderer, px + (panelW - textWidth(title, s)) / 2.0f, py + pad, title, s,
+                 255, 255, 255, 255);
+
+        const float itemsX = px + pad;
+        const float itemsW = panelW - 2.0f * pad;
+        const float itemsY = py + pad + titleH + gap;
+        for (int i = 0; i < PauseMenu::kControllerOptionCount; ++i) {
+            const bool selected = menu.selection() == i;
+            if (selected) {
+                fillRect(renderer, itemsX, itemsY + static_cast<float>(i) * rowH, itemsW, rowH,
+                         kAccentR, kAccentG, kAccentB, 255);
+            }
+            const float ty = itemsY + static_cast<float>(i) * rowH + (rowH - 7.0f * s) / 2.0f;
+            drawText(renderer, itemsX + 2.0f * s, ty, PauseMenu::controllerOptionLabel(i), s,
+                     255, 255, 255, 255);
+        }
+
+        const char* hint = "BACK TO RETURN";
+        drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
+                 hint, s, 189, 189, 189, 255);
+        return;
+    }
+
+    // 2c. Physical Controller Settings placeholder: a read-only preview of
+    // the built-in gamepad -> RetroPad mapping (the full remapping editor is
+    // a follow-up sub-unit). Two columns — RetroPad button left, the SDL
+    // gamepad button it is bound to right — plus a return hint.
+    if (menu.state() == PauseMenuState::kPhysicalBindings) {
+        const float subH = 7.0f * s;
+        const float panelW = std::min(Wf * 0.95f, 210.0f * s);
+        const float panelH = pad * 2.0f + titleH + gap + subH + gap +
+                             static_cast<float>(kBindingRowCount) * rowH + gap + hintH;
+        const float px = (Wf - panelW) / 2.0f;
+        const float py = (Hf - panelH) / 2.0f;
+        fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
+
+        const char* title = "PHYSICAL CONTROLLER SETTINGS";
+        drawText(renderer, px + (panelW - textWidth(title, s)) / 2.0f, py + pad, title, s,
+                 255, 255, 255, 255);
+
+        const char* subtitle = "READ-ONLY - EDITOR TO FOLLOW";
+        drawText(renderer, px + (panelW - textWidth(subtitle, s)) / 2.0f, py + pad + titleH + gap,
+                 subtitle, s, 189, 189, 189, 255);
+
+        const float itemsX = px + pad;
+        const float itemsW = panelW - 2.0f * pad;
+        const float itemsY = py + pad + titleH + gap + subH + gap;
+        for (int i = 0; i < kBindingRowCount; ++i) {
+            const float ty = itemsY + static_cast<float>(i) * rowH + (rowH - 7.0f * s) / 2.0f;
+            drawText(renderer, itemsX + 2.0f * s, ty, kBindingRows[i].retroPad, s,
+                     255, 255, 255, 255);
+            drawText(renderer, itemsX + itemsW - 2.0f * s - textWidth(kBindingRows[i].sdlButton, s),
+                     ty, kBindingRows[i].sdlButton, s, kAccentR, kAccentG, kAccentB, 255);
+        }
+
+        const char* hint = "BACK TO CONTROLLER SETTINGS";
+        drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
+                 hint, s, 189, 189, 189, 255);
+        return;
+    }
+
+    // 2d. Menu panel: title + four items (all live now; see
+    // PauseMenu::itemEnabled).
     const float panelW = std::min(Wf * 0.7f, 130.0f * s);
     const float panelH = pad * 2.0f + titleH + gap +
                          static_cast<float>(PauseMenu::kItemCount) * rowH;
@@ -318,7 +421,7 @@ void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu) const {
                      selected ? kAccentB : kButtonIdleB, 255);
             const char* label = PauseMenu::confirmOptionLabel(option);
             drawText(renderer, bx + static_cast<float>(i) * (buttonW + gapX) +
-                                    (buttonW - textWidth(label, s)) / 2.0f,
+                                (buttonW - textWidth(label, s)) / 2.0f,
                      by + (buttonH - 7.0f * s) / 2.0f, label, s, 255, 255, 255, 255);
         }
     }

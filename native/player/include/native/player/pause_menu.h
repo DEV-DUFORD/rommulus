@@ -12,8 +12,14 @@
 // mirroring Android's VideoOptionsDialog: Scanlines, Integer Scaling, and
 // Sharp Filter. The state machine owns the toggle states (so the overlay can
 // draw ON/OFF); handle() reports each change as a kToggle* effect and the
-// caller applies it to the video sink immediately. Controller Settings is
-// still a DISABLED placeholder; navigation skips over it.
+// caller applies it to the video sink immediately. Controller Settings opens
+// a submenu (kControllerSettings) mirroring Android's controller-settings
+// subpage minus its touch-only rows: Physical Controller Settings and
+// Return. Activating Physical Controller Settings opens the read-only
+// kPhysicalBindings placeholder (the full remapping editor is a follow-up
+// sub-unit). Back/Escape from either state returns to the main menu focused
+// on Controller Settings (Android's quickBackTransition) — it never closes
+// the pause menu itself.
 //
 // This class is intentionally SDL-free so it can be unit-tested on the host
 // (native/tests/test_pause_menu.cpp). The caller feeds it one frame of
@@ -23,10 +29,12 @@
 namespace romm::player {
 
 enum class PauseMenuState {
-    kClosed,        // No overlay; gameplay input is routed normally.
-    kOpen,          // The pause menu (Resume / Video Options / Controller Settings / Quit) is visible.
-    kQuitConfirm,   // The "Quit game?" Yes/No dialog is visible on top of the menu.
-    kVideoOptions,  // The Video Options submenu (Scanlines / Integer Scaling / Sharp Filter) is visible.
+    kClosed,             // No overlay; gameplay input is routed normally.
+    kOpen,               // The pause menu (Resume / Video Options / Controller Settings / Quit) is visible.
+    kQuitConfirm,        // The "Quit game?" Yes/No dialog is visible on top of the menu.
+    kVideoOptions,       // The Video Options submenu (Scanlines / Integer Scaling / Sharp Filter) is visible.
+    kControllerSettings, // The Controller Settings submenu (Physical Controller Settings / Return).
+    kPhysicalBindings,   // The read-only physical binding placeholder (the editor is a follow-up).
 };
 
 // One frame of edge-detected input for the overlay. Each field is true only
@@ -73,12 +81,18 @@ public:
     static constexpr int kScanlinesItem = 0;
     static constexpr int kIntegerScalingItem = 1;
     static constexpr int kSharpFilterItem = 2;
+    // Selection indices while in kControllerSettings, in the same order as
+    // Android's controller-settings subpage (minus its touch-only rows).
+    static constexpr int kControllerOptionCount = 2;
+    static constexpr int kPhysicalItem = 0;
+    static constexpr int kReturnItem = 1;
 
     PauseMenuState state() const { return state_; }
     bool isOpen() const { return state_ != PauseMenuState::kClosed; }
     // Current selection: an item index in kOpen, a confirm option in
-    // kQuitConfirm, a toggle-row index in kVideoOptions. Meaningless in
-    // kClosed.
+    // kQuitConfirm, a toggle-row index in kVideoOptions, a subpage-item
+    // index (kPhysicalItem / kReturnItem) in kControllerSettings. Meaningless
+    // in kClosed and kPhysicalBindings.
     int selection() const { return selection_; }
 
     // The Video Options toggle states. The menu owns them so the overlay can
@@ -94,11 +108,12 @@ public:
     }
 
     static const char* itemLabel(int index);
-    // Controller Settings is a disabled placeholder until its sub-unit lands.
-    static bool itemEnabled(int index);
+    static bool itemEnabled(int index);  // all four items are live now
     static const char* confirmOptionLabel(int index);  // "Yes" / "No"
     // Toggle-row labels while in kVideoOptions ("Scanlines" / ...).
     static const char* videoOptionLabel(int index);
+    // Subpage-item labels while in kControllerSettings.
+    static const char* controllerOptionLabel(int index);
 
     // CLOSED -> OPEN with Resume focused (Android requests focus on RESUME
     // for a fresh CLOSED -> MENU transition). No-op when already open.
@@ -128,6 +143,10 @@ public:
                 return handleQuitConfirm(a);
             case PauseMenuState::kVideoOptions:
                 return handleVideoOptions(a);
+            case PauseMenuState::kControllerSettings:
+                return handleControllerSettings(a);
+            case PauseMenuState::kPhysicalBindings:
+                return handlePhysicalBindings(a);
         }
         return PauseMenuEffect::kNone;
     }
@@ -147,6 +166,12 @@ private:
     // three (always-enabled) toggle rows.
     void moveVideoSelection(int delta) {
         selection_ = (selection_ + delta + kVideoOptionCount) % kVideoOptionCount;
+    }
+
+    // Moves the Controller Settings submenu selection by +/-1, wrapping over
+    // its two (always-enabled) items.
+    void moveControllerSelection(int delta) {
+        selection_ = (selection_ + delta + kControllerOptionCount) % kControllerOptionCount;
     }
 
     PauseMenuEffect handleOpen(const PauseMenuActions& a) {
@@ -169,6 +194,13 @@ private:
                     state_ = PauseMenuState::kVideoOptions;
                     selection_ = kScanlinesItem;
                     return PauseMenuEffect::kNone;
+                case kControllerSettingsItem:
+                    // Open the Controller Settings submenu, focused on
+                    // Physical Controller Settings (Android requests focus
+                    // on that row in its subpage).
+                    state_ = PauseMenuState::kControllerSettings;
+                    selection_ = kPhysicalItem;
+                    return PauseMenuEffect::kNone;
                 case kQuitItem:
                     // The user already expressed intent to quit, so the
                     // dialog defaults to Yes (No is one press away).
@@ -176,7 +208,7 @@ private:
                     selection_ = kConfirmYes;
                     return PauseMenuEffect::kNone;
                 default:
-                    break;  // Disabled placeholders are unreachable via navigation.
+                    break;  // All items are enabled; unreachable.
             }
         }
         return PauseMenuEffect::kNone;
@@ -207,6 +239,46 @@ private:
                 default:
                     break;  // unreachable: the submenu only has these three rows
             }
+        }
+        return PauseMenuEffect::kNone;
+    }
+
+    PauseMenuEffect handleControllerSettings(const PauseMenuActions& a) {
+        if (a.up) moveControllerSelection(-1);
+        if (a.down) moveControllerSelection(+1);
+        if (a.cancel) {
+            // Back/Escape returns to the main menu, focused on Controller
+            // Settings (Android's quickBackTransition: CONTROLLER_SETTINGS ->
+            // MENU; it does NOT close the pause menu itself).
+            state_ = PauseMenuState::kOpen;
+            selection_ = kControllerSettingsItem;
+            return PauseMenuEffect::kNone;
+        }
+        if (a.confirm) {
+            switch (selection_) {
+                case kPhysicalItem:
+                    // Open the read-only binding placeholder. The full
+                    // remapping editor is a follow-up sub-unit.
+                    state_ = PauseMenuState::kPhysicalBindings;
+                    return PauseMenuEffect::kNone;
+                case kReturnItem:
+                    state_ = PauseMenuState::kOpen;
+                    selection_ = kControllerSettingsItem;
+                    return PauseMenuEffect::kNone;
+                default:
+                    break;  // unreachable: the submenu only has these two rows
+            }
+        }
+        return PauseMenuEffect::kNone;
+    }
+
+    PauseMenuEffect handlePhysicalBindings(const PauseMenuActions& a) {
+        // The placeholder has no rows to navigate. Confirm (the on-screen
+        // Return action) or Back/Escape both return to the Controller
+        // Settings submenu, focused on Physical Controller Settings.
+        if (a.confirm || a.cancel) {
+            state_ = PauseMenuState::kControllerSettings;
+            selection_ = kPhysicalItem;
         }
         return PauseMenuEffect::kNone;
     }
@@ -252,9 +324,10 @@ inline const char* PauseMenu::itemLabel(int index) {
 }
 
 inline bool PauseMenu::itemEnabled(int index) {
-    // Controller Settings is still a disabled placeholder until its sub-unit
-    // lands; Video Options is now live (opens the kVideoOptions submenu).
-    return index == kResumeItem || index == kVideoOptionsItem || index == kQuitItem;
+    // All four items are live: Video Options opens the kVideoOptions submenu
+    // and Controller Settings opens the kControllerSettings submenu.
+    return index == kResumeItem || index == kVideoOptionsItem ||
+           index == kControllerSettingsItem || index == kQuitItem;
 }
 
 inline const char* PauseMenu::confirmOptionLabel(int index) {
@@ -266,6 +339,14 @@ inline const char* PauseMenu::videoOptionLabel(int index) {
         case kScanlinesItem: return "Scanlines";
         case kIntegerScalingItem: return "Integer Scaling";
         case kSharpFilterItem: return "Sharp Filter";
+        default: return "";
+    }
+}
+
+inline const char* PauseMenu::controllerOptionLabel(int index) {
+    switch (index) {
+        case kPhysicalItem: return "Physical Controller Settings";
+        case kReturnItem: return "Return";
         default: return "";
     }
 }
