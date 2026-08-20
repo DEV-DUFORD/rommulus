@@ -3,13 +3,14 @@ package com.romm.androidtv.controller.config
 /**
  * A physical input binding that a user can assign to a [CoreControlId].
  *
- * Axis values use plain `Int` matching Android [android.view.MotionEvent] axis
- * constants (e.g., [android.view.MotionEvent.AXIS_X]), consistent with the
+ * Key codes use plain `Int` matching the [com.romm.androidtv.controller.model.NeutralKey]
+ * platform codes and axis values match the
+ * [com.romm.androidtv.controller.model.NeutralAxis] platform codes, consistent with the
  * existing [com.romm.androidtv.controller.model.ControllerMapping] and
  * [com.romm.androidtv.controller.policy.AxisMappingPolicy] conventions.
  */
 sealed interface PhysicalBinding {
-    /** A physical button bound by Android key code. */
+    /** A physical button bound by neutral key platform code. */
     data class Key(val keyCode: Int) : PhysicalBinding
 
     /** A full analog axis (both polarities produce continuous output). */

@@ -12,5 +12,6 @@ data class CoreControllerConfig(
     val players: Map<Int, PlayerControllerConfig>,
 )
 
-internal val CoreControlId.isPauseMenuControl: Boolean
+/** True for the app-level pause-menu shortcut, which is never forwarded to a core. */
+val CoreControlId.isPauseMenuControl: Boolean
     get() = this == CoreControlId.PAUSE_MENU

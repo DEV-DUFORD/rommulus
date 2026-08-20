@@ -196,7 +196,8 @@ class ControllerConfigMergerTest {
 
     @Test
     fun `existing override wins over a newly added secondary default`() {
-        val stickUp = PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_Y, -1)
+        // AXIS_Y platform code is 1 (see NeutralAxis.Y).
+        val stickUp = PhysicalBinding.AxisDirection(1, -1)
         val overrides = mapOf(
             0 to mapOf(
                 CoreControlId.BUTTON_A to mapOf(BindingSlot.PRIMARY to stickUp),

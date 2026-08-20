@@ -1,10 +1,10 @@
 package com.romm.androidtv.controller.config
 
-import android.view.KeyEvent
-import android.view.MotionEvent
 import com.romm.androidtv.controller.model.NEUTRAL_AXIS_TO_CONTROL
 import com.romm.androidtv.controller.model.NEUTRAL_KEY_TO_CONTROL
 import com.romm.androidtv.controller.model.LogicalControl
+import com.romm.androidtv.controller.model.NeutralAxis
+import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.emulation.model.CoreManifest
 
 /**
@@ -309,12 +309,12 @@ object CoreControllerProfiles {
         val bindings = allControls.associate { descriptor ->
             descriptor.id to ControlBindings(
                 primary = if (descriptor.id.isPauseMenuControl) {
-                    PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_THUMBL)
+                    PhysicalBinding.Key(NeutralKey.BUTTON_THUMBL.platformCode)
                 } else {
                     defaultBinding(descriptor.target)
                 },
                 secondary = if (descriptor.id.isPauseMenuControl) {
-                    PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_THUMBR)
+                    PhysicalBinding.Key(NeutralKey.BUTTON_THUMBR.platformCode)
                 } else {
                     defaultTriggerAxisAlias(descriptor)
                         ?: defaultRightStickAxisAlias(descriptor.target)
@@ -355,26 +355,26 @@ object CoreControllerProfiles {
 
     /**
      * Derive the default physical binding for a logical target, mirroring
-     * [KEYCODE_TO_CONTROL] (buttons/d-pad) and [AXIS_TO_CONTROL] (analog axes)
+     * [NEUTRAL_KEY_TO_CONTROL] (buttons/d-pad) and [NEUTRAL_AXIS_TO_CONTROL] (analog axes)
      * exactly so unconfigured cores keep today's default controller behavior.
      */
     private fun defaultBinding(target: LogicalControl): PhysicalBinding = when (target.type) {
         LogicalControl.Type.BUTTON -> {
-            // KEYCODE_TO_CONTROL omits L2/R2 (only L1/R1 are standard gamepad buttons
-            // there); map them to their Android key codes explicitly.
+            // NEUTRAL_KEY_TO_CONTROL omits L2/R2 (only L1/R1 are standard gamepad buttons
+            // there); map them to their neutral key platform codes explicitly.
             val keyCode = when (target) {
-                LogicalControl.BUTTON_LT -> KeyEvent.KEYCODE_BUTTON_L2
-                LogicalControl.BUTTON_RT -> KeyEvent.KEYCODE_BUTTON_R2
+                LogicalControl.BUTTON_LT -> NeutralKey.BUTTON_L2.platformCode
+                LogicalControl.BUTTON_RT -> NeutralKey.BUTTON_R2.platformCode
                 else -> NEUTRAL_KEY_TO_CONTROL.entries.first { it.value == target }.key.platformCode
             }
             PhysicalBinding.Key(keyCode)
         }
         LogicalControl.Type.AXIS -> {
-            // Right-stick axes appear twice in AXIS_TO_CONTROL (AXIS_RX and AXIS_Z both
-            // map to AXIS_RX). AxisMappingPolicy prefers AXIS_RX/AXIS_RY over Z/RZ.
+            // Right-stick axes appear twice in NEUTRAL_AXIS_TO_CONTROL (NeutralAxis.RX and
+            // NeutralAxis.Z both map to AXIS_RX). AxisMappingPolicy prefers RX/RY over Z/RZ.
             val axis = when (target) {
-                LogicalControl.AXIS_RX -> MotionEvent.AXIS_RX
-                LogicalControl.AXIS_RY -> MotionEvent.AXIS_RY
+                LogicalControl.AXIS_RX -> NeutralAxis.RX.platformCode
+                LogicalControl.AXIS_RY -> NeutralAxis.RY.platformCode
                 else -> NEUTRAL_AXIS_TO_CONTROL.entries.first { it.value == target }.key.platformCode
             }
             PhysicalBinding.Axis(axis)
@@ -382,25 +382,25 @@ object CoreControllerProfiles {
     }
 
     private fun defaultDigitalDpadAlias(controlId: CoreControlId): PhysicalBinding? = when (controlId) {
-        CoreControlId.D_PAD_UP -> PhysicalBinding.AxisDirection(MotionEvent.AXIS_Y, -1)
-        CoreControlId.D_PAD_DOWN -> PhysicalBinding.AxisDirection(MotionEvent.AXIS_Y, 1)
-        CoreControlId.D_PAD_LEFT -> PhysicalBinding.AxisDirection(MotionEvent.AXIS_X, -1)
-        CoreControlId.D_PAD_RIGHT -> PhysicalBinding.AxisDirection(MotionEvent.AXIS_X, 1)
+        CoreControlId.D_PAD_UP -> PhysicalBinding.AxisDirection(NeutralAxis.Y.platformCode, -1)
+        CoreControlId.D_PAD_DOWN -> PhysicalBinding.AxisDirection(NeutralAxis.Y.platformCode, 1)
+        CoreControlId.D_PAD_LEFT -> PhysicalBinding.AxisDirection(NeutralAxis.X.platformCode, -1)
+        CoreControlId.D_PAD_RIGHT -> PhysicalBinding.AxisDirection(NeutralAxis.X.platformCode, 1)
         else -> null
     }
 
     private fun defaultTriggerAxisAlias(descriptor: CoreControlDescriptor): PhysicalBinding? {
         if (descriptor.inputKind != InputKind.TRIGGER) return null
         return when (descriptor.target) {
-            LogicalControl.BUTTON_LT -> PhysicalBinding.Axis(MotionEvent.AXIS_LTRIGGER)
-            LogicalControl.BUTTON_RT -> PhysicalBinding.Axis(MotionEvent.AXIS_RTRIGGER)
+            LogicalControl.BUTTON_LT -> PhysicalBinding.Axis(NeutralAxis.LTRIGGER.platformCode)
+            LogicalControl.BUTTON_RT -> PhysicalBinding.Axis(NeutralAxis.RTRIGGER.platformCode)
             else -> null
         }
     }
 
     private fun defaultRightStickAxisAlias(target: LogicalControl): PhysicalBinding? = when (target) {
-        LogicalControl.AXIS_RX -> PhysicalBinding.Axis(MotionEvent.AXIS_Z)
-        LogicalControl.AXIS_RY -> PhysicalBinding.Axis(MotionEvent.AXIS_RZ)
+        LogicalControl.AXIS_RX -> PhysicalBinding.Axis(NeutralAxis.Z.platformCode)
+        LogicalControl.AXIS_RY -> PhysicalBinding.Axis(NeutralAxis.RZ.platformCode)
         else -> null
     }
 

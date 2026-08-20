@@ -2,6 +2,8 @@ package com.romm.androidtv.controller.config
 
 import com.romm.androidtv.controller.model.ControllerSlot
 import com.romm.androidtv.controller.model.LogicalControl
+import com.romm.androidtv.controller.model.NeutralAxis
+import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.emulation.model.CoreManifest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
@@ -14,7 +16,9 @@ class CoreControllerProfilesTest {
 
     @Test
     fun `every approved core has exactly one profile and no extra profiles exist`() {
-        val approvedIds = CoreManifest.approvedEntries().map { it.coreId }
+        // The project-owned synthetic `test_core` harness entry (Phase 8) is not a console —
+        // it intentionally has no controller profile — so scope the invariant to real cores.
+        val approvedIds = CoreManifest.approvedEntries().map { it.coreId } - setOf("test_core")
         val profileIds = profiles.map { it.coreId }
 
         assertThat(profileIds).containsExactlyInAnyOrderElementsOf(approvedIds)
@@ -64,9 +68,9 @@ class CoreControllerProfilesTest {
         for (profile in profiles) {
             for (player in profile.defaults.values) {
                 assertThat(player.get(CoreControlId.PAUSE_MENU, BindingSlot.PRIMARY))
-                    .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_THUMBL))
+                    .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_THUMBL.platformCode))
                 assertThat(player.get(CoreControlId.PAUSE_MENU, BindingSlot.SECONDARY))
-                    .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_THUMBR))
+                    .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_THUMBR.platformCode))
             }
         }
     }
@@ -92,19 +96,19 @@ class CoreControllerProfilesTest {
                         for (player in profile.defaults.values) {
                             assertThat(player.get(CoreControlId.D_PAD_UP, BindingSlot.SECONDARY))
                                 .isEqualTo(
-                                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_Y, -1),
+                                    PhysicalBinding.AxisDirection(NeutralAxis.Y.platformCode, -1),
                                 )
                             assertThat(player.get(CoreControlId.D_PAD_DOWN, BindingSlot.SECONDARY))
                                 .isEqualTo(
-                                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_Y, 1),
+                                    PhysicalBinding.AxisDirection(NeutralAxis.Y.platformCode, 1),
                                 )
                             assertThat(player.get(CoreControlId.D_PAD_LEFT, BindingSlot.SECONDARY))
                                 .isEqualTo(
-                                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_X, -1),
+                                    PhysicalBinding.AxisDirection(NeutralAxis.X.platformCode, -1),
                                 )
                             assertThat(player.get(CoreControlId.D_PAD_RIGHT, BindingSlot.SECONDARY))
                                 .isEqualTo(
-                                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_X, 1),
+                                    PhysicalBinding.AxisDirection(NeutralAxis.X.platformCode, 1),
                                 )
                         }
                     }
@@ -122,13 +126,13 @@ class CoreControllerProfilesTest {
                         val player = playStation.defaults.getValue(0)
 
                         assertThat(player.get(CoreControlId.L2, BindingSlot.PRIMARY))
-                            .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_L2))
+                            .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_L2.platformCode))
                         assertThat(player.get(CoreControlId.L2, BindingSlot.SECONDARY))
-                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_LTRIGGER))
+                            .isEqualTo(PhysicalBinding.Axis(NeutralAxis.LTRIGGER.platformCode))
                         assertThat(player.get(CoreControlId.R2, BindingSlot.PRIMARY))
-                            .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_R2))
+                            .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_R2.platformCode))
                         assertThat(player.get(CoreControlId.R2, BindingSlot.SECONDARY))
-                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RTRIGGER))
+                            .isEqualTo(PhysicalBinding.Axis(NeutralAxis.RTRIGGER.platformCode))
                     }
 
                     @Test
@@ -136,13 +140,13 @@ class CoreControllerProfilesTest {
                         val player = CoreControllerProfiles.byCoreId("pcsx_rearmed")!!.defaults.getValue(0)
 
                         assertThat(player.get(CoreControlId.RIGHT_STICK_X, BindingSlot.PRIMARY))
-                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RX))
+                            .isEqualTo(PhysicalBinding.Axis(NeutralAxis.RX.platformCode))
                         assertThat(player.get(CoreControlId.RIGHT_STICK_X, BindingSlot.SECONDARY))
-                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_Z))
+                            .isEqualTo(PhysicalBinding.Axis(NeutralAxis.Z.platformCode))
                         assertThat(player.get(CoreControlId.RIGHT_STICK_Y, BindingSlot.PRIMARY))
-                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RY))
+                            .isEqualTo(PhysicalBinding.Axis(NeutralAxis.RY.platformCode))
                         assertThat(player.get(CoreControlId.RIGHT_STICK_Y, BindingSlot.SECONDARY))
-                            .isEqualTo(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RZ))
+                            .isEqualTo(PhysicalBinding.Axis(NeutralAxis.RZ.platformCode))
                     }
 
                     assertThat(analogProfiles.map { it.coreId })
@@ -210,44 +214,9 @@ class CoreControllerProfilesTest {
         }
     }
 
-    @Test
-    fun `every profile artwork resourceName resolves to a known drawable`() {
-        // Guards against a wrong/typo'd resourceName shipping unnoticed (spec point 5,
-        // non-visual stand-in for a screenshot/golden review until a golden library is added).
-        // Every declared resourceName must map to an explicit branch — the two generic
-        // placeholders plus the 13 distinct per-family outlines — never silently to the
-        // fallback.
-        val knownNames = listOf(
-            ControllerArtworkResolver.GENERIC_GAMEPAD,
-            ControllerArtworkResolver.GENERIC_HANDHELD,
-            "controller_outline_genesis",
-            "controller_outline_snes",
-            "controller_outline_nes",
-            "controller_outline_atari2600",
-            "controller_outline_atari7800",
-            "controller_outline_ps1",
-            "controller_outline_n64",
-            "controller_outline_gba",
-            "controller_outline_gb",
-            "controller_outline_tg16",
-            "controller_outline_ngp",
-            "controller_outline_wswan",
-            "controller_outline_lynx",
-        )
-        val knownIds = knownNames.map(ControllerArtworkResolver::resourceIdFor)
-        assertThat(knownIds).allMatch { it > 0 }
-        // The 13 console profiles must resolve to 13 distinct outlines (not 2 shared buckets).
-        val consoleIds = knownNames.drop(2).map(ControllerArtworkResolver::resourceIdFor)
-        assertThat(consoleIds.distinct()).hasSize(consoleIds.size)
-        for (profile in profiles) {
-            val resourceName = profile.artwork.resourceName
-            assertThat(resourceName).`as`("artwork resourceName for %s", profile.coreId).isNotBlank()
-            // The resolver must return a valid, non-zero drawable id for every declared name.
-            val resolved = ControllerArtworkResolver.resourceIdFor(resourceName)
-            assertThat(resolved).`as`("resolved drawable id for %s", profile.coreId).isGreaterThan(0)
-            assertThat(resolved).`as`("resolved drawable for %s", profile.coreId).isIn(knownIds)
-        }
-    }
+    // NOTE: the artwork-resourceName -> drawable resolution test lives in :app
+    // (CoreControllerProfilesArtworkTest) because ControllerArtworkResolver is an
+    // Android resource-lookup adapter; the shared catalog only carries the metadata.
 
     // --- Documentation-as-code: default console-control -> LogicalControl mapping ---
 

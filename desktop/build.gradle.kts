@@ -40,6 +40,8 @@ dependencies {
     implementation("org.tukaani:xz:1.12")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:1.9.23")
+    // Virtual-time clock for the capture coordinator's 15 s timeout (same version as :app).
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     implementation(project(":shared:storage-api"))
     implementation(project(":shared:domain"))
     implementation(project(":shared:network"))
