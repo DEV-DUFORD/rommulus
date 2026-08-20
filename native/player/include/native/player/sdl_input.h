@@ -23,7 +23,9 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 
+#include "native/player/binding_table.h"
 #include "native/player/pause_menu.h"
 
 namespace romm {
@@ -79,6 +81,54 @@ public:
     // cannot re-trigger either path.
     PauseMenuActions pollMenuActions();
 
+    // --- Binding editor support (the pause menu's Physical Controller
+    // Settings). The table maps each of the 12 RetroPad slots to a physical
+    // control; poll() consults it instead of a hardcoded mapping. Defaults
+    // are the built-in mapping; the editor mutates it at runtime.
+    const BindingTable& bindings() const { return bindings_; }
+    const BindingSource& bindingForSlot(int slot) const { return bindings_.get(slot); }
+    void setBinding(int slot, BindingSource source) { bindings_.set(slot, source); }
+    // Restores the built-in default mapping (the editor's Reset to Default).
+    void resetBindings() { bindings_.reset(); }
+
+    // True when a gamepad occupies the port.
+    bool hasGamepad(int port) const {
+        return port >= 0 && port < kPorts && gamepads_[port].gamepad != nullptr;
+    }
+
+    // One frame of capture samples for the binding editor: current button
+    // levels and normalized axis values for every connected pad, plus Back
+    // press/release edges. Call ONCE per frame while the pause menu is in
+    // its binding-capture state — pollMenuActions() must NOT be called then
+    // (the capture coordinator owns gamepad input). Levels are read fresh
+    // from SDL each call, so a pad that hot-unplugs simply drops out of the
+    // next frame.
+    struct CapturePortSample {
+        int port = -1;                       // player port index of this pad
+        bool backDown = false;               // Back newly pressed this frame
+        bool backUp = false;                 // Back released this frame
+        bool buttons[kPadButtonCount] = {};  // level per PadButton
+        float axes[kPadAxisCount] = {};      // sticks -1..+1, triggers 0..+1
+    };
+    struct CaptureFrame {
+        CapturePortSample ports[kPorts]{};
+        int count = 0;  // number of connected pads
+    };
+    CaptureFrame captureFrame();
+
+    // Drops the menu edge-detection latches (call when entering/leaving
+    // capture mode so a button held across the transition cannot fire a
+    // spurious menu action on the next pollMenuActions()).
+    void resetMenuEdges() {
+        prevButtons_ = {};
+        prevBackHeld_ = {};
+    }
+
+    // The canonical SDL joystick GUID string for a port's pad (the stable
+    // persistence key, LINUX_X64.md section 11.9), or "" when no pad is on
+    // the port.
+    std::string joystickGuidString(int port) const;
+
     // Clears all four ports to neutral (no buttons, centered sticks).
     // Call on window focus loss and before quit so a held key/button can
     // never leak into the core after we stop pumping events.
@@ -110,6 +160,11 @@ private:
     std::array<PortState, kPorts> ports_{};
     std::array<GamepadSlot, kPorts> gamepads_{};
 
+    // The RetroPad slot -> physical control table poll() consults. Owned by
+    // the editor (setBinding / resetBindings); defaults are the built-in
+    // mapping. See binding_table.h.
+    BindingTable bindings_{};
+
     // Port 0 bit flags accumulated from KEY_DOWN/KEY_UP events (see
     // keyboardButtonBit). Merged into port 0's snapshot by poll() each
     // frame and cleared by reset(). Kept separate from ports_[0] so the
@@ -133,6 +188,11 @@ private:
         bool east = false;        // B — menu cancel
     };
     std::array<PrevButtons, kPorts> prevButtons_{};
+
+    // Per-port previous-frame Back level for the capture editor's
+    // press/release edges (captureFrame). Separate from prevButtons_.back so
+    // the two consumers never disturb each other's edge state.
+    std::array<bool, kPorts> prevBackHeld_{};
 };
 
 }  // namespace romm::player

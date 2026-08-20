@@ -35,6 +35,8 @@
 #include "native/engine/LogSink.h"
 #include "native/engine/VideoSink.h"
 
+#include "native/player/binding_capture.h"
+#include "native/player/binding_sidecar.h"
 #include "native/player/pause_menu.h"
 #include "native/player/pause_overlay.h"
 #include "native/player/protocol.h"
@@ -62,6 +64,24 @@ std::atomic<bool> g_signal_flag{false};
 int g_sessionLockFd = -1;
 
 void signalHandler(int) { g_signal_flag.store(true, std::memory_order_relaxed); }
+
+// Identity control lists for BindingCaptureCoordinator::sample(): the level
+// arrays in SdlInput::CapturePortSample are indexed by PadButton/PadAxis
+// value, so the coordinator receives every control each frame.
+constexpr romm::player::PadButton kAllPadButtons[romm::player::kPadButtonCount] = {
+    romm::player::PadButton::kSouth,      romm::player::PadButton::kEast,
+    romm::player::PadButton::kWest,       romm::player::PadButton::kNorth,
+    romm::player::PadButton::kBack,       romm::player::PadButton::kStart,
+    romm::player::PadButton::kLeftShoulder,   romm::player::PadButton::kRightShoulder,
+    romm::player::PadButton::kDpadUp,     romm::player::PadButton::kDpadDown,
+    romm::player::PadButton::kDpadLeft,   romm::player::PadButton::kDpadRight,
+    romm::player::PadButton::kLeftStick,  romm::player::PadButton::kRightStick,
+};
+constexpr romm::player::PadAxis kAllPadAxes[romm::player::kPadAxisCount] = {
+    romm::player::PadAxis::kLeftX,    romm::player::PadAxis::kLeftY,
+    romm::player::PadAxis::kRightX,   romm::player::PadAxis::kRightY,
+    romm::player::PadAxis::kLeftTrigger, romm::player::PadAxis::kRightTrigger,
+};
 
 std::string envVar(const char* name) {
     const char* value = std::getenv(name);
@@ -465,6 +485,14 @@ int main(int argc, char* argv[]) {
     pauseMenu.setVideoToggles(request.video.scanlines, request.video.integerScaling,
                               request.video.sharpFilter);
 
+    // Binding editor (Physical Controller Settings): the capture coordinator
+    // owns gamepad input while the menu is in kBindingCapture; the devices
+    // eligible for the current capture are the ports that had pads when it
+    // began (a mid-capture unplug cancels via onDeviceRemoved).
+    romm::player::BindingCaptureCoordinator captureCoordinator;
+    std::vector<int> captureDevices;
+    auto lastFrameTime = std::chrono::steady_clock::now();
+
     // Executes one pause-menu effect on the session (main thread).
     auto handlePauseEffect = [&](romm::player::PauseMenuEffect effect) {
         switch (effect) {
@@ -487,6 +515,27 @@ int main(int argc, char* argv[]) {
                 break;
             case romm::player::PauseMenuEffect::kToggleSharpFilter:
                 videoSink->setSharpFilter(pauseMenu.sharpFilterEnabled());
+                break;
+            case romm::player::PauseMenuEffect::kBeginCapture: {
+                // A slot row was confirmed: start capturing a digital binding
+                // for it. Every connected pad is eligible — the first
+                // qualifying input wins (Android's coordinator semantics).
+                captureDevices.clear();
+                for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
+                    if (input.hasGamepad(port)) captureDevices.push_back(port);
+                }
+                // The menu stops consuming gamepad input now; drop its edge
+                // latches so a button held across the transition cannot fire
+                // a spurious menu action when we return to the list.
+                input.resetMenuEdges();
+                captureCoordinator.begin(pauseMenu.selection(), captureDevices.data(),
+                                         static_cast<int>(captureDevices.size()),
+                                         romm::player::CaptureTarget::kDigital);
+                break;
+            }
+            case romm::player::PauseMenuEffect::kResetDefault:
+                // Reset to Default: restore the built-in mapping.
+                input.resetBindings();
                 break;
             default:
                 break;
@@ -527,9 +576,14 @@ int main(int argc, char* argv[]) {
                         // directly — quitting happens only via the menu's Quit
                         // item (with confirm) or window close / SIGTERM.
                         if (pauseMenu.isOpen()) {
+                            const bool wasCapturing = pauseMenu.isCapturingBinding();
                             romm::player::PauseMenuActions cancel{};
                             cancel.cancel = true;
                             handlePauseEffect(pauseMenu.handle(cancel));
+                            // Keyboard quick-Back during capture: cancel the
+                            // coordinator too (the gamepad's held-Back clear
+                            // is handled via its own edges).
+                            if (wasCapturing) captureCoordinator.cancel();
                         } else {
                             openPause();
                         }
@@ -567,19 +621,92 @@ int main(int argc, char* argv[]) {
         }
         input.poll();  // refresh per-port snapshots from live device state
         if (pauseMenu.isOpen()) {
-            // The overlay owns controller input too (the core is paused, so
-            // nothing reaches the session while it is open).
-            handlePauseEffect(pauseMenu.handle(input.pollMenuActions()));
+            if (pauseMenu.isCapturingBinding()) {
+                // Binding capture mode: the coordinator owns gamepad input.
+                // Feed it one frame of levels per connected pad, drive its
+                // clock with the measured frame delta, and act on terminal
+                // states by updating the BindingTable / leaving capture.
+                const romm::player::SdlInput::CaptureFrame frame = input.captureFrame();
+                for (int i = 0; i < frame.count; ++i) {
+                    const romm::player::SdlInput::CapturePortSample& p = frame.ports[i];
+                    if (p.backDown) captureCoordinator.onBackDown();
+                    if (p.backUp) captureCoordinator.onBackUp();
+                    captureCoordinator.sample(p.port, kAllPadButtons, p.buttons,
+                                              romm::player::kPadButtonCount, kAllPadAxes,
+                                              p.axes, romm::player::kPadAxisCount);
+                }
+                // A pad that unplugged mid-capture drops out of the frame;
+                // tell the coordinator (it cancels when none remain).
+                for (int port : captureDevices) {
+                    if (!input.hasGamepad(port)) captureCoordinator.onDeviceRemoved(port);
+                }
+                const auto now = std::chrono::steady_clock::now();
+                captureCoordinator.advanceTime(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFrameTime)
+                        .count());
+                switch (captureCoordinator.state()) {
+                    case romm::player::CaptureState::kResult: {
+                        const romm::player::CapturedBinding* result = captureCoordinator.result();
+                        if (result != nullptr) {
+                            // Apply the captured binding to the table. A full
+                            // analog axis cannot occur here (the editor always
+                            // captures digital targets); bind its positive
+                            // half defensively if it ever did.
+                            romm::player::BindingSource source =
+                                result->kind == romm::player::CapturedBinding::Kind::kButton
+                                    ? romm::player::BindingSource::ofButton(result->button)
+                                    : romm::player::BindingSource::axisDirection(
+                                          result->axis,
+                                          result->kind ==
+                                                  romm::player::CapturedBinding::Kind::kAxisDirection
+                                              ? result->polarity
+                                              : 1);
+                            input.setBinding(pauseMenu.selection(), source);
+                        }
+                        pauseMenu.exitCapture();
+                        break;
+                    }
+                    case romm::player::CaptureState::kCleared:
+                        // Held Back: clear the selected slot's binding.
+                        input.setBinding(pauseMenu.selection(),
+                                         romm::player::BindingSource::unbound());
+                        pauseMenu.exitCapture();
+                        break;
+                    case romm::player::CaptureState::kCancelled:
+                    case romm::player::CaptureState::kTimedOut:
+                    case romm::player::CaptureState::kNoDeviceAssigned:
+                        // Quick Back / 15 s timeout / no controller: back to
+                        // the slot list, nothing saved.
+                        pauseMenu.exitCapture();
+                        break;
+                    default:
+                        break;  // still capturing (or idle)
+                }
+                if (!pauseMenu.isCapturingBinding()) {
+                    // Left capture this frame: drop the menu edge latches so
+                    // a button held across the transition cannot fire a
+                    // spurious menu action on the list.
+                    input.resetMenuEdges();
+                }
+            } else {
+                // The overlay owns controller input too (the core is paused,
+                // so nothing reaches the session while it is open).
+                handlePauseEffect(pauseMenu.handle(input.pollMenuActions()));
+            }
         } else {
             if (input.pollPauseTrigger()) openPause();
             input.updateSession(session);
         }
         videoSink->present([&](SDL_Renderer* renderer) {
-            pauseOverlay.draw(renderer, pauseMenu);
+            const int captureSecondsLeft = pauseMenu.isCapturingBinding()
+                ? static_cast<int>(captureCoordinator.remainingTimeoutMs() / 1000)
+                : -1;
+            pauseOverlay.draw(renderer, pauseMenu, input.bindings(), captureSecondsLeft);
         });
         if (session.diagnostics().coreRequestedShutdown.load()) running = false;
         if (g_signal_flag.load()) running = false;  // SIGTERM/SIGINT
         SDL_Delay(1);
+        lastFrameTime = std::chrono::steady_clock::now();
     }
 
     // 12. Shutdown: capture audio diagnostics before stop() tears the sink
@@ -593,6 +720,29 @@ int main(int argc, char* argv[]) {
     // while the core is loaded (stop() unloads it). If the pause menu was
     // open, the session is already paused and this simply re-checkpoints.
     const bool checkpointWritten = takeCheckpoint(session, request);
+
+    // Persist controller bindings (LINUX_X64.md section 11.9): when the user
+    // remapped anything in the pause menu's Physical Controller Settings,
+    // atomically write a versioned sidecar into the session dir (next to the
+    // result file), keyed by each connected pad's stable SDL GUID plus a
+    // normalized identity. The desktop ingestion of this file is a follow-up
+    // sub-unit — writing it correctly is all this sub-unit owes. A default
+    // table writes nothing (the built-in mapping needs no persistence).
+    if (!input.bindings().isDefault() && !request.resultPath.empty()) {
+        std::vector<romm::player::DeviceBindings> devices;
+        for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
+            if (!input.hasGamepad(port)) continue;
+            romm::player::DeviceBindings device;
+            device.guid = input.joystickGuidString(port);
+            device.identity = romm::player::normalizedDeviceIdentity(device.guid);
+            device.table = input.bindings();
+            devices.push_back(std::move(device));
+        }
+        if (!romm::player::writeBindingSidecar(
+                parentDirectory(request.resultPath) + "/controller-bindings.json", devices)) {
+            std::fprintf(stderr, "warning: failed to write controller-bindings.json\n");
+        }
+    }
 
     session.stop();
 

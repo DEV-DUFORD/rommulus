@@ -18,6 +18,60 @@ namespace {
 // into the first few RETRO_DEVICE_ID_ANALOG steps.
 constexpr Sint16 kAxisDeadzone = 4096;
 
+// Half-scale level an axis must reach (in the bound polarity's direction,
+// after deadzone) to count as "pressed" for a slot bound to an axis half.
+constexpr Sint16 kAxisBindLevel = 16384;
+
+// The binding table names physical controls in platform-neutral terms
+// (LINUX_X64.md section 11.9 — no SDL constants in the model); this file is
+// the single translation point to SDL enums.
+SDL_GamepadButton toSdlButton(PadButton button) {
+    switch (button) {
+        case PadButton::kSouth: return SDL_GAMEPAD_BUTTON_SOUTH;
+        case PadButton::kEast: return SDL_GAMEPAD_BUTTON_EAST;
+        case PadButton::kWest: return SDL_GAMEPAD_BUTTON_WEST;
+        case PadButton::kNorth: return SDL_GAMEPAD_BUTTON_NORTH;
+        case PadButton::kBack: return SDL_GAMEPAD_BUTTON_BACK;
+        case PadButton::kStart: return SDL_GAMEPAD_BUTTON_START;
+        case PadButton::kLeftShoulder: return SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+        case PadButton::kRightShoulder: return SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+        case PadButton::kDpadUp: return SDL_GAMEPAD_BUTTON_DPAD_UP;
+        case PadButton::kDpadDown: return SDL_GAMEPAD_BUTTON_DPAD_DOWN;
+        case PadButton::kDpadLeft: return SDL_GAMEPAD_BUTTON_DPAD_LEFT;
+        case PadButton::kDpadRight: return SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
+        case PadButton::kLeftStick: return SDL_GAMEPAD_BUTTON_LEFT_STICK;
+        case PadButton::kRightStick: return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+    }
+    return SDL_GAMEPAD_BUTTON_SOUTH;  // unreachable
+}
+
+SDL_GamepadAxis toSdlAxis(PadAxis axis) {
+    switch (axis) {
+        case PadAxis::kLeftX: return SDL_GAMEPAD_AXIS_LEFTX;
+        case PadAxis::kLeftY: return SDL_GAMEPAD_AXIS_LEFTY;
+        case PadAxis::kRightX: return SDL_GAMEPAD_AXIS_RIGHTX;
+        case PadAxis::kRightY: return SDL_GAMEPAD_AXIS_RIGHTY;
+        case PadAxis::kLeftTrigger: return SDL_GAMEPAD_AXIS_LEFT_TRIGGER;
+        case PadAxis::kRightTrigger: return SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+    }
+    return SDL_GAMEPAD_AXIS_LEFTX;  // unreachable
+}
+
+// The binding table's slot bit positions must match the libretro ABI exactly
+// (poll() uses them to set the core's button mask).
+static_assert(kJoypadBitB == RETRO_DEVICE_ID_JOYPAD_B, "slot bits drifted from libretro");
+static_assert(kJoypadBitY == RETRO_DEVICE_ID_JOYPAD_Y, "slot bits drifted from libretro");
+static_assert(kJoypadBitSelect == RETRO_DEVICE_ID_JOYPAD_SELECT, "slot bits drifted from libretro");
+static_assert(kJoypadBitStart == RETRO_DEVICE_ID_JOYPAD_START, "slot bits drifted from libretro");
+static_assert(kJoypadBitUp == RETRO_DEVICE_ID_JOYPAD_UP, "slot bits drifted from libretro");
+static_assert(kJoypadBitDown == RETRO_DEVICE_ID_JOYPAD_DOWN, "slot bits drifted from libretro");
+static_assert(kJoypadBitLeft == RETRO_DEVICE_ID_JOYPAD_LEFT, "slot bits drifted from libretro");
+static_assert(kJoypadBitRight == RETRO_DEVICE_ID_JOYPAD_RIGHT, "slot bits drifted from libretro");
+static_assert(kJoypadBitA == RETRO_DEVICE_ID_JOYPAD_A, "slot bits drifted from libretro");
+static_assert(kJoypadBitX == RETRO_DEVICE_ID_JOYPAD_X, "slot bits drifted from libretro");
+static_assert(kJoypadBitL == RETRO_DEVICE_ID_JOYPAD_L, "slot bits drifted from libretro");
+static_assert(kJoypadBitR == RETRO_DEVICE_ID_JOYPAD_R, "slot bits drifted from libretro");
+
 }  // namespace
 
 SdlInput::SdlInput() {
@@ -146,43 +200,34 @@ void SdlInput::poll() {
         SDL_Gamepad* gamepad = gamepads_[port].gamepad;
         PortState& p = ports_[port];
 
+        // Table-driven: each RetroPad slot consults the binding table (the
+        // pause menu's Physical Controller Settings editor mutates it at
+        // runtime). A slot bound to a button polls that button; a slot bound
+        // to an axis half polls the axis in the bound polarity past
+        // kAxisBindLevel (after deadzone); an unbound slot never fires. The
+        // defaults reproduce the built-in mapping exactly.
         int32_t mask = 0;
         if (gamepad != nullptr) {
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_A);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_B);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_WEST)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_X);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_NORTH)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_Y);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_SELECT);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_START);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_L);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_R);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_UP);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT);
-            }
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
-                mask |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT);
+            for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
+                const BindingSource& source = bindings_.get(slot);
+                bool pressed = false;
+                switch (source.kind) {
+                    case BindingSource::Kind::kButton:
+                        pressed = SDL_GetGamepadButton(gamepad, toSdlButton(source.button));
+                        break;
+                    case BindingSource::Kind::kAxisDirection: {
+                        const Sint16 raw = SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis));
+                        const int16_t value = applyDeadzone(raw);
+                        pressed = source.polarity > 0 ? (value >= kAxisBindLevel)
+                                                      : (value <= -kAxisBindLevel);
+                        break;
+                    }
+                    case BindingSource::Kind::kUnbound:
+                        break;
+                }
+                if (pressed) {
+                    mask |= (1 << retroPadSlotJoypadBit(slot));
+                }
             }
         }
 
@@ -283,6 +328,43 @@ PauseMenuActions SdlInput::pollMenuActions() {
     return actions;
 }
 
+SdlInput::CaptureFrame SdlInput::captureFrame() {
+    CaptureFrame frame{};
+    for (int port = 0; port < kPorts; ++port) {
+        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+        if (gamepad == nullptr) continue;
+
+        CapturePortSample& s = frame.ports[frame.count++];
+        s.port = port;
+        for (int b = 0; b < kPadButtonCount; ++b) {
+            s.buttons[b] = SDL_GetGamepadButton(gamepad, toSdlButton(static_cast<PadButton>(b)));
+        }
+        // Back edges for the coordinator's quick-cancel / held-clear logic.
+        const bool backNow = s.buttons[static_cast<int>(PadButton::kBack)];
+        s.backDown = backNow && !prevBackHeld_[port];
+        s.backUp = !backNow && prevBackHeld_[port];
+        prevBackHeld_[port] = backNow;
+        for (int a = 0; a < kPadAxisCount; ++a) {
+            const PadAxis axis = static_cast<PadAxis>(a);
+            const Sint16 raw = SDL_GetGamepadAxis(gamepad, toSdlAxis(axis));
+            // Sticks: -32768..32767 -> ~-1..+1. Triggers: 0..32767 -> 0..+1
+            // (unidirectional, like Android's trigger normalization).
+            s.axes[a] = static_cast<float>(raw) / 32767.0f;
+        }
+    }
+    return frame;
+}
+
+std::string SdlInput::joystickGuidString(int port) const {
+    if (!hasGamepad(port)) return "";
+    SDL_Joystick* joystick = SDL_GetGamepadJoystick(gamepads_[port].gamepad);
+    if (joystick == nullptr) return "";
+    char buffer[64] = {};
+    SDL_GUIDToString(SDL_GetJoystickGUIDForID(SDL_GetJoystickID(joystick)), buffer,
+                     sizeof(buffer));
+    return buffer;
+}
+
 void SdlInput::reset() {
     keyboardMask_ = 0;
     for (auto& port : ports_) {
@@ -290,7 +372,7 @@ void SdlInput::reset() {
     }
     // Drop the edge-detection latches too: any button held while this is
     // called must not fire a spurious "new press" on the next poll.
-    prevButtons_ = {};
+    resetMenuEdges();
 }
 
 }  // namespace romm::player

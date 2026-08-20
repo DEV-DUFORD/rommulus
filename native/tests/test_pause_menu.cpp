@@ -4,8 +4,8 @@
 // dialog (Yes/No/cancel), the Video Options submenu (enter/focus, toggle
 // rows via confirm or left/right, Return to menu), the Controller Settings
 // submenu (enter/focus, navigation, the Return item and Back to menu, the
-// read-only physical binding placeholder and its return paths), and effect
-// reporting.
+// editable physical binding list: 12 slots + Reset to Default, capture-mode
+// entry/exit), and effect reporting.
 
 #include <string>
 
@@ -408,34 +408,87 @@ void testControllerSettingsCancelToMenuThenClose() {
     CHECK(!menu.isOpen());
 }
 
-void testPhysicalPlaceholderOpensFromSubmenu() {
-    PauseMenu menu;
+// Opens the menu and enters the editable binding list (Controller Settings ->
+// Physical Controller Settings).
+void selectBindingList(PauseMenu& menu) {
     selectControllerSettings(menu);
     menu.handle(confirmAction());  // -> submenu, Physical selected
     CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
     CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
+}
+
+void testBindingListOpensFromSubmenu() {
+    PauseMenu menu;
+    selectBindingList(menu);
     CHECK(menu.isOpen());
+    CHECK_EQ(menu.selection(), 0);  // first slot (A) focused
 }
 
-void testPhysicalPlaceholderConfirmReturnsToSubmenu() {
+void testBindingListNavigationWrapsOverThirteenRows() {
     PauseMenu menu;
-    selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> submenu
-    menu.handle(confirmAction());  // -> placeholder
-    // Confirm (the on-screen Return action) goes back to the submenu,
-    // focused on Physical Controller Settings.
+    selectBindingList(menu);
+    // Down walks the 12 slot rows to Reset to Default.
+    for (int i = 0; i < PauseMenu::kBindingSlotCount; ++i) {
+        CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    }
+    CHECK_EQ(menu.selection(), PauseMenu::kResetDefaultItem);
+    // Down wraps to the first slot; Up wraps back to Reset to Default.
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), 0);
+    CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kResetDefaultItem);
+    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);  // never leaves
+}
+
+void testBindingListConfirmEntersCapture() {
+    PauseMenu menu;
+    selectBindingList(menu);
+    menu.handle(downAction());  // -> slot B (index 1)
+    // Confirming a slot row reports kBeginCapture and enters capture mode
+    // for that slot.
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kBeginCapture);
+    CHECK(menu.state() == PauseMenuState::kBindingCapture);
+    CHECK(menu.isCapturingBinding());
+    CHECK_EQ(menu.selection(), 1);
+}
+
+void testBindingCaptureCancelExitsToList() {
+    // While capturing, only cancel (keyboard Escape) is honored by the menu;
+    // it returns to the slot list focused on the captured slot. Confirm and
+    // navigation are ignored (gamepad input belongs to the coordinator).
+    PauseMenu menu;
+    selectBindingList(menu);
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kBeginCapture);
+    CHECK(menu.state() == PauseMenuState::kBindingCapture);
     CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
-    CHECK(menu.state() == PauseMenuState::kControllerSettings);
-    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kBindingCapture);
+    CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
+    CHECK_EQ(menu.selection(), 0);  // back on the captured slot
+    // exitCapture() is idempotent and no-op outside capture mode.
+    menu.exitCapture();
+    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
 }
 
-void testPhysicalPlaceholderCancelReturnsToSubmenu() {
+void testBindingListResetDefaultRow() {
     PauseMenu menu;
-    selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> submenu
-    menu.handle(confirmAction());  // -> placeholder
-    // Back/Escape likewise returns to the submenu (it never closes the pause
-    // menu itself).
+    selectBindingList(menu);
+    for (int i = 0; i < PauseMenu::kBindingSlotCount; ++i) {
+        menu.handle(downAction());  // -> Reset to Default row
+    }
+    CHECK_EQ(menu.selection(), PauseMenu::kResetDefaultItem);
+    // Confirm reports kResetDefault and stays on the row.
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kResetDefault);
+    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
+    CHECK_EQ(menu.selection(), PauseMenu::kResetDefaultItem);
+}
+
+void testBindingListCancelReturnsToSubmenu() {
+    PauseMenu menu;
+    selectBindingList(menu);
+    // Back/Escape returns to the Controller Settings submenu (it never
+    // closes the pause menu itself).
     CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
     CHECK(menu.state() == PauseMenuState::kControllerSettings);
     CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);
@@ -481,9 +534,12 @@ int main() {
     testControllerSettingsLeftRightIgnored();
     testControllerSettingsReturnItemToMenu();
     testControllerSettingsCancelToMenuThenClose();
-    testPhysicalPlaceholderOpensFromSubmenu();
-    testPhysicalPlaceholderConfirmReturnsToSubmenu();
-    testPhysicalPlaceholderCancelReturnsToSubmenu();
+    testBindingListOpensFromSubmenu();
+    testBindingListNavigationWrapsOverThirteenRows();
+    testBindingListConfirmEntersCapture();
+    testBindingCaptureCancelExitsToList();
+    testBindingListResetDefaultRow();
+    testBindingListCancelReturnsToSubmenu();
     testCloseFromControllerSettingsResetsFocus();
     return rommtest::finish("test_pause_menu");
 }

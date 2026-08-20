@@ -4,9 +4,10 @@
 // plus an embedded 5x7 bitmap font (no SDL_ttf dependency). Everything is
 // drawn in the renderer's logical presentation coordinates so the overlay
 // scales and letterboxes together with the game frame. Draws the main menu,
-// the Video Options submenu, the Controller Settings submenu, the read-only
-// Physical Controller Settings binding placeholder, and the "Quit game?"
-// confirm dialog on top when active.
+// the Video Options submenu, the Controller Settings submenu, the editable
+// Physical Controller Settings binding list (12 RetroPad slots + Reset to
+// Default) and its capture dialog, and the "Quit game?" confirm dialog on
+// top when active.
 #include "native/player/pause_overlay.h"
 
 #include <SDL3/SDL.h>
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 
 namespace romm::player {
 namespace {
@@ -139,31 +141,6 @@ constexpr unsigned kAccentR = 47, kAccentG = 111, kAccentB = 237;  // selection 
 constexpr unsigned kDialogBgR = 26, kDialogBgG = 32, kDialogBgB = 38;
 constexpr unsigned kButtonIdleR = 42, kButtonIdleG = 49, kButtonIdleB = 56;
 
-// The built-in gamepad -> RetroPad mapping as displayed by the Physical
-// Controller Settings placeholder (kPhysicalBindings). This mirrors
-// SdlInput::poll() (native/player/src/sdl_input.cpp), which is the single
-// source of truth for what the core actually receives — when the remapping
-// editor lands, replace this table with a live read from SdlInput.
-struct BindingRow {
-    const char* retroPad;   // RetroPad button the core sees (display label)
-    const char* sdlButton;  // SDL gamepad button it is bound to (display label)
-};
-constexpr BindingRow kBindingRows[] = {
-    {"A (South)", "SOUTH"},
-    {"B (East)", "EAST"},
-    {"X (West)", "WEST"},
-    {"Y (North)", "NORTH"},
-    {"Select", "BACK"},
-    {"Start", "START"},
-    {"Left Shoulder", "LEFT SHOULDER"},
-    {"Right Shoulder", "RIGHT SHOULDER"},
-    {"D-Pad Up", "DPAD UP"},
-    {"D-Pad Down", "DPAD DOWN"},
-    {"D-Pad Left", "DPAD LEFT"},
-    {"D-Pad Right", "DPAD RIGHT"},
-};
-constexpr int kBindingRowCount = sizeof(kBindingRows) / sizeof(kBindingRows[0]);
-
 void fillRect(SDL_Renderer* renderer, float x, float y, float w, float h,
               unsigned r, unsigned g, unsigned b, unsigned a) {
     SDL_SetRenderDrawColor(renderer, static_cast<Uint8>(r), static_cast<Uint8>(g),
@@ -211,7 +188,8 @@ void PauseOverlay::drawText(SDL_Renderer* renderer, float x, float y, const char
     }
 }
 
-void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu) const {
+void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu,
+                        const BindingTable& bindings, int captureSecondsLeft) const {
     if (renderer == nullptr || !menu.isOpen()) return;
 
     // Prefer the logical presentation space (the core's aspect, letterboxed);
@@ -319,15 +297,15 @@ void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu) const {
         return;
     }
 
-    // 2c. Physical Controller Settings placeholder: a read-only preview of
-    // the built-in gamepad -> RetroPad mapping (the full remapping editor is
-    // a follow-up sub-unit). Two columns — RetroPad button left, the SDL
-    // gamepad button it is bound to right — plus a return hint.
+    // 2c. Physical Controller Settings: the EDITABLE binding list — the 12
+    // RetroPad slots (slot label left, its current binding right, read live
+    // from SdlInput's BindingTable) plus a Reset to Default row. Confirming
+    // a slot row enters capture mode (drawn in 2c-below).
     if (menu.state() == PauseMenuState::kPhysicalBindings) {
-        const float subH = 7.0f * s;
         const float panelW = std::min(Wf * 0.95f, 210.0f * s);
-        const float panelH = pad * 2.0f + titleH + gap + subH + gap +
-                             static_cast<float>(kBindingRowCount) * rowH + gap + hintH;
+        const float panelH = pad * 2.0f + titleH + gap +
+                             static_cast<float>(PauseMenu::kPhysicalRowCount) * rowH +
+                             gap + hintH;
         const float px = (Wf - panelW) / 2.0f;
         const float py = (Hf - panelH) / 2.0f;
         fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
@@ -336,22 +314,64 @@ void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu) const {
         drawText(renderer, px + (panelW - textWidth(title, s)) / 2.0f, py + pad, title, s,
                  255, 255, 255, 255);
 
-        const char* subtitle = "READ-ONLY - EDITOR TO FOLLOW";
-        drawText(renderer, px + (panelW - textWidth(subtitle, s)) / 2.0f, py + pad + titleH + gap,
-                 subtitle, s, 189, 189, 189, 255);
-
         const float itemsX = px + pad;
         const float itemsW = panelW - 2.0f * pad;
-        const float itemsY = py + pad + titleH + gap + subH + gap;
-        for (int i = 0; i < kBindingRowCount; ++i) {
+        const float itemsY = py + pad + titleH + gap;
+        for (int i = 0; i < PauseMenu::kPhysicalRowCount; ++i) {
+            const bool selected = menu.selection() == i;
+            if (selected) {
+                fillRect(renderer, itemsX, itemsY + static_cast<float>(i) * rowH, itemsW, rowH,
+                         kAccentR, kAccentG, kAccentB, 255);
+            }
             const float ty = itemsY + static_cast<float>(i) * rowH + (rowH - 7.0f * s) / 2.0f;
-            drawText(renderer, itemsX + 2.0f * s, ty, kBindingRows[i].retroPad, s,
+            drawText(renderer, itemsX + 2.0f * s, ty, PauseMenu::physicalRowLabel(i), s,
                      255, 255, 255, 255);
-            drawText(renderer, itemsX + itemsW - 2.0f * s - textWidth(kBindingRows[i].sdlButton, s),
-                     ty, kBindingRows[i].sdlButton, s, kAccentR, kAccentG, kAccentB, 255);
+            if (i < PauseMenu::kBindingSlotCount) {
+                const std::string bindingText = bindings.get(i).display();
+                drawText(renderer, itemsX + itemsW - 2.0f * s - textWidth(bindingText.c_str(), s),
+                         ty, bindingText.c_str(), s, kAccentR, kAccentG, kAccentB, 255);
+            }
         }
 
         const char* hint = "BACK TO CONTROLLER SETTINGS";
+        drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
+                 hint, s, 189, 189, 189, 255);
+        return;
+    }
+
+    // 2c-below. Binding capture dialog (kBindingCapture): "Map <slot>" plus
+    // the prompt and remaining timeout — mirrors Android's
+    // ControllerCaptureDialog (no focusable cancel button; Back cancels,
+    // held Back clears).
+    if (menu.state() == PauseMenuState::kBindingCapture) {
+        const std::string title =
+            std::string("MAP ") + retroPadSlotLabel(menu.selection());
+        const char* body = "PRESS A BUTTON OR MOVE AN AXIS";
+        std::string timeoutText;
+        if (captureSecondsLeft >= 0) {
+            char buffer[32];
+            std::snprintf(buffer, sizeof(buffer), "TIME LEFT: %ds", captureSecondsLeft);
+            timeoutText = buffer;
+        }
+        const float panelW = std::min(Wf * 0.9f, 150.0f * s);
+        const float subH = 7.0f * s;
+        const float panelH = pad * 2.0f + titleH + gap + subH + gap +
+                             (timeoutText.empty() ? 0.0f : subH) + hintH;
+        const float px = (Wf - panelW) / 2.0f;
+        const float py = (Hf - panelH) / 2.0f;
+        fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
+
+        drawText(renderer, px + (panelW - textWidth(title.c_str(), s)) / 2.0f, py + pad,
+                 title.c_str(), s, 255, 255, 255, 255);
+        const float bodyY = py + pad + titleH + gap;
+        drawText(renderer, px + (panelW - textWidth(body, s)) / 2.0f, bodyY, body, s,
+                 255, 255, 255, 255);
+        if (!timeoutText.empty()) {
+            drawText(renderer, px + (panelW - textWidth(timeoutText.c_str(), s)) / 2.0f,
+                     bodyY + subH + gap, timeoutText.c_str(), s, kAccentR, kAccentG, kAccentB, 255);
+        }
+
+        const char* hint = "BACK CANCELS - HOLD BACK TO CLEAR";
         drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
                  hint, s, 189, 189, 189, 255);
         return;

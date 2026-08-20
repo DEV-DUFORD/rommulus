@@ -59,8 +59,13 @@ add_library(romm_player_under_test STATIC
     ${ROMM_PLAYER_SRC}/protocol.cpp
     ${ROMM_PLAYER_SRC}/save_metadata.cpp
     ${ROMM_PLAYER_SRC}/validation.cpp
+    # The binding sidecar (Phase 9): versioned JSON persistence of the
+    # RetroPad BindingTable. It links against romm_engine_under_test for
+    # romm::atomicWriteFile (write-temp, fsync, rename).
+    ${ROMM_PLAYER_SRC}/binding_sidecar.cpp
 )
 target_include_directories(romm_player_under_test PUBLIC
+    ${ROMM_ENGINE_SRC}  # atomic_file_store.h (used by binding_sidecar.cpp)
     ${ROMM_PLAYER_INCLUDE}
     ${ROMM_REPO_ROOT}/third_party
 )
@@ -82,7 +87,9 @@ romm_add_engine_test(test_core_library)
 
 function(romm_add_player_test name)
     add_executable(${name} ${name}.cpp)
-    target_link_libraries(${name} PRIVATE romm_player_under_test)
+    # romm_engine_under_test supplies romm::atomicWriteFile, which the
+    # binding sidecar (part of romm_player_under_test) links against.
+    target_link_libraries(${name} PRIVATE romm_player_under_test romm_engine_under_test)
     target_compile_options(${name} PRIVATE -Wall -Wextra)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
@@ -91,3 +98,10 @@ romm_add_player_test(test_player_protocol)
 romm_add_player_test(test_save_metadata)
 romm_add_player_test(test_player_validation)
 romm_add_player_test(test_pause_menu)
+# The binding editor's SDL-free units (Phase 9): the capture state machine
+# (binding_capture.h, ported Android ControllerBindingCaptureCoordinator
+# semantics) and the RetroPad BindingTable (binding_table.h). Both are
+# header-only, so they compile straight into the test executables through
+# the include paths above — no SDL involved.
+romm_add_player_test(test_controller_capture)
+romm_add_player_test(test_binding_table)

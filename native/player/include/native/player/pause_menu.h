@@ -15,16 +15,25 @@
 // caller applies it to the video sink immediately. Controller Settings opens
 // a submenu (kControllerSettings) mirroring Android's controller-settings
 // subpage minus its touch-only rows: Physical Controller Settings and
-// Return. Activating Physical Controller Settings opens the read-only
-// kPhysicalBindings placeholder (the full remapping editor is a follow-up
-// sub-unit). Back/Escape from either state returns to the main menu focused
-// on Controller Settings (Android's quickBackTransition) — it never closes
+// Return. Activating Physical Controller Settings opens the EDITABLE
+// kPhysicalBindings list — the 12 RetroPad slots (each showing its current
+// binding, read from SdlInput's BindingTable) plus a Reset to Default row.
+// Confirming a slot row enters kBindingCapture: the caller starts the
+// capture coordinator (binding_capture.h, ported Android semantics) for that
+// slot and feeds it raw gamepad levels each frame — while capturing, the
+// overlay owns NO menu actions (confirm/cancel come from the coordinator's
+// terminal states, not handle()). Confirming Reset to Default reports a
+// kResetDefault effect; the caller restores the default mapping. Back/Escape
+// from kPhysicalBindings or kBindingCapture returns one level up (to the
+// Controller Settings submenu / back to the slot list) — it never closes
 // the pause menu itself.
 //
 // This class is intentionally SDL-free so it can be unit-tested on the host
 // (native/tests/test_pause_menu.cpp). The caller feeds it one frame of
 // edge-detected actions and executes the returned effect.
 #pragma once
+
+#include "native/player/binding_table.h"
 
 namespace romm::player {
 
@@ -34,7 +43,10 @@ enum class PauseMenuState {
     kQuitConfirm,        // The "Quit game?" Yes/No dialog is visible on top of the menu.
     kVideoOptions,       // The Video Options submenu (Scanlines / Integer Scaling / Sharp Filter) is visible.
     kControllerSettings, // The Controller Settings submenu (Physical Controller Settings / Return).
-    kPhysicalBindings,   // The read-only physical binding placeholder (the editor is a follow-up).
+    kPhysicalBindings,   // The editable binding list: 12 RetroPad slots + Reset to Default.
+    kBindingCapture,     // Capturing a new binding for the slot in selection() —
+                         // gamepad input is owned by the capture coordinator;
+                         // handle() only serves cancel (keyboard Escape).
 };
 
 // One frame of edge-detected input for the overlay. Each field is true only
@@ -62,6 +74,13 @@ enum class PauseMenuEffect {
     kToggleScanlines,
     kToggleIntegerScaling,
     kToggleSharpFilter,
+    // A slot row was confirmed in kPhysicalBindings: start capturing a new
+    // binding for selection() (the capture coordinator; the menu is now in
+    // kBindingCapture).
+    kBeginCapture,
+    // Reset to Default was confirmed in kPhysicalBindings: restore SdlInput's
+    // default binding table.
+    kResetDefault,
 };
 
 class PauseMenu {
@@ -86,14 +105,34 @@ public:
     static constexpr int kControllerOptionCount = 2;
     static constexpr int kPhysicalItem = 0;
     static constexpr int kReturnItem = 1;
+    // Row indices while in kPhysicalBindings: the 12 RetroPad slots (0..11,
+    // RetroPadSlot order) followed by the Reset to Default row.
+    static constexpr int kBindingSlotCount = kRetroPadSlotCount;
+    static constexpr int kResetDefaultItem = kBindingSlotCount;
+    static constexpr int kPhysicalRowCount = kBindingSlotCount + 1;
 
     PauseMenuState state() const { return state_; }
     bool isOpen() const { return state_ != PauseMenuState::kClosed; }
     // Current selection: an item index in kOpen, a confirm option in
     // kQuitConfirm, a toggle-row index in kVideoOptions, a subpage-item
-    // index (kPhysicalItem / kReturnItem) in kControllerSettings. Meaningless
-    // in kClosed and kPhysicalBindings.
+    // index (kPhysicalItem / kReturnItem) in kControllerSettings, or a
+    // row index (0..12) in kPhysicalBindings. In kBindingCapture it is the
+    // RetroPad slot being captured. Meaningless in kClosed.
     int selection() const { return selection_; }
+
+    // True while capturing a binding for the slot in selection(). While this
+    // is true the caller must feed the capture coordinator raw gamepad
+    // levels (NOT pollMenuActions) and act on its terminal states.
+    bool isCapturingBinding() const { return state_ == PauseMenuState::kBindingCapture; }
+
+    // Returns from kBindingCapture to the slot list, keeping focus on the
+    // captured slot. No-op in any other state. Called by the caller when the
+    // capture coordinator reaches a terminal state (or Escape is pressed).
+    void exitCapture() {
+        if (state_ == PauseMenuState::kBindingCapture) {
+            state_ = PauseMenuState::kPhysicalBindings;
+        }
+    }
 
     // The Video Options toggle states. The menu owns them so the overlay can
     // draw ON/OFF; the caller seeds them from the launch request and applies
@@ -114,6 +153,9 @@ public:
     static const char* videoOptionLabel(int index);
     // Subpage-item labels while in kControllerSettings.
     static const char* controllerOptionLabel(int index);
+    // Row labels while in kPhysicalBindings (slot label, or "Reset to
+    // Default" for kResetDefaultItem).
+    static const char* physicalRowLabel(int index);
 
     // CLOSED -> OPEN with Resume focused (Android requests focus on RESUME
     // for a fresh CLOSED -> MENU transition). No-op when already open.
@@ -147,6 +189,8 @@ public:
                 return handleControllerSettings(a);
             case PauseMenuState::kPhysicalBindings:
                 return handlePhysicalBindings(a);
+            case PauseMenuState::kBindingCapture:
+                return handleBindingCapture(a);
         }
         return PauseMenuEffect::kNone;
     }
@@ -172,6 +216,12 @@ private:
     // its two (always-enabled) items.
     void moveControllerSelection(int delta) {
         selection_ = (selection_ + delta + kControllerOptionCount) % kControllerOptionCount;
+    }
+
+    // Moves the physical-binding list selection by +/-1, wrapping over its
+    // 12 slot rows plus the Reset to Default row.
+    void movePhysicalSelection(int delta) {
+        selection_ = (selection_ + delta + kPhysicalRowCount) % kPhysicalRowCount;
     }
 
     PauseMenuEffect handleOpen(const PauseMenuActions& a) {
@@ -257,9 +307,10 @@ private:
         if (a.confirm) {
             switch (selection_) {
                 case kPhysicalItem:
-                    // Open the read-only binding placeholder. The full
-                    // remapping editor is a follow-up sub-unit.
+                    // Open the editable binding list, focused on the first
+                    // slot (A).
                     state_ = PauseMenuState::kPhysicalBindings;
+                    selection_ = kSlotA;
                     return PauseMenuEffect::kNone;
                 case kReturnItem:
                     state_ = PauseMenuState::kOpen;
@@ -273,12 +324,36 @@ private:
     }
 
     PauseMenuEffect handlePhysicalBindings(const PauseMenuActions& a) {
-        // The placeholder has no rows to navigate. Confirm (the on-screen
-        // Return action) or Back/Escape both return to the Controller
-        // Settings submenu, focused on Physical Controller Settings.
-        if (a.confirm || a.cancel) {
+        if (a.up) movePhysicalSelection(-1);
+        if (a.down) movePhysicalSelection(+1);
+        if (a.cancel) {
+            // Back/Escape returns to the Controller Settings submenu, focused
+            // on Physical Controller Settings (it never closes the pause menu).
             state_ = PauseMenuState::kControllerSettings;
             selection_ = kPhysicalItem;
+            return PauseMenuEffect::kNone;
+        }
+        if (a.confirm) {
+            if (selection_ < kBindingSlotCount) {
+                // Enter capture mode for the focused slot. The caller starts
+                // the capture coordinator (kBeginCapture) and feeds it raw
+                // gamepad levels each frame.
+                state_ = PauseMenuState::kBindingCapture;
+                return PauseMenuEffect::kBeginCapture;
+            }
+            // Reset to Default: the caller restores SdlInput's default table.
+            return PauseMenuEffect::kResetDefault;
+        }
+        return PauseMenuEffect::kNone;
+    }
+
+    PauseMenuEffect handleBindingCapture(const PauseMenuActions& a) {
+        // While capturing, gamepad input is owned by the capture coordinator
+        // (confirm/cancel arrive as its terminal states, not menu actions).
+        // The only menu action honored here is cancel — keyboard Escape —
+        // which returns to the slot list focused on the captured slot.
+        if (a.cancel) {
+            exitCapture();
         }
         return PauseMenuEffect::kNone;
     }
@@ -349,6 +424,12 @@ inline const char* PauseMenu::controllerOptionLabel(int index) {
         case kReturnItem: return "Return";
         default: return "";
     }
+}
+
+inline const char* PauseMenu::physicalRowLabel(int index) {
+    if (index == kResetDefaultItem) return "Reset to Default";
+    if (index >= 0 && index < kBindingSlotCount) return retroPadSlotLabel(index);
+    return "";
 }
 
 }  // namespace romm::player
