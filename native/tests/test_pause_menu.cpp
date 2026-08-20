@@ -1,7 +1,9 @@
 // test_pause_menu.cpp — host unit tests for the SDL-free pause overlay state
 // machine (native/player/include/native/player/pause_menu.h). Covers open/
 // close, D-pad navigation with disabled-item skipping and wrapping, Resume,
-// the "Quit game?" confirm dialog (Yes/No/cancel), and effect reporting.
+// the "Quit game?" confirm dialog (Yes/No/cancel), the Video Options submenu
+// (enter/focus, toggle rows via confirm or left/right, Return to menu), and
+// effect reporting.
 
 #include <string>
 
@@ -40,6 +42,26 @@ PauseMenuActions cancelAction() {
     return a;
 }
 
+PauseMenuActions leftAction() {
+    PauseMenuActions a{};
+    a.left = true;
+    return a;
+}
+
+PauseMenuActions rightAction() {
+    PauseMenuActions a{};
+    a.right = true;
+    return a;
+}
+
+// Opens the menu and navigates to Quit (two Downs: Resume -> Video Options
+// -> [skips disabled Controller Settings] -> Quit).
+void selectQuit(PauseMenu& menu) {
+    menu.open();
+    menu.handle(downAction());
+    menu.handle(downAction());
+}
+
 void testInitialAndClosedNoop() {
     PauseMenu menu;
     CHECK(menu.state() == PauseMenuState::kClosed);
@@ -65,14 +87,17 @@ void testOpenFocusesResume() {
 void testNavigationSkipsDisabledAndWraps() {
     PauseMenu menu;
     menu.open();
-    // Resume(0) is enabled; Video Options(1) and Controller Settings(2) are
-    // disabled placeholders, so Down jumps straight to Quit(3).
+    // Resume(0) and Video Options(1) are enabled; Controller Settings(2) is a
+    // disabled placeholder, so Down from Video Options skips it to Quit(3).
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kVideoOptionsItem);
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kQuitItem);
     // Wrap: Down from Quit returns to Resume.
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kResumeItem);
-    // Wrap the other way: Up from Resume lands on Quit.
+    // Wrap the other way: Up from Resume lands on Quit (skipping the disabled
+    // Controller Settings).
     CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kQuitItem);
     CHECK(menu.state() == PauseMenuState::kOpen);  // navigation never closes
@@ -80,15 +105,14 @@ void testNavigationSkipsDisabledAndWraps() {
 
 void testLeftRightIgnoredInMenu() {
     PauseMenu menu;
-    menu.open();
-    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    selectQuit(menu);
     PauseMenuActions left{};
     left.left = true;
     PauseMenuActions right{};
     right.right = true;
     CHECK_EQ(menu.handle(left), PauseMenuEffect::kNone);
     CHECK_EQ(menu.handle(right), PauseMenuEffect::kNone);
-    CHECK_EQ(menu.selection(), PauseMenu::kQuitItem);  // unchanged
+    CHECK_EQ(menu.selection(), PauseMenu::kQuitItem);  // unchanged in the main menu
 }
 
 void testResumeClosesAndReports() {
@@ -101,8 +125,7 @@ void testResumeClosesAndReports() {
 
 void testCancelClosesAndResumes() {
     PauseMenu menu;
-    menu.open();
-    menu.handle(downAction());  // Quit selected
+    selectQuit(menu);
     // Back/Escape closes the menu and resumes (quickBackTransition MENU->CLOSED).
     CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kResume);
     CHECK(!menu.isOpen());
@@ -110,8 +133,7 @@ void testCancelClosesAndResumes() {
 
 void testQuitOpensConfirmWithYesDefault() {
     PauseMenu menu;
-    menu.open();
-    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);  // -> Quit
+    selectQuit(menu);
     CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
     CHECK(menu.state() == PauseMenuState::kQuitConfirm);
     CHECK_EQ(menu.selection(), PauseMenu::kConfirmYes);
@@ -119,8 +141,7 @@ void testQuitOpensConfirmWithYesDefault() {
 
 void testConfirmYesQuits() {
     PauseMenu menu;
-    menu.open();
-    menu.handle(downAction());  // -> Quit
+    selectQuit(menu);
     menu.handle(confirmAction());  // -> confirm dialog (Yes selected)
     CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kQuit);
     CHECK(!menu.isOpen());
@@ -129,8 +150,7 @@ void testConfirmYesQuits() {
 
 void testConfirmNoReturnsToMenuOnQuit() {
     PauseMenu menu;
-    menu.open();
-    menu.handle(downAction());  // -> Quit
+    selectQuit(menu);
     menu.handle(confirmAction());  // -> confirm dialog
     menu.handle(downAction());  // toggle to No
     CHECK_EQ(menu.selection(), PauseMenu::kConfirmNo);
@@ -141,8 +161,7 @@ void testConfirmNoReturnsToMenuOnQuit() {
 
 void testConfirmCancelReturnsToMenuOnQuit() {
     PauseMenu menu;
-    menu.open();
-    menu.handle(downAction());  // -> Quit
+    selectQuit(menu);
     menu.handle(confirmAction());  // -> confirm dialog
     CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
     CHECK(menu.state() == PauseMenuState::kOpen);
@@ -151,8 +170,7 @@ void testConfirmCancelReturnsToMenuOnQuit() {
 
 void testConfirmNavigationToggles() {
     PauseMenu menu;
-    menu.open();
-    menu.handle(downAction());  // -> Quit
+    selectQuit(menu);
     menu.handle(confirmAction());  // -> confirm dialog, Yes selected
     // Up wraps No -> ... i.e. Yes -> No.
     CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
@@ -173,17 +191,139 @@ void testLabels() {
           "Controller Settings");
     CHECK(std::string(PauseMenu::itemLabel(PauseMenu::kQuitItem)) == "Quit");
     CHECK(PauseMenu::itemEnabled(PauseMenu::kResumeItem));
-    CHECK(!PauseMenu::itemEnabled(PauseMenu::kVideoOptionsItem));
+    CHECK(PauseMenu::itemEnabled(PauseMenu::kVideoOptionsItem));  // live submenu now
     CHECK(!PauseMenu::itemEnabled(PauseMenu::kControllerSettingsItem));
     CHECK(PauseMenu::itemEnabled(PauseMenu::kQuitItem));
     CHECK(std::string(PauseMenu::confirmOptionLabel(PauseMenu::kConfirmYes)) == "Yes");
     CHECK(std::string(PauseMenu::confirmOptionLabel(PauseMenu::kConfirmNo)) == "No");
+    CHECK(std::string(PauseMenu::videoOptionLabel(PauseMenu::kScanlinesItem)) == "Scanlines");
+    CHECK(std::string(PauseMenu::videoOptionLabel(PauseMenu::kIntegerScalingItem)) ==
+          "Integer Scaling");
+    CHECK(std::string(PauseMenu::videoOptionLabel(PauseMenu::kSharpFilterItem)) == "Sharp Filter");
 }
 
 void testCloseResetsFocus() {
     PauseMenu menu;
+    selectQuit(menu);
+    menu.close();
+    CHECK(!menu.isOpen());
     menu.open();
-    menu.handle(downAction());  // -> Quit
+    CHECK_EQ(menu.selection(), PauseMenu::kResumeItem);  // fresh open focuses Resume
+}
+
+// ---------------------------------------------------------------------------
+// Video Options submenu (mirrors Android's VideoOptionsDialog)
+
+void testVideoOptionsOpensFocusedOnScanlines() {
+    PauseMenu menu;
+    menu.open();
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);  // -> Video Options
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kVideoOptions);
+    CHECK(menu.isOpen());
+    CHECK_EQ(menu.selection(), PauseMenu::kScanlinesItem);  // first toggle focused
+}
+
+void testVideoOptionsNavigationWraps() {
+    PauseMenu menu;
+    menu.open();
+    menu.handle(downAction());   // -> Video Options
+    menu.handle(confirmAction());  // -> submenu, Scanlines selected
+    // Down walks the three rows; Up wraps Sharp Filter -> Scanlines and
+    // Down wraps Scanlines -> Sharp Filter.
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kIntegerScalingItem);
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kSharpFilterItem);
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kScanlinesItem);  // wrap
+    CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kSharpFilterItem);  // wrap the other way
+    CHECK(menu.state() == PauseMenuState::kVideoOptions);  // navigation never leaves
+}
+
+void testVideoOptionsToggleOnConfirm() {
+    PauseMenu menu;
+    menu.open();
+    menu.handle(downAction());   // -> Video Options
+    menu.handle(confirmAction());  // -> submenu, Scanlines selected (default OFF)
+    CHECK(!menu.scanlinesEnabled());
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kToggleScanlines);
+    CHECK(menu.scanlinesEnabled());  // toggled ON
+    CHECK_EQ(menu.selection(), PauseMenu::kScanlinesItem);  // confirm does not move
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kToggleScanlines);
+    CHECK(!menu.scanlinesEnabled());  // toggled back OFF
+}
+
+void testVideoOptionsToggleOnLeftRight() {
+    PauseMenu menu;
+    menu.open();
+    menu.handle(downAction());   // -> Video Options
+    menu.handle(confirmAction());  // -> submenu, Scanlines selected
+    CHECK_EQ(menu.handle(leftAction()), PauseMenuEffect::kToggleScanlines);
+    CHECK(menu.scanlinesEnabled());
+    CHECK_EQ(menu.handle(rightAction()), PauseMenuEffect::kToggleScanlines);
+    CHECK(!menu.scanlinesEnabled());
+}
+
+void testVideoOptionsTogglesAllThreeRows() {
+    PauseMenu menu;
+    menu.open();
+    menu.handle(downAction());   // -> Video Options
+    menu.handle(confirmAction());  // -> submenu, Scanlines selected
+    CHECK_EQ(menu.handle(rightAction()), PauseMenuEffect::kToggleScanlines);
+    CHECK(menu.scanlinesEnabled());
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);  // -> Integer Scaling
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kToggleIntegerScaling);
+    CHECK(menu.integerScalingEnabled());
+    CHECK(!menu.sharpFilterEnabled());  // untouched so far
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);  // -> Sharp Filter
+    CHECK_EQ(menu.handle(leftAction()), PauseMenuEffect::kToggleSharpFilter);
+    CHECK(menu.sharpFilterEnabled());
+    CHECK(menu.scanlinesEnabled());      // state persists across rows
+    CHECK(menu.integerScalingEnabled());
+}
+
+void testVideoOptionsSeededToggles() {
+    PauseMenu menu;
+    menu.setVideoToggles(true, false, true);  // e.g. from the launch request
+    CHECK(menu.scanlinesEnabled());
+    CHECK(!menu.integerScalingEnabled());
+    CHECK(menu.sharpFilterEnabled());
+}
+
+void testVideoOptionsReturnToMenu() {
+    PauseMenu menu;
+    menu.open();
+    menu.handle(downAction());   // -> Video Options
+    menu.handle(confirmAction());  // -> submenu
+    menu.handle(rightAction());  // toggle something while in there
+    CHECK(menu.state() == PauseMenuState::kVideoOptions);
+    // Back/Escape returns to the MAIN menu (does not close it), focused on
+    // Video Options.
+    CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kOpen);
+    CHECK(menu.isOpen());
+    CHECK_EQ(menu.selection(), PauseMenu::kVideoOptionsItem);
+}
+
+void testVideoOptionsCancelThenMenuCancelCloses() {
+    PauseMenu menu;
+    menu.open();
+    menu.handle(downAction());   // -> Video Options
+    menu.handle(confirmAction());  // -> submenu
+    menu.handle(cancelAction());  // -> main menu (still open)
+    CHECK(menu.isOpen());
+    // A second Back closes the whole menu and resumes.
+    CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kResume);
+    CHECK(!menu.isOpen());
+}
+
+void testCloseFromVideoOptionsResetsFocus() {
+    PauseMenu menu;
+    menu.open();
+    menu.handle(downAction());   // -> Video Options
+    menu.handle(confirmAction());  // -> submenu
     menu.close();
     CHECK(!menu.isOpen());
     menu.open();
@@ -206,5 +346,14 @@ int main() {
     testConfirmNavigationToggles();
     testLabels();
     testCloseResetsFocus();
+    testVideoOptionsOpensFocusedOnScanlines();
+    testVideoOptionsNavigationWraps();
+    testVideoOptionsToggleOnConfirm();
+    testVideoOptionsToggleOnLeftRight();
+    testVideoOptionsTogglesAllThreeRows();
+    testVideoOptionsSeededToggles();
+    testVideoOptionsReturnToMenu();
+    testVideoOptionsCancelThenMenuCancelCloses();
+    testCloseFromVideoOptionsResetsFocus();
     return rommtest::finish("test_pause_menu");
 }

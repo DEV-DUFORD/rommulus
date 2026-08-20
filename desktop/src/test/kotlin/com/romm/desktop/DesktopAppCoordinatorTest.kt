@@ -18,6 +18,7 @@ import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.player.RomContentStagingException
 import com.romm.desktop.player.RomContentStagingFailure
+import com.romm.desktop.player.VideoSettings
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopSessionStorage
 import com.romm.desktop.storage.secret.FakeSecretBackend
@@ -310,6 +311,63 @@ class DesktopAppCoordinatorTest {
         assertThat(request.coreId).isEqualTo("gambatte")
         assertThat(request.contentPath).isEqualTo(staged.path.toAbsolutePath().normalize().toString())
         assertThat(request.contentHash).isEqualTo(sha256Hex("fake-rom-content".toByteArray()))
+        waitForReconciled(supervisor, started.sessionId)
+    }
+
+    @Test
+    fun `launchPlayer passes persisted video options from the settings store into the request`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb") },
+            romContentStagerOverride = FakeRomContentStager(),
+        )
+
+        // Persist the user's Video Options choices (the same keys Android writes via
+        // SettingsRepository) BEFORE launching: the request must carry them.
+        c.settingsStore.write(
+            mapOf(
+                SettingsKeys.SCANLINES_ENABLED to "true",
+                SettingsKeys.INTEGER_SCALING_ENABLED to "true",
+                SettingsKeys.SHARP_FILTER_ENABLED to "true",
+            ),
+        )
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
+
+        val request = launcher.launches.single()
+        assertThat(request.video).isEqualTo(
+            VideoSettings(fullscreen = false, integerScaling = true, scanlines = true, sharpFilter = true),
+        )
+        waitForReconciled(supervisor, started.sessionId)
+    }
+
+    @Test
+    fun `launchPlayer defaults video options to off when none are persisted`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb") },
+            romContentStagerOverride = FakeRomContentStager(),
+        )
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
+
+        assertThat(launcher.launches.single().video).isEqualTo(VideoSettings())
         waitForReconciled(supervisor, started.sessionId)
     }
 

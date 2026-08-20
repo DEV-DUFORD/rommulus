@@ -23,11 +23,13 @@ import java.io.IOException
 /** The only protocol version this build understands (mirrors C++ `kProtocolVersion`). */
 const val PLAYER_PROTOCOL_VERSION: Int = 1
 
-/** Video settings block of a v1 launch request (§12.2). All three fields are required on the wire. */
+/** Video settings block of a v1 launch request (§12.2). All four fields are required on the wire. */
 data class VideoSettings(
     val fullscreen: Boolean = false,
     val integerScaling: Boolean = false,
     val scanlines: Boolean = false,
+    /** Sharp filter (nearest-neighbor scaling); mirrors Android's VideoOptionsDialog toggle. */
+    val sharpFilter: Boolean = false,
 )
 
 /**
@@ -227,6 +229,7 @@ object PlayerProtocol {
             writer.name("fullscreen").value(request.video.fullscreen)
             writer.name("integerScaling").value(request.video.integerScaling)
             writer.name("scanlines").value(request.video.scanlines)
+            writer.name("sharpFilter").value(request.video.sharpFilter)
             writer.endObject()
             writer.endObject()
         }
@@ -397,6 +400,7 @@ object PlayerProtocol {
         var fullscreen: Boolean? = null
         var integerScaling: Boolean? = null
         var scanlines: Boolean? = null
+        var sharpFilter: Boolean? = null
         while (reader.peek() != JsonReader.Token.END_OBJECT) {
             val name = reader.nextName()
             if (name !in VIDEO_FIELDS) throw ProtocolException("unknown video field: $name")
@@ -405,12 +409,13 @@ object PlayerProtocol {
                 "fullscreen" -> fullscreen = readBoolean(reader, name)
                 "integerScaling" -> integerScaling = readBoolean(reader, name)
                 "scanlines" -> scanlines = readBoolean(reader, name)
+                "sharpFilter" -> sharpFilter = readBoolean(reader, name)
             }
         }
         reader.endObject()
         val missing = VIDEO_FIELDS.firstOrNull { it !in seen }
         if (missing != null) throw ProtocolException("missing video field: $missing")
-        return VideoSettings(fullscreen!!, integerScaling!!, scanlines!!)
+        return VideoSettings(fullscreen!!, integerScaling!!, scanlines!!, sharpFilter!!)
     }
 
     private val REQUIRED_REQUEST_FIELDS = listOf(
@@ -427,7 +432,7 @@ object PlayerProtocol {
         "errorMessage",
     )
 
-    private val VIDEO_FIELDS = setOf("fullscreen", "integerScaling", "scanlines")
+    private val VIDEO_FIELDS = setOf("fullscreen", "integerScaling", "scanlines", "sharpFilter")
 
     private val INT64_LITERAL = Regex("-?[0-9]+")
 }

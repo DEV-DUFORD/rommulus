@@ -6,7 +6,8 @@
 //     software framebuffer to RGBA8888 row-by-row into a mutex-protected
 //     staging buffer and flags frameReady_. It never touches the renderer.
 //   - attachWindow()/detachWindow()/present()/setIntegerScaling()/
-//     setScanlines()/setFullscreen() run on the MAIN thread. present()
+//     setScanlines()/setSharpFilter()/setFullscreen() run on the MAIN
+//     thread. present()
 //     copies the staging buffer into a streaming texture (under the mutex)
 //     and then renders outside the lock, so the emulation thread is only
 //     ever blocked for the duration of SDL_UpdateTexture.
@@ -54,6 +55,13 @@ public:
     // over the frame).
     void setScanlines(bool enabled);
 
+    // Toggles the sharp filter: nearest-neighbor scaling of the frame
+    // texture (hard pixel edges) when enabled, bilinear (smooth) when
+    // disabled — ported from Android's VideoOptionsDialog "Sharp Filter"
+    // (EmulationSurface/AndroidVideoSink scale the core frame with
+    // nearest-neighbor instead of letting the compositor blur it).
+    void setSharpFilter(bool enabled);
+
     void setFullscreen(bool enabled);
 
 private:
@@ -86,6 +94,7 @@ private:
     // Presentation options (main thread).
     bool integerScaling_ = false;
     bool scanlines_ = false;
+    bool sharpFilter_ = false;
 
     mutable std::mutex mutex_;
 };

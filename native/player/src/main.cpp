@@ -362,6 +362,7 @@ int main(int argc, char* argv[]) {
     }
     videoSink->setIntegerScaling(request.video.integerScaling);
     videoSink->setScanlines(request.video.scanlines);
+    videoSink->setSharpFilter(request.video.sharpFilter);
     videoSink->setFullscreen(request.video.fullscreen);
 
     // Give the window manager one chance to deliver an early close/quit
@@ -459,6 +460,10 @@ int main(int argc, char* argv[]) {
     romm::player::SdlInput input;
     romm::player::PauseMenu pauseMenu;
     romm::player::PauseOverlay pauseOverlay;
+    // Seed the Video Options submenu with the launch request's settings so
+    // its ON/OFF display matches what was applied to the sink at startup.
+    pauseMenu.setVideoToggles(request.video.scanlines, request.video.integerScaling,
+                              request.video.sharpFilter);
 
     // Executes one pause-menu effect on the session (main thread).
     auto handlePauseEffect = [&](romm::player::PauseMenuEffect effect) {
@@ -471,6 +476,17 @@ int main(int argc, char* argv[]) {
                 // Quit was confirmed: leave through the normal shutdown path,
                 // which checkpoints and reports exitKind=completed.
                 running = false;
+                break;
+            // Video Options toggles: apply the menu's NEW state to the sink
+            // immediately (runtime toggle — no relaunch needed).
+            case romm::player::PauseMenuEffect::kToggleScanlines:
+                videoSink->setScanlines(pauseMenu.scanlinesEnabled());
+                break;
+            case romm::player::PauseMenuEffect::kToggleIntegerScaling:
+                videoSink->setIntegerScaling(pauseMenu.integerScalingEnabled());
+                break;
+            case romm::player::PauseMenuEffect::kToggleSharpFilter:
+                videoSink->setSharpFilter(pauseMenu.sharpFilterEnabled());
                 break;
             default:
                 break;

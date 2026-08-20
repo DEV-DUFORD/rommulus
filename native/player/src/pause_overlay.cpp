@@ -205,12 +205,57 @@ void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu) const {
     // 1. Dim backdrop — the frozen last frame shows through.
     fillRect(renderer, 0.0f, 0.0f, Wf, Hf, 0, 0, 0, kDimAlpha);
 
-    // 2. Menu panel: title + four items (Video Options / Controller Settings
-    // are disabled placeholders drawn dimmed; see PauseMenu::itemEnabled).
     const float pad = 6.0f * s;
     const float rowH = 9.0f * s;
     const float titleH = 8.0f * s;
     const float gap = 2.0f * s;
+
+    // 2a. Video Options submenu: title + three toggle rows (label left,
+    // ON/OFF state right) + a "BACK TO RETURN" hint. Replaces the main menu
+    // panel while visible (the Quit dialog is never shown at the same time).
+    if (menu.state() == PauseMenuState::kVideoOptions) {
+        const float hintH = 7.0f * s;
+        const float panelW = std::min(Wf * 0.85f, 132.0f * s);
+        const float panelH = pad * 2.0f + titleH + gap +
+                             static_cast<float>(PauseMenu::kVideoOptionCount) * rowH +
+                             gap + hintH;
+        const float px = (Wf - panelW) / 2.0f;
+        const float py = (Hf - panelH) / 2.0f;
+        fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
+
+        const char* title = "VIDEO OPTIONS";
+        drawText(renderer, px + (panelW - textWidth(title, s)) / 2.0f, py + pad, title, s,
+                 255, 255, 255, 255);
+
+        const float itemsX = px + pad;
+        const float itemsW = panelW - 2.0f * pad;
+        const float itemsY = py + pad + titleH + gap;
+        for (int i = 0; i < PauseMenu::kVideoOptionCount; ++i) {
+            const bool selected = menu.selection() == i;
+            if (selected) {
+                fillRect(renderer, itemsX, itemsY + static_cast<float>(i) * rowH, itemsW, rowH,
+                         kAccentR, kAccentG, kAccentB, 255);
+            }
+            const float ty = itemsY + static_cast<float>(i) * rowH + (rowH - 7.0f * s) / 2.0f;
+            drawText(renderer, itemsX + 2.0f * s, ty, PauseMenu::videoOptionLabel(i), s,
+                     255, 255, 255, 255);
+            const bool on = i == PauseMenu::kScanlinesItem ? menu.scanlinesEnabled()
+                         : i == PauseMenu::kIntegerScalingItem ? menu.integerScalingEnabled()
+                                                               : menu.sharpFilterEnabled();
+            const char* stateText = on ? "ON" : "OFF";
+            drawText(renderer, itemsX + itemsW - 2.0f * s - textWidth(stateText, s), ty,
+                     stateText, s, on ? kAccentR : 189, on ? kAccentG : 189,
+                     on ? kAccentB : 189, 255);
+        }
+
+        const char* hint = "BACK TO RETURN";
+        drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
+                 hint, s, 189, 189, 189, 255);
+        return;
+    }
+
+    // 2b. Menu panel: title + four items (Controller Settings is a disabled
+    // placeholder drawn dimmed; see PauseMenu::itemEnabled).
     const float panelW = std::min(Wf * 0.7f, 130.0f * s);
     const float panelH = pad * 2.0f + titleH + gap +
                          static_cast<float>(PauseMenu::kItemCount) * rowH;

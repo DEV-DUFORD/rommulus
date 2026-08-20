@@ -39,6 +39,7 @@ PlayerRequest sampleRequest() {
     r.video.fullscreen = true;
     r.video.integerScaling = false;
     r.video.scanlines = true;
+    r.video.sharpFilter = true;
     return r;
 }
 
@@ -82,6 +83,7 @@ void checkRoundTripRequest(const PlayerRequest& in) {
     CHECK_EQ(out->video.fullscreen, in.video.fullscreen);
     CHECK_EQ(out->video.integerScaling, in.video.integerScaling);
     CHECK_EQ(out->video.scanlines, in.video.scanlines);
+    CHECK_EQ(out->video.sharpFilter, in.video.sharpFilter);
 }
 
 void checkRoundTripResult(const PlayerResult& in) {
@@ -252,6 +254,10 @@ int main() {
         mutatedVideoMissing["video"].erase("scanlines");
         expectRequestRejected(mutatedVideoMissing.dump(),
                               "missing video field");
+        json mutatedSharpMissing = base;
+        mutatedSharpMissing["video"].erase("sharpFilter");
+        expectRequestRejected(mutatedSharpMissing.dump(),
+                              "missing sharpFilter video field");
     }
 
     // --- Wrong types --------------------------------------------------

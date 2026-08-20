@@ -23,7 +23,7 @@ class PlayerProtocolTest {
         candidateSavePath = "/state/journals/x/candidate.srm",
         resultPath = "/state/journals/x/result.json",
         expectedSaveSize = 32768L,
-        video = VideoSettings(fullscreen = true, integerScaling = false, scanlines = true),
+        video = VideoSettings(fullscreen = true, integerScaling = false, scanlines = true, sharpFilter = true),
     )
 
     private fun sampleResult(): PlayerResult = PlayerResult(
@@ -146,7 +146,7 @@ class PlayerProtocolTest {
     }
 
     @Test
-    fun `video must be an object with exactly the three boolean fields`() {
+    fun `video must be an object with exactly the four boolean fields`() {
         val notAnObject = PlayerProtocol.serializeRequest(sampleRequest())
             .replace(Regex("\"video\": \\{[^}]*\\}", RegexOption.DOT_MATCHES_ALL), "\"video\": []")
         assertThat(PlayerProtocol.parseRequest(notAnObject).isFailure).isTrue()
@@ -156,16 +156,25 @@ class PlayerProtocolTest {
              "corePath":"/c","contentPath":"/g","contentHash":"","systemDir":"/s",
              "savePath":"/sp","candidateSavePath":"/cs","resultPath":"/rp",
              "expectedSaveSize":null,
-             "video":{"fullscreen":true,"integerScaling":false}}
+             "video":{"fullscreen":true,"integerScaling":false,"sharpFilter":false}}
         """.trimIndent()
         assertThat(PlayerProtocol.parseRequest(missingScanlines).isFailure).isTrue()
+
+        val missingSharpFilter = """
+            {"protocolVersion":1,"sessionId":"s","coreId":"c","coreBuildRevision":"r",
+             "corePath":"/c","contentPath":"/g","contentHash":"","systemDir":"/s",
+             "savePath":"/sp","candidateSavePath":"/cs","resultPath":"/rp",
+             "expectedSaveSize":null,
+             "video":{"fullscreen":true,"integerScaling":false,"scanlines":false}}
+        """.trimIndent()
+        assertThat(PlayerProtocol.parseRequest(missingSharpFilter).isFailure).isTrue()
 
         val extraVideoField = """
             {"protocolVersion":1,"sessionId":"s","coreId":"c","coreBuildRevision":"r",
              "corePath":"/c","contentPath":"/g","contentHash":"","systemDir":"/s",
              "savePath":"/sp","candidateSavePath":"/cs","resultPath":"/rp",
              "expectedSaveSize":null,
-             "video":{"fullscreen":true,"integerScaling":false,"scanlines":false,"stereo":true}}
+             "video":{"fullscreen":true,"integerScaling":false,"scanlines":false,"sharpFilter":false,"stereo":true}}
         """.trimIndent()
         assertThat(PlayerProtocol.parseRequest(extraVideoField).isFailure).isTrue()
     }

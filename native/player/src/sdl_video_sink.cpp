@@ -193,6 +193,13 @@ bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
                                              SDL_TEXTUREACCESS_STREAMING,
                                              static_cast<int>(width_),
                                              static_cast<int>(height_));
+                // Apply the sharp-filter scale mode to every (re)created
+                // frame texture: NEAREST for hard pixel edges, LINEAR
+                // (SDL3's default) for smooth compositor-style upscaling.
+                if (texture_ != nullptr) {
+                    SDL_SetTextureScaleMode(texture_, sharpFilter_ ? SDL_SCALEMODE_NEAREST
+                                                                   : SDL_SCALEMODE_LINEAR);
+                }
                 textureWidth_ = width_;
                 textureHeight_ = height_;
                 if (texture_ == nullptr) {
@@ -272,6 +279,15 @@ void SdlVideoSink::setIntegerScaling(bool enabled) {
 void SdlVideoSink::setScanlines(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     scanlines_ = enabled;
+}
+
+void SdlVideoSink::setSharpFilter(bool enabled) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    sharpFilter_ = enabled;
+    if (texture_ != nullptr) {
+        SDL_SetTextureScaleMode(texture_, sharpFilter_ ? SDL_SCALEMODE_NEAREST
+                                                       : SDL_SCALEMODE_LINEAR);
+    }
 }
 
 void SdlVideoSink::setFullscreen(bool enabled) {

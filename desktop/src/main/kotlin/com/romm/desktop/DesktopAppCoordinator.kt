@@ -753,7 +753,14 @@ class DesktopAppCoordinator(
             contentHash = staged.sha256,
             systemDir = paths.firmwareDir(),
             savePath = savePath,
-            video = VideoSettings(),
+            // Persisted Video Options state (JsonSettingsStore via the settings
+            // adapter): the player applies these at launch so a user's
+            // scanlines / integer-scaling / sharp-filter choices survive relaunch.
+            video = VideoSettings(
+                integerScaling = settingsAdapter.integerScalingEnabled(),
+                scanlines = settingsAdapter.scanlinesEnabled(),
+                sharpFilter = settingsAdapter.sharpFilterEnabled(),
+            ),
         )
 
         return when (val result = playerSupervisor.prepareLaunch(params, sessionId)) {

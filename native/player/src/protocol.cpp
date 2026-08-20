@@ -197,14 +197,14 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
     if (!j["video"].is_object())
         return reject<PlayerRequest>(error, "video must be an object");
     const ordered_json& v = j["video"];
-    static const std::array<const char*, 3> kVideoFields = {{
-        "fullscreen", "integerScaling", "scanlines",
+    static const std::array<const char*, 4> kVideoFields = {{
+        "fullscreen", "integerScaling", "scanlines", "sharpFilter",
     }};
     for (const char* key : kVideoFields) {
         if (!v.contains(key))
             return reject<PlayerRequest>(error,
                                          std::string("missing video field: ") +
-                                             key);
+                                              key);
         if (!v[key].is_boolean())
             return reject<PlayerRequest>(
                 error, std::string("video field must be a boolean: ") + key);
@@ -214,6 +214,7 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
     r.video.fullscreen = v["fullscreen"].get<bool>();
     r.video.integerScaling = v["integerScaling"].get<bool>();
     r.video.scanlines = v["scanlines"].get<bool>();
+    r.video.sharpFilter = v["sharpFilter"].get<bool>();
 
     return r;
 }
@@ -313,6 +314,7 @@ std::string serializeRequest(const PlayerRequest& r) {
     video["fullscreen"] = r.video.fullscreen;
     video["integerScaling"] = r.video.integerScaling;
     video["scanlines"] = r.video.scanlines;
+    video["sharpFilter"] = r.video.sharpFilter;
     j["video"] = video;
     return j.dump(2);
 }

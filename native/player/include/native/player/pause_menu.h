@@ -8,10 +8,12 @@
 // must keep the EmulationSession paused (setPaused(true)); the kResume
 // effect means "unpause now" and kQuit means "checkpoint and exit cleanly".
 //
-// Video Options and Controller Settings are present but DISABLED placeholders
-// in this sub-unit (follow-up sub-units wire them to real settings screens);
-// navigation skips over them. The item list is structured so enabling them
-// later is a one-line change in itemEnabled().
+// Video Options opens a submenu (kVideoOptions) with three runtime toggles
+// mirroring Android's VideoOptionsDialog: Scanlines, Integer Scaling, and
+// Sharp Filter. The state machine owns the toggle states (so the overlay can
+// draw ON/OFF); handle() reports each change as a kToggle* effect and the
+// caller applies it to the video sink immediately. Controller Settings is
+// still a DISABLED placeholder; navigation skips over it.
 //
 // This class is intentionally SDL-free so it can be unit-tested on the host
 // (native/tests/test_pause_menu.cpp). The caller feeds it one frame of
@@ -21,9 +23,10 @@
 namespace romm::player {
 
 enum class PauseMenuState {
-    kClosed,      // No overlay; gameplay input is routed normally.
-    kOpen,        // The pause menu (Resume / Video Options / Controller Settings / Quit) is visible.
-    kQuitConfirm, // The "Quit game?" Yes/No dialog is visible on top of the menu.
+    kClosed,        // No overlay; gameplay input is routed normally.
+    kOpen,          // The pause menu (Resume / Video Options / Controller Settings / Quit) is visible.
+    kQuitConfirm,   // The "Quit game?" Yes/No dialog is visible on top of the menu.
+    kVideoOptions,  // The Video Options submenu (Scanlines / Integer Scaling / Sharp Filter) is visible.
 };
 
 // One frame of edge-detected input for the overlay. Each field is true only
@@ -42,9 +45,15 @@ struct PauseMenuActions {
 
 // What the caller must do after handle() returns.
 enum class PauseMenuEffect {
-    kNone,    // No state change requiring action.
-    kResume,  // The menu closed via Resume (or cancel): call setPaused(false).
-    kQuit,    // Quit was confirmed: checkpoint and exit the session cleanly.
+    kNone,                 // No state change requiring action.
+    kResume,               // The menu closed via Resume (or cancel): call setPaused(false).
+    kQuit,                 // Quit was confirmed: checkpoint and exit the session cleanly.
+    // A Video Options toggle changed: apply the menu's NEW state for that
+    // setting to the video sink (read it back via scanlinesEnabled() /
+    // integerScalingEnabled() / sharpFilterEnabled()).
+    kToggleScanlines,
+    kToggleIntegerScaling,
+    kToggleSharpFilter,
 };
 
 class PauseMenu {
@@ -58,18 +67,38 @@ public:
     // Selection indices while in kQuitConfirm.
     static constexpr int kConfirmYes = 0;
     static constexpr int kConfirmNo = 1;
+    // Toggle-row indices while in kVideoOptions, in the same order as
+    // Android's VideoOptionsDialog.
+    static constexpr int kVideoOptionCount = 3;
+    static constexpr int kScanlinesItem = 0;
+    static constexpr int kIntegerScalingItem = 1;
+    static constexpr int kSharpFilterItem = 2;
 
     PauseMenuState state() const { return state_; }
     bool isOpen() const { return state_ != PauseMenuState::kClosed; }
     // Current selection: an item index in kOpen, a confirm option in
-    // kQuitConfirm. Meaningless in kClosed.
+    // kQuitConfirm, a toggle-row index in kVideoOptions. Meaningless in
+    // kClosed.
     int selection() const { return selection_; }
 
+    // The Video Options toggle states. The menu owns them so the overlay can
+    // draw ON/OFF; the caller seeds them from the launch request and applies
+    // each kToggle* effect back to the video sink.
+    bool scanlinesEnabled() const { return scanlinesEnabled_; }
+    bool integerScalingEnabled() const { return integerScalingEnabled_; }
+    bool sharpFilterEnabled() const { return sharpFilterEnabled_; }
+    void setVideoToggles(bool scanlines, bool integerScaling, bool sharpFilter) {
+        scanlinesEnabled_ = scanlines;
+        integerScalingEnabled_ = integerScaling;
+        sharpFilterEnabled_ = sharpFilter;
+    }
+
     static const char* itemLabel(int index);
-    // Video Options / Controller Settings are disabled placeholders until the
-    // follow-up sub-units land.
+    // Controller Settings is a disabled placeholder until its sub-unit lands.
     static bool itemEnabled(int index);
     static const char* confirmOptionLabel(int index);  // "Yes" / "No"
+    // Toggle-row labels while in kVideoOptions ("Scanlines" / ...).
+    static const char* videoOptionLabel(int index);
 
     // CLOSED -> OPEN with Resume focused (Android requests focus on RESUME
     // for a fresh CLOSED -> MENU transition). No-op when already open.
@@ -97,6 +126,8 @@ public:
                 return handleOpen(a);
             case PauseMenuState::kQuitConfirm:
                 return handleQuitConfirm(a);
+            case PauseMenuState::kVideoOptions:
+                return handleVideoOptions(a);
         }
         return PauseMenuEffect::kNone;
     }
@@ -110,6 +141,12 @@ private:
             if (itemEnabled(candidate)) break;
         }
         selection_ = candidate;
+    }
+
+    // Moves the Video Options submenu selection by +/-1, wrapping over its
+    // three (always-enabled) toggle rows.
+    void moveVideoSelection(int delta) {
+        selection_ = (selection_ + delta + kVideoOptionCount) % kVideoOptionCount;
     }
 
     PauseMenuEffect handleOpen(const PauseMenuActions& a) {
@@ -126,6 +163,12 @@ private:
                 case kResumeItem:
                     close();
                     return PauseMenuEffect::kResume;
+                case kVideoOptionsItem:
+                    // Open the Video Options submenu, focused on the first
+                    // toggle (Android requests focus on the scanlines row).
+                    state_ = PauseMenuState::kVideoOptions;
+                    selection_ = kScanlinesItem;
+                    return PauseMenuEffect::kNone;
                 case kQuitItem:
                     // The user already expressed intent to quit, so the
                     // dialog defaults to Yes (No is one press away).
@@ -134,6 +177,35 @@ private:
                     return PauseMenuEffect::kNone;
                 default:
                     break;  // Disabled placeholders are unreachable via navigation.
+            }
+        }
+        return PauseMenuEffect::kNone;
+    }
+
+    PauseMenuEffect handleVideoOptions(const PauseMenuActions& a) {
+        if (a.up) moveVideoSelection(-1);
+        if (a.down) moveVideoSelection(+1);
+        if (a.cancel) {
+            // Back/Escape returns to the main menu, focused on Video Options
+            // (Android's dialog dismissRequest — it does NOT close the pause
+            // menu itself).
+            state_ = PauseMenuState::kOpen;
+            selection_ = kVideoOptionsItem;
+            return PauseMenuEffect::kNone;
+        }
+        if (a.confirm || a.left || a.right) {
+            switch (selection_) {
+                case kScanlinesItem:
+                    scanlinesEnabled_ = !scanlinesEnabled_;
+                    return PauseMenuEffect::kToggleScanlines;
+                case kIntegerScalingItem:
+                    integerScalingEnabled_ = !integerScalingEnabled_;
+                    return PauseMenuEffect::kToggleIntegerScaling;
+                case kSharpFilterItem:
+                    sharpFilterEnabled_ = !sharpFilterEnabled_;
+                    return PauseMenuEffect::kToggleSharpFilter;
+                default:
+                    break;  // unreachable: the submenu only has these three rows
             }
         }
         return PauseMenuEffect::kNone;
@@ -164,6 +236,9 @@ private:
 
     PauseMenuState state_ = PauseMenuState::kClosed;
     int selection_ = 0;
+    bool scanlinesEnabled_ = false;
+    bool integerScalingEnabled_ = false;
+    bool sharpFilterEnabled_ = false;
 };
 
 inline const char* PauseMenu::itemLabel(int index) {
@@ -177,13 +252,22 @@ inline const char* PauseMenu::itemLabel(int index) {
 }
 
 inline bool PauseMenu::itemEnabled(int index) {
-    // Video Options and Controller Settings are disabled placeholders in this
-    // sub-unit; the follow-up settings sub-units flip them to enabled.
-    return index == kResumeItem || index == kQuitItem;
+    // Controller Settings is still a disabled placeholder until its sub-unit
+    // lands; Video Options is now live (opens the kVideoOptions submenu).
+    return index == kResumeItem || index == kVideoOptionsItem || index == kQuitItem;
 }
 
 inline const char* PauseMenu::confirmOptionLabel(int index) {
     return index == kConfirmYes ? "Yes" : "No";
+}
+
+inline const char* PauseMenu::videoOptionLabel(int index) {
+    switch (index) {
+        case kScanlinesItem: return "Scanlines";
+        case kIntegerScalingItem: return "Integer Scaling";
+        case kSharpFilterItem: return "Sharp Filter";
+        default: return "";
+    }
 }
 
 }  // namespace romm::player

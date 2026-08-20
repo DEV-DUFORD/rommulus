@@ -25,6 +25,9 @@ struct VideoSettings {
     bool fullscreen = false;
     bool integerScaling = false;
     bool scanlines = false;
+    // Sharp filter (nearest-neighbor scaling), mirroring Android's
+    // VideoOptionsDialog "Sharp Filter" toggle.
+    bool sharpFilter = false;
 };
 
 // Launch request version 1 (LINUX_X64.md section 12.2). Every field is

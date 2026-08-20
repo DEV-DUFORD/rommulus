@@ -81,6 +81,19 @@ class DesktopSettingsAdapter(
         store.write(mapOf(SettingsKeys.ONSCREEN_GAME_CONTROLS to enabled.toString()))
     }
 
+    // Video Options toggles (mirrors Android's SettingsRepository keys): read at
+    // player launch and passed in the v1 request's video block so the player
+    // applies the persisted state from the start. All default off, matching
+    // both the wire schema defaults and Android's fresh-install behavior.
+    fun scanlinesEnabled(): Boolean =
+        store.snapshot().boolean(SettingsKeys.SCANLINES_ENABLED, default = false)
+
+    fun integerScalingEnabled(): Boolean =
+        store.snapshot().boolean(SettingsKeys.INTEGER_SCALING_ENABLED, default = false)
+
+    fun sharpFilterEnabled(): Boolean =
+        store.snapshot().boolean(SettingsKeys.SHARP_FILTER_ENABLED, default = false)
+
     fun theme(): String = store.snapshot().get(SettingsKeys.THEME) ?: DEFAULT_THEME
 
     private val _currentTheme = mutableStateOf(RommTheme.fromStorage(theme()))
