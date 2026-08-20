@@ -95,6 +95,7 @@ import com.romm.androidtv.romm.StagingOutcome
 import com.romm.androidtv.romm.StagingOutcomeMessage
 import com.romm.androidtv.romm.save.ConflictChoice
 import com.romm.androidtv.romm.save.FileSaveContentStore
+import com.romm.androidtv.romm.save.GameLaunchRecorder
 import com.romm.androidtv.romm.save.ResolveConflictRequest
 import com.romm.androidtv.romm.save.SaveSyncCoordinator
 import com.romm.androidtv.romm.save.SaveSyncCoordinatorImpl
@@ -438,6 +439,10 @@ class MainActivity : ComponentActivity() {
     // sync-outcome handling between debug and native-library flows.
     private val saveLaunchOrchestrator: SaveLaunchOrchestrator by lazy {
         SaveLaunchOrchestrator(saveSyncCoordinator)
+    }
+
+    private val gameLaunchRecorder: GameLaunchRecorder by lazy {
+        GameLaunchRecorder(saveSyncCoordinator::recordPlaySession)
     }
 
     // Phase B: Handles EmulationActivity results and journal-based recovery with
@@ -1422,6 +1427,9 @@ class MainActivity : ComponentActivity() {
                 candidateMetadata?.let { CandidateExtras.putIntoIntent(this, it) }
             }
         )
+        lifecycleScope.launch(Dispatchers.IO) {
+            gameLaunchRecorder.recordLaunch(spec.romId)
+        }
     }
 
     /**
@@ -1437,8 +1445,6 @@ class MainActivity : ComponentActivity() {
                 val checkpointedPath = data.getStringExtra("checkpointed_save_path")
                 val checkpointedHash = data.getStringExtra("checkpointed_save_hash")
                 val resultRomId = data.getLongExtra("rom_id", -1L)
-                val playSessionStartEpochMs = data.getLongExtra("play_session_start_epoch_ms", -1L)
-                val playSessionEndEpochMs = data.getLongExtra("play_session_end_epoch_ms", -1L)
 
                 lifecycleScope.launch {
                     emulationResultHandler.handleEmulationResult(
@@ -1447,8 +1453,6 @@ class MainActivity : ComponentActivity() {
                         checkpointedPath = checkpointedPath,
                         checkpointedHash = checkpointedHash,
                         resultRomId = resultRomId,
-                        playSessionStartEpochMs = playSessionStartEpochMs,
-                        playSessionEndEpochMs = playSessionEndEpochMs,
                     )
                     // Refresh Continue Playing immediately rather than waiting for the next
                     // cold app start — see continuePlayingRefreshTick's doc comment.

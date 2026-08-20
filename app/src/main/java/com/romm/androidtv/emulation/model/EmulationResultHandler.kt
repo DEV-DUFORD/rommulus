@@ -5,8 +5,6 @@ import androidx.lifecycle.LifecycleCoroutineScope
 import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.network.extractServerKey
 import com.romm.androidtv.romm.save.FinalizeAdoptionRequest
-import com.romm.androidtv.romm.save.PlaySessionRecordRequest
-import com.romm.androidtv.romm.save.PlaySessionRecordResult
 import com.romm.androidtv.romm.save.PostPlayCheckpointRequest
 import com.romm.androidtv.romm.save.PostPlayCheckpointResult
 import com.romm.androidtv.romm.save.SaveSyncCoordinator
@@ -83,8 +81,6 @@ class EmulationResultHandler(
         checkpointedPath: String?,
         checkpointedHash: String?,
         resultRomId: Long,
-        playSessionStartEpochMs: Long = -1L,
-        playSessionEndEpochMs: Long = -1L,
     ): Boolean = withContext(Dispatchers.Main) {
         if (resultCode != android.app.Activity.RESULT_OK) {
             Log.w(logTag, "handleEmulationResult: cancelled for session $sessionId")
@@ -96,7 +92,7 @@ class EmulationResultHandler(
 
         val lock = getSessionLock(sessionId)
         lock.withLock {
-            processSuccessfulResult(sessionId, checkpointedPath, checkpointedHash, resultRomId, playSessionStartEpochMs, playSessionEndEpochMs)
+            processSuccessfulResult(sessionId, checkpointedPath, checkpointedHash, resultRomId)
         }
         true
     }
@@ -112,8 +108,6 @@ class EmulationResultHandler(
         checkpointedPath: String?,
         checkpointedHash: String?,
         resultRomId: Long,
-        playSessionStartEpochMs: Long = -1L,
-        playSessionEndEpochMs: Long = -1L,
     ) {
         val journal = LaunchSessionJournal(filesDir.resolve("launch_sessions"))
         val descriptor = journal.read(sessionId)
@@ -191,26 +185,6 @@ class EmulationResultHandler(
                 Log.i(logTag, "processSuccessfulResult: no checkpoint for session $sessionId; skipping save sync")
             }
 
-            // Best-effort: report the completed play session for "Continue Playing" tracking.
-            // Deliberately never affects `hadFailure`/journal replay — losing this telemetry is
-            // low-stakes compared to losing save-sync data, and it isn't idempotency-tracked here.
-            if (playSessionStartEpochMs > 0L && playSessionEndEpochMs > playSessionStartEpochMs) {
-                try {
-                    val result = coordinator.recordPlaySession(
-                        PlaySessionRecordRequest(
-                            romId = resultRomId,
-                            slot = SavePathPolicy.AUTOSAVE_SLOT,
-                            startEpochMs = playSessionStartEpochMs,
-                            endEpochMs = playSessionEndEpochMs,
-                        )
-                    )
-                    if (result is PlaySessionRecordResult.Failure) {
-                        Log.w(logTag, "processSuccessfulResult: recordPlaySession failed for session $sessionId error=${result.error}")
-                    }
-                } catch (e: Exception) {
-                    Log.w(logTag, "processSuccessfulResult: recordPlaySession threw for session $sessionId", e)
-                }
-            }
         }
 
         // Only clean up journal if no failure occurred — preserve for replay on failure.
