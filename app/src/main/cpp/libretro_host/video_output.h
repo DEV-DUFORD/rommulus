@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <vector>
 
 namespace romm {
 
@@ -49,6 +50,14 @@ public:
 private:
     std::mutex mutex_;
     ANativeWindow* window_ = nullptr;
+    uint32_t scaledSourceWidth_ = 0;
+    uint32_t scaledSourceHeight_ = 0;
+    uint32_t scaledDestinationWidth_ = 0;
+    uint32_t scaledDestinationHeight_ = 0;
+    std::vector<uint32_t> scaledSourceXs_;
+    std::vector<uint32_t> scaledSourceYs_;
+    std::vector<uint32_t> convertedSourceRow_;
+    std::vector<uint32_t> expandedDestinationRow_;
 };
 
 }  // namespace romm

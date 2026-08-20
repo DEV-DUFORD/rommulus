@@ -1,7 +1,7 @@
 #include "video_output.h"
 
 #include <algorithm>
-#include <vector>
+#include <cstring>
 
 namespace romm {
 
@@ -88,6 +88,10 @@ void VideoOutput::submitFrame(const void* data, unsigned width, unsigned height,
     const uint32_t rows = static_cast<uint32_t>(buffer.height);
     const uint32_t cols = static_cast<uint32_t>(buffer.width);
     const size_t dstStrideBytes = static_cast<size_t>(buffer.stride) * 4;
+    if (rows == 0 || cols == 0) {
+        ANativeWindow_unlockAndPost(window_);
+        return;
+    }
 
     if (rows == height && cols == width) {
         for (uint32_t y = 0; y < rows; ++y) {
@@ -111,43 +115,62 @@ void VideoOutput::submitFrame(const void* data, unsigned width, unsigned height,
         return;
     }
 
-    std::vector<uint32_t> sourceXs(cols);
-    for (uint32_t x = 0; x < cols; ++x) {
-        sourceXs[x] = std::min(
-            static_cast<uint32_t>((static_cast<uint64_t>(x) * width) / cols),
-            static_cast<uint32_t>(width - 1));
+    if (scaledSourceWidth_ != width || scaledSourceHeight_ != height ||
+        scaledDestinationWidth_ != cols || scaledDestinationHeight_ != rows) {
+        scaledSourceWidth_ = width;
+        scaledSourceHeight_ = height;
+        scaledDestinationWidth_ = cols;
+        scaledDestinationHeight_ = rows;
+        scaledSourceXs_.resize(cols);
+        scaledSourceYs_.resize(rows);
+        convertedSourceRow_.resize(width);
+        expandedDestinationRow_.resize(cols);
+
+        for (uint32_t x = 0; x < cols; ++x) {
+            scaledSourceXs_[x] = std::min(
+                static_cast<uint32_t>((static_cast<uint64_t>(x) * width) / cols),
+                static_cast<uint32_t>(width - 1));
+        }
+        for (uint32_t y = 0; y < rows; ++y) {
+            scaledSourceYs_[y] = std::min(
+                static_cast<uint32_t>((static_cast<uint64_t>(y) * height) / rows),
+                static_cast<uint32_t>(height - 1));
+        }
     }
 
+    uint32_t previousSourceY = height;
     for (uint32_t y = 0; y < rows; ++y) {
-        const uint32_t sourceY = std::min(
-            static_cast<uint32_t>((static_cast<uint64_t>(y) * height) / rows),
-            static_cast<uint32_t>(height - 1));
-        const uint8_t* srcRow = srcBytes + static_cast<size_t>(sourceY) * pitch;
-        auto* dstRow = reinterpret_cast<uint32_t*>(dstBytes + static_cast<size_t>(y) * dstStrideBytes);
-        for (uint32_t x = 0; x < cols; ++x) {
-            const uint32_t sourceX = sourceXs[x];
+        const uint32_t sourceY = scaledSourceYs_[y];
+        if (sourceY != previousSourceY) {
+            const uint8_t* srcRow = srcBytes + static_cast<size_t>(sourceY) * pitch;
             switch (format) {
                 case RETRO_PIXEL_FORMAT_0RGB1555:
                     convertRow0RGB1555(
-                        reinterpret_cast<const uint16_t*>(srcRow) + sourceX,
-                        dstRow + x,
-                        1);
+                        reinterpret_cast<const uint16_t*>(srcRow),
+                        convertedSourceRow_.data(),
+                        width);
                     break;
                 case RETRO_PIXEL_FORMAT_RGB565:
                     convertRowRGB565(
-                        reinterpret_cast<const uint16_t*>(srcRow) + sourceX,
-                        dstRow + x,
-                        1);
+                        reinterpret_cast<const uint16_t*>(srcRow),
+                        convertedSourceRow_.data(),
+                        width);
                     break;
                 case RETRO_PIXEL_FORMAT_XRGB8888:
                 default:
                     convertRowXRGB8888(
-                        reinterpret_cast<const uint32_t*>(srcRow) + sourceX,
-                        dstRow + x,
-                        1);
+                        reinterpret_cast<const uint32_t*>(srcRow),
+                        convertedSourceRow_.data(),
+                        width);
                     break;
             }
+            for (uint32_t x = 0; x < cols; ++x) {
+                expandedDestinationRow_[x] = convertedSourceRow_[scaledSourceXs_[x]];
+            }
+            previousSourceY = sourceY;
         }
+        auto* dstRow = reinterpret_cast<uint32_t*>(dstBytes + static_cast<size_t>(y) * dstStrideBytes);
+        std::memcpy(dstRow, expandedDestinationRow_.data(), static_cast<size_t>(cols) * sizeof(uint32_t));
     }
 
     ANativeWindow_unlockAndPost(window_);
