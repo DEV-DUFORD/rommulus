@@ -84,6 +84,17 @@ class ScanlineGeometryTest {
     }
 
     @Test
+    fun `bands align to alternating scaled source row boundaries`() {
+        val nesBands = calculateScanlineBands(480f, 240)
+        val gbaBands = calculateScanlineBands(480f, 160)
+
+        // At 2x, a 240-line frame places a band every four output pixels.
+        assertThat(nesBands.take(3).map { it.topPx }).containsExactly(0f, 4f, 8f)
+        // At 3x, a 160-line frame places a band every six output pixels.
+        assertThat(gbaBands.take(3).map { it.topPx }).containsExactly(0f, 6f, 12f)
+    }
+
+    @Test
     fun `band thickness never drops below one physical pixel`() {
         val cases = listOf(480f to 240, 720f to 240, 1080f to 240, 480f to 480, 480f to 720)
         for ((height, core) in cases) {
@@ -140,12 +151,11 @@ class ScanlineGeometryTest {
     }
 
     @Test
-    fun `single source row case produces one band (row 0 is even)`() {
+    fun `single source row case anchors its band to the top boundary`() {
         // coreHeight = 1: row 0 (even) is the only row, so one band is produced.
         val bands = calculateScanlineBands(100f, 1)
         assertThat(bands).hasSize(1)
-        // bandTop = (100 - 3)/2 = 48.5; kotlin.math.round() uses banker's rounding -> 48.
-        assertThat(bands[0].topPx).isEqualTo(48f)
+        assertThat(bands[0].topPx).isEqualTo(0f)
         assertThat(bands[0].heightPx).isEqualTo(3f)
     }
 
