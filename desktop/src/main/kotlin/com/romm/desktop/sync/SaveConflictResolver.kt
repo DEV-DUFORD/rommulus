@@ -13,8 +13,13 @@ import com.romm.androidtv.storage.records.SaveSyncStatus
 import java.time.Instant
 import java.util.logging.Logger
 
-/** The user's explicit choice for a CONFLICT replica (mirrors Android's `ConflictChoice`). */
-enum class SaveConflictChoice { KEEP_LOCAL, KEEP_SERVER }
+/**
+ * The user's explicit choice for a CONFLICT replica (mirrors Android's `ConflictChoice` plus the
+ * desktop quarantine escape hatch). [QUARANTINE] is offered for incompatible-provenance conflicts,
+ * where KEEP_LOCAL/KEEP_SERVER are rejected: it preserves the server copy in the quarantine dir
+ * and settles the replica QUARANTINED without ever adopting or uploading it.
+ */
+enum class SaveConflictChoice { KEEP_LOCAL, KEEP_SERVER, QUARANTINE }
 
 /**
  * Result of an explicit conflict-resolution attempt. On [Failure] the choice was NOT applied:
@@ -28,6 +33,8 @@ sealed interface SaveConflictResolutionResult {
         val serverBackupPath: String? = null,
         /** Where the losing LOCAL copy was durably preserved (keep-server only), if any. */
         val localBackupPath: String? = null,
+        /** Where the server copy was preserved in the quarantine dir ([QUARANTINE] choice only). */
+        val quarantinedPath: String? = null,
     ) : SaveConflictResolutionResult
 
     /** [reason] is safe to surface in the UI as-is. */
@@ -46,13 +53,30 @@ sealed interface SaveConflictResolutionResult {
  *  3. Upload local bytes with `overwrite = true`.
  *  4. Persist the replica as SYNCED (new local generation, server metadata from the upload)
  *     ONLY after the upload succeeds.
+ *  The PROVENANCE GUARD (described under KEEP SERVER) runs before any of this: uploading a
+ *  different-core save over the server would be exactly the data-safety error it prevents.
  *
  * **KEEP SERVER** (server copy wins, adopted locally):
- *  1. Resolve the server save id (the replica's recorded `rommSaveId`, falling back to listing
- *     the ROM's saves when the conflict predates that record).
+ *  1. Identify the server save against the server's own listing (the recorded `rommSaveId` when
+ *     present in it, else the newest listed save matching the slot — fallback for conflicts that
+ *     predate that record). The listing also carries the save's emulator: the PROVENANCE GUARD
+ *     (mirroring Android's `isProvenanceCompatible`) rejects KEEP_LOCAL and KEEP_SERVER with
+ *     "incompatible-provenance … quarantine UI only" when it differs from this replica's coreId —
+ *     an incompatible-provenance conflict can never be resolved by adopting/uploading a
+ *     different-core save. Unknown provenance (null emulator) is rejected the same way.
  *  2. Download the server bytes; validate hash + exact known SRAM size (no fabrication).
  *  3. Durably back up the losing local copy BEFORE atomic replacement.
  *  4. Adopt atomically, re-hash, persist the replica as SYNCED, confirm the download.
+ *
+ * **QUARANTINE** (the bad server copy is preserved, never adopted — the escape hatch for
+ * incompatible-provenance conflicts, where both keep-choices above are rejected):
+ *  1. Identify the server save (same listing lookup; no provenance gate here — quarantining an
+ *     unknown/different-core copy is exactly the point).
+ *  2. Download the server bytes (no session bookkeeping) and preserve them via
+ *     `content.quarantine(..., reason = "conflict")` in the quarantine dir.
+ *  3. Persist the replica as QUARANTINED (`lastError = "quarantined: conflict"`). The local bytes
+ *     are never touched (the save stays playable) and nothing is uploaded or confirmed.
+ *  QUARANTINED is a blocked-replay status, so the drain never re-negotiates around it.
  *
  * No timestamps are used for decision-making and there is no automatic choice — the user's click
  * is the only input. Status is persisted only after all network operations succeed; any failure
@@ -74,12 +98,12 @@ class SaveConflictResolver(
 ) {
 
     /**
-     * Applies [keepLocal] (true = keep local / false = keep server) to [replica]. The replica is
+     * Applies [choice] (KEEP_LOCAL / KEEP_SERVER / QUARANTINE) to [replica]. The replica is
      * re-read from the store first so a concurrent change (e.g. the user played again) invalidates
      * the choice instead of acting on a stale row. Only CONFLICT replicas resolve; anything else
      * returns [SaveConflictResolutionResult.Failure] without touching any data.
      */
-    fun resolve(replica: SaveReplicaRecord, keepLocal: Boolean): SaveConflictResolutionResult {
+    fun resolve(replica: SaveReplicaRecord, choice: SaveConflictChoice): SaveConflictResolutionResult {
         val current = saveReplicas.findByScope(
             SaveReplicaScope(replica.serverKey, replica.userKey, replica.romId, replica.romHash, replica.slot),
         ) ?: return SaveConflictResolutionResult.Failure("replica-missing: the save record is gone")
@@ -100,10 +124,11 @@ class SaveConflictResolver(
         val deviceIdentity = deviceIdentityLoader.load(origin, username)
             ?: return SaveConflictResolutionResult.Failure("device not registered — cannot resolve")
 
-        return if (keepLocal) {
-            resolveKeepLocal(current, origin, deviceIdentity.rommDeviceId)
-        } else {
-            resolveKeepServer(current, origin, deviceIdentity.rommDeviceId)
+        val deviceId = deviceIdentity.rommDeviceId
+        return when (choice) {
+            SaveConflictChoice.KEEP_LOCAL -> resolveKeepLocal(current, origin, deviceId)
+            SaveConflictChoice.KEEP_SERVER -> resolveKeepServer(current, origin, deviceId)
+            SaveConflictChoice.QUARANTINE -> resolveQuarantine(current, origin, deviceId)
         }
     }
 
@@ -126,6 +151,15 @@ class SaveConflictResolver(
             ?: return SaveConflictResolutionResult.Failure(
                 "server-save-unidentified: cannot resolve conflict — the server copy could not be identified or backed up",
             )
+
+        // Provenance guard (Android isProvenanceCompatible): uploading a save written by a
+        // different core over the server would corrupt this slot for every other device.
+        if (!isProvenanceCompatible(replica.coreId, serverSave.emulator)) {
+            return SaveConflictResolutionResult.Failure(
+                "incompatible-provenance: local core '${replica.coreId}' vs server '${serverSave.emulator}' — quarantine UI only",
+            )
+        }
+
         val serverBytes = when (val dl = sync.downloadSaveContentBackup(origin, serverSave.saveId, deviceId)) {
             is SaveDownloadResult.Success -> dl.bytes
             is SaveDownloadResult.Failure -> return SaveConflictResolutionResult.Failure(
@@ -201,6 +235,14 @@ class SaveConflictResolver(
                 "no-server-save: the server has no save to keep for this game",
             )
 
+        // Provenance guard (Android isProvenanceCompatible): adopting a different-core save would
+        // replace the playable local copy with bytes this core cannot load.
+        if (!isProvenanceCompatible(replica.coreId, serverSave.emulator)) {
+            return SaveConflictResolutionResult.Failure(
+                "incompatible-provenance: local core '${replica.coreId}' vs server '${serverSave.emulator}' — quarantine UI only",
+            )
+        }
+
         val serverBytes = when (val dl = sync.downloadSaveContent(origin, serverSave.saveId, deviceId, null)) {
             is SaveDownloadResult.Success -> dl.bytes
             is SaveDownloadResult.Failure -> return SaveConflictResolutionResult.Failure(
@@ -259,19 +301,74 @@ class SaveConflictResolver(
         )
     }
 
+    // ------------------------------------------------------------------ QUARANTINE
+
+    /**
+     * "Bad server copy preserved, never adopted": the escape hatch for incompatible-provenance
+     * conflicts (both keep-choices are rejected there — see the class doc). The local bytes stay
+     * on disk untouched (the save remains playable); the server copy is downloaded (no session
+     * bookkeeping — it is NOT being adopted) and preserved in the quarantine dir; the replica
+     * settles QUARANTINED so the drain never re-negotiates around it (blocked-replay status).
+     * No upload, no adoption, no confirm. There is deliberately NO provenance gate here:
+     * quarantining an unknown/different-core copy is exactly what this choice exists for.
+     */
+    private fun resolveQuarantine(replica: SaveReplicaRecord, origin: String, deviceId: String): SaveConflictResolutionResult {
+        val serverSave = findServerSave(replica, origin, deviceId)
+            ?: return SaveConflictResolutionResult.Failure(
+                "server-save-unidentified: cannot quarantine — the server copy could not be identified",
+            )
+
+        val serverBytes = when (val dl = sync.downloadSaveContentBackup(origin, serverSave.saveId, deviceId)) {
+            is SaveDownloadResult.Success -> dl.bytes
+            is SaveDownloadResult.Failure -> return SaveConflictResolutionResult.Failure(
+                "server-backup-download-failed: ${dl.error}", dl.httpCode,
+            )
+        }
+
+        // Preserve the server copy in the quarantine dir (never at the real autosave path).
+        val quarantinedPath = content.quarantine(
+            replica.serverKey, replica.userKey, replica.romId, replica.romHash, replica.slot,
+            bytes = serverBytes, reason = "conflict", nowEpochMs = clock(),
+        )
+
+        // Settle the replica QUARANTINED. Local hash/size/generation are untouched — the playable
+        // local copy is exactly as found; only the sync state records the user's decision.
+        upsert(replica.copy(
+            syncStatus = SaveSyncStatus.QUARANTINED,
+            lastError = "quarantined: conflict",
+        ))
+
+        return SaveConflictResolutionResult.Success(
+            choice = SaveConflictChoice.QUARANTINE,
+            quarantinedPath = quarantinedPath,
+        )
+    }
+
     // ------------------------------------------------------------------ shared helpers
 
-    /** The server-side save for this slot: [SaveReplicaRecord.rommSaveId] when recorded, else the
-     *  newest listed save matching the slot (fallback for conflicts that predate the record). */
-    private data class ServerSave(val saveId: Long, val updatedAt: Instant?)
+    /**
+     * Mirrors Android's `ConflictResolverImpl.isProvenanceCompatible`: only a server save written
+     * by the SAME core as this replica may be adopted or uploaded against it. Unknown provenance
+     * (null emulator) is incompatible — such conflicts are "quarantine UI only".
+     */
+    private fun isProvenanceCompatible(localCoreId: String, serverEmulator: String?): Boolean =
+        serverEmulator != null && localCoreId == serverEmulator
+
+    /** The server-side save for this slot, identified against the server's own listing — the
+     *  authoritative provenance source for the guard. Prefers [SaveReplicaRecord.rommSaveId] when
+     *  present in the listing; falls back to the newest listed save matching the slot (conflicts
+     *  that predate the record). A listing failure yields null: resolution then aborts rather
+     *  than acting on unknown provenance. */
+    private data class ServerSave(val saveId: Long, val updatedAt: Instant?, val emulator: String?)
 
     private fun findServerSave(replica: SaveReplicaRecord, origin: String, deviceId: String): ServerSave? {
-        replica.rommSaveId?.let { return ServerSave(it, null) }
         return when (val result = sync.listSaves(origin, replica.romId, deviceId)) {
-            is SaveListResult.Success -> result.saves
-                .filter { it.slot == null || it.slot == replica.slot }
-                .maxByOrNull { it.updatedAt?.toEpochMilli() ?: 0L }
-                ?.let { ServerSave(it.saveId, it.updatedAt) }
+            is SaveListResult.Success -> {
+                val candidates = result.saves.filter { it.slot == null || it.slot == replica.slot }
+                val recorded = replica.rommSaveId?.let { id -> candidates.firstOrNull { it.saveId == id } }
+                (recorded ?: candidates.maxByOrNull { it.updatedAt?.toEpochMilli() ?: 0L })
+                    ?.let { ServerSave(it.saveId, it.updatedAt, it.emulator) }
+            }
             is SaveListResult.Failure -> {
                 log.warning("findServerSave: listSaves failed for rom ${replica.romId}: ${result.error}")
                 null

@@ -4,6 +4,7 @@ import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.romm.DeviceIdentity
 import com.romm.androidtv.romm.SaveDownloadResult
+import com.romm.androidtv.romm.SaveListResult
 import com.romm.androidtv.romm.SaveUploadResult
 import com.romm.androidtv.romm.ServerSaveInfo
 import com.romm.androidtv.romm.SyncAction
@@ -131,6 +132,13 @@ class DesktopSaveSyncActionsTest {
         syncStatus = status, lastError = "server-newer",
     )
 
+    /** The conflicting server save as the server's own listing reports it (provenance-guard
+     *  source). [emulator] defaults to the replica's core ("gambatte" — compatible provenance). */
+    private fun listedSave(emulator: String? = "gambatte") = ServerSaveInfo(
+        saveId = 900L, romId = ROM_ID, fileName = "autosave.srm", slot = SLOT, emulator = emulator,
+        contentHash = sha256Hex(SERVER_BYTES), updatedAt = null, fileSizeBytes = SERVER_BYTES.size.toLong(),
+    )
+
     private fun Path.testRoot(): AppPaths = TestAppPaths(this)
 
     // ── "Sync now" ──────────────────────────────────────────────────────────────
@@ -192,6 +200,7 @@ class DesktopSaveSyncActionsTest {
             signIn(wired.coordinator)
             wired.content.setLocal(SERVER_KEY, USERNAME, ROM_ID, ROM_HASH, SLOT, LOCAL_BYTES)
             wired.store.upsert(conflictReplica()).getOrThrow()
+            wired.sync.listSavesResult = SaveListResult.Success(listOf(listedSave())) // compatible provenance
             wired.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES) // losing-copy backup
             wired.sync.uploadResult = SaveUploadResult.Success(
                 ServerSaveInfo(
@@ -230,6 +239,7 @@ class DesktopSaveSyncActionsTest {
             signIn(wired.coordinator)
             wired.content.setLocal(SERVER_KEY, USERNAME, ROM_ID, ROM_HASH, SLOT, LOCAL_BYTES)
             wired.store.upsert(conflictReplica()).getOrThrow()
+            wired.sync.listSavesResult = SaveListResult.Success(listOf(listedSave())) // compatible provenance
             wired.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES)
 
             val result = wired.coordinator.resolveSaveConflict(ROM_ID, keepLocal = false)
@@ -249,6 +259,48 @@ class DesktopSaveSyncActionsTest {
             assertThat(rep.syncStatus).isEqualTo(SaveSyncStatus.SYNCED)
             assertThat(rep.localHash).isEqualTo(sha256Hex(SERVER_BYTES))
             assertThat(wired.sync.confirmCalls).hasSize(1)
+        } finally {
+            wired.coordinator.scheduler.shutdown()
+        }
+    }
+
+    // ── conflict resolution: quarantine (incompatible provenance escape hatch) ───
+
+    @Test
+    fun `quarantine choice preserves the server copy quarantined and blocks re-negotiation`(@TempDir dir: Path) {
+        val wired = wire(dir.testRoot())
+        try {
+            signIn(wired.coordinator)
+            wired.content.setLocal(SERVER_KEY, USERNAME, ROM_ID, ROM_HASH, SLOT, LOCAL_BYTES)
+            wired.store.upsert(conflictReplica()).getOrThrow()
+            // The server's listing says the conflicting save came from a DIFFERENT core — both
+            // keep-choices are rejected by the provenance guard; quarantine is the way out.
+            wired.sync.listSavesResult = SaveListResult.Success(listOf(listedSave(emulator = "snes9x")))
+            wired.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES)
+
+            val result = wired.coordinator.resolveSaveConflict(ROM_ID, choice = SaveConflictChoice.QUARANTINE)
+
+            assertThat(result).isInstanceOf(SaveConflictResolutionResult.Success::class.java)
+            val success = result as SaveConflictResolutionResult.Success
+            assertThat(success.choice).isEqualTo(SaveConflictChoice.QUARANTINE)
+            assertThat(success.quarantinedPath).isNotNull()
+            // The server copy was preserved in the quarantine dir (reason "conflict"), never at
+            // the real autosave path and never uploaded or confirmed.
+            val q = wired.content.quarantined.single()
+            assertThat(q.second).isEqualTo("conflict")
+            assertThat(q.third).containsExactly(*SERVER_BYTES)
+            assertThat(wired.sync.uploadCalls).isEmpty()
+            assertThat(wired.sync.confirmCalls).isEmpty()
+            // The playable local bytes are untouched.
+            assertThat(wired.content.readLocal(SERVER_KEY, USERNAME, ROM_ID, ROM_HASH, SLOT))
+                .containsExactly(*LOCAL_BYTES)
+            // The replica settled QUARANTINED — a blocked-replay status (see
+            // DesktopAppCoordinator.BLOCKED_REPLAY_STATUSES), so the post-play enqueue never
+            // restarts negotiation around this decision.
+            val scope = SaveReplicaScope(SERVER_KEY, USERNAME, ROM_ID, ROM_HASH, SLOT)
+            val rep = wired.store.findByScope(scope)!!
+            assertThat(rep.syncStatus).isEqualTo(SaveSyncStatus.QUARANTINED)
+            assertThat(rep.lastError).isEqualTo("quarantined: conflict")
         } finally {
             wired.coordinator.scheduler.shutdown()
         }

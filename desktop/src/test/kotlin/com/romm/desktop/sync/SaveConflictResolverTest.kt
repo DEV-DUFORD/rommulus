@@ -64,6 +64,14 @@ class SaveConflictResolverTest {
         fileSizeBytes = LOCAL_BYTES.size.toLong(),
     )
 
+    /** The conflicting server save as the server's own listing reports it (the provenance-guard
+     *  source). [emulator] defaults to the replica's core ("snes9x" — compatible provenance). */
+    private fun listedSave(saveId: Long = 900L, emulator: String? = "snes9x") = ServerSaveInfo(
+        saveId = saveId, romId = ROM_ID, fileName = "autosave.srm", slot = SLOT, emulator = emulator,
+        contentHash = sha256Hex(SERVER_BYTES), updatedAt = Instant.ofEpochMilli(NOW - 1000),
+        fileSizeBytes = SERVER_BYTES.size.toLong(),
+    )
+
     private class Harness(
         val store: InMemorySaveStateStore = InMemorySaveStateStore(),
         val content: FakeSaveContentGateway = FakeSaveContentGateway(),
@@ -90,10 +98,11 @@ class SaveConflictResolverTest {
     fun `keep local uploads local over the server and backs up the losing server copy`() {
         val h = Harness()
         h.seedConflict(conflictReplica())
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave())) // compatible provenance
         h.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES) // losing-copy backup read
         h.sync.uploadResult = SaveUploadResult.Success(uploadedSave())
 
-        val result = h.resolver.resolve(conflictReplica(), keepLocal = true)
+        val result = h.resolver.resolve(conflictReplica(), choice = SaveConflictChoice.KEEP_LOCAL)
 
         assertThat(result).isEqualTo(
             SaveConflictResolutionResult.Success(
@@ -127,10 +136,11 @@ class SaveConflictResolverTest {
     fun `keep local upload failure preserves both copies and leaves the conflict in place`() {
         val h = Harness()
         h.seedConflict(conflictReplica())
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave())) // compatible provenance
         h.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES)
         h.sync.uploadResult = SaveUploadResult.Failure(RommApiError.NETWORK_ERROR, 503)
 
-        val result = h.resolver.resolve(conflictReplica(), keepLocal = true)
+        val result = h.resolver.resolve(conflictReplica(), choice = SaveConflictChoice.KEEP_LOCAL)
 
         assertThat(result).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
         assertThat((result as SaveConflictResolutionResult.Failure).httpCode).isEqualTo(503)
@@ -150,7 +160,7 @@ class SaveConflictResolverTest {
         // be identified. Mirrors Android: never overwrite=true without a durable backup of the
         // losing copy — abort instead of silently destroying it.
 
-        val result = h.resolver.resolve(conflictReplica(rommSaveId = null, serverHash = null), keepLocal = true)
+        val result = h.resolver.resolve(conflictReplica(rommSaveId = null, serverHash = null), choice = SaveConflictChoice.KEEP_LOCAL)
 
         assertThat(result).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
         assertThat((result as SaveConflictResolutionResult.Failure).reason)
@@ -169,10 +179,11 @@ class SaveConflictResolverTest {
     fun `keep server downloads adopts the server copy and marks the replica synced`() {
         val h = Harness()
         h.seedConflict(conflictReplica(expectedSize = SERVER_BYTES.size.toLong()))
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave())) // compatible provenance
         h.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES)
         h.sync.confirmResult = SaveConfirmResult.Success
 
-        val result = h.resolver.resolve(conflictReplica(expectedSize = SERVER_BYTES.size.toLong()), keepLocal = false)
+        val result = h.resolver.resolve(conflictReplica(expectedSize = SERVER_BYTES.size.toLong()), choice = SaveConflictChoice.KEEP_SERVER)
 
         assertThat(result).isInstanceOf(SaveConflictResolutionResult.Success::class.java)
         val success = result as SaveConflictResolutionResult.Success
@@ -201,9 +212,10 @@ class SaveConflictResolverTest {
         val h = Harness()
         // Recorded conflict-time server hash does not match what actually downloads.
         h.seedConflict(conflictReplica(serverHash = "deadbeef"))
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave())) // compatible provenance
         h.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES)
 
-        val result = h.resolver.resolve(conflictReplica(serverHash = "deadbeef"), keepLocal = false)
+        val result = h.resolver.resolve(conflictReplica(serverHash = "deadbeef"), choice = SaveConflictChoice.KEEP_SERVER)
 
         assertThat(result).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
         assertThat((result as SaveConflictResolutionResult.Failure).reason)
@@ -230,7 +242,7 @@ class SaveConflictResolverTest {
         )
         h.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES)
 
-        val result = h.resolver.resolve(conflictReplica(rommSaveId = null), keepLocal = false)
+        val result = h.resolver.resolve(conflictReplica(rommSaveId = null), choice = SaveConflictChoice.KEEP_SERVER)
 
         assertThat(result).isInstanceOf(SaveConflictResolutionResult.Success::class.java)
         // The listed save id was downloaded and adopted.
@@ -238,6 +250,125 @@ class SaveConflictResolverTest {
         val rep = h.store.findByScope(scope)!!
         assertThat(rep.syncStatus).isEqualTo(SaveSyncStatus.SYNCED)
         assertThat(rep.rommSaveId).isEqualTo(555L)
+    }
+
+    // ── provenance guard (Android isProvenanceCompatible) ───────────────────────
+
+    @Test
+    fun `keep local with incompatible provenance is rejected before any download or upload`() {
+        val h = Harness()
+        h.seedConflict(conflictReplica())
+        // The server's listing says the conflicting save was written by a DIFFERENT core.
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave(emulator = "genesis")))
+
+        val result = h.resolver.resolve(conflictReplica(), choice = SaveConflictChoice.KEEP_LOCAL)
+
+        assertThat(result).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
+        assertThat((result as SaveConflictResolutionResult.Failure).reason)
+            .startsWith("incompatible-provenance: local core 'snes9x' vs server 'genesis'")
+            .contains("quarantine UI only")
+        // Nothing was downloaded, uploaded, or backed up — the wrong-core save can never be
+        // adopted into this slot; both copies remain exactly as found.
+        assertThat(h.sync.downloadCalls).isEmpty()
+        assertThat(h.sync.uploadCalls).isEmpty()
+        assertThat(h.content.conflictBackups).isEmpty()
+        assertThat(h.content.readLocal(SRV, USER, ROM_ID, HASH, SLOT)).containsExactly(*LOCAL_BYTES)
+        assertThat(h.store.findByScope(scope)!!.syncStatus).isEqualTo(SaveSyncStatus.CONFLICT)
+    }
+
+    @Test
+    fun `keep server with incompatible provenance is rejected before any download or adoption`() {
+        val h = Harness()
+        h.seedConflict(conflictReplica(expectedSize = SERVER_BYTES.size.toLong()))
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave(emulator = "genesis")))
+
+        val result = h.resolver.resolve(conflictReplica(expectedSize = SERVER_BYTES.size.toLong()), choice = SaveConflictChoice.KEEP_SERVER)
+
+        assertThat(result).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
+        assertThat((result as SaveConflictResolutionResult.Failure).reason)
+            .startsWith("incompatible-provenance: local core 'snes9x' vs server 'genesis'")
+            .contains("quarantine UI only")
+        // The playable local copy was never replaced by a different-core save.
+        assertThat(h.sync.downloadCalls).isEmpty()
+        assertThat(h.sync.confirmCalls).isEmpty()
+        assertThat(h.content.conflictBackups).isEmpty()
+        assertThat(h.content.readLocal(SRV, USER, ROM_ID, HASH, SLOT)).containsExactly(*LOCAL_BYTES)
+        assertThat(h.store.findByScope(scope)!!.syncStatus).isEqualTo(SaveSyncStatus.CONFLICT)
+    }
+
+    @Test
+    fun `unknown provenance (null server emulator) is rejected like incompatible`() {
+        val h = Harness()
+        // The recorded server save id is absent from the listing and the newest listed save for
+        // the slot carries no emulator at all — provenance cannot be established either way.
+        h.seedConflict(conflictReplica())
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave(emulator = null)))
+
+        val keepLocal = h.resolver.resolve(conflictReplica(), choice = SaveConflictChoice.KEEP_LOCAL)
+        assertThat(keepLocal).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
+        assertThat((keepLocal as SaveConflictResolutionResult.Failure).reason)
+            .startsWith("incompatible-provenance: local core 'snes9x' vs server 'null'")
+
+        val keepServer = h.resolver.resolve(conflictReplica(), choice = SaveConflictChoice.KEEP_SERVER)
+        assertThat(keepServer).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
+        assertThat((keepServer as SaveConflictResolutionResult.Failure).reason)
+            .startsWith("incompatible-provenance: local core 'snes9x' vs server 'null'")
+    }
+
+    // ── QUARANTINE (bad server copy preserved, never adopted) ───────────────────
+
+    @Test
+    fun `quarantine preserves the server copy in the quarantine dir and settles the replica quarantined`() {
+        val h = Harness()
+        h.seedConflict(conflictReplica())
+        // The realistic case: incompatible provenance — both keep-choices would be rejected, so
+        // the user quarantines instead.
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave(emulator = "genesis")))
+        h.sync.downloadResult = SaveDownloadResult.Success(SERVER_BYTES)
+
+        val result = h.resolver.resolve(conflictReplica(), choice = SaveConflictChoice.QUARANTINE)
+
+        assertThat(result).isEqualTo(
+            SaveConflictResolutionResult.Success(
+                choice = SaveConflictChoice.QUARANTINE,
+                quarantinedPath = "quarantine/$NOW-conflict-$SLOT.srm",
+            ),
+        )
+        // The server copy was preserved in the quarantine dir under reason "conflict" — never at
+        // the real autosave path, never uploaded.
+        val q = h.content.quarantined.single()
+        assertThat(q.second).isEqualTo("conflict")
+        assertThat(q.third).containsExactly(*SERVER_BYTES)
+        // The playable local bytes are untouched; no adoption, no upload, no confirm, no backup.
+        assertThat(h.content.readLocal(SRV, USER, ROM_ID, HASH, SLOT)).containsExactly(*LOCAL_BYTES)
+        assertThat(h.sync.uploadCalls).isEmpty()
+        assertThat(h.sync.confirmCalls).isEmpty()
+        assertThat(h.content.conflictBackups).isEmpty()
+        // The replica settled QUARANTINED — a blocked-replay status, so the drain never
+        // re-negotiates around this decision (DesktopAppCoordinator.BLOCKED_REPLAY_STATUSES).
+        val rep = h.store.findByScope(scope)!!
+        assertThat(rep.syncStatus).isEqualTo(SaveSyncStatus.QUARANTINED)
+        assertThat(rep.lastError).isEqualTo("quarantined: conflict")
+        // Local generation/hash are exactly as found (the save stays playable).
+        assertThat(rep.localHash).isEqualTo(sha256Hex(LOCAL_BYTES))
+        assertThat(rep.localWrittenAtEpochMs).isEqualTo(GEN)
+    }
+
+    @Test
+    fun `quarantine without an identifiable server save aborts without touching any data`() {
+        val h = Harness()
+        h.seedConflict(conflictReplica(rommSaveId = null))
+        // listSaves fails (the fake's default) → nothing to quarantine.
+
+        val result = h.resolver.resolve(conflictReplica(rommSaveId = null), choice = SaveConflictChoice.QUARANTINE)
+
+        assertThat(result).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
+        assertThat((result as SaveConflictResolutionResult.Failure).reason)
+            .startsWith("server-save-unidentified")
+        assertThat(h.sync.downloadCalls).isEmpty()
+        assertThat(h.content.quarantined).isEmpty()
+        assertThat(h.content.readLocal(SRV, USER, ROM_ID, HASH, SLOT)).containsExactly(*LOCAL_BYTES)
+        assertThat(h.store.findByScope(scope)!!.syncStatus).isEqualTo(SaveSyncStatus.CONFLICT)
     }
 
     // ── gating: resolution is offered only on CONFLICT ──────────────────────────
@@ -248,7 +379,7 @@ class SaveConflictResolverTest {
         h.store.upsert(conflictReplica(syncStatus = SaveSyncStatus.SYNCED)).getOrThrow()
         h.content.setLocal(SRV, USER, ROM_ID, HASH, SLOT, LOCAL_BYTES)
 
-        val result = h.resolver.resolve(conflictReplica(syncStatus = SaveSyncStatus.SYNCED), keepLocal = true)
+        val result = h.resolver.resolve(conflictReplica(syncStatus = SaveSyncStatus.SYNCED), choice = SaveConflictChoice.KEEP_LOCAL)
 
         assertThat(result).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
         assertThat((result as SaveConflictResolutionResult.Failure).reason).startsWith("not-conflict")
@@ -273,7 +404,7 @@ class SaveConflictResolverTest {
             sync = h.sync,
         )
 
-        val result = noSessionResolver.resolve(conflictReplica(), keepLocal = true)
+        val result = noSessionResolver.resolve(conflictReplica(), choice = SaveConflictChoice.KEEP_LOCAL)
 
         assertThat(result).isInstanceOf(SaveConflictResolutionResult.Failure::class.java)
         assertThat((result as SaveConflictResolutionResult.Failure).reason).startsWith("no active session")

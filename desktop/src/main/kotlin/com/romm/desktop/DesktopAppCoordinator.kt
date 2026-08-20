@@ -91,6 +91,7 @@ import com.romm.desktop.storage.sqlite.SqliteSessionRecordStore
 import com.romm.desktop.sync.BackgroundSyncSchedulerImpl
 import com.romm.desktop.sync.FileSaveContentGateway
 import com.romm.desktop.sync.RommSyncApiGateway
+import com.romm.desktop.sync.SaveConflictChoice
 import com.romm.desktop.sync.SaveConflictResolutionResult
 import com.romm.desktop.sync.SaveConflictResolver
 import com.romm.desktop.sync.SaveSyncDeviceIdentityLoader
@@ -1143,14 +1144,17 @@ class DesktopAppCoordinator(
     fun requestSaveSync(): Boolean = scheduler.requestDrain("user-requested")
 
     /**
-     * Explicitly resolves [romId]'s CONFLICT autosave: [keepLocal] = the local file wins (uploaded
-     * over the server, losing server copy backed up); false = the server copy wins (downloaded and
-     * adopted, losing local copy backed up). Both copies are preserved until this choice is
-     * applied — see [SaveConflictResolver]. The detail screen refreshes its status presenter after
-     * calling this. Safe to call from any thread; performs network I/O (callers dispatch off the
-     * UI thread).
+     * Explicitly resolves [romId]'s CONFLICT autosave with the user's three-way [choice]:
+     * [SaveConflictChoice.KEEP_LOCAL] = the local file wins (uploaded over the server, losing
+     * server copy backed up); [SaveConflictChoice.KEEP_SERVER] = the server copy wins (downloaded
+     * and adopted, losing local copy backed up); [SaveConflictChoice.QUARANTINE] = the server copy
+     * is preserved in the quarantine dir and the replica settles QUARANTINED (nothing adopted or
+     * uploaded — the escape hatch for incompatible-provenance conflicts). Both copies are
+     * preserved until this choice is applied — see [SaveConflictResolver]. The detail screen
+     * refreshes its status presenter after calling this. Safe to call from any thread; performs
+     * network I/O (callers dispatch off the UI thread).
      */
-    fun resolveSaveConflict(romId: Long, keepLocal: Boolean): SaveConflictResolutionResult {
+    fun resolveSaveConflict(romId: Long, choice: SaveConflictChoice): SaveConflictResolutionResult {
         val (serverKey, userKey) = currentSaveSessionKeys()
             ?: return SaveConflictResolutionResult.Failure("no active session — log in again to resolve")
         // Same newest-generation autosave lookup the status presenter uses (a re-uploaded ROM
@@ -1160,8 +1164,15 @@ class DesktopAppCoordinator(
             .filter { it.romId == romId && it.slot == SavePathPolicy.AUTOSAVE_SLOT }
             .maxByOrNull { it.localWrittenAtEpochMs ?: Long.MIN_VALUE }
             ?: return SaveConflictResolutionResult.Failure("no save recorded for this game")
-        return saveConflictResolver.resolve(replica, keepLocal)
+        return saveConflictResolver.resolve(replica, choice)
     }
+
+    /**
+     * Two-way convenience overload for the existing detail-screen buttons (the third QUARANTINE
+     * button is a follow-up sub-unit — F2). [keepLocal] true = KEEP_LOCAL, false = KEEP_SERVER.
+     */
+    fun resolveSaveConflict(romId: Long, keepLocal: Boolean): SaveConflictResolutionResult =
+        resolveSaveConflict(romId, if (keepLocal) SaveConflictChoice.KEEP_LOCAL else SaveConflictChoice.KEEP_SERVER)
 
     fun biosConfigurationPresenter(platformSlug: String): BiosConfigurationPresenter =
         BiosConfigurationPresenter(scope, biosConfigurationProvider(platformSlug))
