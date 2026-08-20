@@ -134,6 +134,22 @@ class SettingsRepository(
             .commit()
 
     /**
+     * Sharp video filter (off by default): when true, software-rendered core
+     * frames are nearest-neighbor scaled to preserve hard pixel edges.
+     */
+    fun sharpFilterEnabled(): Boolean =
+        prefs.getBoolean(KEY_SHARP_FILTER_ENABLED, false)
+
+    /**
+     * Persists the sharp video filter toggle. Returns true only when the
+     * underlying SharedPreferences committed the write synchronously.
+     */
+    fun setSharpFilterEnabled(enabled: Boolean): Boolean =
+        prefs.edit()
+            .putBoolean(KEY_SHARP_FILTER_ENABLED, enabled)
+            .commit()
+
+    /**
      * Advanced save-cleanup toggle (on by default): when true, SRAM uploads ask
      * the server to auto-clean the "autosave" slot down to a short recent
      * history (5 files) right after each successful upload. When false, the
@@ -229,6 +245,7 @@ class SettingsRepository(
         private const val KEY_AUTOCLEAN_SAVES = "autoclean_saves_on_upload"
         private const val KEY_SCANLINES_ENABLED = "video_scanlines_enabled"
         private const val KEY_INTEGER_SCALING_ENABLED = "video_integer_scaling_enabled"
+        private const val KEY_SHARP_FILTER_ENABLED = "video_sharp_filter_enabled"
         private const val KEY_ON_SCREEN_GAME_CONTROLS = "on_screen_game_controls"
         private const val KEY_SEGACD_BIOS_ID = "segacd_bios_id"
         private const val KEY_SEGACD_BIOS_FILE_NAME = "segacd_bios_file_name"

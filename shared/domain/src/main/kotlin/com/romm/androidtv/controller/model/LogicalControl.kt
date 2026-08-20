@@ -52,6 +52,11 @@ val NEUTRAL_KEY_TO_CONTROL: Map<NeutralKey, LogicalControl> = mapOf(
     NeutralKey.BUTTON_Y to LogicalControl.BUTTON_Y,
     NeutralKey.BUTTON_L1 to LogicalControl.BUTTON_LB,
     NeutralKey.BUTTON_R1 to LogicalControl.BUTTON_RB,
+    // Some controllers report their triggers as key events while others report
+    // them as motion axes. Keep both paths routable so custom mappings (for
+    // example, GBA A on L2) work regardless of the controller's report type.
+    NeutralKey.BUTTON_L2 to LogicalControl.BUTTON_LT,
+    NeutralKey.BUTTON_R2 to LogicalControl.BUTTON_RT,
     NeutralKey.BUTTON_SELECT to LogicalControl.BUTTON_SELECT,
     NeutralKey.BUTTON_START to LogicalControl.BUTTON_START,
     NeutralKey.BUTTON_THUMBL to LogicalControl.BUTTON_L3,

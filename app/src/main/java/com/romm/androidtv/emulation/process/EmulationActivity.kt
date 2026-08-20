@@ -10,6 +10,7 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.Animatable
 import androidx.core.view.WindowCompat
@@ -18,6 +19,11 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +33,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,9 +62,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
@@ -236,6 +248,9 @@ class EmulationActivity : ComponentActivity() {
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
 
+    /** Suppresses the duplicate KeyEvent/BackDispatcher delivery some gesture implementations emit. */
+    private var lastQuickBackNavigationAtMs: Long = 0L
+
     /** The current pause-menu overlay state; drives [NativeLibretroHost.nativeSetPaused] whenever not [PauseOverlay.CLOSED]. */
     private val pauseOverlay = MutableStateFlow(PauseOverlay.CLOSED)
 
@@ -245,6 +260,16 @@ class EmulationActivity : ComponentActivity() {
             getSharedPreferences(SettingsRepository.PREFS_NAME, MODE_PRIVATE),
             BuildConfig.ROMM_ORIGIN,
         )
+    }
+
+    /** Global on-screen-controls preference, observed live by the in-session touch overlay. */
+    private val onScreenControlsEnabled by lazy {
+        MutableStateFlow(settingsRepository.onScreenGameControlsEnabled())
+    }
+
+    private fun setOnScreenControlsEnabled(enabled: Boolean) {
+        settingsRepository.setOnScreenGameControlsEnabled(enabled)
+        onScreenControlsEnabled.value = enabled
     }
 
     private val touchLayoutRepository by lazy {
@@ -276,6 +301,15 @@ class EmulationActivity : ComponentActivity() {
     private fun setIntegerScalingEnabled(requested: Boolean): Boolean {
         val ok = settingsRepository.setIntegerScalingEnabled(requested)
         if (ok) integerScalingEnabled.value = requested
+        return ok
+    }
+
+    /** Sharp-filter toggle state, initialized from persistence; Compose observes this flow. */
+    private val sharpFilterEnabled by lazy { MutableStateFlow(settingsRepository.sharpFilterEnabled()) }
+
+    private fun setSharpFilterEnabled(requested: Boolean): Boolean {
+        val ok = settingsRepository.setSharpFilterEnabled(requested)
+        if (ok) sharpFilterEnabled.value = requested
         return ok
     }
 
@@ -312,6 +346,18 @@ class EmulationActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Gesture navigation is delivered through OnBackPressedDispatcher rather than
+        // dispatchKeyEvent on Samsung devices. Route it through the same quick-back path as
+        // a remote Back tap, and deduplicate devices that deliver both callbacks.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (sessionStarted) {
+                    requestQuickBackNavigation()
+                } else {
+                    finish()
+                }
+            }
+        })
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         sessionStartEpochMs = System.currentTimeMillis()
@@ -585,16 +631,29 @@ class EmulationActivity : ComponentActivity() {
                     Log.w(TAG, "onCreate: controller config observation stopped", e)
                 }
             }
+
+            // A per-core controller profile can reserve any two physical inputs as
+            // the pause shortcut. The router emits only on the unpressed -> pressed
+            // edge, so holding the pair cannot repeatedly open/close the overlay.
+            lifecycleScope.launch {
+                controllerRouter.pauseMenuRequests.collect {
+                    if (sessionStarted &&
+                        pauseOverlay.value == PauseOverlay.CLOSED &&
+                        !saveFailureVisible.value
+                    ) {
+                        controllerRouter.releaseAllInputs()
+                        inputAdapter.pushCurrentState()
+                        pauseOverlay.value = PauseOverlay.MENU
+                    }
+                }
+            }
         }
 
         this.savePath = savePath
 
-        // Phase 6B: effective on-screen touch controls = device reports a touchscreen AND the
-        // persisted setting arrived enabled. An intent extra must NEVER force touch UI onto a
-        // device that reports no touchscreen, so the touchscreen check is authoritative here
-        // regardless of what the caller passed.
-        val touchControlsEnabled = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) &&
-            intent.getBooleanExtra("on_screen_controls_enabled", false)
+        // The hardware capability is authoritative. The persisted global preference is collected
+        // in Compose so toggling it from the pause menu takes effect immediately.
+        val hasTouchscreen = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
 
         // EmulationActivity runs in :emulation, where the process-local theme state starts at
         // its default. Restore the shared preference before composing the pause menu.
@@ -619,12 +678,16 @@ class EmulationActivity : ComponentActivity() {
                             saveFailureVisible = saveFailureVisible,
                             scanlinesEnabled = scanlinesEnabled,
                             integerScalingEnabled = integerScalingEnabled,
-                            touchControlsEnabled = touchControlsEnabled,
+                            sharpFilterEnabled = sharpFilterEnabled,
+                            hasTouchscreen = hasTouchscreen,
+                            onScreenControlsEnabled = onScreenControlsEnabled,
                             touchCoordinator = touchCoordinator,
                             touchLayoutOverride = coreIdForMapping?.let(touchLayoutRepository::load),
                             touchLayoutRepository = touchLayoutRepository,
                             onSetScanlinesEnabled = ::setScanlinesEnabled,
                             onSetIntegerScalingEnabled = ::setIntegerScalingEnabled,
+                            onSetSharpFilterEnabled = ::setSharpFilterEnabled,
+                            onSetOnScreenControlsEnabled = ::setOnScreenControlsEnabled,
                             onStop = { finishAndDeliverResult() },
                             onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
                             onSetNativePaused = { paused -> host.nativeSetPaused(paused) },
@@ -730,6 +793,14 @@ class EmulationActivity : ComponentActivity() {
      */
     private fun checkpointForPauseMenu() {
         checkpointIfRunning()
+    }
+
+    private fun requestQuickBackNavigation() {
+        if (!sessionStarted || saveFailureVisible.value) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastQuickBackNavigationAtMs < BACK_NAVIGATION_DEDUPLICATION_MS) return
+        lastQuickBackNavigationAtMs = now
+        quickBackTapEvents.tryEmit(Unit)
     }
 
     override fun onPause() {
@@ -1001,7 +1072,7 @@ class EmulationActivity : ComponentActivity() {
                         if (heldMs < BACK_HOLD_DURATION_MS && sessionStarted &&
                             !saveFailureVisible.value
                         ) {
-                            quickBackTapEvents.tryEmit(Unit)
+                            requestQuickBackNavigation()
                         }
                     }
                 }
@@ -1018,7 +1089,7 @@ class EmulationActivity : ComponentActivity() {
             pauseOverlay.value != PauseOverlay.CLOSED
         ) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                quickBackTapEvents.tryEmit(Unit)
+                requestQuickBackNavigation()
             }
             return true
         }
@@ -1071,6 +1142,7 @@ internal fun shouldRouteGameplayInput(
 internal fun pauseOverlayOnBackground(current: PauseOverlay): PauseOverlay = when (current) {
     PauseOverlay.CLOSED -> PauseOverlay.MENU
     PauseOverlay.MENU,
+    PauseOverlay.CONTROLLER_MENU,
     PauseOverlay.VIDEO_OPTIONS,
     PauseOverlay.CONTROLLER_SETTINGS,
     PauseOverlay.TOUCH_CONTROLLER_SETTINGS -> current
@@ -1109,12 +1181,16 @@ private fun EmulationScreen(
     saveFailureVisible: Flow<Boolean>,
     scanlinesEnabled: StateFlow<Boolean>,
     integerScalingEnabled: StateFlow<Boolean>,
-    touchControlsEnabled: Boolean,
+    sharpFilterEnabled: StateFlow<Boolean>,
+    hasTouchscreen: Boolean,
+    onScreenControlsEnabled: StateFlow<Boolean>,
     touchCoordinator: TouchInputCoordinator,
     touchLayoutOverride: com.romm.androidtv.emulation.touch.TouchLayoutOverrideDocument?,
     touchLayoutRepository: com.romm.androidtv.emulation.touch.TouchLayoutRepository,
     onSetScanlinesEnabled: (Boolean) -> Boolean,
     onSetIntegerScalingEnabled: (Boolean) -> Boolean,
+    onSetSharpFilterEnabled: (Boolean) -> Boolean,
+    onSetOnScreenControlsEnabled: (Boolean) -> Unit,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
     onSetNativePaused: (Boolean) -> Unit,
@@ -1136,6 +1212,9 @@ private fun EmulationScreen(
     val saveFailureShown by saveFailureVisible.collectAsState(initial = false)
     val scanlinesOn by scanlinesEnabled.collectAsState()
     val integerScalingOn by integerScalingEnabled.collectAsState()
+    val sharpFilterOn by sharpFilterEnabled.collectAsState()
+    val onScreenControlsOn by onScreenControlsEnabled.collectAsState()
+    val touchControlsEnabled = hasTouchscreen && onScreenControlsOn
     var persistenceError by remember { mutableStateOf(false) }
     var pauseMenuFocusTarget by remember { mutableStateOf(PauseMenuFocusTarget.RESUME) }
     var activeTouchLayoutOverride by remember(coreIdForMapping) {
@@ -1226,6 +1305,7 @@ private fun EmulationScreen(
                 displayAspectRatio = diagnostics.getOrElse(21) { 0L } / 1_000_000f,
                 scanlinesEnabled = scanlinesOn,
                 integerScalingEnabled = integerScalingOn,
+                sharpFilterEnabled = sharpFilterOn,
                 modifier = Modifier.fillMaxSize()
             )
         } else {
@@ -1270,12 +1350,7 @@ private fun EmulationScreen(
                     },
                     onOpenControllerSettings = {
                         pauseMenuFocusTarget = PauseMenuFocusTarget.CONTROLLER_SETTINGS
-                        pauseOverlay.value = PauseOverlay.CONTROLLER_SETTINGS
-                    },
-                    showOnScreenControllerSettings = touchControlsEnabled,
-                    onOpenOnScreenControllerSettings = {
-                        pauseMenuFocusTarget = PauseMenuFocusTarget.TOUCH_CONTROLLER_SETTINGS
-                        pauseOverlay.value = PauseOverlay.TOUCH_CONTROLLER_SETTINGS
+                        pauseOverlay.value = controllerSettingsTransition(hasTouchscreen)
                     },
                     onQuit = onStop,
                 )
@@ -1285,6 +1360,7 @@ private fun EmulationScreen(
                 VideoOptionsDialog(
                     scanlinesEnabled = scanlinesOn,
                     integerScalingEnabled = integerScalingOn,
+                    sharpFilterEnabled = sharpFilterOn,
                     persistenceError = persistenceError,
                     onScanlinesChanged = { requested ->
                         val ok = onSetScanlinesEnabled(requested)
@@ -1293,6 +1369,11 @@ private fun EmulationScreen(
                     },
                     onIntegerScalingChanged = { requested ->
                         val ok = onSetIntegerScalingEnabled(requested)
+                        persistenceError = !ok
+                        ok
+                    },
+                    onSharpFilterChanged = { requested ->
+                        val ok = onSetSharpFilterEnabled(requested)
                         persistenceError = !ok
                         ok
                     },
@@ -1309,6 +1390,20 @@ private fun EmulationScreen(
                     repository = controllerConfigRepository,
                     captureCoordinator = captureCoordinator,
                     controllerRouter = controllerRouter,
+                    onBack = { pauseOverlay.value = PauseOverlay.MENU },
+                )
+            }
+
+            if (overlayState == PauseOverlay.CONTROLLER_MENU) {
+                ControllerSettingsMenu(
+                    onScreenControlsEnabled = onScreenControlsOn,
+                    onSetOnScreenControlsEnabled = onSetOnScreenControlsEnabled,
+                    onOpenPhysicalControllerSettings = {
+                        pauseOverlay.value = PauseOverlay.CONTROLLER_SETTINGS
+                    },
+                    onOpenOnScreenControllerSettings = {
+                        pauseOverlay.value = PauseOverlay.TOUCH_CONTROLLER_SETTINGS
+                    },
                     onBack = { pauseOverlay.value = PauseOverlay.MENU },
                 )
             }
@@ -1346,6 +1441,9 @@ private const val BACK_HINT_IDLE_HIDE_MS = 2500L
 /** How long the remote's Back key must be held to confirm exiting gameplay. */
 private const val BACK_HOLD_DURATION_MS = 1200
 
+/** Ignore duplicate back deliveries from one navigation gesture, without swallowing normal taps. */
+private const val BACK_NAVIGATION_DEDUPLICATION_MS = 250L
+
 /** Coarse category used to select which native error screen to show. */
 enum class LaunchFailureCategory { NONE, CORE_LOAD, CONTENT_LOAD, UNKNOWN }
 
@@ -1355,6 +1453,8 @@ enum class PauseOverlay {
     CLOSED,
     /** The pause menu (Resume / Video Options / Controller Settings / Quit) is visible. */
     MENU,
+    /** Touchscreen-only controller-settings menu; the core stays paused. */
+    CONTROLLER_MENU,
     /** The shared video-options dialog is visible; the core stays paused. */
     VIDEO_OPTIONS,
     /** The shared controller-settings subpage is visible; the core stays paused. */
@@ -1372,14 +1472,18 @@ enum class PauseMenuFocusTarget {
     RESUME,
     VIDEO_OPTIONS,
     CONTROLLER_SETTINGS,
-    TOUCH_CONTROLLER_SETTINGS,
     QUIT,
 }
 
-/** Pure transition for a quick Back tap: VIDEO_OPTIONS/CONTROLLER_SETTINGS return to MENU, never CLOSED. */
+/** Opens the touchscreen controller-settings submenu, or physical mappings directly on TV. */
+internal fun controllerSettingsTransition(hasTouchscreen: Boolean): PauseOverlay =
+    if (hasTouchscreen) PauseOverlay.CONTROLLER_MENU else PauseOverlay.CONTROLLER_SETTINGS
+
+/** Pure transition for a quick Back tap: subpages return to MENU, never CLOSED. */
 internal fun quickBackTransition(current: PauseOverlay): PauseOverlay = when (current) {
     PauseOverlay.CLOSED -> PauseOverlay.MENU
     PauseOverlay.MENU -> PauseOverlay.CLOSED
+    PauseOverlay.CONTROLLER_MENU -> PauseOverlay.MENU
     PauseOverlay.VIDEO_OPTIONS -> PauseOverlay.MENU
     PauseOverlay.CONTROLLER_SETTINGS -> PauseOverlay.MENU
     PauseOverlay.TOUCH_CONTROLLER_SETTINGS -> PauseOverlay.MENU
@@ -1496,8 +1600,6 @@ private fun PauseMenuOverlay(
     onResume: () -> Unit,
     onOpenVideoOptions: () -> Unit,
     onOpenControllerSettings: () -> Unit,
-    showOnScreenControllerSettings: Boolean,
-    onOpenOnScreenControllerSettings: () -> Unit,
     onQuit: () -> Unit,
 ) {
     var showQuitConfirm by remember { mutableStateOf(false) }
@@ -1507,7 +1609,6 @@ private fun PauseMenuOverlay(
     val resumeFocusRequester = remember { FocusRequester() }
     val videoOptionsFocusRequester = remember { FocusRequester() }
     val controllerSettingsFocusRequester = remember { FocusRequester() }
-    val touchControllerSettingsFocusRequester = remember { FocusRequester() }
     val quitFocusRequester = remember { FocusRequester() }
 
     // Explicit focus-target mapping: when the menu is enabled, request focus on the item the
@@ -1520,8 +1621,6 @@ private fun PauseMenuOverlay(
             PauseMenuFocusTarget.RESUME -> resumeFocusRequester.requestFocus()
             PauseMenuFocusTarget.VIDEO_OPTIONS -> videoOptionsFocusRequester.requestFocus()
             PauseMenuFocusTarget.CONTROLLER_SETTINGS -> controllerSettingsFocusRequester.requestFocus()
-            PauseMenuFocusTarget.TOUCH_CONTROLLER_SETTINGS ->
-                touchControllerSettingsFocusRequester.requestFocus()
             PauseMenuFocusTarget.QUIT -> quitFocusRequester.requestFocus()
         }
     }
@@ -1529,7 +1628,7 @@ private fun PauseMenuOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(RommTvColors.NightHi.copy(alpha = 0.85f)),
+            .background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -1573,18 +1672,6 @@ private fun PauseMenuOverlay(
                 modifier = Modifier.fillMaxWidth().focusRequester(controllerSettingsFocusRequester),
             ) { Text(stringResource(R.string.pause_menu_controller_settings)) }
             Spacer(modifier = Modifier.height(8.dp))
-            if (showOnScreenControllerSettings) {
-                TvOutlinedButton(
-                    onClick = onOpenOnScreenControllerSettings,
-                    enabled = enabled,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(touchControllerSettingsFocusRequester),
-                ) {
-                    Text(stringResource(R.string.pause_menu_on_screen_controller_settings))
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
             TvOutlinedButton(
                 onClick = { showQuitConfirm = true },
                 enabled = enabled,
@@ -1611,6 +1698,115 @@ private fun PauseMenuOverlay(
                 ) { Text("No") }
             },
         )
+    }
+}
+
+/**
+ * Touchscreen-only pause submenu. Keeping its global visibility toggle beside the touch-layout
+ * editor lets a player re-enable controls without leaving an active game.
+ */
+@Composable
+private fun ControllerSettingsMenu(
+    onScreenControlsEnabled: Boolean,
+    onSetOnScreenControlsEnabled: (Boolean) -> Unit,
+    onOpenPhysicalControllerSettings: () -> Unit,
+    onOpenOnScreenControllerSettings: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val physicalSettingsFocusRequester = remember { FocusRequester() }
+    val onScreenControlsInteractionSource = remember { MutableInteractionSource() }
+    val onScreenControlsFocused by onScreenControlsInteractionSource.collectIsFocusedAsState()
+    val scrollState = rememberScrollState()
+    val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.7f
+    LaunchedEffect(Unit) {
+        physicalSettingsFocusRequester.requestFocus()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(540.dp)
+                .heightIn(max = maxHeight)
+                .clip(RoundedCornerShape(16.dp))
+                .background(RommTvColors.NightLo)
+                .border(
+                    BorderStroke(1.dp, RommTvColors.TextSecondary.copy(alpha = 0.25f)),
+                    RoundedCornerShape(16.dp),
+                )
+                .padding(28.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState),
+            ) {
+                Text(
+                    text = stringResource(R.string.pause_menu_controller_settings),
+                    color = RommTvColors.TextPrimary,
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                TvOutlinedButton(
+                    onClick = onOpenPhysicalControllerSettings,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(physicalSettingsFocusRequester),
+                ) {
+                    Text(stringResource(R.string.pause_menu_physical_controller_settings))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                TvOutlinedButton(
+                    onClick = onOpenOnScreenControllerSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.pause_menu_on_screen_controller_settings))
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = onScreenControlsEnabled,
+                            interactionSource = onScreenControlsInteractionSource,
+                            indication = null,
+                            role = Role.Switch,
+                            onValueChange = onSetOnScreenControlsEnabled,
+                        )
+                        .border(
+                            BorderStroke(
+                                3.dp,
+                                if (onScreenControlsFocused) RommTvColors.Romm300 else Color.Transparent,
+                            ),
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = stringResource(R.string.pause_menu_on_screen_controls),
+                        color = RommTvColors.TextPrimary,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Switch(
+                        checked = onScreenControlsEnabled,
+                        onCheckedChange = null,
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                TvOutlinedButton(
+                    onClick = onBack,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.video_options_return))
+                }
+            }
+        }
     }
 }
 
@@ -1671,8 +1867,12 @@ private fun ControllerSettingsSubpage(
         onRowFocused = viewModel::onRowFocused,
         onRowSelected = viewModel::onRowSelected,
         onCaptureDialogDismiss = viewModel::dismissCaptureDialog,
+        onCaptureClear = viewModel::clearPendingBinding,
         onConflictResolution = viewModel::resolveConflict,
         onResetPlayer = viewModel::resetPlayer,
+        onClearMappingsConfirm = viewModel::confirmClearMappings,
+        onClearMappingsRequest = viewModel::requestClearMappings,
+        onClearMappingsCancel = viewModel::cancelClearMappings,
         onResetAllConfirm = viewModel::confirmResetAll,
         onResetAllRequest = viewModel::requestResetAll,
         onResetAllCancel = viewModel::cancelResetAll,

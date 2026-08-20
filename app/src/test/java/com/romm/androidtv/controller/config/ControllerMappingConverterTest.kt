@@ -138,6 +138,76 @@ class ControllerMappingConverterTest {
     }
 
     @Test
+    fun `GBA A can be mapped from an L2 key event`() {
+        val gbaProfile = CoreControllerProfiles.byCoreId("mgba")!!
+        val gbaConfig = CoreControllerConfig(
+            coreId = "mgba",
+            players = mapOf(
+                0 to PlayerControllerConfig(
+                    mapOf(
+                        CoreControlId.BUTTON_A to ControlBindings(
+                            primary = PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_L2),
+                            secondary = PhysicalBinding.AxisDirection(
+                                android.view.MotionEvent.AXIS_LTRIGGER,
+                                1,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val mapping = gbaConfig.toRouterMappings(gbaProfile).getValue(0)
+        val pressed = com.romm.androidtv.controller.model.GamepadSnapshot.fromPhysicalInput(
+            pressedKeys = setOf(NeutralKey.BUTTON_L2),
+            axisValues = emptyMap(),
+            mapping = mapping,
+        )
+
+        assertThat(mapping.buttons)
+            .containsEntry(NeutralKey.BUTTON_L2, LogicalControl.BUTTON_A)
+        assertThat(pressed.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
+
+        val triggerPressed = com.romm.androidtv.controller.model.GamepadSnapshot.fromPhysicalInput(
+            pressedKeys = emptySet(),
+            axisValues = mapOf(NeutralAxis.LTRIGGER to 0.9f),
+            mapping = mapping,
+        )
+        assertThat(triggerPressed.buttons[LogicalControl.BUTTON_A.index]).isEqualTo(1f)
+    }
+
+    @Test
+    fun `pause menu bindings stay out of core input and become a two-button shortcut`() {
+        val config = CoreControllerConfig(
+            coreId = "snes9x",
+            players = mapOf(
+                0 to PlayerControllerConfig(
+                    mapOf(
+                        CoreControlId.PAUSE_MENU to ControlBindings(
+                            primary = PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_L2),
+                            secondary = PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_R2),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val mapping = config.toRouterMappings(profile).getValue(0)
+
+        assertThat(mapping.buttons).isEmpty()
+        assertThat(mapping.pauseMenuCombination).isEqualTo(
+            com.romm.androidtv.controller.model.PauseMenuCombination(
+                com.romm.androidtv.controller.model.PhysicalControl.Key(
+                    android.view.KeyEvent.KEYCODE_BUTTON_L2,
+                ),
+                com.romm.androidtv.controller.model.PhysicalControl.Key(
+                    android.view.KeyEvent.KEYCODE_BUTTON_R2,
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun `player with no config is omitted`() {
         val result = config.toRouterMappings(profile)
         assertThat(result).doesNotContainKeys(1, 2, 3)

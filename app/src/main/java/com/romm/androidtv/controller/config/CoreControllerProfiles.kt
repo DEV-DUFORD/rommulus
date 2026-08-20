@@ -298,13 +298,28 @@ object CoreControllerProfiles {
         artwork: ControllerArtwork,
         controls: List<CoreControlDescriptor>,
     ): CoreControllerProfile {
+        val allControls = controls + desc(
+            CoreControlId.PAUSE_MENU,
+            "Pause Menu (hold both)",
+            LogicalControl.BUTTON_SELECT,
+            InputKind.BUTTON,
+            rect("pause_menu", 0.001f, 0.001f, 0.001f, 0.001f),
+        )
         val hasAnalogControls = controls.any { it.inputKind == InputKind.ANALOG_STICK }
-        val bindings = controls.associate { descriptor ->
+        val bindings = allControls.associate { descriptor ->
             descriptor.id to ControlBindings(
-                primary = defaultBinding(descriptor.target),
-                secondary = defaultTriggerAxisAlias(descriptor)
-                    ?: defaultRightStickAxisAlias(descriptor.target)
-                    ?: if (!hasAnalogControls) defaultDigitalDpadAlias(descriptor.id) else null,
+                primary = if (descriptor.id.isPauseMenuControl) {
+                    PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_THUMBL)
+                } else {
+                    defaultBinding(descriptor.target)
+                },
+                secondary = if (descriptor.id.isPauseMenuControl) {
+                    PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_THUMBR)
+                } else {
+                    defaultTriggerAxisAlias(descriptor)
+                        ?: defaultRightStickAxisAlias(descriptor.target)
+                        ?: if (!hasAnalogControls) defaultDigitalDpadAlias(descriptor.id) else null
+                },
             )
         }
         val defaults = (0 until playerCount).associateWith { PlayerControllerConfig(bindings) }
@@ -314,7 +329,7 @@ object CoreControllerProfiles {
             consoleSubtitle = consoleSubtitle,
             playerCount = playerCount,
             artwork = artwork,
-            controls = controls,
+            controls = allControls,
             defaults = defaults,
         )
     }

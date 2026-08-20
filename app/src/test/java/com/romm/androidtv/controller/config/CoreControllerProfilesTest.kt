@@ -56,6 +56,19 @@ class CoreControllerProfilesTest {
                 .`as`("defaults keys for %s", profile.coreId)
                 .isEqualTo(expectedKeys)
         }
+
+    }
+
+    @Test
+    fun `every core defaults pause menu to holding L3 and R3`() {
+        for (profile in profiles) {
+            for (player in profile.defaults.values) {
+                assertThat(player.get(CoreControlId.PAUSE_MENU, BindingSlot.PRIMARY))
+                    .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_THUMBL))
+                assertThat(player.get(CoreControlId.PAUSE_MENU, BindingSlot.SECONDARY))
+                    .isEqualTo(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_THUMBR))
+            }
+        }
     }
 
     @Test

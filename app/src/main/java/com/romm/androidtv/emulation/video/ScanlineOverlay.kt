@@ -44,8 +44,10 @@ internal fun calculateScanlineBands(
     val bands = ArrayList<ScanlineBand>(coreHeight / 2 + 1)
     var i = 0
     while (i < coreHeight) {
-        val rowTop = i * sourceRowHeight
-        val bandTop = rowTop + (sourceRowHeight - lineHeight) / 2f
+        // Anchor the band to the scaled source-pixel boundary, rather than
+        // centering it within the row. This keeps the CRT effect aligned with
+        // each core's native pixel grid as its output resolution changes.
+        val bandTop = i * sourceRowHeight
 
         // Clip band top to the valid canvas range.
         val clampedTop = bandTop.coerceIn(0f, canvasHeightPx - lineHeight)

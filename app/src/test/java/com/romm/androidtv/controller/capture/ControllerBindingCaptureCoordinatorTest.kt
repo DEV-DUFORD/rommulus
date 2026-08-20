@@ -119,6 +119,22 @@ class ControllerBindingCaptureCoordinatorTest {
         }
 
         @Test
+        @DisplayName("captures L2 and R2 key-event triggers for a button target")
+        fun `capturesKeyEventTriggers`() = runTest {
+            val c = coordinator()
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Digital)
+            c.onKeySample(gamepadDevice, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A)
+
+            c.onKeySample(gamepadDevice, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_L2)
+
+            assertThat(c.state.value).isEqualTo(
+                ControllerBindingCaptureState.Result(
+                    PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_L2),
+                ),
+            )
+        }
+
+        @Test
         @DisplayName("repeats are suppressed and never captured")
         fun `repeatsSuppressed`() = runTest {
             val c = coordinator()

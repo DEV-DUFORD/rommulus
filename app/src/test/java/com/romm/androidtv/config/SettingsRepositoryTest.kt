@@ -157,4 +157,27 @@ class SettingsRepositoryTest {
         assertThat(result).isFalse()
         assertThat(repo.scanlinesEnabled()).isFalse()
     }
+
+    @Test
+    fun `on-screen game controls default on and persist globally`() {
+        val prefs = FakeSharedPreferences()
+        val repo1 = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+        val repo2 = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+
+        assertThat(repo1.onScreenGameControlsEnabled()).isTrue()
+
+        repo1.setOnScreenGameControlsEnabled(false)
+
+        assertThat(repo2.onScreenGameControlsEnabled()).isFalse()
+    }
+
+    @Test
+    fun `sharpFilterEnabled defaults to false and persists synchronously`() {
+        val prefs = FakeSharedPreferences()
+        val repo = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+
+        assertThat(repo.sharpFilterEnabled()).isFalse()
+        assertThat(repo.setSharpFilterEnabled(true)).isTrue()
+        assertThat(SettingsRepository(prefs, defaultOrigin = "https://example.com").sharpFilterEnabled()).isTrue()
+    }
 }

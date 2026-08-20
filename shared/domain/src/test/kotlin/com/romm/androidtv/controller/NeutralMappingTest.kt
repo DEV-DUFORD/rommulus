@@ -13,15 +13,16 @@ import org.junit.jupiter.api.Test
 class NeutralMappingTest {
 
     @Test
-    fun `NEUTRAL_KEY_TO_CONTROL covers all 14 standard gamepad keys`() {
+    fun `NEUTRAL_KEY_TO_CONTROL covers all 16 standard gamepad keys`() {
         val keys = setOf(
             NeutralKey.BUTTON_A, NeutralKey.BUTTON_B, NeutralKey.BUTTON_X, NeutralKey.BUTTON_Y,
-            NeutralKey.BUTTON_L1, NeutralKey.BUTTON_R1, NeutralKey.BUTTON_SELECT,
+            NeutralKey.BUTTON_L1, NeutralKey.BUTTON_R1, NeutralKey.BUTTON_L2, NeutralKey.BUTTON_R2,
+            NeutralKey.BUTTON_SELECT,
             NeutralKey.BUTTON_START, NeutralKey.BUTTON_THUMBL, NeutralKey.BUTTON_THUMBR,
             NeutralKey.DPAD_UP, NeutralKey.DPAD_DOWN, NeutralKey.DPAD_LEFT, NeutralKey.DPAD_RIGHT
         )
         assertThat(NEUTRAL_KEY_TO_CONTROL).containsOnlyKeys(keys)
-        assertThat(NEUTRAL_KEY_TO_CONTROL).hasSize(14)
+        assertThat(NEUTRAL_KEY_TO_CONTROL).hasSize(16)
     }
 
     @Test
@@ -32,6 +33,8 @@ class NeutralMappingTest {
         assertThat(NEUTRAL_KEY_TO_CONTROL[NeutralKey.BUTTON_Y]).isEqualTo(LogicalControl.BUTTON_Y)
         assertThat(NEUTRAL_KEY_TO_CONTROL[NeutralKey.BUTTON_L1]).isEqualTo(LogicalControl.BUTTON_LB)
         assertThat(NEUTRAL_KEY_TO_CONTROL[NeutralKey.BUTTON_R1]).isEqualTo(LogicalControl.BUTTON_RB)
+        assertThat(NEUTRAL_KEY_TO_CONTROL[NeutralKey.BUTTON_L2]).isEqualTo(LogicalControl.BUTTON_LT)
+        assertThat(NEUTRAL_KEY_TO_CONTROL[NeutralKey.BUTTON_R2]).isEqualTo(LogicalControl.BUTTON_RT)
         assertThat(NEUTRAL_KEY_TO_CONTROL[NeutralKey.BUTTON_SELECT]).isEqualTo(LogicalControl.BUTTON_SELECT)
         assertThat(NEUTRAL_KEY_TO_CONTROL[NeutralKey.BUTTON_START]).isEqualTo(LogicalControl.BUTTON_START)
         assertThat(NEUTRAL_KEY_TO_CONTROL[NeutralKey.BUTTON_THUMBL]).isEqualTo(LogicalControl.BUTTON_L3)

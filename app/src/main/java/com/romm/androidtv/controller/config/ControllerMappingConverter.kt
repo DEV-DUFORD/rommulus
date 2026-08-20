@@ -5,6 +5,8 @@ import com.romm.androidtv.controller.model.ControllerMapping
 import com.romm.androidtv.controller.model.LogicalControl
 import com.romm.androidtv.controller.model.NeutralAxis
 import com.romm.androidtv.controller.model.NeutralKey
+import com.romm.androidtv.controller.model.PauseMenuCombination
+import com.romm.androidtv.controller.model.PhysicalControl
 
 /**
  * Converts the persistence-layer per-console-control model ([CoreControllerConfig] /
@@ -34,6 +36,7 @@ fun CoreControllerConfig.toRouterMappings(profile: CoreControllerProfile): Map<I
             val axisDirections = mutableMapOf<AxisDirection, LogicalControl>()
 
             for ((controlId, controlBindings) in playerConfig.bindings) {
+                if (controlId.isPauseMenuControl) continue
                 val target = descriptorByControlId[controlId]?.target ?: continue
                 for ((_, binding) in controlBindings.entries()) {
                     when (binding) {
@@ -66,8 +69,24 @@ fun CoreControllerConfig.toRouterMappings(profile: CoreControllerProfile): Map<I
                     axes = axes,
                     axisConfigs = emptyMap(),
                     axisDirections = axisDirections,
+                    pauseMenuCombination = playerConfig.pauseMenuCombination(),
                 ),
             )
         }
     }
+}
+
+private fun PlayerControllerConfig.pauseMenuCombination(): PauseMenuCombination? {
+    val bindings = bindings[CoreControlId.PAUSE_MENU] ?: return null
+    val first = bindings.primary.toPhysicalControl() ?: return null
+    val second = bindings.secondary.toPhysicalControl() ?: return null
+    if (first == second) return null
+    return PauseMenuCombination(first, second)
+}
+
+private fun PhysicalBinding?.toPhysicalControl(): PhysicalControl? = when (this) {
+    is PhysicalBinding.Key -> PhysicalControl.Key(keyCode)
+    is PhysicalBinding.Axis -> PhysicalControl.AxisDirection(axis, 1)
+    is PhysicalBinding.AxisDirection -> PhysicalControl.AxisDirection(axis, polarity)
+    null -> null
 }

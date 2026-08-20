@@ -22,6 +22,8 @@ class EventConsumptionPolicyTest {
         const val KEYCODE_BUTTON_Y = 100
         const val KEYCODE_BUTTON_L1 = 102
         const val KEYCODE_BUTTON_R1 = 103
+        const val KEYCODE_BUTTON_L2 = 104
+        const val KEYCODE_BUTTON_R2 = 105
         const val KEYCODE_BUTTON_SELECT = 109
         const val KEYCODE_BUTTON_START = 108
         const val KEYCODE_BUTTON_THUMBL = 106
@@ -75,6 +77,13 @@ class EventConsumptionPolicyTest {
         @DisplayName("KEYCODE_BUTTON_R1 is consumed")
         fun `button r1`() {
             assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(KEYCODE_BUTTON_R1)).isTrue()
+        }
+
+        @Test
+        @DisplayName("KEYCODE_BUTTON_L2 and KEYCODE_BUTTON_R2 are consumed")
+        fun `trigger buttons`() {
+            assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(KEYCODE_BUTTON_L2)).isTrue()
+            assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(KEYCODE_BUTTON_R2)).isTrue()
         }
 
         @Test

@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 
 namespace romm::android {
@@ -60,10 +61,6 @@ void AndroidVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
         ANativeWindow_release(window_);
     }
     window_ = static_cast<ANativeWindow*>(window);
-    // Force ANativeWindow_setBuffersGeometry to run again on the next frame,
-    // since a fresh Surface has no geometry set yet.
-    lastBufferWidth_ = 0;
-    lastBufferHeight_ = 0;
 }
 
 void AndroidVideoSink::detachWindow() {
@@ -81,19 +78,6 @@ void AndroidVideoSink::submitFrame(const void* data, unsigned width, unsigned he
     if (data == nullptr) return;  // frame duplication: keep showing the last posted buffer
     if (width == 0 || height == 0) return;
 
-    const auto bufferWidth = static_cast<int32_t>(width);
-    const auto bufferHeight = static_cast<int32_t>(height);
-    if (bufferWidth != lastBufferWidth_ || bufferHeight != lastBufferHeight_) {
-        if (ANativeWindow_setBuffersGeometry(window_, bufferWidth, bufferHeight,
-                                              WINDOW_FORMAT_RGBA_8888) != 0) {
-            logAt(romm::log::Severity::Error, "ANativeWindow_setBuffersGeometry failed for %dx%d",
-                  bufferWidth, bufferHeight);
-            return;
-        }
-        lastBufferWidth_ = bufferWidth;
-        lastBufferHeight_ = bufferHeight;
-    }
-
     ANativeWindow_Buffer buffer;
     if (ANativeWindow_lock(window_, &buffer, nullptr) != 0) {
         // Transient failure (e.g. compositor busy). Drop this frame rather
@@ -103,14 +87,60 @@ void AndroidVideoSink::submitFrame(const void* data, unsigned width, unsigned he
 
     const auto* srcBytes = static_cast<const uint8_t*>(data);
     auto* dstBytes = static_cast<uint8_t*>(buffer.bits);
-    const uint32_t rows = std::min(static_cast<uint32_t>(height), static_cast<uint32_t>(buffer.height));
-    const uint32_t cols = std::min(static_cast<uint32_t>(width), static_cast<uint32_t>(buffer.width));
+    const uint32_t rows = static_cast<uint32_t>(buffer.height);
+    const uint32_t cols = static_cast<uint32_t>(buffer.width);
     const size_t dstStrideBytes = static_cast<size_t>(buffer.stride) * 4;
+    if (rows == 0 || cols == 0) {
+        ANativeWindow_unlockAndPost(window_);
+        return;
+    }
 
+    if (rows == height && cols == width) {
+        for (uint32_t y = 0; y < rows; ++y) {
+            const uint8_t* srcRow = srcBytes + static_cast<size_t>(y) * pitch;
+            auto* dstRow = reinterpret_cast<uint32_t*>(dstBytes + static_cast<size_t>(y) * dstStrideBytes);
+            romm::video::convertRow(format, srcRow, dstRow, cols);
+        }
+        ANativeWindow_unlockAndPost(window_);
+        return;
+    }
+
+    if (scaledSourceWidth_ != width || scaledSourceHeight_ != height ||
+        scaledDestinationWidth_ != cols || scaledDestinationHeight_ != rows) {
+        scaledSourceWidth_ = width;
+        scaledSourceHeight_ = height;
+        scaledDestinationWidth_ = cols;
+        scaledDestinationHeight_ = rows;
+        scaledSourceXs_.resize(cols);
+        scaledSourceYs_.resize(rows);
+        convertedSourceRow_.resize(width);
+        expandedDestinationRow_.resize(cols);
+
+        for (uint32_t x = 0; x < cols; ++x) {
+            scaledSourceXs_[x] = std::min(
+                static_cast<uint32_t>((static_cast<uint64_t>(x) * width) / cols),
+                static_cast<uint32_t>(width - 1));
+        }
+        for (uint32_t y = 0; y < rows; ++y) {
+            scaledSourceYs_[y] = std::min(
+                static_cast<uint32_t>((static_cast<uint64_t>(y) * height) / rows),
+                static_cast<uint32_t>(height - 1));
+        }
+    }
+
+    uint32_t previousSourceY = height;
     for (uint32_t y = 0; y < rows; ++y) {
-        const uint8_t* srcRow = srcBytes + static_cast<size_t>(y) * pitch;
+        const uint32_t sourceY = scaledSourceYs_[y];
+        if (sourceY != previousSourceY) {
+            const uint8_t* srcRow = srcBytes + static_cast<size_t>(sourceY) * pitch;
+            romm::video::convertRow(format, srcRow, convertedSourceRow_.data(), width);
+            for (uint32_t x = 0; x < cols; ++x) {
+                expandedDestinationRow_[x] = convertedSourceRow_[scaledSourceXs_[x]];
+            }
+            previousSourceY = sourceY;
+        }
         auto* dstRow = reinterpret_cast<uint32_t*>(dstBytes + static_cast<size_t>(y) * dstStrideBytes);
-        romm::video::convertRow(format, srcRow, dstRow, cols);
+        std::memcpy(dstRow, expandedDestinationRow_.data(), static_cast<size_t>(cols) * sizeof(uint32_t));
     }
 
     ANativeWindow_unlockAndPost(window_);

@@ -20,6 +20,11 @@ val KEYCODE_TO_CONTROL: Map<Int, LogicalControl> = mapOf(
     KeyEvent.KEYCODE_BUTTON_Y to LogicalControl.BUTTON_Y,
     KeyEvent.KEYCODE_BUTTON_L1 to LogicalControl.BUTTON_LB,
     KeyEvent.KEYCODE_BUTTON_R1 to LogicalControl.BUTTON_RB,
+    // Some controllers report their triggers as key events while others report
+    // them as motion axes. Keep both paths routable so custom mappings (for
+    // example, GBA A on L2) work regardless of the controller's report type.
+    KeyEvent.KEYCODE_BUTTON_L2 to LogicalControl.BUTTON_LT,
+    KeyEvent.KEYCODE_BUTTON_R2 to LogicalControl.BUTTON_RT,
     KeyEvent.KEYCODE_BUTTON_SELECT to LogicalControl.BUTTON_SELECT,
     KeyEvent.KEYCODE_BUTTON_START to LogicalControl.BUTTON_START,
     KeyEvent.KEYCODE_BUTTON_THUMBL to LogicalControl.BUTTON_L3,

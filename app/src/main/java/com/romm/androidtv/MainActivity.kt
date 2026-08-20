@@ -186,6 +186,10 @@ class MainActivity : ComponentActivity() {
     private var selectedCollectionId by mutableStateOf<Long?>(null)
     private var selectedRomId by mutableStateOf<Long?>(null)
     private var gameDetailParent by mutableStateOf(Screen.NATIVE_HOME)
+    private var gameDetailOriginRomId by mutableStateOf<Long?>(null)
+    private var gameDetailHomeShelf by mutableStateOf<com.romm.androidtv.library.ui.HomeShelf?>(null)
+    private var gameDetailHomeShelfViewport by mutableStateOf<com.romm.androidtv.library.ui.HomeShelfViewport?>(null)
+    private var pendingGameCardFocusId by mutableStateOf<Long?>(null)
     // Selection state for the full-screen screenshot viewer, opened from the game detail
     // screen's screenshot shelf. Always returns to NATIVE_GAME_DETAIL on Back.
     private var selectedScreenshotUrls by mutableStateOf<List<String>>(emptyList())
@@ -469,6 +473,11 @@ class MainActivity : ComponentActivity() {
         private const val STATE_PLATFORM_ID = "navigation.platformId"
         private const val STATE_COLLECTION_ID = "navigation.collectionId"
         private const val STATE_ROM_ID = "navigation.romId"
+        private const val STATE_GAME_DETAIL_ORIGIN_ROM_ID = "navigation.gameDetailOriginRomId"
+        private const val STATE_GAME_DETAIL_HOME_SHELF = "navigation.gameDetailHomeShelf"
+        private const val STATE_GAME_DETAIL_HOME_SHELF_FIRST_INDEX = "navigation.gameDetailHomeShelfFirstIndex"
+        private const val STATE_GAME_DETAIL_HOME_SHELF_SCROLL_OFFSET = "navigation.gameDetailHomeShelfScrollOffset"
+        private const val STATE_PENDING_GAME_CARD_FOCUS_ROM_ID = "navigation.pendingGameCardFocusRomId"
         private const val STATE_CONTROLLER_CORE_ID = "navigation.controllerCoreId"
         private const val STATE_BIOS_SYSTEM = "navigation.biosSystem"
         private const val STATE_SCREENSHOT_URLS = "navigation.screenshotUrls"
@@ -484,6 +493,11 @@ class MainActivity : ComponentActivity() {
         com.romm.androidtv.library.ui.NavDestination.SETTINGS -> Screen.NATIVE_SETTINGS
     }
 
+    private fun returnFromGameDetail() {
+        pendingGameCardFocusId = gameDetailOriginRomId ?: selectedRomId
+        currentScreen = gameDetailParent
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(STATE_SCREEN, currentScreen.name)
@@ -491,6 +505,13 @@ class MainActivity : ComponentActivity() {
         selectedPlatformId?.let { outState.putLong(STATE_PLATFORM_ID, it) }
         selectedCollectionId?.let { outState.putLong(STATE_COLLECTION_ID, it) }
         selectedRomId?.let { outState.putLong(STATE_ROM_ID, it) }
+        gameDetailOriginRomId?.let { outState.putLong(STATE_GAME_DETAIL_ORIGIN_ROM_ID, it) }
+        gameDetailHomeShelf?.let { outState.putString(STATE_GAME_DETAIL_HOME_SHELF, it.name) }
+        gameDetailHomeShelfViewport?.let { viewport ->
+            outState.putInt(STATE_GAME_DETAIL_HOME_SHELF_FIRST_INDEX, viewport.firstVisibleItemIndex)
+            outState.putInt(STATE_GAME_DETAIL_HOME_SHELF_SCROLL_OFFSET, viewport.firstVisibleItemScrollOffset)
+        }
+        pendingGameCardFocusId?.let { outState.putLong(STATE_PENDING_GAME_CARD_FOCUS_ROM_ID, it) }
         selectedControllerCoreId?.let { outState.putString(STATE_CONTROLLER_CORE_ID, it) }
         outState.putString(STATE_BIOS_SYSTEM, selectedBiosSystem.name)
         outState.putStringArrayList(STATE_SCREENSHOT_URLS, ArrayList(selectedScreenshotUrls))
@@ -501,6 +522,24 @@ class MainActivity : ComponentActivity() {
         selectedPlatformId = state.takeIf { it.containsKey(STATE_PLATFORM_ID) }?.getLong(STATE_PLATFORM_ID)
         selectedCollectionId = state.takeIf { it.containsKey(STATE_COLLECTION_ID) }?.getLong(STATE_COLLECTION_ID)
         selectedRomId = state.takeIf { it.containsKey(STATE_ROM_ID) }?.getLong(STATE_ROM_ID)
+        gameDetailOriginRomId = state.takeIf { it.containsKey(STATE_GAME_DETAIL_ORIGIN_ROM_ID) }
+            ?.getLong(STATE_GAME_DETAIL_ORIGIN_ROM_ID)
+            ?: selectedRomId
+        gameDetailHomeShelf = state.getString(STATE_GAME_DETAIL_HOME_SHELF)
+            ?.let { runCatching { com.romm.androidtv.library.ui.HomeShelf.valueOf(it) }.getOrNull() }
+        gameDetailHomeShelfViewport = if (
+            state.containsKey(STATE_GAME_DETAIL_HOME_SHELF_FIRST_INDEX) &&
+            state.containsKey(STATE_GAME_DETAIL_HOME_SHELF_SCROLL_OFFSET)
+        ) {
+            com.romm.androidtv.library.ui.HomeShelfViewport(
+                firstVisibleItemIndex = state.getInt(STATE_GAME_DETAIL_HOME_SHELF_FIRST_INDEX),
+                firstVisibleItemScrollOffset = state.getInt(STATE_GAME_DETAIL_HOME_SHELF_SCROLL_OFFSET),
+            )
+        } else {
+            null
+        }
+        pendingGameCardFocusId = state.takeIf { it.containsKey(STATE_PENDING_GAME_CARD_FOCUS_ROM_ID) }
+            ?.getLong(STATE_PENDING_GAME_CARD_FOCUS_ROM_ID)
         selectedControllerCoreId = state.getString(STATE_CONTROLLER_CORE_ID)
         selectedScreenshotUrls = state.getStringArrayList(STATE_SCREENSHOT_URLS).orEmpty()
         selectedScreenshotIndex = state.getInt(STATE_SCREENSHOT_INDEX, 0)
@@ -605,7 +644,7 @@ class MainActivity : ComponentActivity() {
                         currentScreen = Screen.NATIVE_TOUCH_CONTROLLER_LIST
                     Screen.NATIVE_PLATFORM_DETAIL -> currentScreen = Screen.NATIVE_PLATFORMS
                     Screen.NATIVE_COLLECTION_DETAIL -> currentScreen = Screen.NATIVE_COLLECTIONS
-                    Screen.NATIVE_GAME_DETAIL -> currentScreen = gameDetailParent
+                    Screen.NATIVE_GAME_DETAIL -> returnFromGameDetail()
                     Screen.NATIVE_SCREENSHOT_VIEWER -> currentScreen = Screen.NATIVE_GAME_DETAIL
                     Screen.NATIVE_SAVE_PICKER -> {
                         // Dismiss picker; no filesystem/Room/network mutation occurred yet.
@@ -767,10 +806,15 @@ class MainActivity : ComponentActivity() {
                                                 title = "Platform",
                                                 viewModel = gridViewModel,
                                                 onOpenGameDetail = { romId ->
+                                                    pendingGameCardFocusId = null
                                                     selectedRomId = romId
+                                                    gameDetailOriginRomId = romId
+                                                    gameDetailHomeShelf = null
                                                     gameDetailParent = Screen.NATIVE_PLATFORM_DETAIL
                                                     currentScreen = Screen.NATIVE_GAME_DETAIL
                                                 },
+                                                restoreFocusRomId = pendingGameCardFocusId,
+                                                onFocusRestored = { pendingGameCardFocusId = null },
                                             )
                                         }
                                     }
@@ -791,10 +835,15 @@ class MainActivity : ComponentActivity() {
                                                 title = "Collection",
                                                 viewModel = gridViewModel,
                                                 onOpenGameDetail = { romId ->
+                                                    pendingGameCardFocusId = null
                                                     selectedRomId = romId
+                                                    gameDetailOriginRomId = romId
+                                                    gameDetailHomeShelf = null
                                                     gameDetailParent = Screen.NATIVE_COLLECTION_DETAIL
                                                     currentScreen = Screen.NATIVE_GAME_DETAIL
                                                 },
+                                                restoreFocusRomId = pendingGameCardFocusId,
+                                                onFocusRestored = { pendingGameCardFocusId = null },
                                             )
                                         }
                                     }
@@ -818,7 +867,7 @@ class MainActivity : ComponentActivity() {
                                             } else {
                                                     com.romm.androidtv.library.ui.GameDetailScreen(
                                                             viewModel = detailViewModel,
-                                                            onBack = { currentScreen = gameDetailParent },
+                                                            onBack = ::returnFromGameDetail,
                                                             onPlay = { playRomId ->
                                                             nativeLibraryOnPlay(playRomId)
                                                         },
@@ -962,10 +1011,15 @@ class MainActivity : ComponentActivity() {
                                         com.romm.androidtv.library.ui.SearchScreen(
                                             repository = libraryRepository,
                                             onGameSelected = { romId ->
+                                                pendingGameCardFocusId = null
                                                 selectedRomId = romId
+                                                gameDetailOriginRomId = romId
+                                                gameDetailHomeShelf = null
                                                 gameDetailParent = Screen.NATIVE_SEARCH
                                                 currentScreen = Screen.NATIVE_GAME_DETAIL
                                             },
+                                            restoreFocusRomId = pendingGameCardFocusId,
+                                            onFocusRestored = { pendingGameCardFocusId = null },
                                             hideUnsupportedSystems = { settingsRepository.hideUnsupportedSystems() },
                                             hideUnsupportedSystemsFlow = settingsRepository.hideUnsupportedSystemsFlow,
                                             refreshEvents = libraryRefreshEvents,
@@ -1079,8 +1133,12 @@ class MainActivity : ComponentActivity() {
                                                 onRowFocused = controllerViewModel::onRowFocused,
                                                 onRowSelected = controllerViewModel::onRowSelected,
                                                 onCaptureDialogDismiss = controllerViewModel::dismissCaptureDialog,
+                                                onCaptureClear = controllerViewModel::clearPendingBinding,
                                                 onConflictResolution = controllerViewModel::resolveConflict,
                                                 onResetPlayer = controllerViewModel::resetPlayer,
+                                                onClearMappingsConfirm = controllerViewModel::confirmClearMappings,
+                                                onClearMappingsRequest = controllerViewModel::requestClearMappings,
+                                                onClearMappingsCancel = controllerViewModel::cancelClearMappings,
                                                 onResetAllConfirm = controllerViewModel::confirmResetAll,
                                                 onResetAllRequest = controllerViewModel::requestResetAll,
                                                 onResetAllCancel = controllerViewModel::cancelResetAll,
@@ -1154,10 +1212,21 @@ class MainActivity : ComponentActivity() {
                                     ) {
                                         com.romm.androidtv.library.ui.NativeHomeScreen(
                                             viewModel = homeViewModel,
-                                            onOpenGameDetail = { romId ->
+                                            onOpenGameDetail = { romId, shelf, viewport ->
+                                                pendingGameCardFocusId = null
                                                 selectedRomId = romId
+                                                gameDetailOriginRomId = romId
+                                                gameDetailHomeShelf = shelf
+                                                gameDetailHomeShelfViewport = viewport
                                                 gameDetailParent = Screen.NATIVE_HOME
                                                 currentScreen = Screen.NATIVE_GAME_DETAIL
+                                            },
+                                            restoreFocusRomId = pendingGameCardFocusId,
+                                            restoreFocusShelf = gameDetailHomeShelf,
+                                            restoreShelfViewport = gameDetailHomeShelfViewport,
+                                            onFocusRestored = {
+                                                pendingGameCardFocusId = null
+                                                gameDetailHomeShelfViewport = null
                                             },
                                         )
                                     }

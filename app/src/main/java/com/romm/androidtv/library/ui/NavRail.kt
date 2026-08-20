@@ -4,7 +4,9 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.rememberScrollState
@@ -163,23 +165,52 @@ private fun BottomNavBar(
     icons: Map<NavDestination, ImageVector>,
     modifier: Modifier = Modifier,
 ) {
+    val focusManager = LocalFocusManager.current
+    val view = LocalView.current
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(BottomBarHeight)
             .zIndex(1f)
-            .background(RommTvColors.StageHi),
+            .background(RommTvColors.StageHi)
+            .focusGroup(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         NavDestination.entries.forEach { destination ->
             val isSelected = destination == selected
+            val interactionSource = remember { MutableInteractionSource() }
+            val isFocused by interactionSource.collectIsFocusedAsState()
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clickable { onSelect(destination) }
+                    .padding(horizontal = 3.dp, vertical = 4.dp)
+                    .border(
+                        width = if (isFocused) 2.dp else 0.dp,
+                        color = if (isFocused) RommTvColors.Romm300 else Color.Transparent,
+                        shape = RoundedCornerShape(8.dp),
+                    )
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                    ) {
+                        onSelect(destination)
+                        if (destination != NavDestination.SETTINGS) {
+                            view.postOnAnimation {
+                                view.postOnAnimation {
+                                    focusManager.clearFocus(force = true)
+                                    focusManager.moveFocus(FocusDirection.Next)
+                                }
+                            }
+                        }
+                    }
                     .background(
-                        if (isSelected) RommTvColors.Romm600.copy(alpha = 0.4f) else Color.Transparent,
+                        when {
+                            isFocused -> RommTvColors.Romm500.copy(alpha = 0.35f)
+                            isSelected -> RommTvColors.Romm600.copy(alpha = 0.4f)
+                            else -> Color.Transparent
+                        },
                     )
                     .padding(vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -298,6 +329,11 @@ private fun NavRailItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp)
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) RommTvColors.Romm300 else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+            )
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) RommTvColors.Romm500 else if (isSelected) RommTvColors.Romm600.copy(alpha = 0.4f) else Color.Transparent)
             .clickable(

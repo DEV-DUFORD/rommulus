@@ -10,6 +10,10 @@
     <!-- Controller Config Screen -->
     <string name="controller_config_back">Back</string>
     <string name="controller_config_reset_controller">Reset Controller</string>
+    <string name="controller_config_clear_mappings">Clear Mappings</string>
+    <string name="controller_config_clear_mappings_title">Clear controller mappings?</string>
+    <string name="controller_config_clear_mappings_body">This unmaps every control for the selected controller, including the pause menu shortcut.</string>
+    <string name="controller_config_clear_mappings_confirm">Clear</string>
     <string name="controller_config_footer_hint">Press Select to remap \u2022 Back to return</string>
     <string name="controller_config_player_tab_label">Controller %1$d</string>
     <string name="controller_config_player_tab_content_description">Controller %1$d tab</string>
@@ -31,7 +35,7 @@
     <!-- Capture Dialog -->
     <string name="controller_capture_dialog_title">Map %1$s</string>
     <string name="controller_capture_dialog_awaiting_input">Press a button or move a stick on the controller for %1$s.</string>
-    <string name="controller_capture_dialog_back_hint">Press Back on the remote to cancel.</string>
+    <string name="controller_capture_dialog_back_hint">Press Back to cancel \u2022 Hold Back to clear this mapping.</string>
     <string name="controller_capture_dialog_result">Captured: %1$s</string>
     <string name="controller_capture_dialog_timeout">No input detected</string>
     <string name="controller_capture_dialog_no_device">Connect %1$s to remap inputs</string>
@@ -98,6 +102,8 @@
     <string name="pause_menu_resume">Resume</string>
     <string name="pause_menu_video_options">Video Options</string>
     <string name="pause_menu_controller_settings">Controller Settings</string>
+    <string name="pause_menu_physical_controller_settings">Physical Controller Settings</string>
+    <string name="pause_menu_on_screen_controls">On-Screen Controls</string>
     <string name="pause_menu_on_screen_controller_settings">On-Screen Controller Settings</string>
     <string name="pause_menu_quit">Quit</string>
 
@@ -107,6 +113,8 @@
     <string name="video_options_scanlines_description">Adds subtle horizontal lines for a classic CRT look.</string>
     <string name="video_options_integer_scaling">Integer Scaling</string>
     <string name="video_options_integer_scaling_description">Scales the image vertically by a clean integer factor (aspect-corrected horizontally) to fit on screen for crisp pixels.</string>
+    <string name="video_options_sharp_filter">Sharp Filter</string>
+    <string name="video_options_sharp_filter_description">Uses nearest-neighbor scaling to keep pixel art crisp.</string>
     <string name="video_options_return">Return</string>
     <string name="video_options_save_error">Couldn\'t save this video option. Try again.</string>
     <string name="video_options_state_on">On</string>

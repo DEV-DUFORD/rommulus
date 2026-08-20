@@ -17,8 +17,10 @@
 
 #include <native/engine/VideoSink.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <vector>
 
 struct ANativeWindow;
 
@@ -36,8 +38,14 @@ public:
 private:
     std::mutex mutex_;
     ANativeWindow* window_ = nullptr;
-    int32_t lastBufferWidth_ = 0;
-    int32_t lastBufferHeight_ = 0;
+    uint32_t scaledSourceWidth_ = 0;
+    uint32_t scaledSourceHeight_ = 0;
+    uint32_t scaledDestinationWidth_ = 0;
+    uint32_t scaledDestinationHeight_ = 0;
+    std::vector<uint32_t> scaledSourceXs_;
+    std::vector<uint32_t> scaledSourceYs_;
+    std::vector<uint32_t> convertedSourceRow_;
+    std::vector<uint32_t> expandedDestinationRow_;
 };
 
 }  // namespace romm::android

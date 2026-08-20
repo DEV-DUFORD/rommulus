@@ -85,8 +85,12 @@ fun ControllerConfigScreen(
     onRowFocused: (controlId: CoreControlId) -> Unit,
     onRowSelected: (controlId: CoreControlId, bindingSlot: BindingSlot) -> Unit,
     onCaptureDialogDismiss: () -> Unit,
+    onCaptureClear: () -> Unit,
     onConflictResolution: (resolution: ConflictResolution) -> Unit,
     onResetPlayer: () -> Unit,
+    onClearMappingsConfirm: () -> Unit,
+    onClearMappingsRequest: () -> Unit,
+    onClearMappingsCancel: () -> Unit,
     onResetAllConfirm: () -> Unit,
     onResetAllRequest: () -> Unit,
     onResetAllCancel: () -> Unit,
@@ -113,7 +117,6 @@ fun ControllerConfigScreen(
     val listState = remember(state.consoleName) { LazyListState() }
     var initialListPositioned by remember(state.consoleName) { mutableStateOf(false) }
     var listLaidOut by remember(state.consoleName) { mutableStateOf(false) }
-
     // Focus restoration can move the list before its first layout. Reset after layout and clear
     // that focus first so every newly opened console starts with its first mapping visible.
     LaunchedEffect(state.consoleName, listLaidOut) {
@@ -160,10 +163,16 @@ fun ControllerConfigScreen(
                 .background(RommTvColors.NightHi)
                 .safeDrawingPadding()
                 .onPreviewKeyEvent { keyEvent ->
-                if (keyEvent.nativeKeyEvent.action != android.view.KeyEvent.ACTION_DOWN) {
+                val action = keyEvent.nativeKeyEvent.action
+                if (keyEvent.key == Key.Back && state.capture != null) {
                     return@onPreviewKeyEvent false
                 }
-                when (keyEvent.key) {
+                if (keyEvent.key == Key.Back) {
+                    if (action == android.view.KeyEvent.ACTION_UP) currentOnBack()
+                    true
+                } else if (action != android.view.KeyEvent.ACTION_DOWN) {
+                    return@onPreviewKeyEvent false
+                } else when (keyEvent.key) {
                     Key.DirectionDown -> {
                         // Down from the selected tab returns to the last-focused row for that tab.
                         if (focusedTabIndex.value == currentPlayer) {
@@ -182,14 +191,6 @@ fun ControllerConfigScreen(
                             true
                         } else false
                     }
-                    Key.Back -> {
-                        if (state.capture != null) {
-                            onCaptureDialogDismiss()
-                        } else {
-                            currentOnBack()
-                        }
-                        true
-                    }
                     else -> false
                 }
             },
@@ -198,6 +199,7 @@ fun ControllerConfigScreen(
             title = state.consoleName,
             onBack = currentOnBack,
             onResetPlayer = onResetPlayer,
+            onClearMappingsRequest = onClearMappingsRequest,
         )
 
         PlayerTabRow(
@@ -243,6 +245,8 @@ fun ControllerConfigScreen(
                         if (BuildConfig.CONTROLLER_HIGHLIGHTING_ENABLED) {
                             state.rows.getOrNull(index)?.controlId?.let(onRowFocused)
                         }
+                    } else if (focusedRowIndex.value == index) {
+                        focusedRowIndex.value = null
                     }
                 },
                 onRowSelected = { controlId, slot -> currentOnRowSelected(controlId, slot) },
@@ -285,6 +289,7 @@ fun ControllerConfigScreen(
             captureState = capture.captureState,
             connectedDeviceName = capture.connectedDeviceName,
             onDismiss = onCaptureDialogDismiss,
+            onClear = onCaptureClear,
         )
     }
 
@@ -300,6 +305,24 @@ fun ControllerConfigScreen(
     }
 
     // Reset All Controllers confirmation.
+    if (state.clearMappingsAwaitingConfirmation) {
+        AlertDialog(
+            onDismissRequest = onClearMappingsCancel,
+            title = { Text(stringResource(R.string.controller_config_clear_mappings_title)) },
+            text = { Text(stringResource(R.string.controller_config_clear_mappings_body)) },
+            confirmButton = {
+                TextButton(onClick = onClearMappingsConfirm, modifier = Modifier.tvButtonFocus()) {
+                    Text(stringResource(R.string.controller_config_clear_mappings_confirm), color = RommTvColors.Romm300)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onClearMappingsCancel, modifier = Modifier.tvButtonFocus()) {
+                    Text(stringResource(R.string.controller_config_reset_all_cancel), color = RommTvColors.TextSecondary)
+                }
+            },
+        )
+    }
+
     if (state.resetAllAwaitingConfirmation) {
         AlertDialog(
             onDismissRequest = onResetAllCancel,
@@ -324,6 +347,7 @@ private fun ControllerHeader(
     title: String,
     onBack: () -> Unit,
     onResetPlayer: () -> Unit,
+    onClearMappingsRequest: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
@@ -345,6 +369,11 @@ private fun ControllerHeader(
             onClick = onResetPlayer,
             modifier = Modifier.tvButtonFocus().semantics { contentDescription = resetControllerLabel },
         ) { Text(resetControllerLabel, color = RommTvColors.TextSecondary) }
+        val clearMappingsLabel = stringResource(R.string.controller_config_clear_mappings)
+        TextButton(
+            onClick = onClearMappingsRequest,
+            modifier = Modifier.tvButtonFocus().semantics { contentDescription = clearMappingsLabel },
+        ) { Text(clearMappingsLabel, color = RommTvColors.TextSecondary) }
     }
 }
 

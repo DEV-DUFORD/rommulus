@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -91,6 +92,7 @@ fun GameCard(
                     model = coverUrl,
                     contentDescription = title,
                     modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
                 )
             } else {
                 Icon(
@@ -108,7 +110,7 @@ fun GameCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp),
+                .padding(top = if (isFocused) 14.dp else 6.dp),
         )
         if (subtitle != null) {
             Text(

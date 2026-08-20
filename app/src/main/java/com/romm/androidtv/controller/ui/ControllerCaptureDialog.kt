@@ -15,8 +15,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +38,9 @@ import com.romm.androidtv.R
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureState
 import com.romm.androidtv.controller.config.BindingLabelFormatter
 import com.romm.androidtv.library.ui.RommTvColors
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Stateless capture dialog for mapping a single console control to a physical binding.
@@ -47,7 +55,8 @@ import com.romm.androidtv.library.ui.RommTvColors
  * @param playerLabel The player/controller label (e.g. "Controller 1").
  * @param captureState The current capture lifecycle state.
  * @param connectedDeviceName The connected controller device name, or null.
- * @param onDismiss Called when the remote Back should cancel (caller wires cancel()).
+ * @param onDismiss Called when a quick Back should cancel (caller wires cancel()).
+ * @param onClear Called when Back is held to clear the selected mapping.
  */
 @Composable
 fun ControllerCaptureDialog(
@@ -56,6 +65,7 @@ fun ControllerCaptureDialog(
     captureState: ControllerBindingCaptureState,
     connectedDeviceName: String?,
     onDismiss: () -> Unit,
+    onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Result and Cancelled are terminal states — the caller is expected to
@@ -118,7 +128,13 @@ fun ControllerCaptureDialog(
     }
 
     val focusRequester = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    var clearJob by remember { mutableStateOf<Job?>(null) }
+    var clearedByBackHold by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    DisposableEffect(Unit) {
+        onDispose { clearJob?.cancel() }
+    }
 
     Box(
         modifier = Modifier
@@ -126,12 +142,31 @@ fun ControllerCaptureDialog(
             .background(Color.Black.copy(alpha = 0.72f))
             .focusRequester(focusRequester)
             .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_BACK &&
-                    event.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN
-                ) {
-                    onDismiss()
+                if (event.nativeKeyEvent.keyCode != android.view.KeyEvent.KEYCODE_BACK) {
+                    return@onPreviewKeyEvent true
                 }
-                true
+                when (event.nativeKeyEvent.action) {
+                    android.view.KeyEvent.ACTION_DOWN -> {
+                        if (event.nativeKeyEvent.repeatCount == 0) {
+                            clearedByBackHold = false
+                            clearJob?.cancel()
+                            clearJob = scope.launch {
+                                delay(HOLD_BACK_TO_CLEAR_MAPPING_MILLIS)
+                                onClear()
+                                clearedByBackHold = true
+                            }
+                        }
+                        true
+                    }
+                    android.view.KeyEvent.ACTION_UP -> {
+                        clearJob?.cancel()
+                        clearJob = null
+                        if (!clearedByBackHold) onDismiss()
+                        clearedByBackHold = false
+                        true
+                    }
+                    else -> true
+                }
             }
             .focusable(),
         contentAlignment = Alignment.Center,
@@ -191,5 +226,8 @@ fun ControllerCaptureDialog(
                 )
             }
         }
+
     }
 }
+
+private const val HOLD_BACK_TO_CLEAR_MAPPING_MILLIS = 600L
