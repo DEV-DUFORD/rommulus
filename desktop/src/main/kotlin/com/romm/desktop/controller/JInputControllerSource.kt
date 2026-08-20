@@ -134,50 +134,61 @@ class JInputControllerSource : JInputSource {
     @Volatile
     private var lastLoggedControllers: List<String>? = null
 
+    /**
+     * Synchronized because the focus router and the capture pump both call this at ~60 Hz
+     * from different threads while a capture session is active: [wrappers] is a plain
+     * [HashMap] (mutated below via getOrPut/retainAll) and
+     * [ControllerEnvironment.getControllers] is a native call, neither of which tolerates
+     * concurrent access. Holding the lock for the whole body also keeps the diagnostic
+     * logging consistent with the controller set it describes.
+     */
     override fun enumerate(): List<JInputController> {
-        // getControllers() returns a Controller[] (a snapshot array in 2.0.10).
-        val controllers = environment.controllers
-        val result = ArrayList<JInputController>(controllers.size)
-        val seen = HashSet<Controller>()
-        for (controller in controllers) {
-            seen.add(controller)
-            result.add(wrappers.getOrPut(controller) { LiveJInputController(controller) })
-        }
-        // Drop wrappers for controllers that were unplugged since the last tick.
-        wrappers.keys.retainAll(seen)
+        return synchronized(this) {
+            // getControllers() returns a Controller[] (a snapshot array in 2.0.10).
+            val controllers = environment.controllers
+            val result = ArrayList<JInputController>(controllers.size)
+            val seen = HashSet<Controller>()
+            for (controller in controllers) {
+                seen.add(controller)
+                result.add(wrappers.getOrPut(controller) { LiveJInputController(controller) })
+            }
+            // Drop wrappers for controllers that were unplugged since the last tick.
+            wrappers.keys.retainAll(seen)
 
-        // Diagnostic: log the detected set once (and whenever it changes) so "no controllers
-        // detected" is distinguishable from "detected but unmapped" in a single run.
-        val names = controllers.map { it.name ?: "<unnamed>" }
-        if (names != lastLoggedControllers) {
-            lastLoggedControllers = names
-            if (names.isEmpty() && nativeBootstrapFailed) {
-                logger.log(
-                    Level.WARNING,
-                    "JInput detected 0 controllers and the native library bootstrap failed; " +
-                        "see the earlier WARNING for the cause. Controllers will not appear " +
-                        "until the JInput native library is loadable."
-                )
-            } else {
-                logger.log(Level.INFO, "JInput detected ${names.size} controller(s): $names")
+            // Diagnostic: log the detected set once (and whenever it changes) so "no
+            // controllers detected" is distinguishable from "detected but unmapped" in a
+            // single run.
+            val names = controllers.map { it.name ?: "<unnamed>" }
+            if (names != lastLoggedControllers) {
+                lastLoggedControllers = names
+                if (names.isEmpty() && nativeBootstrapFailed) {
+                    logger.log(
+                        Level.WARNING,
+                        "JInput detected 0 controllers and the native library bootstrap failed; " +
+                            "see the earlier WARNING for the cause. Controllers will not appear " +
+                            "until the JInput native library is loadable."
+                    )
+                } else {
+                    logger.log(Level.INFO, "JInput detected ${names.size} controller(s): $names")
+                }
+                // "Detected but unreadable" diagnostic: JInput enumerates controllers from
+                // /dev/input/event* but cannot open them when this process lacks read
+                // permission (open() fails with EACCES) — typically because the user is not
+                // in the `input` group. JInput logs the per-device failures only to
+                // java.util.logging internally, so without this probe the app would just
+                // report "detected N controller(s)" while nothing works.
+                if (names.isNotEmpty() && inputEventDevicesReadable() == false) {
+                    logger.log(
+                        Level.WARNING,
+                        "Controllers were detected but no /dev/input/event* device is readable " +
+                            "by this process (opening them fails with permission denied). " +
+                            "Add your user to the 'input' group: sudo usermod -aG input \$USER, " +
+                            "then log out and back in."
+                    )
+                }
             }
-            // "Detected but unreadable" diagnostic: JInput enumerates controllers from
-            // /dev/input/event* but cannot open them when this process lacks read
-            // permission (open() fails with EACCES) — typically because the user is not
-            // in the `input` group. JInput logs the per-device failures only to
-            // java.util.logging internally, so without this probe the app would just
-            // report "detected N controller(s)" while nothing works.
-            if (names.isNotEmpty() && inputEventDevicesReadable() == false) {
-                logger.log(
-                    Level.WARNING,
-                    "Controllers were detected but no /dev/input/event* device is readable " +
-                        "by this process (opening them fails with permission denied). " +
-                        "Add your user to the 'input' group: sudo usermod -aG input \$USER, " +
-                        "then log out and back in."
-                )
-            }
+            result
         }
-        return result
     }
 
     /**
@@ -284,43 +295,51 @@ internal class LiveJInputController(private val controller: Controller) : JInput
         name = id,
     )
 
+    /**
+     * Synchronized because the focus router and the capture pump can poll the same
+     * controller instance from different threads at ~60 Hz while a capture session is
+     * active; [Controller.poll] refreshes shared component state that must not be
+     * read mid-refresh.
+     */
     override fun poll(): JInputControllerState {
-        // JInput only refreshes Component.pollData when the owning controller is polled.
-        // A failed poll means the device is unavailable, so expose a neutral state.
-        if (!controller.poll()) {
-            return JInputControllerState(buttons = emptySet(), axes = emptyMap())
-        }
+        return synchronized(this) {
+            // JInput only refreshes Component.pollData when the owning controller is polled.
+            // A failed poll means the device is unavailable, so expose a neutral state.
+            if (!controller.poll()) {
+                return JInputControllerState(buttons = emptySet(), axes = emptyMap())
+            }
 
-        val buttons = LinkedHashSet<NeutralKey>()
-        val axes = HashMap<NeutralAxis, Float>()
+            val buttons = LinkedHashSet<NeutralKey>()
+            val axes = HashMap<NeutralAxis, Float>()
 
-        // getComponents() returns a Component[] in 2.0.10; the component's identifier
-        // (not its runtime class) tells us whether it is a button or an axis.
-        for (component in controller.components) {
-            when (val identifier = component.identifier) {
-                is Component.Identifier.Button -> {
-                    val neutral = BUTTON_TO_NEUTRAL[identifier] ?: continue
-                    // Button poll data is 0.0f (released) or 1.0f (pressed).
-                    if (component.pollData > 0f) buttons.add(neutral)
-                }
+            // getComponents() returns a Component[] in 2.0.10; the component's identifier
+            // (not its runtime class) tells us whether it is a button or an axis.
+            for (component in controller.components) {
+                when (val identifier = component.identifier) {
+                    is Component.Identifier.Button -> {
+                        val neutral = BUTTON_TO_NEUTRAL[identifier] ?: continue
+                        // Button poll data is 0.0f (released) or 1.0f (pressed).
+                        if (component.pollData > 0f) buttons.add(neutral)
+                    }
 
-                is Component.Identifier.Axis -> {
-                    if (identifier == Component.Identifier.Axis.POV) {
-                        addPovButtons(component.pollData, buttons)
-                    } else {
-                        val neutral = AXIS_TO_NEUTRAL[identifier] ?: continue
-                        axes[neutral] = AxisNormalizer.normalize(
-                            rawValue = component.pollData,
-                            rangeMin = JINPUT_AXIS_MIN,
-                            rangeMax = JINPUT_AXIS_MAX,
-                            rangeFlat = component.deadZone,
-                        )
+                    is Component.Identifier.Axis -> {
+                        if (identifier == Component.Identifier.Axis.POV) {
+                            addPovButtons(component.pollData, buttons)
+                        } else {
+                            val neutral = AXIS_TO_NEUTRAL[identifier] ?: continue
+                            axes[neutral] = AxisNormalizer.normalize(
+                                rawValue = component.pollData,
+                                rangeMin = JINPUT_AXIS_MIN,
+                                rangeMax = JINPUT_AXIS_MAX,
+                                rangeFlat = component.deadZone,
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        return JInputControllerState(buttons = buttons, axes = axes)
+            JInputControllerState(buttons = buttons, axes = axes)
+        }
     }
 
     private fun addPovButtons(value: Float, buttons: MutableSet<NeutralKey>) {

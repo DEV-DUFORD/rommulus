@@ -68,7 +68,8 @@ internal fun libraryNavDestination(
     Screen.PLATFORMS, Screen.PLATFORM_DETAIL -> DesktopNavDestination.PLATFORMS
     Screen.COLLECTIONS, Screen.COLLECTION_DETAIL -> DesktopNavDestination.COLLECTIONS
     Screen.SEARCH -> DesktopNavDestination.SEARCH
-    Screen.SETTINGS, Screen.BIOS_CONFIGURATION, Screen.LICENSE -> DesktopNavDestination.SETTINGS
+    Screen.SETTINGS, Screen.BIOS_CONFIGURATION, Screen.LICENSE,
+    Screen.CONTROLLER_LIST, Screen.CONTROLLER_CONFIG -> DesktopNavDestination.SETTINGS
     Screen.GAME_DETAIL -> when (gameDetailParent) {
         Screen.GAME_DETAIL, Screen.ONBOARDING -> DesktopNavDestination.HOME
         else -> libraryNavDestination(gameDetailParent)

@@ -2,6 +2,7 @@ package com.romm.desktop
 
 import com.romm.androidtv.auth.ClientTokenStorage
 import com.romm.androidtv.auth.SessionStorage
+import com.romm.androidtv.controller.config.ControllerConfigRepository
 import com.romm.androidtv.emulation.model.CoreLicenseFinding
 import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.emulation.model.SavePathPolicy
@@ -46,6 +47,9 @@ import com.romm.androidtv.storage.records.SaveReplicaRecord
 import com.romm.androidtv.storage.records.SaveSyncStatus
 import com.romm.androidtv.storage.romCacheDir
 import com.romm.androidtv.storage.settingsFile
+import com.romm.desktop.controller.JInputControllerSource
+import com.romm.desktop.controller.JInputSource
+import com.romm.desktop.controller.config.DesktopControllerConfigRepository
 import com.romm.desktop.library.DesktopBiosConfigurationProvider
 import com.romm.desktop.network.DesktopNetworkModule
 import com.romm.desktop.player.AdoptionSummary
@@ -272,6 +276,24 @@ class DesktopAppCoordinator(
      * and [loadLaunchControllerBindings].
      */
     internal val controllerBindingStore = SqliteControllerBindingStore(database)
+
+    /**
+     * Desktop [ControllerConfigRepository] for the controller-settings screens (E2): catalog
+     * defaults merged over the durable overrides in [controllerBindingStore]. The same store
+     * instance the player-launch sidecar ingest uses, so remaps made in Settings are picked up
+     * by [loadLaunchControllerBindings] on the next launch.
+     */
+    val controllerConfigRepository: DesktopControllerConfigRepository by lazy {
+        DesktopControllerConfigRepository(controllerBindingStore)
+    }
+
+    /**
+     * The single shared JInput enumeration seam (E2): consumed both by the desktop focus
+     * router (via [RommulusDesktopApp]) and by the controller-settings capture pump, so one
+     * native-environment bootstrap serves both.
+     */
+    val controllerInputSource: JInputSource by lazy { JInputControllerSource() }
+
     private val deviceIdentityStorage = SqliteDeviceIdentityStorage(database)
     private val schedulerStateStore: SchedulerStateStore = SqliteSchedulerStateStore(database)
 
@@ -342,6 +364,9 @@ class DesktopAppCoordinator(
     /** Which BIOS-required console's configuration screen is active. */
     enum class BiosSystem { SEGA_CD, PLAYSTATION }
     var selectedBiosSystem by mutableStateOf(BiosSystem.SEGA_CD)
+
+    /** Which core's controller-configuration screen is active (CONTROLLER_CONFIG). */
+    var selectedControllerCoreId by mutableStateOf<String?>(null)
 
     /**
      * Memoized [RomDetailPresenter] instances keyed by ROM id so the detail screen's
@@ -1017,6 +1042,17 @@ class DesktopAppCoordinator(
         currentScreen = Screen.BIOS_CONFIGURATION
     }
 
+    /** Opens the controller console list (Settings → "Controller Settings", E2). */
+    fun openControllerSettings() {
+        currentScreen = Screen.CONTROLLER_LIST
+    }
+
+    /** Opens the per-core binding configuration screen for [coreId] (E2). */
+    fun openControllerConfig(coreId: String) {
+        selectedControllerCoreId = coreId
+        currentScreen = Screen.CONTROLLER_CONFIG
+    }
+
     // ------------------------------------------------------------------ presenters (lazy per screen)
 
     fun onboardingPresenter(): OnboardingPresenter = onboardingPresenterLazy
@@ -1254,7 +1290,8 @@ class DesktopAppCoordinator(
  */
 enum class Screen {
     ONBOARDING, HOME, PLATFORMS, COLLECTIONS, SEARCH, SETTINGS,
-    PLATFORM_DETAIL, COLLECTION_DETAIL, GAME_DETAIL, BIOS_CONFIGURATION, LICENSE;
+    PLATFORM_DETAIL, COLLECTION_DETAIL, GAME_DETAIL, BIOS_CONFIGURATION, LICENSE,
+    CONTROLLER_LIST, CONTROLLER_CONFIG;
 
     /** The screen Back returns to (root returns nothing; GAME_DETAIL uses its remembered parent). */
     fun parent(): Screen = when (this) {
@@ -1263,6 +1300,8 @@ enum class Screen {
         PLATFORM_DETAIL -> PLATFORMS
         COLLECTION_DETAIL -> COLLECTIONS
         BIOS_CONFIGURATION -> SETTINGS
+        CONTROLLER_CONFIG -> CONTROLLER_LIST
+        CONTROLLER_LIST -> SETTINGS
         GAME_DETAIL, ONBOARDING -> HOME
     }
 }

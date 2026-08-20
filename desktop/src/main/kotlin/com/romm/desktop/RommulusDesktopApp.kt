@@ -29,7 +29,6 @@ import com.romm.androidtv.library.RomQuery
 import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
 import com.romm.desktop.controller.DesktopControllerRouter
 import com.romm.desktop.controller.FocusAction
-import com.romm.desktop.controller.JInputControllerSource
 import com.romm.desktop.ui.components.RommulusTheme
 import com.romm.desktop.ui.image.LocalDesktopImageLoader
 import com.romm.desktop.ui.navigation.DesktopFocusScope
@@ -40,6 +39,8 @@ import com.romm.desktop.ui.navigation.topLevelNavDestination
 import com.romm.desktop.ui.screens.detail.BiosConfigurationScreen
 import com.romm.desktop.ui.screens.detail.GameDetailScreen
 import com.romm.desktop.ui.screens.detail.LicensesDialog
+import com.romm.desktop.ui.screens.controller.ControllerConfigScreen
+import com.romm.desktop.ui.screens.controller.ControllerConsoleListScreen
 import com.romm.desktop.ui.screens.detail.SettingsScreen
 import com.romm.desktop.ui.screens.library.HomeScreen
 import com.romm.desktop.ui.screens.library.CollectionsScreen
@@ -92,7 +93,9 @@ fun RommulusDesktopApp(
     // JInput performs native device enumeration and polling synchronously. Keep it off the
     // Compose UI dispatcher so a slow device read cannot stall focus or animation updates.
     val pollScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
-    val router = remember { DesktopControllerRouter(JInputControllerSource(), pollScope) }
+    // The coordinator owns the single JInput enumeration seam so the focus router and the
+    // controller-settings capture pump share one native-environment bootstrap.
+    val router = remember { DesktopControllerRouter(coordinator.controllerInputSource, pollScope) }
     DisposableEffect(router, pollScope) {
         router.start()
         onDispose {
@@ -235,6 +238,9 @@ fun RommulusDesktopApp(
 
                             Screen.GAME_DETAIL -> GameDetailScreen(coordinator)
                             Screen.BIOS_CONFIGURATION -> BiosConfigurationScreen(coordinator)
+
+                            Screen.CONTROLLER_LIST -> ControllerConsoleListScreen(coordinator)
+                            Screen.CONTROLLER_CONFIG -> ControllerConfigScreen(coordinator)
 
                             // The licenses dialog is a separate desktop window (its own
                             // composition); rendering it as the screen content is acceptable —

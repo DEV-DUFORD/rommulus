@@ -163,6 +163,56 @@ class DesktopAppCoordinatorTest {
         assertThat(c.exitRequested).isFalse()
     }
 
+    // ---------------------------------------------------------------- controller settings (E2)
+
+    @Test
+    fun `openControllerSettings navigates to the controller console list`(@TempDir dir: Path) {
+        val c = coordinator(dir.testRoot())
+        c.appMode = AppMode.MAIN
+        c.currentScreen = Screen.SETTINGS
+        c.openControllerSettings()
+        assertThat(c.currentScreen).isEqualTo(Screen.CONTROLLER_LIST)
+    }
+
+    @Test
+    fun `openControllerConfig sets the core selection and navigates to controller config`(@TempDir dir: Path) {
+        val c = coordinator(dir.testRoot())
+        c.appMode = AppMode.MAIN
+        c.openControllerSettings()
+        c.openControllerConfig("snes9x")
+        assertThat(c.currentScreen).isEqualTo(Screen.CONTROLLER_CONFIG)
+        assertThat(c.selectedControllerCoreId).isEqualTo("snes9x")
+    }
+
+    @Test
+    fun `back from controller config returns to the controller list`(@TempDir dir: Path) {
+        val c = coordinator(dir.testRoot())
+        c.appMode = AppMode.MAIN
+        c.openControllerConfig("fceumm")
+        assertThat(c.currentScreen).isEqualTo(Screen.CONTROLLER_CONFIG)
+        c.onBack()
+        assertThat(c.currentScreen).isEqualTo(Screen.CONTROLLER_LIST)
+    }
+
+    @Test
+    fun `back from controller list returns to settings`(@TempDir dir: Path) {
+        val c = coordinator(dir.testRoot())
+        c.appMode = AppMode.MAIN
+        c.openControllerSettings()
+        assertThat(c.currentScreen).isEqualTo(Screen.CONTROLLER_LIST)
+        c.onBack()
+        assertThat(c.currentScreen).isEqualTo(Screen.SETTINGS)
+    }
+
+    @Test
+    fun `controller config exposes the store-backed repository and shared input source`(@TempDir dir: Path) {
+        val c = coordinator(dir.testRoot())
+        // The settings screens read merged configs through the same durable store the player
+        // sidecar ingest writes to.
+        assertThat(c.controllerConfigRepository).isNotNull()
+        assertThat(c.controllerInputSource).isNotNull()
+    }
+
     // ---------------------------------------------------------------- player launch (Phase 8)
 
     private fun testRom(platformSlug: String, fileName: String = "test-game.gb"): RomDetail = RomDetail(

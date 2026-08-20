@@ -111,6 +111,7 @@ fun SettingsScreen(
     val themeFocus = remember { FocusRequester() }
     val segaCdFocus = remember { FocusRequester() }
     val playStationFocus = remember { FocusRequester() }
+    val controllerSettingsFocus = remember { FocusRequester() }
     val verifySha1Focus = remember { FocusRequester() }
     val autocleanFocus = remember { FocusRequester() }
     val licensesFocus = remember { FocusRequester() }
@@ -412,13 +413,38 @@ fun SettingsScreen(
                     .focusRequester(playStationFocus)
                     .focusProperties {
                         up = segaCdFocus
-                        down = verifySha1Focus
+                        down = controllerSettingsFocus
                     }
                     .focusableItem("settings:playstation", navigator) {
                         coordinator.openBiosConfiguration(DesktopAppCoordinator.BiosSystem.PLAYSTATION)
                     },
             ) {
                 Text("PlayStation")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // ---- Controllers section (E2: controller console list → per-core binding config) ----
+            SettingsSectionHeader("Controllers", colors)
+            Text(
+                text = "Map physical controller buttons and axes to console controls for each supported system.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+            TvButton(
+                onClick = { coordinator.openControllerSettings() },
+                modifier = Modifier
+                    .focusRequester(controllerSettingsFocus)
+                    .focusProperties {
+                        up = playStationFocus
+                        down = verifySha1Focus
+                    }
+                    .focusableItem("settings:controller-settings", navigator) {
+                        coordinator.openControllerSettings()
+                    },
+            ) {
+                Text("Controller Settings")
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -432,7 +458,7 @@ fun SettingsScreen(
                 checked = uiState.verifySha1OnLaunch,
                 onCheckedChange = presenter::onVerifySha1OnLaunchChanged,
                 focusRequester = verifySha1Focus,
-                upFocus = playStationFocus,
+                upFocus = controllerSettingsFocus,
                 downFocus = autocleanFocus,
                 colors = colors,
                 navigator = navigator,
