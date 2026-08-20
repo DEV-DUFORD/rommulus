@@ -24,6 +24,8 @@
 #include <array>
 #include <cstdint>
 
+#include "native/player/pause_menu.h"
+
 namespace romm {
 class EmulationSession;
 }
@@ -62,6 +64,21 @@ public:
     // neutral state rather than going stale).
     void updateSession(romm::EmulationSession& session);
 
+    // Edge-detected pause trigger (Android's quick-Back / pause-combo):
+    // true on the single frame in which any gamepad newly presses Back, or
+    // its Start+Select or L3+R3 combination transitions from not-held to
+    // held. Call once per frame while gameplay input is active (SDL pads map
+    // Select to Back, so "Start+Select" is polled as Start+Back).
+    bool pollPauseTrigger();
+
+    // Edge-detected menu navigation for the pause overlay: d-pad up/down/
+    // left/right, A or Start (confirm), B or Back (cancel) — each true only
+    // on the frame the control newly pressed. Call once per frame while the
+    // overlay is open. Shares its per-button edge state with
+    // pollPauseTrigger() so a button held across an open/close transition
+    // cannot re-trigger either path.
+    PauseMenuActions pollMenuActions();
+
     // Clears all four ports to neutral (no buttons, centered sticks).
     // Call on window focus loss and before quit so a held key/button can
     // never leak into the core after we stop pumping events.
@@ -98,6 +115,24 @@ private:
     // frame and cleared by reset(). Kept separate from ports_[0] so the
     // gamepad half of port 0 can be re-polled fresh without latching.
     int32_t keyboardMask_ = 0;
+
+    // Per-port previous-frame levels for the buttons consumed by
+    // pollPauseTrigger()/pollMenuActions(). Shared between the two so edge
+    // detection stays correct across a pause open/close transition (a button
+    // still held when the menu closes must not immediately re-trigger).
+    struct PrevButtons {
+        bool back = false;
+        bool start = false;
+        bool leftStick = false;   // L3
+        bool rightStick = false;  // R3
+        bool up = false;
+        bool down = false;
+        bool left = false;
+        bool right = false;
+        bool south = false;       // A — menu confirm
+        bool east = false;        // B — menu cancel
+    };
+    std::array<PrevButtons, kPorts> prevButtons_{};
 };
 
 }  // namespace romm::player

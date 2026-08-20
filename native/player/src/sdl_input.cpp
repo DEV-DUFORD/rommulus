@@ -215,11 +215,82 @@ void SdlInput::updateSession(romm::EmulationSession& session) {
     }
 }
 
+bool SdlInput::pollPauseTrigger() {
+    bool trigger = false;
+    for (int port = 0; port < kPorts; ++port) {
+        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+        if (gamepad == nullptr) continue;
+
+        PrevButtons& prev = prevButtons_[port];
+        const bool back = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK);
+        const bool start = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
+        const bool leftStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+        const bool rightStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+
+        // Select maps to Back on SDL pads, so Android's Start+Select combo is
+        // polled as Start+Back; L3+R3 is its default binding. Both are
+        // edge-detected (pressed && !wasPressed), mirroring the Android
+        // router's evaluatePauseMenuCombination().
+        const bool comboNow = (start && back) || (leftStick && rightStick);
+        const bool comboPrev = (prev.start && prev.back) ||
+                               (prev.leftStick && prev.rightStick);
+        if ((back && !prev.back) || (comboNow && !comboPrev)) {
+            trigger = true;
+        }
+
+        prev.back = back;
+        prev.start = start;
+        prev.leftStick = leftStick;
+        prev.rightStick = rightStick;
+    }
+    return trigger;
+}
+
+PauseMenuActions SdlInput::pollMenuActions() {
+    PauseMenuActions actions{};
+    for (int port = 0; port < kPorts; ++port) {
+        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+        if (gamepad == nullptr) continue;
+
+        PrevButtons& prev = prevButtons_[port];
+        const bool up = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP);
+        const bool down = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+        const bool left = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+        const bool right = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+        const bool south = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
+        const bool east = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST);
+        const bool back = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK);
+        const bool start = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
+
+        if (up && !prev.up) actions.up = true;
+        if (down && !prev.down) actions.down = true;
+        if (left && !prev.left) actions.left = true;
+        if (right && !prev.right) actions.right = true;
+        // A or Start confirms; B or Back cancels (Back is the menu's "back"
+        // control, matching Android's quick-Back dismissal).
+        if ((south && !prev.south) || (start && !prev.start)) actions.confirm = true;
+        if ((east && !prev.east) || (back && !prev.back)) actions.cancel = true;
+
+        prev.up = up;
+        prev.down = down;
+        prev.left = left;
+        prev.right = right;
+        prev.south = south;
+        prev.east = east;
+        prev.back = back;
+        prev.start = start;
+    }
+    return actions;
+}
+
 void SdlInput::reset() {
     keyboardMask_ = 0;
     for (auto& port : ports_) {
         port = PortState{};
     }
+    // Drop the edge-detection latches too: any button held while this is
+    // called must not fire a spurious "new press" on the next poll.
+    prevButtons_ = {};
 }
 
 }  // namespace romm::player

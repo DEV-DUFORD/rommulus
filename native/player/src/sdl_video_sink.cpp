@@ -167,84 +167,95 @@ void SdlVideoSink::applyLogicalPresentationLocked() {
     presentationDirty_ = false;
 }
 
-bool SdlVideoSink::present() {
+bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
     // Snapshot of the geometry, taken under the lock: submitFrame() may
     // change width_/height_ concurrently, and the scanline section below
     // runs OUTSIDE the mutex (a data race on height_ otherwise).
-    unsigned frameWidth = 0;
-    unsigned frameHeight = 0;
+    unsigned textureHeight = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!frameReady_ || renderer_ == nullptr || width_ == 0 || height_ == 0) {
-            // No new frame (or no window yet): leave the screen untouched.
+        if (renderer_ == nullptr || width_ == 0 || height_ == 0) {
+            // No window/renderer yet: leave the screen untouched.
             // frameReady_ stays set so the frame is presented once a
             // window is attached.
             return false;
         }
-        frameWidth = width_;
-        frameHeight = height_;
 
-        // (Re)create the streaming texture when the geometry changed.
-        if (texture_ == nullptr || textureWidth_ != width_ ||
-            textureHeight_ != height_) {
-            if (texture_ != nullptr) {
-                SDL_DestroyTexture(texture_);
-                texture_ = nullptr;
+        if (frameReady_) {
+            // (Re)create the streaming texture when the geometry changed.
+            if (texture_ == nullptr || textureWidth_ != width_ ||
+                textureHeight_ != height_) {
+                if (texture_ != nullptr) {
+                    SDL_DestroyTexture(texture_);
+                    texture_ = nullptr;
+                }
+                texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32,
+                                             SDL_TEXTUREACCESS_STREAMING,
+                                             static_cast<int>(width_),
+                                             static_cast<int>(height_));
+                textureWidth_ = width_;
+                textureHeight_ = height_;
+                if (texture_ == nullptr) {
+                    romm::log::sink().log(romm::log::Severity::Warn, kTag,
+                                          std::string("SDL_CreateTexture failed: ") +
+                                              SDL_GetError());
+                    frameReady_ = false;
+                    return false;
+                }
+                presentationDirty_ = true;
             }
-            texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32,
-                                         SDL_TEXTUREACCESS_STREAMING,
-                                         static_cast<int>(width_),
-                                         static_cast<int>(height_));
-            textureWidth_ = width_;
-            textureHeight_ = height_;
-            if (texture_ == nullptr) {
+            if (presentationDirty_) {
+                applyLogicalPresentationLocked();
+            }
+
+            // Copy the staging buffer into the texture, then clear the flag
+            // under the lock (before rendering) so a frame converted during
+            // the render below is not lost.
+            if (!SDL_UpdateTexture(texture_, nullptr, staging_.data(),
+                                   static_cast<int>(width_ * 4))) {
                 romm::log::sink().log(romm::log::Severity::Warn, kTag,
-                                      std::string("SDL_CreateTexture failed: ") +
+                                      std::string("SDL_UpdateTexture failed: ") +
                                           SDL_GetError());
                 frameReady_ = false;
                 return false;
             }
-            presentationDirty_ = true;
-        }
-        if (presentationDirty_) {
-            applyLogicalPresentationLocked();
+            frameReady_ = false;
         }
 
-        // Copy the staging buffer into the texture, then clear the flag
-        // under the lock (before rendering) so a frame converted during
-        // the render below is not lost.
-        if (!SDL_UpdateTexture(texture_, nullptr, staging_.data(),
-                               static_cast<int>(frameWidth * 4))) {
-            romm::log::sink().log(romm::log::Severity::Warn, kTag,
-                                  std::string("SDL_UpdateTexture failed: ") +
-                                      SDL_GetError());
-            frameReady_ = false;
-            return false;
-        }
-        frameReady_ = false;
+        // Snapshot the texture height for the scanline section below (which
+        // runs outside the mutex, where these could change under us). While
+        // paused no new frame arrives, so the texture keeps holding the last
+        // presented frame and we simply re-present it.
+        textureHeight = textureHeight_;
     }
 
-    // Render outside the lock: the texture now owns a copy of the frame,
+    // Render outside the lock: the texture owns a copy of the last frame,
     // and the emulation thread may convert the next one while we present.
     SDL_RenderClear(renderer_);
-    SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
+    if (texture_ != nullptr) {
+        SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
 
-    if (scanlines_) {
-        // Uses the frameWidth_/frameHeight_ snapshot from above: this block
-        // runs outside the mutex, where height_ could change under us.
-        if (scanlineTexture_ == nullptr ||
-            scanlineTextureHeight_ != frameHeight) {
-            if (scanlineTexture_ != nullptr) {
-                SDL_DestroyTexture(scanlineTexture_);
-                scanlineTexture_ = nullptr;
+        if (scanlines_) {
+            if (scanlineTexture_ == nullptr || scanlineTextureHeight_ != textureHeight) {
+                if (scanlineTexture_ != nullptr) {
+                    SDL_DestroyTexture(scanlineTexture_);
+                    scanlineTexture_ = nullptr;
+                }
+                scanlineTexture_ = buildScanlineTexture(renderer_, textureHeight);
+                scanlineTextureHeight_ =
+                    scanlineTexture_ != nullptr ? textureHeight : 0;
             }
-            scanlineTexture_ = buildScanlineTexture(renderer_, frameHeight);
-            scanlineTextureHeight_ =
-                scanlineTexture_ != nullptr ? frameHeight : 0;
+            if (scanlineTexture_ != nullptr) {
+                SDL_RenderTexture(renderer_, scanlineTexture_, nullptr, nullptr);
+            }
         }
-        if (scanlineTexture_ != nullptr) {
-            SDL_RenderTexture(renderer_, scanlineTexture_, nullptr, nullptr);
-        }
+    }
+
+    // The overlay (pause menu) draws in the same logical coordinate space on
+    // top of whatever is currently presented — the frozen last frame while
+    // paused, or a clear before the first frame arrives.
+    if (overlay) {
+        overlay(renderer_);
     }
 
     SDL_RenderPresent(renderer_);

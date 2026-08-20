@@ -35,6 +35,8 @@
 #include "native/engine/LogSink.h"
 #include "native/engine/VideoSink.h"
 
+#include "native/player/pause_menu.h"
+#include "native/player/pause_overlay.h"
 #include "native/player/protocol.h"
 #include "native/player/save_metadata.h"
 #include "native/player/sdl_audio_sink.h"
@@ -239,6 +241,36 @@ void writeResult(const romm::player::PlayerRequest& request, romm::player::ExitK
     }
 }
 
+// Pauses the session, waits (bounded) for the core to quiesce, and writes an
+// SRAM checkpoint to candidateSavePath. Shared by the pause menu's
+// checkpoint-on-pause safety net and the shutdown path. Returns whether a
+// checkpoint was written (false when no save path was requested).
+bool takeCheckpoint(romm::EmulationSession& session,
+                    const romm::player::PlayerRequest& request) {
+    if (request.savePath.empty()) return false;
+
+    // The emulation thread may still be inside retro_run() when we get here
+    // (pause-open / user-quit / SIGTERM exit paths); reading
+    // RETRO_MEMORY_SAVE_RAM from this thread would race it and could capture
+    // a torn save. Pause first — runLoop() skips retro_run() entirely while
+    // paused, so the core stops advancing — then quiesce: poll the frame
+    // counter at ~30ms intervals (bounded to ~500ms total) until it stops
+    // changing, which proves the core is quiescent. On a core-requested
+    // shutdown the thread has already returned, so this simply observes one
+    // stable interval and costs ~30ms.
+    session.setPaused(true);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    uint64_t lastFrameCount = session.diagnostics().frameCount.load();
+    for (;;) {
+        if (std::chrono::steady_clock::now() >= deadline) break;
+        SDL_Delay(30);
+        const uint64_t frameCount = session.diagnostics().frameCount.load();
+        if (frameCount == lastFrameCount) break;  // stable across ~30ms
+        lastFrameCount = frameCount;
+    }
+    return session.checkpointSaveRam(request.candidateSavePath);
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -425,21 +457,90 @@ int main(int argc, char* argv[]) {
     // 11. Main loop.
     bool running = true;
     romm::player::SdlInput input;
+    romm::player::PauseMenu pauseMenu;
+    romm::player::PauseOverlay pauseOverlay;
+
+    // Executes one pause-menu effect on the session (main thread).
+    auto handlePauseEffect = [&](romm::player::PauseMenuEffect effect) {
+        switch (effect) {
+            case romm::player::PauseMenuEffect::kResume:
+                // The menu closed via Resume (or cancel): unfreeze the core.
+                session.setPaused(false);
+                break;
+            case romm::player::PauseMenuEffect::kQuit:
+                // Quit was confirmed: leave through the normal shutdown path,
+                // which checkpoints and reports exitKind=completed.
+                running = false;
+                break;
+            default:
+                break;
+        }
+    };
+
+    // Opens the pause menu (Android's quick-Back / pause-combo behavior):
+    // freeze the core (the nativeSetPaused equivalent — runLoop() skips
+    // retro_run(), video holds the last frame, audio drains to silence),
+    // clear any held input so nothing leaks into the core on resume, and
+    // take a silent local-only checkpoint as a safety net (Android's
+    // checkpointForPauseMenu: "checkpoint on pause or quit").
+    auto openPause = [&]() {
+        if (pauseMenu.isOpen()) return;
+        input.reset();
+        session.setPaused(true);
+        pauseMenu.open();
+        takeCheckpoint(session, request);
+    };
+
     while (running) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
                 case SDL_EVENT_QUIT:
                 case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                    running = false;
+                    running = false;  // window close = requested quit (unchanged)
                     break;
-                case SDL_EVENT_KEY_DOWN:
+                case SDL_EVENT_KEY_DOWN: {
+                    // Skip auto-repeat events: holding Escape (or an overlay
+                    // arrow/confirm key) must not re-toggle the menu or
+                    // navigate repeatedly.
+                    if (event.key.repeat) break;
                     if (event.key.key == SDLK_ESCAPE) {
-                        running = false;  // quit
+                        // Escape is the keyboard Back button: it opens the
+                        // pause menu, and closes/resumes when the menu (or its
+                        // confirm dialog) is already open. It no longer quits
+                        // directly — quitting happens only via the menu's Quit
+                        // item (with confirm) or window close / SIGTERM.
+                        if (pauseMenu.isOpen()) {
+                            romm::player::PauseMenuActions cancel{};
+                            cancel.cancel = true;
+                            handlePauseEffect(pauseMenu.handle(cancel));
+                        } else {
+                            openPause();
+                        }
+                    } else if (pauseMenu.isOpen()) {
+                        // The overlay owns keyboard input: arrows navigate,
+                        // Enter/Space confirm. Everything else is consumed so
+                        // it cannot leak into the core on resume.
+                        romm::player::PauseMenuActions actions{};
+                        switch (event.key.scancode) {
+                            case SDL_SCANCODE_UP: actions.up = true; break;
+                            case SDL_SCANCODE_DOWN: actions.down = true; break;
+                            case SDL_SCANCODE_LEFT: actions.left = true; break;
+                            case SDL_SCANCODE_RIGHT: actions.right = true; break;
+                            case SDL_SCANCODE_RETURN:
+                            case SDL_SCANCODE_KP_ENTER:
+                            case SDL_SCANCODE_SPACE:
+                                actions.confirm = true;
+                                break;
+                            default:
+                                break;  // consumed by the overlay
+                        }
+                        if (actions.any()) handlePauseEffect(pauseMenu.handle(actions));
                     } else {
                         input.handleEvent(event);
                     }
                     break;
+                }
                 case SDL_EVENT_WINDOW_FOCUS_LOST:
                     input.reset();
                     break;
@@ -448,9 +549,18 @@ int main(int argc, char* argv[]) {
                     break;
             }
         }
-        input.poll();
-        input.updateSession(session);
-        videoSink->present();
+        input.poll();  // refresh per-port snapshots from live device state
+        if (pauseMenu.isOpen()) {
+            // The overlay owns controller input too (the core is paused, so
+            // nothing reaches the session while it is open).
+            handlePauseEffect(pauseMenu.handle(input.pollMenuActions()));
+        } else {
+            if (input.pollPauseTrigger()) openPause();
+            input.updateSession(session);
+        }
+        videoSink->present([&](SDL_Renderer* renderer) {
+            pauseOverlay.draw(renderer, pauseMenu);
+        });
         if (session.diagnostics().coreRequestedShutdown.load()) running = false;
         if (g_signal_flag.load()) running = false;  // SIGTERM/SIGINT
         SDL_Delay(1);
@@ -463,29 +573,10 @@ int main(int argc, char* argv[]) {
     const int64_t underrunFrames = static_cast<int64_t>(romm::audio::sink().underrunFrames());
     const int64_t overrunFrames = static_cast<int64_t>(romm::audio::sink().overrunFrames());
 
-    bool checkpointWritten = false;
-    if (!request.savePath.empty()) {
-        // The emulation thread may still be inside retro_run() when we get
-        // here (user quit / SIGTERM exit paths); reading RETRO_MEMORY_SAVE_RAM
-        // from this thread would race it and could capture a torn save. Pause
-        // first — runLoop() skips retro_run() entirely while paused, so the
-        // core stops advancing — then quiesce: poll the frame counter at ~30ms
-        // intervals (bounded to ~500ms total) until it stops changing, which
-        // proves the core is quiescent. On a core-requested shutdown the
-        // thread has already returned, so this simply observes one stable
-        // interval and costs ~30ms.
-        session.setPaused(true);
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
-        uint64_t lastFrameCount = session.diagnostics().frameCount.load();
-        for (;;) {
-            if (std::chrono::steady_clock::now() >= deadline) break;
-            SDL_Delay(30);
-            const uint64_t frameCount = session.diagnostics().frameCount.load();
-            if (frameCount == lastFrameCount) break;  // stable across ~30ms
-            lastFrameCount = frameCount;
-        }
-        checkpointWritten = session.checkpointSaveRam(request.candidateSavePath);
-    }
+    // Pause + quiesce + checkpoint BEFORE stop() — SRAM access is only valid
+    // while the core is loaded (stop() unloads it). If the pause menu was
+    // open, the session is already paused and this simply re-checkpoints.
+    const bool checkpointWritten = takeCheckpoint(session, request);
 
     session.stop();
 

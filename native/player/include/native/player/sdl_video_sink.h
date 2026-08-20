@@ -18,6 +18,7 @@
 #include <native/engine/VideoSink.h>
 
 #include <cstddef>
+#include <functional>
 #include <mutex>
 #include <vector>
 
@@ -38,9 +39,12 @@ public:
                      size_t pitch, enum retro_pixel_format format) override;
 
     // Main-thread presentation loop.
-    // Presents the latest converted frame if one is ready; returns false
-    // (and leaves the screen untouched) when frameReady_ is not set.
-    bool present();
+    // Presents the latest converted frame if one is ready, then draws `overlay`
+    // (if any) on top of it before presenting; returns false when no
+    // renderer is attached. While paused the last frame stays in the texture
+    // and is re-presented each call, so an overlay renders over a frozen
+    // frame. Pass nullptr for `overlay` to present without one.
+    bool present(const std::function<void(SDL_Renderer*)>& overlay = nullptr);
 
     // Toggles integer scaling. Non-integer output is letterboxed.
     void setIntegerScaling(bool enabled);
