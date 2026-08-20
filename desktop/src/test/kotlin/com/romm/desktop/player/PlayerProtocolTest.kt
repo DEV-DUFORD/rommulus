@@ -5,11 +5,36 @@ import org.assertj.core.description.TextDescription
 import org.junit.jupiter.api.Test
 
 /**
- * Strict v1 protocol tests (plans/LINUX_X64.md §12.2/§12.3). The Kotlin parser must match the
+ * Strict v2 protocol tests (plans/LINUX_X64.md §12.2/§12.3). The Kotlin parser must match the
  * C++ strictness in native/player/src/protocol.cpp: unknown fields are rejected so a secret can
- * never ride along, expectedSaveSize is 64-bit, and only protocolVersion 1 is accepted.
+ * never ride along, expectedSaveSize is 64-bit, only protocolVersion 2 is accepted, and the
+ * optional controllerBindings field round-trips with its full strict sub-schema.
  */
 class PlayerProtocolTest {
+
+    /** One device covering all three entry shapes (button / axis_direction / unbound). */
+    private fun sampleControllerBindings(): ControllerBindings = ControllerBindings(
+        devices = listOf(
+            ControllerBindingDevice(
+                guid = "036d04ca010000000000000000000000",
+                identity = ControllerBindingIdentity(vendorId = 0x046d, productId = 0x01ca, descriptor = "vid:046d-pid:01ca"),
+                bindings = listOf(
+                    PlayerSlotBinding("a", PlayerBindingType.BUTTON, button = "south"),
+                    PlayerSlotBinding("b", PlayerBindingType.AXIS_DIRECTION, axis = "left_x", polarity = -1),
+                    PlayerSlotBinding("x", PlayerBindingType.BUTTON, button = "west"),
+                    PlayerSlotBinding("y", PlayerBindingType.UNBOUND),
+                    PlayerSlotBinding("select", PlayerBindingType.BUTTON, button = "back"),
+                    PlayerSlotBinding("start", PlayerBindingType.BUTTON, button = "start"),
+                    PlayerSlotBinding("left_shoulder", PlayerBindingType.AXIS_DIRECTION, axis = "left_trigger", polarity = 1),
+                    PlayerSlotBinding("right_shoulder", PlayerBindingType.BUTTON, button = "right_shoulder"),
+                    PlayerSlotBinding("dpad_up", PlayerBindingType.BUTTON, button = "dpad_up"),
+                    PlayerSlotBinding("dpad_down", PlayerBindingType.BUTTON, button = "dpad_down"),
+                    PlayerSlotBinding("dpad_left", PlayerBindingType.AXIS_DIRECTION, axis = "left_x", polarity = -1),
+                    PlayerSlotBinding("dpad_right", PlayerBindingType.BUTTON, button = "dpad_right"),
+                ),
+            ),
+        ),
+    )
 
     private fun sampleRequest(): PlayerRequest = PlayerRequest(
         sessionId = "11111111-2222-3333-4444-555555555555",
@@ -73,6 +98,118 @@ class PlayerProtocolTest {
         assertThat(PlayerProtocol.parseResult(json).getOrNull()).isEqualTo(original)
     }
 
+    // ------------------------------------------------------------------ v2 controllerBindings
+
+    @Test
+    fun `request with controllerBindings round-trips`() {
+        val original = sampleRequest().copy(controllerBindings = sampleControllerBindings())
+        val parsed = PlayerProtocol.parseRequest(PlayerProtocol.serializeRequest(original))
+        assertThat(parsed.isSuccess).isTrue()
+        assertThat(parsed.getOrNull()).isEqualTo(original)
+    }
+
+    @Test
+    fun `controllerBindings is omitted from the wire when null and parses back as null`() {
+        val json = PlayerProtocol.serializeRequest(sampleRequest())
+        assertThat(json).doesNotContain("controllerBindings")
+        assertThat(PlayerProtocol.parseRequest(json).getOrNull()?.controllerBindings).isNull()
+    }
+
+    @Test
+    fun `request with empty devices array round-trips`() {
+        val original = sampleRequest().copy(controllerBindings = ControllerBindings(devices = emptyList()))
+        val parsed = PlayerProtocol.parseRequest(PlayerProtocol.serializeRequest(original))
+        assertThat(parsed.getOrNull()).isEqualTo(original)
+    }
+
+    @Test
+    fun `controllerBindings rejects unknown fields at every nesting level`() {
+        val base = PlayerProtocol.serializeRequest(sampleRequest().copy(controllerBindings = sampleControllerBindings()))
+
+        // Unknown identity sub-field (descriptor is the last identity field).
+        val unknownIdentityField = base.replace(
+            "\"descriptor\": \"vid:046d-pid:01ca\"",
+            "\"descriptor\": \"vid:046d-pid:01ca\", \"mac\": \"aa:bb\"",
+        )
+        assertThat(PlayerProtocol.parseRequest(unknownIdentityField).isFailure).isTrue()
+
+        // Unknown device-level field.
+        val unknownDeviceField = base.replace(
+            "\"guid\": \"036d04ca010000000000000000000000\"",
+            "\"guid\": \"036d04ca010000000000000000000000\", \"serial\": \"x\"",
+        )
+        assertThat(PlayerProtocol.parseRequest(unknownDeviceField).isFailure).isTrue()
+
+        // Unknown binding-entry field.
+        val unknownBindingField = base.replace("\"slot\": \"a\"", "\"slot\": \"a\", \"mod\": true")
+        assertThat(PlayerProtocol.parseRequest(unknownBindingField).isFailure).isTrue()
+    }
+
+    @Test
+    fun `controllerBindings rejects malformed binding entries`() {
+        val base = PlayerProtocol.serializeRequest(sampleRequest().copy(controllerBindings = sampleControllerBindings()))
+
+        // Unknown slot / button / axis names.
+        assertThat(PlayerProtocol.parseRequest(base.replace("\"slot\": \"a\"", "\"slot\": \"z\"")).isFailure).isTrue()
+        assertThat(PlayerProtocol.parseRequest(base.replace("\"button\": \"south\"", "\"button\": \"trigger\"")).isFailure).isTrue()
+        assertThat(PlayerProtocol.parseRequest(base.replace("\"axis\": \"left_x\"", "\"axis\": \"hat_z\"")).isFailure).isTrue()
+
+        // Polarity out of range / missing (slot b is the first axis_direction entry).
+        assertThat(PlayerProtocol.parseRequest(base.replace("\"polarity\": -1", "\"polarity\": 2")).isFailure).isTrue()
+        val missingPolarity = base.replace(Regex(",\\s*\"polarity\": -1"), "")
+        assertThat(PlayerProtocol.parseRequest(missingPolarity).isFailure).isTrue()
+
+        // Type-specific field sets: unbound must not carry button; button must not carry axis.
+        // (The serializer is multi-line, so the patterns tolerate whitespace between fields.)
+        val unboundWithButton = base.replace(
+            Regex("\"slot\": \"y\",\\s*\"type\": \"unbound\""),
+            "\"slot\": \"y\", \"type\": \"unbound\", \"button\": \"south\"",
+        )
+        assertThat(PlayerProtocol.parseRequest(unboundWithButton).isFailure).isTrue()
+        val buttonWithAxis = base.replace(
+            Regex("\"slot\": \"a\",\\s*\"type\": \"button\",\\s*\"button\": \"south\""),
+            "\"slot\": \"a\", \"type\": \"button\", \"button\": \"south\", \"axis\": \"left_x\"",
+        )
+        assertThat(PlayerProtocol.parseRequest(buttonWithAxis).isFailure).isTrue()
+
+        // Unknown type.
+        assertThat(PlayerProtocol.parseRequest(base.replace("\"type\": \"unbound\"", "\"type\": \"hat\"")).isFailure).isTrue()
+
+        // Wrong identity types.
+        val negativeVendor = base.replace("\"vendorId\": 1133", "\"vendorId\": -1")
+        assertThat(PlayerProtocol.parseRequest(negativeVendor).isFailure).isTrue()
+        val stringProductId = base.replace("\"productId\": 458", "\"productId\": \"cafe\"")
+        assertThat(PlayerProtocol.parseRequest(stringProductId).isFailure).isTrue()
+    }
+
+    @Test
+    fun `controllerBindings requires all twelve slots in order`() {
+        val base = PlayerProtocol.serializeRequest(sampleRequest().copy(controllerBindings = sampleControllerBindings()))
+
+        // Drop the last entry (11 total, prefix still in order).
+        val withoutLast = base.replace(Regex(",\\s*\\{[^{}]*\"slot\": \"dpad_right\"[^{}]*\\}"), "")
+        assertThat(PlayerProtocol.parseRequest(withoutLast).isFailure).isTrue()
+
+        // Out of order: rename the first entry's slot so it no longer leads the sequence.
+        val swapped = base.replace(
+            Regex("\"slot\": \"a\",\\s*\"type\": \"button\",\\s*\"button\": \"south\""),
+            "\"slot\": \"b\", \"type\": \"button\", \"button\": \"south\"",
+        )
+        assertThat(PlayerProtocol.parseRequest(swapped).isFailure).isTrue()
+
+        // Duplicate a slot (12 entries, one repeated, one missing).
+        val duplicated = base.replace(
+            Regex("\"slot\": \"dpad_right\",\\s*\"type\": \"button\",\\s*\"button\": \"dpad_right\""),
+            "\"slot\": \"a\", \"type\": \"button\", \"button\": \"south\"",
+        )
+        assertThat(PlayerProtocol.parseRequest(duplicated).isFailure).isTrue()
+
+        // Missing the inner required "devices" array.
+        val noDevices = base.substringBefore("\"controllerBindings\"").trimEnd().removeSuffix(",") +
+            "\n  \"controllerBindings\": {}\n}"
+        assertThat(PlayerProtocol.parseRequest(noDevices).isFailure).isTrue()
+    }
+
     // ------------------------------------------------------------------ 64-bit sizes
 
     @Test
@@ -121,19 +258,34 @@ class PlayerProtocolTest {
     @Test
     fun `non-integer protocolVersion is rejected`() {
         val json = PlayerProtocol.serializeRequest(sampleRequest())
-            .replace("\"protocolVersion\": 1,", "\"protocolVersion\": 1.5,")
+            .replace("\"protocolVersion\": 2,", "\"protocolVersion\": 1.5,")
         assertThat(PlayerProtocol.parseRequest(json).isFailure).isTrue()
     }
 
     @Test
     fun `unsupported protocolVersion is rejected`() {
-        val requestJson = PlayerProtocol.serializeRequest(sampleRequest())
-            .replace("\"protocolVersion\": 1,", "\"protocolVersion\": 2,")
-        assertThat(PlayerProtocol.parseRequest(requestJson).isFailure).isTrue()
+        // v1 requests are rejected now that the protocol is at v2 (and so is anything else).
+        for (version in listOf(0, 1, 3, 99)) {
+            val requestJson = PlayerProtocol.serializeRequest(sampleRequest())
+                .replace("\"protocolVersion\": 2,", "\"protocolVersion\": $version,")
+            assertThat(PlayerProtocol.parseRequest(requestJson).isFailure)
+                .describedAs(TextDescription("request version $version must be rejected")).isTrue()
 
-        val resultJson = PlayerProtocol.serializeResult(sampleResult())
-            .replace("\"protocolVersion\": 1,", "\"protocolVersion\": 2,")
-        assertThat(PlayerProtocol.parseResult(resultJson).isFailure).isTrue()
+            val resultJson = PlayerProtocol.serializeResult(sampleResult())
+                .replace("\"protocolVersion\": 2,", "\"protocolVersion\": $version,")
+            assertThat(PlayerProtocol.parseResult(resultJson).isFailure)
+                .describedAs(TextDescription("result version $version must be rejected")).isTrue()
+        }
+    }
+
+    @Test
+    fun `v1 request without controllerBindings is still rejected on the version alone`() {
+        // A genuine v1 wire document (no controllerBindings, version 1) fails on the version.
+        val json = PlayerProtocol.serializeRequest(sampleRequest())
+            .replace("\"protocolVersion\": 2,", "\"protocolVersion\": 1,")
+        val parsed = PlayerProtocol.parseRequest(json)
+        assertThat(parsed.isFailure).isTrue()
+        assertThat(parsed.exceptionOrNull()?.message).contains("unsupported protocolVersion: 1")
     }
 
     @Test
@@ -152,7 +304,7 @@ class PlayerProtocolTest {
         assertThat(PlayerProtocol.parseRequest(notAnObject).isFailure).isTrue()
 
         val missingScanlines = """
-            {"protocolVersion":1,"sessionId":"s","coreId":"c","coreBuildRevision":"r",
+            {"protocolVersion":2,"sessionId":"s","coreId":"c","coreBuildRevision":"r",
              "corePath":"/c","contentPath":"/g","contentHash":"","systemDir":"/s",
              "savePath":"/sp","candidateSavePath":"/cs","resultPath":"/rp",
              "expectedSaveSize":null,
@@ -161,7 +313,7 @@ class PlayerProtocolTest {
         assertThat(PlayerProtocol.parseRequest(missingScanlines).isFailure).isTrue()
 
         val missingSharpFilter = """
-            {"protocolVersion":1,"sessionId":"s","coreId":"c","coreBuildRevision":"r",
+            {"protocolVersion":2,"sessionId":"s","coreId":"c","coreBuildRevision":"r",
              "corePath":"/c","contentPath":"/g","contentHash":"","systemDir":"/s",
              "savePath":"/sp","candidateSavePath":"/cs","resultPath":"/rp",
              "expectedSaveSize":null,
@@ -170,7 +322,7 @@ class PlayerProtocolTest {
         assertThat(PlayerProtocol.parseRequest(missingSharpFilter).isFailure).isTrue()
 
         val extraVideoField = """
-            {"protocolVersion":1,"sessionId":"s","coreId":"c","coreBuildRevision":"r",
+            {"protocolVersion":2,"sessionId":"s","coreId":"c","coreBuildRevision":"r",
              "corePath":"/c","contentPath":"/g","contentHash":"","systemDir":"/s",
              "savePath":"/sp","candidateSavePath":"/cs","resultPath":"/rp",
              "expectedSaveSize":null,

@@ -88,6 +88,9 @@ public:
     const BindingTable& bindings() const { return bindings_; }
     const BindingSource& bindingForSlot(int slot) const { return bindings_.get(slot); }
     void setBinding(int slot, BindingSource source) { bindings_.set(slot, source); }
+    // Replaces the ENTIRE table at once (the v2 launch request seeds stored
+    // bindings before the first frame; the editor mutates per slot).
+    void setBindings(const BindingTable& table) { bindings_ = table; }
     // Restores the built-in default mapping (the editor's Reset to Default).
     void resetBindings() { bindings_.reset(); }
 

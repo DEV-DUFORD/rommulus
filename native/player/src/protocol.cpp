@@ -1,4 +1,4 @@
-// protocol.cpp — strict v1 request/result JSON parsing and canonical
+// protocol.cpp — strict v2 request/result JSON parsing and canonical
 // serialization (LINUX_X64.md section 12.2 / 12.3).
 //
 // Parsing is strict on purpose: this is a security boundary. Unknown
@@ -6,6 +6,11 @@
 // server-save-id/upload-url, and a typo must not smuggle one in), wrong
 // types are rejected, and the no-throw nlohmann/json parse overload is
 // used so malformed input can never raise out of the validator.
+//
+// v2 adds the optional request field "controllerBindings" (per-device
+// RetroPad binding tables to apply at launch). Its device-entry shape
+// reuses the sidecar schema (binding_sidecar.cpp) verbatim, so a sidecar's
+// "devices" array pastes straight into a request.
 #include "native/player/protocol.h"
 
 #include <algorithm>
@@ -100,6 +105,186 @@ void checkUnknownFields(const ordered_json& j, const Container& allowed,
     }
 }
 
+// --------------------------------------------------------------------- v2
+// controllerBindings parsing (sidecar-shaped device entries).
+
+// null or non-negative integer, narrowed to int only after the full-range
+// check (vendor/product IDs are 16-bit by construction but this stays safe
+// for any future widening).
+bool getNullableId(const ordered_json& j, const char* key,
+                   std::optional<int>& out, std::string& error) {
+    if (j[key].is_null()) {
+        out = std::nullopt;
+        return true;
+    }
+    if (!j[key].is_number_integer() || j[key].get<int64_t>() < 0) {
+        error = std::string(key) + " must be null or a non-negative integer";
+        return false;
+    }
+    out = static_cast<int>(j[key].get<int64_t>());
+    return true;
+}
+
+// Parses one binding entry (sidecar shape: {"slot", "type", ...}) into the
+// table at `slot`. The union of all fields an entry may carry is checked
+// first; the declared type then pins down the EXACT field subset, so
+// {"type":"unbound","button":"south"} is rejected as well as unknown names.
+bool parseBindingEntry(const ordered_json& j, int slot, BindingTable& table,
+                       std::string& error) {
+    static const std::array<const char*, 5> kUnionFields = {
+        {"slot", "type", "button", "axis", "polarity"}};
+    checkUnknownFields(j, kUnionFields, error);
+    if (!error.empty()) return false;
+
+    std::string slotName;
+    if (!getString(j, "slot", slotName, error)) return false;
+    const int parsedSlot = retroPadSlotFromName(slotName);
+    if (parsedSlot < 0) {
+        error = "unknown binding slot: " + slotName;
+        return false;
+    }
+    // Entries must arrive in slot order (the canonical producers — the
+    // sidecar and the desktop serializer — both emit all 12 in order); a
+    // duplicate or gap is rejected here.
+    if (parsedSlot != slot) {
+        error = "binding slot out of order or duplicate: " + slotName;
+        return false;
+    }
+
+    if (!j.contains("type") || !j["type"].is_string()) {
+        error = "binding type must be a string";
+        return false;
+    }
+    const std::string type = j["type"].get<std::string>();
+
+    if (type == "unbound") {
+        if (j.contains("button") || j.contains("axis") || j.contains("polarity")) {
+            error = "unbound binding must not carry button/axis/polarity";
+            return false;
+        }
+        table.set(slot, BindingSource::unbound());
+        return true;
+    }
+    if (type == "button") {
+        if (j.contains("axis") || j.contains("polarity")) {
+            error = "button binding must not carry axis/polarity";
+            return false;
+        }
+        std::string buttonName;
+        if (!getString(j, "button", buttonName, error)) return false;
+        const auto button = padButtonFromName(buttonName);
+        if (!button) {
+            error = "unknown pad button: " + buttonName;
+            return false;
+        }
+        table.set(slot, BindingSource::ofButton(*button));
+        return true;
+    }
+    if (type == "axis_direction") {
+        if (j.contains("button")) {
+            error = "axis_direction binding must not carry button";
+            return false;
+        }
+        std::string axisName;
+        if (!getString(j, "axis", axisName, error)) return false;
+        const auto axis = padAxisFromName(axisName);
+        if (!axis) {
+            error = "unknown pad axis: " + axisName;
+            return false;
+        }
+        if (!j.contains("polarity") || !j["polarity"].is_number_integer()) {
+            error = "binding polarity must be an integer";
+            return false;
+        }
+        const int polarity = j["polarity"].get<int>();
+        if (polarity != -1 && polarity != 1) {
+            error = "binding polarity must be -1 or 1";
+            return false;
+        }
+        table.set(slot, BindingSource::axisDirection(*axis, polarity));
+        return true;
+    }
+    error = "unknown binding type: " + type;
+    return false;
+}
+
+// Parses the v2 request's optional controllerBindings object. Devices carry
+// guid + identity + exactly the 12 RetroPad slot bindings in slot order.
+bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
+                             std::string& error) {
+    static const std::array<const char*, 1> kFields = {{"devices"}};
+    if (!j.contains("devices")) {
+        error = "missing controllerBindings field: devices";
+        return false;
+    }
+    checkUnknownFields(j, kFields, error);
+    if (!error.empty()) return false;
+
+    const ordered_json& devices = j["devices"];
+    if (!devices.is_array()) {
+        error = "controllerBindings.devices must be an array";
+        return false;
+    }
+
+    static const std::array<const char*, 3> kDeviceFields = {
+        {"guid", "identity", "bindings"}};
+    static const std::array<const char*, 3> kIdentityFields = {
+        {"vendorId", "productId", "descriptor"}};
+
+    for (const ordered_json& d : devices) {
+        if (!d.is_object()) {
+            error = "controllerBindings device must be an object";
+            return false;
+        }
+        checkUnknownFields(d, kDeviceFields, error);
+        if (!error.empty()) return false;
+        for (const char* key : kDeviceFields) {
+            if (!d.contains(key)) {
+                error = std::string("missing controllerBindings device field: ") + key;
+                return false;
+            }
+        }
+
+        ControllerBindingDevice device;
+        if (!getString(d, "guid", device.guid, error)) return false;
+
+        const ordered_json& id = d["identity"];
+        if (!id.is_object()) {
+            error = "controllerBindings identity must be an object";
+            return false;
+        }
+        checkUnknownFields(id, kIdentityFields, error);
+        if (!error.empty()) return false;
+        for (const char* key : kIdentityFields) {
+            if (!id.contains(key)) {
+                error = std::string("missing controllerBindings identity field: ") + key;
+                return false;
+            }
+        }
+        if (!getNullableId(id, "vendorId", device.identity.vendorId, error)) return false;
+        if (!getNullableId(id, "productId", device.identity.productId, error)) return false;
+        if (!getString(id, "descriptor", device.identity.descriptor, error)) return false;
+
+        const ordered_json& bindings = d["bindings"];
+        if (!bindings.is_array()) {
+            error = "controllerBindings bindings must be an array";
+            return false;
+        }
+        if (bindings.size() != static_cast<size_t>(kRetroPadSlotCount)) {
+            error = "controllerBindings bindings must carry exactly 12 entries";
+            return false;
+        }
+        for (size_t i = 0; i < bindings.size(); ++i) {
+            if (!parseBindingEntry(bindings[i], static_cast<int>(i), device.table, error)) {
+                return false;
+            }
+        }
+
+        out.devices.push_back(std::move(device));
+    }
+    return true;
+}
+
 }  // namespace
 
 const char* toString(ExitKind kind) {
@@ -138,13 +323,21 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
     if (!j.is_object())
         return reject<PlayerRequest>(error, "top-level JSON must be an object");
 
-    static const std::array<const char*, 13> kFields = {{
+    // controllerBindings is v2's OPTIONAL field: it passes the unknown-field
+    // check below but is not part of the required set (absent = defaults).
+    static const std::array<const char*, 14> kFields = {{
+        "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
+        "corePath",        "contentPath", "contentHash", "systemDir",
+        "savePath",        "candidateSavePath", "resultPath",
+        "expectedSaveSize", "video", "controllerBindings",
+    }};
+    static const std::array<const char*, 13> kRequiredFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
         "corePath",        "contentPath", "contentHash", "systemDir",
         "savePath",        "candidateSavePath", "resultPath",
         "expectedSaveSize", "video",
     }};
-    for (const char* key : kFields) {
+    for (const char* key : kRequiredFields) {
         if (!j.contains(key))
             return reject<PlayerRequest>(error,
                                          std::string("missing required field: ") +
@@ -215,6 +408,16 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
     r.video.integerScaling = v["integerScaling"].get<bool>();
     r.video.scanlines = v["scanlines"].get<bool>();
     r.video.sharpFilter = v["sharpFilter"].get<bool>();
+
+    // v2 optional field: stored controller bindings to seed the BindingTable
+    // at launch. Absent (the common case — no stored overrides) means the
+    // player keeps its built-in defaults.
+    if (j.contains("controllerBindings")) {
+        ControllerBindings bindings;
+        if (!parseControllerBindings(j["controllerBindings"], bindings, err))
+            return reject<PlayerRequest>(error, err);
+        r.controllerBindings = std::move(bindings);
+    }
 
     return r;
 }
@@ -316,6 +519,55 @@ std::string serializeRequest(const PlayerRequest& r) {
     video["scanlines"] = r.video.scanlines;
     video["sharpFilter"] = r.video.sharpFilter;
     j["video"] = video;
+
+    // v2 optional field: written only when present (absent = player defaults),
+    // so a request with no stored bindings stays byte-identical to the v1
+    // layout plus the version bump. Device entries use the sidecar's
+    // canonical shape (fixed field order, 2-space indent via dump(2)).
+    if (r.controllerBindings.has_value()) {
+        ordered_json devices = ordered_json::array();
+        for (const ControllerBindingDevice& device : r.controllerBindings->devices) {
+            ordered_json entry;
+            entry["guid"] = device.guid;
+            ordered_json identity;
+            if (device.identity.vendorId.has_value())
+                identity["vendorId"] = *device.identity.vendorId;
+            else
+                identity["vendorId"] = ordered_json(nullptr);
+            if (device.identity.productId.has_value())
+                identity["productId"] = *device.identity.productId;
+            else
+                identity["productId"] = ordered_json(nullptr);
+            identity["descriptor"] = device.identity.descriptor;
+            entry["identity"] = std::move(identity);
+            ordered_json bindings = ordered_json::array();
+            for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
+                const BindingSource& source = device.table.get(slot);
+                ordered_json bindingEntry;
+                bindingEntry["slot"] = retroPadSlotName(slot);
+                switch (source.kind) {
+                    case BindingSource::Kind::kUnbound:
+                        bindingEntry["type"] = "unbound";
+                        break;
+                    case BindingSource::Kind::kButton:
+                        bindingEntry["type"] = "button";
+                        bindingEntry["button"] = padButtonName(source.button);
+                        break;
+                    case BindingSource::Kind::kAxisDirection:
+                        bindingEntry["type"] = "axis_direction";
+                        bindingEntry["axis"] = padAxisName(source.axis);
+                        bindingEntry["polarity"] = source.polarity < 0 ? -1 : 1;
+                        break;
+                }
+                bindings.push_back(std::move(bindingEntry));
+            }
+            entry["bindings"] = std::move(bindings);
+            devices.push_back(std::move(entry));
+        }
+        ordered_json controllerBindings;
+        controllerBindings["devices"] = std::move(devices);
+        j["controllerBindings"] = std::move(controllerBindings);
+    }
     return j.dump(2);
 }
 

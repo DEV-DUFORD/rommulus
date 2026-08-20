@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace romm::player {
@@ -177,6 +178,33 @@ inline const char* padAxisName(PadAxis axis) {
         case PadAxis::kRightTrigger: return "right_trigger";
     }
     return "";
+}
+
+// Strict name -> enum parsers (the inverses of the getters above), used by
+// the v2 launch-request parser to decode sidecar-shaped binding entries.
+// Unknown names yield std::nullopt / -1 so the strict parsers can reject
+// them with a precise error instead of guessing.
+inline int retroPadSlotFromName(const std::string& name) {
+    for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
+        if (name == retroPadSlotName(slot)) return slot;
+    }
+    return -1;
+}
+
+inline std::optional<PadButton> padButtonFromName(const std::string& name) {
+    for (int i = 0; i < kPadButtonCount; ++i) {
+        const PadButton button = static_cast<PadButton>(i);
+        if (name == padButtonName(button)) return button;
+    }
+    return std::nullopt;
+}
+
+inline std::optional<PadAxis> padAxisFromName(const std::string& name) {
+    for (int i = 0; i < kPadAxisCount; ++i) {
+        const PadAxis axis = static_cast<PadAxis>(i);
+        if (name == padAxisName(axis)) return axis;
+    }
+    return std::nullopt;
 }
 
 // Uppercase display name for the editor list (5x7 font is case-aware).

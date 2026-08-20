@@ -294,7 +294,7 @@ int main() {
     }
     {
         PlayerRequest r = f.request;
-        r.protocolVersion = 2;
+        r.protocolVersion = 3;  // v2 is current; anything else is rejected
         expectRejected(writeAndValidate(f, r), "unknown protocol version");
     }
     {

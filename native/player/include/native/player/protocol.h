@@ -4,7 +4,7 @@
 // The desktop supervisor writes a request file atomically before spawning
 // `rommulus-player --request <file>`; the player writes a result file
 // atomically before successful exit. Neither file may carry credentials:
-// the v1 schema deliberately has no origin, username, token, server save
+// the v2 schema deliberately has no origin, username, token, server save
 // ID, or upload URL fields, and the strict parsers below REJECT unknown
 // fields so a secret can never ride along in a future schema typo.
 //
@@ -15,11 +15,14 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
+
+#include "native/player/binding_table.h"
 
 namespace romm::player {
 
 // The only protocol version this binary understands.
-constexpr int kProtocolVersion = 1;
+constexpr int kProtocolVersion = 2;
 
 struct VideoSettings {
     bool fullscreen = false;
@@ -30,9 +33,41 @@ struct VideoSettings {
     bool sharpFilter = false;
 };
 
-// Launch request version 1 (LINUX_X64.md section 12.2). Every field is
-// required; contentHash may be the empty string (hash verification is
-// then skipped) and expectedSaveSize may be null.
+// One device entry of the v2 request's optional controllerBindings field.
+// The device-entry shape REUSES the sidecar schema (binding_sidecar.h):
+// guid + normalized identity + the full 12-slot RetroPad binding table, so
+// the player can seed its BindingTable from a launch request exactly as it
+// would from a sidecar file. Unlike the sidecar (where guid is always a real
+// 32-hex SDL GUID), a launch request may carry an EMPTY guid + identity to
+// mean "apply this table to every connected controller" — which is what the
+// desktop supervisor serializes, since its store keys bindings by core, not
+// by device. The player keeps ONE global BindingTable (SdlInput applies it
+// to every port), so it seeds from the FIRST device entry and ignores the
+// rest.
+struct ControllerBindingIdentity {
+    std::optional<int> vendorId;   // null when the device is not USB-identified
+    std::optional<int> productId;  // null when the device is not USB-identified
+    std::string descriptor;        // "vid:%04x-pid:%04x" or "guid:<hex>" ("" in launch requests)
+};
+
+struct ControllerBindingDevice {
+    std::string guid;      // canonical lowercase SDL GUID, or "" = all controllers
+    ControllerBindingIdentity identity;
+    BindingTable table;    // the 12 RetroPad slot bindings, in slot order
+};
+
+// The v2 request's optional controllerBindings field: per-device binding
+// tables to apply at launch (LINUX_X64.md section 12.2). A present-but-empty
+// devices array is legal and behaves like an absent field (defaults kept).
+struct ControllerBindings {
+    std::vector<ControllerBindingDevice> devices;
+};
+
+// Launch request version 2 (LINUX_X64.md section 12.2). Every field except
+// controllerBindings is required; contentHash may be the empty string (hash
+// verification is then skipped), expectedSaveSize may be null, and
+// controllerBindings may be absent (the player then uses its built-in
+// default binding table).
 struct PlayerRequest {
     int protocolVersion = kProtocolVersion;
     std::string sessionId;
@@ -50,6 +85,9 @@ struct PlayerRequest {
     // desktop Kotlin side must use Long for this field.
     std::optional<int64_t> expectedSaveSize;
     VideoSettings video;
+    // v2: stored controller bindings to apply from the first frame (see
+    // ControllerBindings below). Absent = the player keeps its defaults.
+    std::optional<ControllerBindings> controllerBindings;
 };
 
 // Result exit kinds (LINUX_X64.md section 12.3). Signals, a missing
@@ -88,10 +126,10 @@ struct PlayerResult {
 // if:
 //   - the text is not valid JSON, or the top level is not an object;
 //   - a required field is missing or has the wrong type;
-//   - an unknown field is present (v1 must not carry origin/username/
+//   - an unknown field is present (v2 must not carry origin/username/
 //     token/server-save-id/upload-url — unknown fields are rejected so a
 //     secret can never slip through a schema typo);
-//   - protocolVersion is not 1;
+//   - protocolVersion is not 2;
 //   - an integer field is negative where the schema forbids it.
 std::optional<PlayerRequest> parseRequest(const std::string& json,
                                           std::string* error = nullptr);

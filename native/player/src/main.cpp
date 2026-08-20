@@ -478,6 +478,16 @@ int main(int argc, char* argv[]) {
     // 11. Main loop.
     bool running = true;
     romm::player::SdlInput input;
+    // v2: apply the stored controller bindings from the launch request so
+    // they are active from the FIRST FRAME (the desktop supervisor ingests
+    // the previous session's sidecar and serializes it into this field).
+    // The player keeps one global BindingTable applied to every port, so a
+    // multi-device request seeds from the first device entry; an absent or
+    // empty field keeps the built-in defaults.
+    if (request.controllerBindings.has_value() &&
+        !request.controllerBindings->devices.empty()) {
+        input.setBindings(request.controllerBindings->devices.front().table);
+    }
     romm::player::PauseMenu pauseMenu;
     romm::player::PauseOverlay pauseOverlay;
     // Seed the Video Options submenu with the launch request's settings so

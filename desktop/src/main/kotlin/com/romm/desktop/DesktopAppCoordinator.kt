@@ -49,6 +49,9 @@ import com.romm.androidtv.storage.settingsFile
 import com.romm.desktop.library.DesktopBiosConfigurationProvider
 import com.romm.desktop.network.DesktopNetworkModule
 import com.romm.desktop.player.AdoptionSummary
+import com.romm.desktop.player.CONTROLLER_BINDINGS_SIDECAR_FILE_NAME
+import com.romm.desktop.player.ControllerBindingSidecarCodec
+import com.romm.desktop.player.ControllerBindings
 import com.romm.desktop.player.LINUX_X86_64_ABI
 import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.player.LaunchOutcome
@@ -56,7 +59,9 @@ import com.romm.desktop.player.LaunchRecoveryDiagnostic
 import com.romm.desktop.player.OkHttpRomContentStager
 import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.player.PlayerLaunchParams
+import com.romm.desktop.player.PlayerProtocol
 import com.romm.desktop.player.PrepareLaunchResult
+import com.romm.desktop.player.RetroPadControlMapping
 import com.romm.desktop.player.RomContentStagingException
 import com.romm.desktop.player.RomContentStagingFailure
 import com.romm.desktop.player.RomContentStager
@@ -260,7 +265,13 @@ class DesktopAppCoordinator(
      * instance to an injected [saveSyncDrainExecutorOverride].
      */
     internal val saveStateStore: SaveStateStore = saveStateStoreOverride ?: SqliteSaveStateStore(database)
-    private val controllerBindingStore = SqliteControllerBindingStore(database)
+
+    /**
+     * Durable controller-binding overrides (LINUX_X64.md §11.9). `internal` so coordinator-level
+     * tests can assert on ingested rows; production traffic goes through [ingestControllerBindingSidecar]
+     * and [loadLaunchControllerBindings].
+     */
+    internal val controllerBindingStore = SqliteControllerBindingStore(database)
     private val deviceIdentityStorage = SqliteDeviceIdentityStorage(database)
     private val schedulerStateStore: SchedulerStateStore = SqliteSchedulerStateStore(database)
 
@@ -446,7 +457,14 @@ class DesktopAppCoordinator(
      * - [playerSupervisor].prepareLaunch — called by [launchPlayer] to commit request + journal
      *   atomically and spawn the player.
      */
-    val playerSupervisor: LaunchJournalSupervisor by lazy { playerSupervisorOverride ?: LaunchJournalSupervisor.forPaths(paths) }
+    /**
+     * Production wiring passes [ingestControllerBindingSidecar] as the sidecar ingestor so a
+     * finished session's `<sessionDir>/controller-bindings.json` is persisted into
+     * [controllerBindingStore] BEFORE reconciliation deletes the session artifacts (§11.9).
+     */
+    val playerSupervisor: LaunchJournalSupervisor by lazy {
+        playerSupervisorOverride ?: LaunchJournalSupervisor.forPaths(paths, ::ingestControllerBindingSidecar)
+    }
 
     /** ROM detail without a network fetch (test seam); production reads the presenter's current UI state. */
     private val detailLookup: (Long) -> RomDetail? = romDetailLookup ?: { id ->
@@ -500,6 +518,67 @@ class DesktopAppCoordinator(
             is PlayerExitReport.ReconcileFailed -> Unit
         }
         return report
+    }
+
+    /**
+     * Ingests the player's controller-binding sidecar (LINUX_X64.md §11.9): parses
+     * `<sessionDir>/controller-bindings.json` and upserts each device's 12-slot table into
+     * [controllerBindingStore] under the session's core — the sidecar carries no core identity,
+     * so it is bound to the session's own request file (strictly re-parsed from disk). On success
+     * the sidecar is DELETED (it is a session artifact); on any failure it is preserved for
+     * forensics and reconciliation proceeds untouched.
+     *
+     * Never throws (the [LaunchJournalSupervisor] ingestor contract) and idempotent: absent or
+     * already-ingested files are no-ops.
+     */
+    internal fun ingestControllerBindingSidecar(sessionDir: Path) {
+        val sidecarPath = sessionDir.resolve(CONTROLLER_BINDINGS_SIDECAR_FILE_NAME)
+        if (!Files.isRegularFile(sidecarPath)) return
+
+        val coreId = runCatching {
+            Files.readString(sessionDir.resolve("request.json"))
+                .let { PlayerProtocol.parseRequest(it).getOrNull()?.coreId }
+        }.getOrNull()
+        if (coreId.isNullOrBlank()) {
+            log.warning("binding sidecar ingestion skipped for $sessionDir: request file missing or unparseable; sidecar preserved")
+            return
+        }
+
+        val text = runCatching { Files.readString(sidecarPath) }.getOrElse { e ->
+            log.warning("binding sidecar unreadable at $sidecarPath: $e; preserved")
+            return
+        }
+        val sidecar = ControllerBindingSidecarCodec.parse(text).getOrElse { e ->
+            log.warning("binding sidecar unusable at $sidecarPath: ${e.message}; preserved")
+            return
+        }
+
+        // Every device entry carries the player's single global table; upsert per device (the
+        // last device wins — identical tables in practice, so this is a no-op).
+        val records = sidecar.devices.flatMap { device -> RetroPadControlMapping.toRecords(coreId, device) }
+        controllerBindingStore.upsertAll(records)
+            .onSuccess {
+                runCatching { Files.deleteIfExists(sidecarPath) }.onFailure { e ->
+                    log.warning("binding sidecar ingested but could not be deleted at $sidecarPath: $e")
+                }
+            }
+            .onFailure { e ->
+                log.warning("binding sidecar ingestion failed for core $coreId: $e; sidecar preserved")
+            }
+    }
+
+    /**
+     * Loads the stored binding table for [coreId] and serializes it into the v2 request's
+     * `controllerBindings` field so the player applies the user's remaps from the FIRST FRAME.
+     * Returns null when nothing is stored (or the stored table is incomplete) — the field is then
+     * omitted and the player keeps its built-in defaults.
+     */
+    private fun loadLaunchControllerBindings(coreId: String): ControllerBindings? = runCatching {
+        val records = controllerBindingStore.loadForPlayer(coreId, RetroPadControlMapping.PLAYER_INDEX)
+        RetroPadControlMapping.toLaunchBindings(records)
+    }.getOrElse { e ->
+        log.warning("loading stored controller bindings for $coreId failed: $e; launching with defaults")
+        null
     }
 
     /**
@@ -761,6 +840,9 @@ class DesktopAppCoordinator(
                 scanlines = settingsAdapter.scanlinesEnabled(),
                 sharpFilter = settingsAdapter.sharpFilterEnabled(),
             ),
+            // Stored controller overrides (ingested from the previous session's sidecar, §11.9):
+            // null when nothing is stored — the player then keeps its built-in defaults.
+            controllerBindings = loadLaunchControllerBindings(core.coreId),
         )
 
         return when (val result = playerSupervisor.prepareLaunch(params, sessionId)) {

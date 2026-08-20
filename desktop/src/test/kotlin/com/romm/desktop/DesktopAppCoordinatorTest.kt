@@ -11,11 +11,14 @@ import com.romm.androidtv.storage.firmwareDir
 import com.romm.androidtv.storage.fakes.InMemorySessionRecordStore
 import com.romm.androidtv.storage.ports.SettingsKeys
 import com.romm.desktop.library.StubServer
+import com.romm.desktop.player.ControllerBindingIdentity
 import com.romm.desktop.player.FakePlayerProcessLauncher
 import com.romm.desktop.player.FakeRomContentStager
 import com.romm.desktop.player.JournalState
 import com.romm.desktop.player.LaunchJournalSupervisor
+import com.romm.desktop.player.PlayerBindingType
 import com.romm.desktop.player.PlayerExitReport
+import com.romm.desktop.player.PlayerSlotBinding
 import com.romm.desktop.player.RomContentStagingException
 import com.romm.desktop.player.RomContentStagingFailure
 import com.romm.desktop.player.VideoSettings
@@ -369,6 +372,180 @@ class DesktopAppCoordinatorTest {
 
         assertThat(launcher.launches.single().video).isEqualTo(VideoSettings())
         waitForReconciled(supervisor, started.sessionId)
+    }
+
+    // ---------------------------------------------------------------- controller bindings (Phase 9, §11.9)
+
+    /** A sidecar the fake player writes at shutdown: one USB pad with a non-default table. */
+    private val fakeBindingSidecar = """
+        {
+          "protocolVersion": 1,
+          "devices": [
+            {
+              "guid": "036d04ca010000000000000000000000",
+              "identity": {"vendorId": 1133, "productId": 458, "descriptor": "vid:046d-pid:01ca"},
+              "bindings": [
+                {"slot": "a", "type": "button", "button": "south"},
+                {"slot": "b", "type": "axis_direction", "axis": "left_x", "polarity": -1},
+                {"slot": "x", "type": "button", "button": "west"},
+                {"slot": "y", "type": "unbound"},
+                {"slot": "select", "type": "button", "button": "back"},
+                {"slot": "start", "type": "button", "button": "start"},
+                {"slot": "left_shoulder", "type": "axis_direction", "axis": "left_trigger", "polarity": 1},
+                {"slot": "right_shoulder", "type": "button", "button": "right_shoulder"},
+                {"slot": "dpad_up", "type": "button", "button": "dpad_up"},
+                {"slot": "dpad_down", "type": "button", "button": "dpad_down"},
+                {"slot": "dpad_left", "type": "axis_direction", "axis": "left_x", "polarity": -1},
+                {"slot": "dpad_right", "type": "button", "button": "dpad_right"}
+              ]
+            }
+          ]
+        }
+    """.trimIndent()
+
+    /** The 12-slot table the fake sidecar above carries, in wire order. */
+    private val expectedSidecarSlots = listOf(
+        PlayerSlotBinding("a", PlayerBindingType.BUTTON, button = "south"),
+        PlayerSlotBinding("b", PlayerBindingType.AXIS_DIRECTION, axis = "left_x", polarity = -1),
+        PlayerSlotBinding("x", PlayerBindingType.BUTTON, button = "west"),
+        PlayerSlotBinding("y", PlayerBindingType.UNBOUND),
+        PlayerSlotBinding("select", PlayerBindingType.BUTTON, button = "back"),
+        PlayerSlotBinding("start", PlayerBindingType.BUTTON, button = "start"),
+        PlayerSlotBinding("left_shoulder", PlayerBindingType.AXIS_DIRECTION, axis = "left_trigger", polarity = 1),
+        PlayerSlotBinding("right_shoulder", PlayerBindingType.BUTTON, button = "right_shoulder"),
+        PlayerSlotBinding("dpad_up", PlayerBindingType.BUTTON, button = "dpad_up"),
+        PlayerSlotBinding("dpad_down", PlayerBindingType.BUTTON, button = "dpad_down"),
+        PlayerSlotBinding("dpad_left", PlayerBindingType.AXIS_DIRECTION, axis = "left_x", polarity = -1),
+        PlayerSlotBinding("dpad_right", PlayerBindingType.BUTTON, button = "dpad_right"),
+    )
+
+    /**
+     * Coordinator wired the way production wires it: the supervisor ingests the session's
+     * controller-binding sidecar into the coordinator's binding store. The `lateinit` dance is
+     * because the ingestor lambda references the coordinator that owns this very supervisor.
+     */
+    private fun bindingWiredCoordinator(
+        paths: AppPaths,
+        platformSlug: String,
+        launcher: FakePlayerProcessLauncher,
+    ): Pair<DesktopAppCoordinator, LaunchJournalSupervisor> {
+        lateinit var c: DesktopAppCoordinator
+        val supervisor = LaunchJournalSupervisor(
+            journalsRoot = paths.stateDir.resolve("journals"),
+            launcher = launcher,
+            bindingSidecarIngestor = { sessionDir -> c.ingestControllerBindingSidecar(sessionDir) },
+        )
+        c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = platformSlug) },
+            romContentStagerOverride = FakeRomContentStager(),
+        )
+        return c to supervisor
+    }
+
+    @Test
+    fun `player sidecar is ingested into the binding store and deleted on exit`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        // Simulate what the real player does at shutdown: write a non-default binding sidecar
+        // into the session dir (synchronously, before the exit watcher can run).
+        val launcher = FakePlayerProcessLauncher(onLaunch = { request ->
+            Files.writeString(
+                Path.of(request.resultPath).parent.resolve("controller-bindings.json"),
+                fakeBindingSidecar,
+            )
+        })
+        val (c, supervisor) = bindingWiredCoordinator(paths, "gb", launcher)
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started // cast asserts Started
+        waitForReconciled(supervisor, started.sessionId)
+
+        // All 12 slots were stored for the session's core under player index 0 / PRIMARY.
+        val records = c.controllerBindingStore.loadForCore("gambatte")
+        assertThat(records).hasSize(12)
+        assertThat(records).allSatisfy { record ->
+            assertThat(record.playerIndex).isZero()
+            assertThat(record.bindingSlot).isZero()
+        }
+        fun row(controlId: String) = records.first { it.controlId == controlId }
+        // slot a (button_a): KEY with the PadButton ordinal of "south" (0).
+        assertThat(row("button_a").bindingType).isEqualTo("KEY")
+        assertThat(row("button_a").inputCode).isZero()
+        assertThat(row("button_a").polarity).isNull()
+        // slot b (button_b): AXIS_DIRECTION left_x (ordinal 0), polarity -1.
+        assertThat(row("button_b").bindingType).isEqualTo("AXIS_DIRECTION")
+        assertThat(row("button_b").inputCode).isZero()
+        assertThat(row("button_b").polarity).isEqualTo(-1)
+        // slot y (button_y): unbound -> UNMAPPED row.
+        assertThat(row("button_y").bindingType).isEqualTo("UNMAPPED")
+        // left_shoulder (l1): AXIS_DIRECTION left_trigger (ordinal 4), polarity +1.
+        assertThat(row("l1").bindingType).isEqualTo("AXIS_DIRECTION")
+        assertThat(row("l1").inputCode).isEqualTo(4)
+        assertThat(row("l1").polarity).isEqualTo(1)
+        // dpad_up (d_pad_up): KEY with the PadButton ordinal of "dpad_up" (8).
+        assertThat(row("d_pad_up").bindingType).isEqualTo("KEY")
+        assertThat(row("d_pad_up").inputCode).isEqualTo(8)
+
+        // The sidecar is a session artifact: deleted after successful ingestion.
+        val sessionDir = supervisor.store.sessionDir(started.sessionId)
+        assertThat(Files.exists(sessionDir.resolve("controller-bindings.json"))).isFalse()
+    }
+
+    @Test
+    fun `stored bindings are serialized into the v2 request and omitted when none exist`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher(onLaunch = { request ->
+            Files.writeString(
+                Path.of(request.resultPath).parent.resolve("controller-bindings.json"),
+                fakeBindingSidecar,
+            )
+        })
+        val (c, supervisor) = bindingWiredCoordinator(paths, "gb", launcher)
+
+        // First launch: nothing stored yet -> the v2 field is OMITTED (player uses defaults).
+        val first = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        assertThat(launcher.launches[0].controllerBindings).isNull()
+        waitForReconciled(supervisor, first.sessionId)
+
+        // Second launch: the ingested table is serialized into controllerBindings so the player
+        // applies it from the first frame — one "all controllers" device (empty guid/identity)
+        // carrying the stored 12-slot table.
+        val second = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        waitForReconciled(supervisor, second.sessionId)
+
+        val bindings = launcher.launches[1].controllerBindings
+            ?: throw AssertionError("second launch must carry controllerBindings")
+        assertThat(bindings.devices).hasSize(1)
+        assertThat(bindings.devices[0].guid).isEmpty()
+        assertThat(bindings.devices[0].identity).isEqualTo(ControllerBindingIdentity(null, null, ""))
+        assertThat(bindings.devices[0].bindings).containsExactlyElementsOf(expectedSidecarSlots)
+    }
+
+    @Test
+    fun `malformed sidecar is preserved and never breaks reconciliation`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher(onLaunch = { request ->
+            Files.writeString(
+                Path.of(request.resultPath).parent.resolve("controller-bindings.json"),
+                """{"protocolVersion": 1, "devices": [{"guid": 42}]}""",
+            )
+        })
+        val (c, supervisor) = bindingWiredCoordinator(paths, "gb", launcher)
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        waitForReconciled(supervisor, started.sessionId)
+
+        // Nothing was ingested...
+        assertThat(c.controllerBindingStore.loadForCore("gambatte")).isEmpty()
+        // ...and the malformed sidecar is preserved for forensics (fail-closed).
+        val sessionDir = supervisor.store.sessionDir(started.sessionId)
+        assertThat(Files.exists(sessionDir.resolve("controller-bindings.json"))).isTrue()
     }
 
     @Test

@@ -1,6 +1,7 @@
-// test_player_protocol.cpp — v1 request/result schema: strict parsing,
+// test_player_protocol.cpp — v2 request/result schema: strict parsing,
 // malformed-JSON fuzzing, missing/unknown/wrong-type fields, protocol
-// version rejection, secret-field rejection, and serialize/parse
+// version rejection, secret-field rejection, the optional controllerBindings
+// field (round-trip + defaults + strict sub-schema), and serialize/parse
 // round-trips (LINUX_X64.md section 12.2 / 12.3).
 #include "native/player/protocol.h"
 
@@ -11,7 +12,12 @@
 #include <string>
 #include <vector>
 
+using romm::player::BindingSource;
+using romm::player::ControllerBindings;
 using romm::player::ExitKind;
+using romm::player::kRetroPadSlotCount;
+using romm::player::PadAxis;
+using romm::player::PadButton;
 using romm::player::PlayerRequest;
 using romm::player::PlayerResult;
 using romm::player::exitKindFromString;
@@ -41,6 +47,41 @@ PlayerRequest sampleRequest() {
     r.video.scanlines = true;
     r.video.sharpFilter = true;
     return r;
+}
+
+// A v2 controllerBindings value with ONE device covering all three entry
+// shapes (button / axis_direction / unbound) across the 12 slots, plus one
+// "apply to every controller" device with an empty guid/identity.
+ControllerBindings sampleControllerBindings() {
+    ControllerBindings cb;
+
+    romm::player::ControllerBindingDevice usb;
+    usb.guid = "036d04ca010000000000000000000000";  // 32-hex SDL USB GUID
+    usb.identity.vendorId = 0x046d;
+    usb.identity.productId = 0x01ca;
+    usb.identity.descriptor = "vid:046d-pid:01ca";
+    usb.table.set(0, BindingSource::ofButton(PadButton::kSouth));       // a
+    usb.table.set(1, BindingSource::axisDirection(PadAxis::kLeftX, -1));  // b
+    usb.table.set(2, BindingSource::ofButton(PadButton::kWest));        // x
+    usb.table.set(3, BindingSource::unbound());                         // y
+    usb.table.set(4, BindingSource::ofButton(PadButton::kBack));        // select
+    usb.table.set(5, BindingSource::ofButton(PadButton::kStart));       // start
+    usb.table.set(6, BindingSource::axisDirection(PadAxis::kLeftTrigger, 1));  // left_shoulder
+    usb.table.set(7, BindingSource::ofButton(PadButton::kRightShoulder));      // right_shoulder
+    usb.table.set(8, BindingSource::ofButton(PadButton::kDpadUp));     // dpad_up
+    usb.table.set(9, BindingSource::ofButton(PadButton::kDpadDown));   // dpad_down
+    usb.table.set(10, BindingSource::axisDirection(PadAxis::kLeftX, -1));      // dpad_left
+    usb.table.set(11, BindingSource::ofButton(PadButton::kDpadRight));  // dpad_right
+    cb.devices.push_back(std::move(usb));
+
+    romm::player::ControllerBindingDevice any;
+    any.guid = "";                      // empty guid = apply to every controller
+    any.identity.vendorId = std::nullopt;
+    any.identity.productId = std::nullopt;
+    any.identity.descriptor = "";
+    cb.devices.push_back(std::move(any));  // default table
+
+    return cb;
 }
 
 PlayerResult sampleResult() {
@@ -84,6 +125,24 @@ void checkRoundTripRequest(const PlayerRequest& in) {
     CHECK_EQ(out->video.integerScaling, in.video.integerScaling);
     CHECK_EQ(out->video.scanlines, in.video.scanlines);
     CHECK_EQ(out->video.sharpFilter, in.video.sharpFilter);
+
+    // v2 optional field: presence must round-trip, and every device's
+    // guid/identity/table must be byte-equal.
+    CHECK(out->controllerBindings.has_value() == in.controllerBindings.has_value());
+    if (in.controllerBindings.has_value()) {
+        const auto& a = in.controllerBindings->devices;
+        const auto& b = out->controllerBindings->devices;
+        CHECK(a.size() == b.size());
+        for (size_t d = 0; d < a.size() && d < b.size(); ++d) {
+            CHECK_EQ(a[d].guid, b[d].guid);
+            CHECK(a[d].identity.vendorId == b[d].identity.vendorId);
+            CHECK(a[d].identity.productId == b[d].identity.productId);
+            CHECK_EQ(a[d].identity.descriptor, b[d].identity.descriptor);
+            for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
+                CHECK(a[d].table.get(slot) == b[d].table.get(slot));
+            }
+        }
+    }
 }
 
 void checkRoundTripResult(const PlayerResult& in) {
@@ -140,11 +199,132 @@ int main() {
     checkRoundTripRequest(sampleRequest());
 
     // Empty contentHash and null expectedSaveSize must survive a
-    // round-trip (both are legal in v1).
+    // round-trip (both are legal in v2).
     PlayerRequest sparse = sampleRequest();
     sparse.contentHash = "";
     sparse.expectedSaveSize = std::nullopt;
     checkRoundTripRequest(sparse);
+
+    // --- v2 controllerBindings field ---------------------------------
+    // Round-trip with the optional field present (two devices: a USB pad
+    // with a remapped table and an empty-guid "all controllers" entry).
+    {
+        PlayerRequest withBindings = sampleRequest();
+        withBindings.controllerBindings = sampleControllerBindings();
+        checkRoundTripRequest(withBindings);
+
+        std::string json = serializeRequest(withBindings);
+        CHECK(json.find("\"controllerBindings\"") != std::string::npos);
+    }
+
+    // Optional-field default: absent on the wire -> nullopt, and a request
+    // without stored bindings must NOT emit the field at all (the player
+    // then keeps its built-in defaults).
+    {
+        const std::string json = serializeRequest(sampleRequest());
+        CHECK(json.find("controllerBindings") == std::string::npos);
+        std::string err;
+        auto r = parseRequest(json, &err);
+        CHECK(r.has_value());
+        if (r) CHECK(!r->controllerBindings.has_value());
+    }
+
+    // A present-but-empty devices array is legal and round-trips.
+    {
+        PlayerRequest emptyDevices = sampleRequest();
+        emptyDevices.controllerBindings = ControllerBindings{};
+        checkRoundTripRequest(emptyDevices);
+    }
+
+    // Strict sub-schema: every mutation below must be rejected.
+    auto requestWithBindings = sampleRequest();
+    requestWithBindings.controllerBindings = sampleControllerBindings();
+    const std::string bindingsJson = serializeRequest(requestWithBindings);
+    {
+        using nlohmann::json;
+        json base = json::parse(bindingsJson);
+
+        // Missing the inner required "devices" array.
+        json mutated = base;
+        mutated["controllerBindings"].erase("devices");
+        expectRequestRejected(mutated.dump(), "missing controllerBindings.devices");
+
+        // Unknown field at each nesting level (no secrets, ever).
+        mutated = base;
+        mutated["controllerBindings"]["extra"] = true;
+        expectRequestRejected(mutated.dump(), "unknown controllerBindings field");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["serial"] = "abc";
+        expectRequestRejected(mutated.dump(), "unknown device field");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["identity"]["mac"] = "aa:bb";
+        expectRequestRejected(mutated.dump(), "unknown identity field");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["bindings"][0]["mod"] = true;
+        expectRequestRejected(mutated.dump(), "unknown binding entry field");
+
+        // devices must be an array.
+        mutated = base;
+        mutated["controllerBindings"]["devices"] = json::object({{"guid", ""}});
+        expectRequestRejected(mutated.dump(), "devices as object");
+
+        // Wrong types in identity / guid.
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["guid"] = 42;
+        expectRequestRejected(mutated.dump(), "guid as number");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["identity"]["vendorId"] = -1;
+        expectRequestRejected(mutated.dump(), "negative vendorId");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["identity"]["productId"] = "cafe";
+        expectRequestRejected(mutated.dump(), "productId as string");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["identity"].erase("descriptor");
+        expectRequestRejected(mutated.dump(), "missing identity descriptor");
+
+        // Binding-entry strictness: every slot must appear exactly once, in
+        // order, with the exact field set for its declared type.
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["bindings"].erase(3);  // 11 entries
+        expectRequestRejected(mutated.dump(), "only 11 binding entries");
+        mutated = base;
+        std::swap(mutated["controllerBindings"]["devices"][0]["bindings"][0],
+                  mutated["controllerBindings"]["devices"][0]["bindings"][1]);  // out of order
+        expectRequestRejected(mutated.dump(), "binding slots out of order");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["bindings"][2] =
+            mutated["controllerBindings"]["devices"][0]["bindings"][1];  // duplicate slot
+        expectRequestRejected(mutated.dump(), "duplicate binding slot");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["bindings"][0]["slot"] = "z";
+        expectRequestRejected(mutated.dump(), "unknown slot name");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["bindings"][0]["button"] = "trigger";
+        expectRequestRejected(mutated.dump(), "unknown pad button");
+        mutated = base;  // slot b is axis_direction left_x -1
+        mutated["controllerBindings"]["devices"][0]["bindings"][1]["axis"] = "hat_z";
+        expectRequestRejected(mutated.dump(), "unknown pad axis");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["bindings"][1]["polarity"] = 2;
+        expectRequestRejected(mutated.dump(), "polarity out of range");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["bindings"][1].erase("polarity");
+        expectRequestRejected(mutated.dump(), "missing polarity");
+        // Type-specific field sets: unbound must not carry button, button
+        // must not carry axis/polarity, axis_direction must not carry button.
+        mutated = base;  // slot y is unbound
+        mutated["controllerBindings"]["devices"][0]["bindings"][3]["button"] = "south";
+        expectRequestRejected(mutated.dump(), "unbound carrying button");
+        mutated = base;  // slot a is button
+        mutated["controllerBindings"]["devices"][0]["bindings"][0]["axis"] = "left_x";
+        expectRequestRejected(mutated.dump(), "button carrying axis");
+        mutated = base;  // slot b is axis_direction
+        mutated["controllerBindings"]["devices"][0]["bindings"][1]["button"] = "south";
+        expectRequestRejected(mutated.dump(), "axis_direction carrying button");
+        mutated = base;
+        mutated["controllerBindings"]["devices"][0]["bindings"][0]["type"] = "hat";
+        expectRequestRejected(mutated.dump(), "unknown binding type");
+    }
 
     checkRoundTripResult(sampleResult());
     PlayerResult failed = sampleResult();
@@ -307,8 +487,9 @@ int main() {
 
     // --- Unknown protocol versions -----------------------------------
     // 4294967297 (2^32+1) wraps to 1 in a 32-bit read; the parser must
-    // compare as int64_t and reject it.
-    for (long version : {0L, -1L, 2L, 99L, 4294967297L}) {
+    // compare as int64_t and reject it. (v1 requests are ALSO rejected now
+    // that the protocol is at v2 — covered by version 1L below.)
+    for (long version : {0L, -1L, 1L, 3L, 99L, 4294967297L}) {
         json mutated = base;
         mutated["protocolVersion"] = version;
         expectRequestRejected(mutated.dump(), "unknown request version");
@@ -317,19 +498,19 @@ int main() {
         expectResultRejected(mutatedResult.dump(), "unknown result version");
     }
 
-    // --- Explicit v1 acceptance (the only supported version) ---------
+    // --- Explicit v2 acceptance (the only supported version) ---------
     {
         std::string err;
-        json v1 = base;
-        v1["protocolVersion"] = 1;
-        auto r = parseRequest(v1.dump(), &err);
+        json v2 = base;
+        v2["protocolVersion"] = 2;
+        auto r = parseRequest(v2.dump(), &err);
         CHECK(r.has_value());
-        if (r) CHECK_EQ(r->protocolVersion, 1);
-        json v1Result = resultBase;
-        v1Result["protocolVersion"] = 1;
-        auto rr = parseResult(v1Result.dump(), &err);
+        if (r) CHECK_EQ(r->protocolVersion, 2);
+        json v2Result = resultBase;
+        v2Result["protocolVersion"] = 2;
+        auto rr = parseResult(v2Result.dump(), &err);
         CHECK(rr.has_value());
-        if (rr) CHECK_EQ(rr->protocolVersion, 1);
+        if (rr) CHECK_EQ(rr->protocolVersion, 2);
     }
 
     // --- expectedSaveSize is a 64-bit byte size ----------------------

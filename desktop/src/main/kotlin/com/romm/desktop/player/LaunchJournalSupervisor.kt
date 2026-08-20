@@ -25,6 +25,8 @@ data class PlayerLaunchParams(
     val savePath: Path,
     val expectedSaveSize: Long? = null,
     val video: VideoSettings = VideoSettings(),
+    /** v2 optional: stored controller bindings to apply from the first frame; null = player defaults. */
+    val controllerBindings: ControllerBindings? = null,
 )
 
 /** A prepared (or recovered) player session and its on-disk artifacts. */
@@ -268,9 +270,25 @@ class LaunchJournalSupervisor(
     /** Liveness probe for a session's player (a real probe lands with the player in Wave 3+). */
     private val playerLiveness: (String) -> PlayerLiveness = { PlayerLiveness.DEAD },
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * Ingests the player's controller-binding sidecar (`<sessionDir>/controller-bindings.json`,
+     * §11.9) BEFORE reconciliation can delete the session artifacts. Invoked from [onPlayerExit]
+     * and [reconcile] (the startup-replay path) with the session directory; it MUST be
+     * idempotent (a second call finds no file) and MUST NOT throw — failures are logged by the
+     * ingestor itself and never break reconciliation. A crashed player never writes a sidecar,
+     * so crash paths simply find nothing to do. Null (the default) disables ingestion.
+     */
+    private val bindingSidecarIngestor: ((Path) -> Unit)? = null,
 ) {
 
     internal val store = LaunchJournalStore(journalsRoot)
+
+    /** Runs the sidecar ingestor fail-soft (see [bindingSidecarIngestor] for the contract). */
+    private fun ingestBindingSidecar(sessionId: String) {
+        bindingSidecarIngestor?.let { ingestor ->
+            runCatching { ingestor(store.sessionDir(sessionId)) }
+        }
+    }
 
     // ------------------------------------------------------------------ prepare
 
@@ -311,6 +329,7 @@ class LaunchJournalSupervisor(
             resultPath = resultPath.toString(),
             expectedSaveSize = params.expectedSaveSize,
             video = params.video,
+            controllerBindings = params.controllerBindings,
         )
 
         // Step 2: request first — an orphan request (no journal) is inert.
@@ -360,6 +379,12 @@ class LaunchJournalSupervisor(
                 return PlayerExitReport.ReconcileFailed(session, "journal unreadable or malformed; preserved: ${e.message}")
             },
         ) ?: return PlayerExitReport.JournalMissing(session.sessionId)
+
+        // Ingest the player's controller-binding sidecar (if it wrote one) BEFORE any
+        // reconciliation below can delete the session artifacts. Runs for every exit kind —
+        // a sidecar only exists when the player completed its shutdown sequence, so this is
+        // a no-op on crash paths.
+        ingestBindingSidecar(session.sessionId)
 
         val resultState = readResultFile(session)
         if (resultState !is ResultFile.Valid || resultState.value.sessionId != session.sessionId) {
@@ -513,6 +538,11 @@ class LaunchJournalSupervisor(
         val journal = store.read(sessionId)
             .getOrElse { return ReconcileOutcome.Failed("journal unreadable: ${it.message}") }
             ?: return ReconcileOutcome.Failed("no journal for session $sessionId")
+
+        // Startup-replay path: a sidecar may still be on disk when the process died between
+        // the player's exit and the exit watcher. Idempotent no-op when already ingested or
+        // absent (covers the RECONCILED early-return below too).
+        ingestBindingSidecar(sessionId)
 
         if (journal.state == JournalState.RECONCILED) {
             cleanupSession(sessionId)
@@ -780,11 +810,15 @@ class LaunchJournalSupervisor(
         val ADOPTABLE_EXIT_KINDS = setOf(PlayerExitKind.COMPLETED, PlayerExitKind.CORE_REQUESTED_SHUTDOWN)
 
         /** Production wiring: journals under the XDG state root, real ProcessBuilder launcher. */
-        fun forPaths(paths: AppPaths): LaunchJournalSupervisor {
+        fun forPaths(
+            paths: AppPaths,
+            bindingSidecarIngestor: ((Path) -> Unit)? = null,
+        ): LaunchJournalSupervisor {
             val journalsRoot = paths.stateDir.resolve("journals")
             return LaunchJournalSupervisor(
                 journalsRoot = journalsRoot,
                 launcher = ProcessBuilderPlayerLauncher.defaultFor(journalsRoot, paths),
+                bindingSidecarIngestor = bindingSidecarIngestor,
             )
         }
     }
