@@ -82,6 +82,8 @@ import com.romm.desktop.storage.sqlite.SqliteSessionRecordStore
 import com.romm.desktop.sync.BackgroundSyncSchedulerImpl
 import com.romm.desktop.sync.FileSaveContentGateway
 import com.romm.desktop.sync.RommSyncApiGateway
+import com.romm.desktop.sync.SaveConflictResolutionResult
+import com.romm.desktop.sync.SaveConflictResolver
 import com.romm.desktop.sync.SaveSyncDeviceIdentityLoader
 import com.romm.desktop.sync.SaveSyncDrainExecutor
 import com.romm.desktop.sync.SaveSyncSession
@@ -141,6 +143,8 @@ import kotlinx.coroutines.launch
  * @param saveSyncDrainExecutorOverride Test seam: inject a [SaveSyncDrainExecutor] backed by fake
  *                                 sync seams so drain tests never touch the network; production
  *                                 wires [FileSaveContentGateway] + [RommSyncApiGateway].
+ * @param saveConflictResolverOverride Test seam: inject a [SaveConflictResolver] over fake seams
+ *                                 so conflict-resolution tests never touch the network/filesystem.
  */
 
 /** Outcome of [DesktopAppCoordinator.launchPlayer]. */
@@ -238,6 +242,7 @@ class DesktopAppCoordinator(
     romContentStagerOverride: RomContentStager? = null,
     saveStateStoreOverride: SaveStateStore? = null,
     saveSyncDrainExecutorOverride: SaveSyncDrainExecutor? = null,
+    saveConflictResolverOverride: SaveConflictResolver? = null,
 ) {
 
     // ------------------------------------------------------------------ storage
@@ -353,26 +358,53 @@ class DesktopAppCoordinator(
      * [DesktopNetworkModule.deviceRepository]. Tests inject a fake-backed executor via
      * [saveSyncDrainExecutorOverride].
      */
+    /**
+     * Durable-session reader shared by the drain executor and the conflict resolver: null without
+     * a coherent non-kiosk session (blank origin, kiosk/anonymous record) — those sessions then
+     * classify AUTH_REQUIRED / "no active session", matching Android.
+     */
+    private val saveSyncSessionReader = SaveSyncSessionReader {
+        val origin = settingsAdapter.currentProfile().origin
+        if (origin.isBlank()) return@SaveSyncSessionReader null
+        // coherentRecord is null without a non-blank username — kiosk sessions therefore
+        // drain as AUTH_REQUIRED, matching Android's "no active session" classification.
+        val record = sessionStorage.coherentRecord(origin) ?: return@SaveSyncSessionReader null
+        SaveSyncSession(record.origin, record.username)
+    }
+
+    /** Device-identity loader shared by the drain executor and the conflict resolver. */
+    private val saveSyncDeviceIdentityLoader = SaveSyncDeviceIdentityLoader { origin, username ->
+        // Runs on the scheduler's drain thread or a worker (never the UI thread), so blocking is fine.
+        when (val result = runBlocking { network.deviceRepository.ensureRegistered(origin, username) }) {
+            is DeviceRegistrationResult.Success -> result.identity
+            is DeviceRegistrationResult.Failure -> null
+        }
+    }
+
     val saveSyncDrainExecutor: SaveSyncDrainExecutor by lazy {
         saveSyncDrainExecutorOverride ?: SaveSyncDrainExecutor(
             pendingOperations = saveStateStore,
             saveReplicas = saveStateStore,
             content = FileSaveContentGateway(paths.dataDir.toFile()),
-            sessionReader = SaveSyncSessionReader {
-                val origin = settingsAdapter.currentProfile().origin
-                if (origin.isBlank()) return@SaveSyncSessionReader null
-                // coherentRecord is null without a non-blank username — kiosk sessions therefore
-                // drain as AUTH_REQUIRED, matching Android's "no active session" classification.
-                val record = sessionStorage.coherentRecord(origin) ?: return@SaveSyncSessionReader null
-                SaveSyncSession(record.origin, record.username)
-            },
-            deviceIdentityLoader = SaveSyncDeviceIdentityLoader { origin, username ->
-                // Runs on the scheduler's drain thread (never the UI thread), so blocking is fine.
-                when (val result = runBlocking { network.deviceRepository.ensureRegistered(origin, username) }) {
-                    is DeviceRegistrationResult.Success -> result.identity
-                    is DeviceRegistrationResult.Failure -> null
-                }
-            },
+            sessionReader = saveSyncSessionReader,
+            deviceIdentityLoader = saveSyncDeviceIdentityLoader,
+            sync = RommSyncApiGateway(network.okHttpClient),
+            shouldAutoclean = { settingsAdapter.autocleanSavesOnUpload() },
+        )
+    }
+
+    /**
+     * Explicit conflict resolver (Phase 9 — the user-facing half of "conflict preserves both
+     * copies"): honors the detail screen's Keep-local / Keep-server choice for a CONFLICT replica.
+     * Production seams mirror the drain executor's: [FileSaveContentGateway] over the data root,
+     * the shared session/identity readers, and [RommSyncApiGateway] on the authenticated client.
+     */
+    val saveConflictResolver: SaveConflictResolver by lazy {
+        saveConflictResolverOverride ?: SaveConflictResolver(
+            saveReplicas = saveStateStore,
+            content = FileSaveContentGateway(paths.dataDir.toFile()),
+            sessionReader = saveSyncSessionReader,
+            deviceIdentityLoader = saveSyncDeviceIdentityLoader,
             sync = RommSyncApiGateway(network.okHttpClient),
             shouldAutoclean = { settingsAdapter.autocleanSavesOnUpload() },
         )
@@ -974,6 +1006,36 @@ class DesktopAppCoordinator(
         val username = record.username ?: return null
         if (record.kioskMode || username.isBlank()) return null
         return SavePathPolicy.sanitizeSegment(origin) to SavePathPolicy.sanitizeSegment(username)
+    }
+
+    // ------------------------------------------------------------------ save-sync actions (saves UI)
+
+    /**
+     * "Sync now" on the save-status line: force an immediate drain of the durable save-sync queue
+     * (the actual work runs on the scheduler's worker thread). Returns whether a drain was started
+     * (false when one is already running or the scheduler is shut down — still a no-op-safe call).
+     */
+    fun requestSaveSync(): Boolean = scheduler.requestDrain("user-requested")
+
+    /**
+     * Explicitly resolves [romId]'s CONFLICT autosave: [keepLocal] = the local file wins (uploaded
+     * over the server, losing server copy backed up); false = the server copy wins (downloaded and
+     * adopted, losing local copy backed up). Both copies are preserved until this choice is
+     * applied — see [SaveConflictResolver]. The detail screen refreshes its status presenter after
+     * calling this. Safe to call from any thread; performs network I/O (callers dispatch off the
+     * UI thread).
+     */
+    fun resolveSaveConflict(romId: Long, keepLocal: Boolean): SaveConflictResolutionResult {
+        val (serverKey, userKey) = currentSaveSessionKeys()
+            ?: return SaveConflictResolutionResult.Failure("no active session — log in again to resolve")
+        // Same newest-generation autosave lookup the status presenter uses (a re-uploaded ROM
+        // leaves one replica per content hash; the newest local write is the current one).
+        val replica = SaveSyncStatus.entries
+            .flatMap { status -> saveStateStore.findByStatus(serverKey, userKey, status) }
+            .filter { it.romId == romId && it.slot == SavePathPolicy.AUTOSAVE_SLOT }
+            .maxByOrNull { it.localWrittenAtEpochMs ?: Long.MIN_VALUE }
+            ?: return SaveConflictResolutionResult.Failure("no save recorded for this game")
+        return saveConflictResolver.resolve(replica, keepLocal)
     }
 
     fun biosConfigurationPresenter(platformSlug: String): BiosConfigurationPresenter =

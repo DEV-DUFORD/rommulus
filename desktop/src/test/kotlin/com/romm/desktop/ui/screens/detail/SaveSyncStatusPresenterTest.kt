@@ -74,6 +74,27 @@ class SaveSyncStatusPresenterTest {
     }
 
     @Test
+    fun `no save offers no actions`() {
+        assertThat(saveSyncUiActions(SaveSyncUiState.NoSave))
+            .isEqualTo(SaveSyncUiActions(canSyncNow = false, canResolveConflict = false))
+    }
+
+    @Test
+    fun `conflict offers only keep-local and keep-server — never sync now`() {
+        assertThat(saveSyncUiActions(SaveSyncUiState.Replica(SaveSyncStatus.CONFLICT, null)))
+            .isEqualTo(SaveSyncUiActions(canSyncNow = false, canResolveConflict = true))
+    }
+
+    @Test
+    fun `every non-conflict replica status offers sync now and never conflict resolution`() {
+        SaveSyncStatus.entries.filter { it != SaveSyncStatus.CONFLICT }.forEach { status ->
+            assertThat(saveSyncUiActions(SaveSyncUiState.Replica(status, null)))
+                .withFailMessage("actions for $status")
+                .isEqualTo(SaveSyncUiActions(canSyncNow = true, canResolveConflict = false))
+        }
+    }
+
+    @Test
     fun `refresh with no replica yields NoSave`() {
         val presenter = presenter(InMemorySaveStateStore())
         presenter.refresh(ROM_ID)

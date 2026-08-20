@@ -3,6 +3,7 @@ package com.romm.desktop.sync
 import com.romm.androidtv.romm.RommSyncApi
 import com.romm.androidtv.romm.SaveConfirmResult
 import com.romm.androidtv.romm.SaveDownloadResult
+import com.romm.androidtv.romm.SaveListResult
 import com.romm.androidtv.romm.SaveUploadRequest
 import com.romm.androidtv.romm.SaveUploadResult
 import com.romm.androidtv.romm.SyncCompleteRequest
@@ -36,4 +37,7 @@ class RommSyncApiGateway(private val client: OkHttpClient) : RommSyncGateway {
 
     override fun confirmDownload(origin: String, saveId: Long, deviceId: String): SaveConfirmResult =
         RommSyncApi.confirmDownload(client, origin, saveId, deviceId)
+
+    override fun listSaves(origin: String, romId: Long, deviceId: String?): SaveListResult =
+        RommSyncApi.listSaves(client, origin, romId, deviceId)
 }

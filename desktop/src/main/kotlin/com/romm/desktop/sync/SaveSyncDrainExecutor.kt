@@ -588,9 +588,13 @@ class SaveSyncDrainExecutor(
     ): Pair<Int, Int> {
         // "Conflict preserves both copies": mark the replica CONFLICT (UI surfaces it); local bytes
         // are untouched and the server copy stays on the server until an explicit user choice.
+        // Also record the negotiation's server-side identity (save id + content hash) so explicit
+        // conflict resolution later knows WHICH server copy to download/keep.
         upsertReplica(replica.copy(
             syncStatus = SaveSyncStatus.CONFLICT,
             lastError = operation.reason,
+            rommSaveId = operation.saveId ?: replica.rommSaveId,
+            serverHash = operation.serverContentHash ?: replica.serverHash,
         ))
         transitionTo(op.id, PendingOperationStatus.RUNNING, PendingOperationStatus.CONFLICT,
             operation.reason, null, now, attemptCount)

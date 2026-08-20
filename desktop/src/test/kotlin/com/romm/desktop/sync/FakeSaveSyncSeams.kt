@@ -52,6 +52,31 @@ class FakeSaveContentGateway : SaveContentGateway {
         quarantined.add(Triple(k, reason, bytes.copyOf()))
         return "quarantine/$nowEpochMs-$reason-$slot.srm"
     }
+
+    /** (scope key, choice, content hash, bytes) in conflict-backup order. */
+    val conflictBackups = mutableListOf<ConflictBackup>()
+
+    data class ConflictBackup(
+        val scopeKey: String,
+        val choice: String,
+        val contentHash: String,
+        val bytes: ByteArray,
+    )
+
+    override fun conflictBackup(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        bytes: ByteArray,
+        choice: String,
+        contentHash: String,
+    ): String {
+        val k = key(serverKey, userKey, romId, romHash, slot)
+        conflictBackups.add(ConflictBackup(k, choice, contentHash, bytes.copyOf()))
+        return "conflict-backups/$choice-${contentHash.take(16)}.srm"
+    }
 }
 
 /** Scripted [RommSyncGateway] — every call recorded, results configurable per test. */
@@ -62,12 +87,15 @@ class FakeRommSyncGateway : RommSyncGateway {
     var uploadResult: SaveUploadResult = SaveUploadResult.Failure(com.romm.androidtv.romm.RommApiError.NETWORK_ERROR)
     var downloadResult: SaveDownloadResult = SaveDownloadResult.Failure(com.romm.androidtv.romm.RommApiError.NETWORK_ERROR)
     var confirmResult: SaveConfirmResult = SaveConfirmResult.Success
+    var listSavesResult: com.romm.androidtv.romm.SaveListResult =
+        com.romm.androidtv.romm.SaveListResult.Failure(com.romm.androidtv.romm.RommApiError.NETWORK_ERROR)
 
     val negotiateCalls = mutableListOf<Pair<String, SyncNegotiateRequest>>()
     val completeSessionCalls = mutableListOf<Triple<String, Long, SyncCompleteRequest>>()
     val uploadCalls = mutableListOf<Pair<String, SaveUploadRequest>>()
     val downloadCalls = mutableListOf<Quadruple>()
     val confirmCalls = mutableListOf<Triple<String, Long, String>>()
+    val listSavesCalls = mutableListOf<Pair<String, Long>>()
 
     data class Quadruple(val origin: String, val saveId: Long, val deviceId: String, val sessionId: Long?)
 
@@ -99,6 +127,11 @@ class FakeRommSyncGateway : RommSyncGateway {
     override fun confirmDownload(origin: String, saveId: Long, deviceId: String): SaveConfirmResult {
         confirmCalls.add(Triple(origin, saveId, deviceId))
         return confirmResult
+    }
+
+    override fun listSaves(origin: String, romId: Long, deviceId: String?): com.romm.androidtv.romm.SaveListResult {
+        listSavesCalls.add(origin to romId)
+        return listSavesResult
     }
 }
 

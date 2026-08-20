@@ -4,6 +4,7 @@ import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.romm.DeviceIdentity
 import com.romm.androidtv.romm.SaveConfirmResult
 import com.romm.androidtv.romm.SaveDownloadResult
+import com.romm.androidtv.romm.SaveListResult
 import com.romm.androidtv.romm.SaveUploadRequest
 import com.romm.androidtv.romm.SaveUploadResult
 import com.romm.androidtv.romm.SyncCompleteRequest
@@ -76,6 +77,24 @@ interface SaveContentGateway {
         nowEpochMs: Long,
     ): String
 
+    /**
+     * Durably preserves [bytes] under a deterministic conflict-backup path (a sibling of the slot
+     * directory) so the LOSING copy of an explicit conflict resolution is never silently discarded
+     * (mirrors Android's `SaveContentStore.conflictBackup`). The path is keyed by [choice] +
+     * [contentHash] and idempotent: re-resolving with identical content converges on one file.
+     * Returns the absolute path preserved.
+     */
+    fun conflictBackup(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        bytes: ByteArray,
+        choice: String,
+        contentHash: String,
+    ): String
+
     /** Computes the SHA-256 hash and size of [bytes] (pure — overridable in tests). */
     fun hashAndSize(bytes: ByteArray): SaveContentHash = SaveContentHash(sha256Hex(bytes), bytes.size.toLong())
 }
@@ -103,4 +122,10 @@ interface RommSyncGateway {
 
     /** `POST /api/saves/{id}/downloaded` — confirms an adopted download. */
     fun confirmDownload(origin: String, saveId: Long, deviceId: String): SaveConfirmResult
+
+    /**
+     * `GET /api/saves?rom_id=X[&device_id=Y]` — every save the user owns for a ROM, across slots
+     * and devices. Conflict-resolution fallback when the replica has no recorded server save id.
+     */
+    fun listSaves(origin: String, romId: Long, deviceId: String?): SaveListResult
 }

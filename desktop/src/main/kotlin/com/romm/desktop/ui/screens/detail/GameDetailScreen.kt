@@ -68,6 +68,7 @@ import com.romm.desktop.PlayerSessionEvent
 import com.romm.desktop.Screen
 import com.romm.desktop.player.PlayerExitKind
 import com.romm.desktop.player.PlayerExitReport
+import com.romm.desktop.sync.SaveConflictResolutionResult
 import com.romm.desktop.ui.components.DesktopTextField
 import com.romm.desktop.ui.components.ErrorBanner
 import com.romm.desktop.ui.components.LocalRommulusColors
@@ -75,6 +76,7 @@ import com.romm.desktop.ui.components.LoadingIndicator
 import com.romm.desktop.ui.components.TvButton
 import com.romm.desktop.ui.components.TvOutlinedButton
 import com.romm.desktop.ui.image.RommAsyncImage
+import com.romm.desktop.ui.navigation.FocusNavigator
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
@@ -166,7 +168,11 @@ private fun GameDetailContent(
     // read is local I/O that should not sit on the compose thread.
     val saveStatusPresenter = remember { coordinator.saveSyncStatusPresenter() }
     val saveUiState by saveStatusPresenter.uiState.collectAsState()
+    // Failure reason from the last save action (Keep-local / Keep-server); null when idle or after
+    // a success. Reset per ROM so a stale message never follows the user to a sibling version.
+    var saveActionMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(romId) {
+        saveActionMessage = null
         launch(Dispatchers.Default) { saveStatusPresenter.refresh(romId) }
     }
 
@@ -184,6 +190,19 @@ private fun GameDetailContent(
     // launchPlayer does file I/O + a process spawn — run it off the compose UI thread and
     // publish the result back as state (snapshot state is safe to write from any thread).
     val launchScope = rememberCoroutineScope()
+
+    // Save-sync actions (actionable half of the saves UI). "Sync now" just kicks the scheduler's
+    // drain (async on its worker thread); conflict resolution does network I/O, so both dispatch
+    // off the compose thread and re-read the status when done.
+    fun resolveSaveConflict(keepLocal: Boolean) {
+        launchScope.launch {
+            saveActionMessage = null
+            val result = withContext(Dispatchers.Default) { coordinator.resolveSaveConflict(romId, keepLocal) }
+            saveActionMessage = (result as? SaveConflictResolutionResult.Failure)?.reason
+            // Success settles the replica (SYNCED); failure leaves it CONFLICT — re-read either way.
+            launch(Dispatchers.Default) { saveStatusPresenter.refresh(romId) }
+        }
+    }
 
     // The coordinator publishes PlayerSessionEvent.Ended (from its daemon exit-watcher thread)
     // when the supervised player process exits and its journal is reconciled. Clean exits clear
@@ -266,6 +285,17 @@ private fun GameDetailContent(
                 },
                 playStatus = playStatus,
                 saveUiState = saveUiState,
+                saveActionMessage = saveActionMessage,
+                onSaveSyncNow = {
+                    launchScope.launch {
+                        withContext(Dispatchers.Default) { coordinator.requestSaveSync() }
+                        // The drain runs async on the scheduler's worker thread — re-read once so a
+                        // fast settle is visible immediately; later refreshes keep correcting.
+                        launch(Dispatchers.Default) { saveStatusPresenter.refresh(romId) }
+                    }
+                },
+                onSaveKeepLocal = { resolveSaveConflict(keepLocal = true) },
+                onSaveKeepServer = { resolveSaveConflict(keepLocal = false) },
                 onOpenScreenshot = { urls, index ->
                     initialScreenshotIndex = index
                     screenshotsToView = urls
@@ -341,7 +371,7 @@ private fun GameDetailContent(
     }
 }
 
-/** Hero cover + title/platform + metadata chips + summary + Play button (+ save-sync status). */
+/** Hero cover + title/platform + metadata chips + summary + Play button (+ save-sync status/actions). */
 @Composable
 private fun GameDetailBody(
     rom: RomDetail,
@@ -349,6 +379,10 @@ private fun GameDetailBody(
     onPlayClick: () -> Unit,
     playStatus: PlayerLaunchResult?,
     saveUiState: SaveSyncUiState,
+    saveActionMessage: String?,
+    onSaveSyncNow: () -> Unit,
+    onSaveKeepLocal: () -> Unit,
+    onSaveKeepServer: () -> Unit,
     onOpenScreenshot: (List<String>, Int) -> Unit,
     onOpenSibling: (Long) -> Unit,
     firstScreenshotFocusRequester: FocusRequester,
@@ -411,7 +445,13 @@ private fun GameDetailBody(
                         status = playStatus,
                         onPlayClick = onPlayClick,
                     )
-                    SaveStatusLine(state = saveUiState)
+                    SaveStatusLine(
+                        state = saveUiState,
+                        actionMessage = saveActionMessage,
+                        onSyncNow = onSaveSyncNow,
+                        onKeepLocal = onSaveKeepLocal,
+                        onKeepServer = onSaveKeepServer,
+                    )
                 }
             }
         }
@@ -538,28 +578,82 @@ private val PlayButtonErrorColor = Color(0xFFF87171)
 private val NEEDS_ATTENTION_SYNC_STATUSES = setOf(SaveSyncStatus.CONFLICT, SaveSyncStatus.QUARANTINED)
 
 /**
- * Read-only save-sync status line under the Play button (first piece of the Linux saves UI).
+ * Save-sync status line under the Play button, with actions (actionable half of the Linux saves UI).
  * Neutral secondary text for healthy/in-flight states; the theme error color for CONFLICT and
- * QUARANTINED (both block automatic sync until a later save-management screen acts on them). An
- * optional second line carries [SaveSyncUiState.Replica.lastError] when the drain recorded one.
+ * QUARANTINED. Actions are offered per [saveSyncUiActions]: "Sync now" (force a drain) whenever a
+ * replica exists in any non-conflict status, and Keep-local / Keep-server ONLY on CONFLICT — the
+ * user's explicit choice of which copy wins ("conflict preserves both copies"). An optional second
+ * line carries the last action failure ([actionMessage]) or [SaveSyncUiState.Replica.lastError]
+ * when the drain recorded one.
  */
 @Composable
-private fun SaveStatusLine(state: SaveSyncUiState) {
+private fun SaveStatusLine(
+    state: SaveSyncUiState,
+    actionMessage: String?,
+    onSyncNow: () -> Unit,
+    onKeepLocal: () -> Unit,
+    onKeepServer: () -> Unit,
+) {
     val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val actions = saveSyncUiActions(state)
     val needsAttention = state is SaveSyncUiState.Replica &&
         state.syncStatus in NEEDS_ATTENTION_SYNC_STATUSES
-    Text(
-        text = saveStatusLabel(state),
-        style = MaterialTheme.typography.bodySmall,
-        color = if (needsAttention) PlayButtonErrorColor else colors.textSecondary,
-    )
-    (state as? SaveSyncUiState.Replica)?.lastError?.let { error ->
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Text(
-            text = error,
+            text = saveStatusLabel(state),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (needsAttention) PlayButtonErrorColor else colors.textSecondary,
+        )
+        if (actions.canSyncNow) {
+            SaveActionButton("Sync now", "detail:save-sync", onSyncNow, navigator)
+        }
+        if (actions.canResolveConflict) {
+            SaveActionButton("Keep local", "detail:keep-local", onKeepLocal, navigator)
+            SaveActionButton("Keep server", "detail:keep-server", onKeepServer, navigator)
+        }
+    }
+    val detailLine = actionMessage ?: (state as? SaveSyncUiState.Replica)?.lastError
+    if (detailLine != null) {
+        Text(
+            text = detailLine,
             style = MaterialTheme.typography.labelSmall,
             color = PlayButtonErrorColor,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Small focusable action chip for the save-status line: mouse-clickable and a stop on the
+ * D-pad/keyboard/controller focus path (same wiring pattern as [PlayButton]).
+ */
+@Composable
+private fun SaveActionButton(
+    label: String,
+    focusKey: String,
+    onClick: () -> Unit,
+    navigator: FocusNavigator,
+) {
+    val colors = LocalRommulusColors.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isFocused) colors.romm500 else colors.romm500.copy(alpha = 0.45f))
+            .then(Modifier.focusableItem(focusKey, navigator, onClick))
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White,
         )
     }
 }

@@ -36,6 +36,28 @@ fun saveStatusLabel(state: SaveSyncUiState): String = when (state) {
     is SaveSyncUiState.Replica -> "Save: ${state.syncStatus.uiLabel}"
 }
 
+/**
+ * Which save actions the status line offers for [state] — the actionable half of the saves UI.
+ * A pure function of [SaveSyncUiState] so it is unit-testable without Compose:
+ *
+ *  - "Sync now" (force a drain) is available whenever a replica exists in any NON-conflict status;
+ *  - Keep-local / Keep-server conflict resolution is offered ONLY when the status is CONFLICT —
+ *    never for healthy, in-flight, or quarantined states.
+ */
+data class SaveSyncUiActions(
+    val canSyncNow: Boolean,
+    val canResolveConflict: Boolean,
+)
+
+fun saveSyncUiActions(state: SaveSyncUiState): SaveSyncUiActions = when (state) {
+    is SaveSyncUiState.NoSave -> SaveSyncUiActions(canSyncNow = false, canResolveConflict = false)
+    is SaveSyncUiState.Replica -> if (state.syncStatus == SaveSyncStatus.CONFLICT) {
+        SaveSyncUiActions(canSyncNow = false, canResolveConflict = true)
+    } else {
+        SaveSyncUiActions(canSyncNow = true, canResolveConflict = false)
+    }
+}
+
 private val SaveSyncStatus.uiLabel: String
     get() = when (this) {
         SaveSyncStatus.SYNCED -> "synced"

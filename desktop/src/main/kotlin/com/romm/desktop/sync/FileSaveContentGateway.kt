@@ -33,22 +33,9 @@ class FileSaveContentGateway(private val filesDir: File) : SaveContentGateway {
         slot: String,
         bytes: ByteArray,
     ) {
-        val target = Path.of(autosavePath(serverKey, userKey, romId, romHash, slot))
-        val dir = checkNotNull(target.parent) { "target has no parent directory: $target" }
-        Files.createDirectories(dir)
         // Same pattern as LaunchJournalSupervisor.adoptFile: temp in the TARGET directory (so the
         // rename is on one filesystem), fsync, then atomic replace.
-        val temp = Files.createTempFile(dir, ".save-", "tmp")
-        try {
-            FileChannel.open(temp, WRITE).use { out ->
-                out.write(ByteBuffer.wrap(bytes))
-                out.force(true)
-            }
-            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-        } catch (e: Exception) {
-            runCatching { Files.deleteIfExists(temp) }
-            throw e
-        }
+        writeAtomically(Path.of(autosavePath(serverKey, userKey, romId, romHash, slot)), bytes)
     }
 
     override fun quarantine(
@@ -75,6 +62,48 @@ class FileSaveContentGateway(private val filesDir: File) : SaveContentGateway {
             out.force(true)
         }
         return quarantineFile.toAbsolutePath().toString()
+    }
+
+    override fun conflictBackup(
+        serverKey: String,
+        userKey: String,
+        romId: Long,
+        romHash: String,
+        slot: String,
+        bytes: ByteArray,
+        choice: String,
+        contentHash: String,
+    ): String {
+        val sanitizedChoice = choice.map { c -> if (c.isLetterOrDigit()) c else '_' }.joinToString("")
+        val hashPrefix = contentHash.take(16)
+        // Same layout as Android's FileSaveContentStore.conflictBackup: a sibling "conflict-backups"
+        // dir next to the slot directory, never inside the canonical save path. Deterministic
+        // (choice + content-hash) so a retried resolution converges on one file; written atomically.
+        val backupDir = Path.of(autosavePath(serverKey, userKey, romId, romHash, slot))
+            .parent?.parent
+            ?.resolve("conflict-backups")
+            ?: error("cannot derive conflict-backup directory for $serverKey/$userKey/$romId/$romHash")
+        Files.createDirectories(backupDir)
+        val target = backupDir.resolve("conflict-$sanitizedChoice-$hashPrefix.srm")
+        writeAtomically(target, bytes)
+        return target.toAbsolutePath().toString()
+    }
+
+    /** Temp file in the target's directory + fsync + atomic rename (shared with [writeLocalAtomically]). */
+    private fun writeAtomically(target: Path, bytes: ByteArray) {
+        val dir = checkNotNull(target.parent) { "target has no parent directory: $target" }
+        Files.createDirectories(dir)
+        val temp = Files.createTempFile(dir, ".save-", "tmp")
+        try {
+            FileChannel.open(temp, WRITE).use { out ->
+                out.write(ByteBuffer.wrap(bytes))
+                out.force(true)
+            }
+            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (e: Exception) {
+            runCatching { Files.deleteIfExists(temp) }
+            throw e
+        }
     }
 
     /**
