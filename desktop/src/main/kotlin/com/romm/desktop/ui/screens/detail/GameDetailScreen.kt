@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -196,6 +197,10 @@ private fun GameDetailContent(
     var screenshotsToView by remember { mutableStateOf<List<String>?>(null) }
     var initialScreenshotIndex by remember { mutableStateOf(0) }
 
+    // Version picker ("Choose File" — Android parity): lists this ROM's sibling versions;
+    // picking an entry re-scopes the detail screen to that ROM (no auto-launch).
+    var showVersionPicker by remember { mutableStateOf(false) }
+
     // Outcome of the last Play click (null until the user clicks Play).
     var playStatus by remember { mutableStateOf<PlayerLaunchResult?>(null) }
     // The sessionId the current playStatus was set from (null until a launch starts). A stale
@@ -321,6 +326,7 @@ private fun GameDetailContent(
                 onOpenSibling = { siblingId ->
                     coordinator.openGameDetail(siblingId, coordinator.gameDetailParent)
                 },
+                onChooseFileClick = { showVersionPicker = true },
                 firstScreenshotFocusRequester = firstScreenshotFocusRequester,
                 screenshotUpFocusRequester = favoriteFocusRequester,
             )
@@ -359,6 +365,23 @@ private fun GameDetailContent(
                 onCollectionRetry = presenter::onCollectionRetry,
                 onAlertDismissed = presenter::onAlertDismissed,
                 onDismiss = presenter::onDialogDismissed,
+            )
+        }
+
+        // ── Version picker overlay ("Choose File" — re-scopes to the picked ROM) ──
+        if (showVersionPicker && loadedDetail != null) {
+            VersionPickerOverlay(
+                model = VersionPickerUiModel(
+                    gameTitle = loadedDetail.title,
+                    entries = buildVersionPickerEntries(loadedDetail),
+                ),
+                onSelect = { entry ->
+                    showVersionPicker = false
+                    // Re-scope the detail screen to the chosen ROM (Android parity: sets
+                    // selectedRomId and stays on GAME_DETAIL — the user presses Play there).
+                    coordinator.openGameDetail(entry.romId, coordinator.gameDetailParent)
+                },
+                onDismiss = { showVersionPicker = false },
             )
         }
 
@@ -413,6 +436,7 @@ private fun GameDetailBody(
     onViewQuarantine: () -> Unit,
     onOpenScreenshot: (List<String>, Int) -> Unit,
     onOpenSibling: (Long) -> Unit,
+    onChooseFileClick: () -> Unit,
     firstScreenshotFocusRequester: FocusRequester,
     screenshotUpFocusRequester: FocusRequester,
 ) {
@@ -468,11 +492,18 @@ private fun GameDetailBody(
                         )
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    PlayButton(
-                        enabled = playEnabled,
-                        status = playStatus,
-                        onPlayClick = onPlayClick,
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        PlayButton(
+                            enabled = playEnabled,
+                            status = playStatus,
+                            onPlayClick = onPlayClick,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // "Choose File" (Android parity): only when the ROM has sibling versions.
+                        if (shouldShowChooseFileButton(rom)) {
+                            ChooseFileButton(onClick = onChooseFileClick)
+                        }
+                    }
                     SaveStatusLine(
                         state = saveUiState,
                         actionMessage = saveActionMessage,
@@ -544,13 +575,14 @@ private fun PlayButton(
     enabled: Boolean,
     status: PlayerLaunchResult?,
     onPlayClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
@@ -597,6 +629,39 @@ private fun PlayButton(
             )
             null -> Unit
         }
+    }
+}
+
+/**
+ * The "Choose File" affordance next to Play, rendered only when the ROM has sibling versions
+ * (Android parity with `ChooseVersionButton`): opens the version picker overlay, which lists
+ * this ROM and its siblings for re-scoping.
+ */
+@Composable
+private fun ChooseFileButton(onClick: () -> Unit) {
+    val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.nightLo)
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) colors.romm300 else colors.textSecondary.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(8.dp),
+            )
+            .focusableItem("detail:choose-file", navigator, onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = "Choose File",
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.textPrimary,
+        )
     }
 }
 
@@ -1136,6 +1201,156 @@ private fun CollectionRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.textSecondary,
             )
+        }
+    }
+}
+
+/**
+ * Version picker overlay (desktop adaptation of Android's full-screen `VersionPickerScreen`,
+ * "Choose Game File"): a scrim + centered panel listing the current ROM and its sibling
+ * versions. Each row shows the per-file name (tags like "(Disc 1)" kept), a checkmark on the
+ * currently-open version, and a "Default version" subtitle for the group's default. Escape
+ * dismisses; picking a row re-scopes the detail screen to that ROM via [onSelect] — no
+ * auto-launch (Android parity: the user presses Play there when ready).
+ */
+@Composable
+@OptIn(ExperimentalComposeUiApi::class)
+private fun VersionPickerOverlay(
+    model: VersionPickerUiModel,
+    onSelect: (VersionPickerEntryUiModel) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val focusManager = LocalFocusManager.current
+    val focusOverrideOwner = remember { Any() }
+    val overlayFocusRequester = remember { FocusRequester() }
+    val initialFocusRequester = remember { FocusRequester() }
+
+    DisposableEffect(navigator, focusManager, focusOverrideOwner, onDismiss) {
+        navigator.installSpatialFocusOverride(
+            owner = focusOverrideOwner,
+            moveFocus = focusManager::moveFocus,
+            onBack = onDismiss,
+        )
+        onDispose { navigator.removeSpatialFocusOverride(focusOverrideOwner) }
+    }
+    LaunchedEffect(Unit) { overlayFocusRequester.requestFocusSafely() }
+    LaunchedEffect(model) { initialFocusRequester.requestFocusSafely() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .focusProperties { exit = { FocusRequester.Cancel } }
+            .focusGroup()
+            .focusRequester(overlayFocusRequester)
+            // Swallow stray clicks so the scrim doesn't pass through to the rail behind it.
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            // Escape dismisses the picker (must win over the screen-level back shortcut).
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                    onDismiss()
+                    true
+                } else {
+                    false
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(420.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.nightLo)
+                .padding(20.dp),
+        ) {
+            Text(
+                text = "Choose Game File",
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.textPrimary,
+            )
+            Text(
+                text = model.gameTitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.romm300,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (model.entries.isEmpty()) {
+                Text(
+                    text = "No other versions found for this game.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    itemsIndexed(model.entries, key = { _, entry -> entry.romId }) { index, entry ->
+                        VersionPickerRow(
+                            entry = entry,
+                            onClick = { onSelect(entry) },
+                            modifier = Modifier.then(
+                                if (index == 0) {
+                                    Modifier.focusRequester(initialFocusRequester)
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One focusable/clickable version row: per-file name, checkmark for the open version, "Default version" subtitle. */
+@Composable
+private fun VersionPickerRow(
+    entry: VersionPickerEntryUiModel,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isFocused) colors.romm600.copy(alpha = 0.3f) else Color.Transparent)
+            .focusableItem("version:${entry.romId}", navigator, onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.width(28.dp)) {
+            if (entry.isCurrentVersion) {
+                Text(text = "✓", color = colors.romm300, style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.fileName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isFocused) colors.romm300 else colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (entry.isMainSibling) {
+                Text(
+                    text = "Default version",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textSecondary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
     }
 }
