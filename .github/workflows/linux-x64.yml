@@ -789,6 +789,7 @@ jobs:
           listing="$(tar --zstd -tf "$ARTIFACT")"
           for entry in \
             ./bin/rommulus \
+            ./bin/rommulus.sh \
             ./bin/rommulus-player \
             ./lib/runtime/bin/java \
             ./lib/rommulus/app.jar \

@@ -10,6 +10,7 @@ directory plus the built player, cores, app jar, and jlink JVM runtime.
 rommulus-<version>-linux-x86_64.tar.zst
 ├── bin/
 │   ├── rommulus                 launcher (this directory: packaging/bin/)
+│   ├── rommulus.sh              Steam-compatible symlink -> rommulus
 │   ├── rommulus-player          native player ELF (from build/player/rommulus_player)
 │   └── rommulus_player          compatibility symlink -> rommulus-player
 │                                (the desktop app resolves "rommulus_player" via PATH)

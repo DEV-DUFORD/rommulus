@@ -54,9 +54,10 @@ a new `X.Y.Z` version. The workflow updates the app version, builds and signs th
 Android App Bundle, commits and tags the version, and publishes them as
 `rommulus-X.Y.Z-arm.apk` and `rommulus-X.Y.Z-arm.aab` with release notes generated from commits
 since the previous release. Publishing the GitHub release also builds and attaches
-`rommulus-X.Y.Z-linux-x86_64.tar.zst` and its checksum. Linux and Steam Deck users can extract
-that self-contained archive (`tar --zstd -xf <archive>`) and launch `bin/rommulus`; upload the
-AAB to Google Play and use the APK for direct Android installation.
+`rommulus-X.Y.Z-linux-x86_64.tar.zst` and its checksum. Linux users can extract that
+self-contained archive (`tar --zstd -xf <archive>`) and launch `bin/rommulus`. Steam Deck users
+should add `bin/rommulus.sh` as a Non-Steam Game. Upload the AAB to Google Play and use the APK
+for direct Android installation.
 
 ## Permissions
 

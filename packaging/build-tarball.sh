@@ -82,6 +82,8 @@ mkdir -p "$STAGE"/bin "$STAGE"/lib/runtime "$STAGE"/lib/rommulus/cores "$STAGE"/
 
 # --- bin/ ------------------------------------------------------------------
 install -m 0755 "$SCRIPT_DIR/bin/rommulus" "$STAGE/bin/rommulus"
+# Steam's Non-Steam Game picker recognizes shell launchers by extension.
+ln -s rommulus "$STAGE/bin/rommulus.sh"
 install -m 0755 "$PLAYER_BUILD_DIR/rommulus_player" "$STAGE/bin/rommulus-player"
 # Compatibility shim: the desktop app resolves the player as "rommulus_player"
 # (underscore) via PATH; the canonical tarball name is "rommulus-player".
