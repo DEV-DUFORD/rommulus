@@ -2,6 +2,8 @@ package com.romm.desktop.sync
 
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.romm.DeviceIdentity
+import com.romm.androidtv.romm.PlaySessionIngestRequest
+import com.romm.androidtv.romm.PlaySessionIngestResult
 import com.romm.androidtv.romm.SaveConfirmResult
 import com.romm.androidtv.romm.SaveDownloadResult
 import com.romm.androidtv.romm.SaveListResult
@@ -128,4 +130,11 @@ interface RommSyncGateway {
      * and devices. Conflict-resolution fallback when the replica has no recorded server save id.
      */
     fun listSaves(origin: String, romId: Long, deviceId: String?): SaveListResult
+
+    /**
+     * `POST /api/play-sessions` — best-effort play-session telemetry so the server advances
+     * `rom_user.last_played`/`now_playing` (the Home screen's "Continue Playing" row). A failure
+     * here must never block save-sync or gameplay.
+     */
+    fun ingestPlaySessions(origin: String, request: PlaySessionIngestRequest): PlaySessionIngestResult
 }

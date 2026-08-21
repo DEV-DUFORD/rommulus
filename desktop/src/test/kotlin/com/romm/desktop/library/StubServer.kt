@@ -28,8 +28,12 @@ internal class StubServer : AutoCloseable {
     @Volatile var contentStatus = 200
     @Volatile var contentBytes = ByteArray(0)
 
+    @Volatile var playSessionsStatus = 200
+    @Volatile var playSessionsBody = """{"results": [], "created_count": 1, "skipped_count": 0}"""
+
     @Volatile var lastFirmwarePath: String? = null
     @Volatile var lastContentPath: String? = null
+    @Volatile var lastPlaySessionsBody: String? = null
 
     val origin: String
         get() = "http://127.0.0.1:" + (server.address as InetSocketAddress).port
@@ -37,6 +41,10 @@ internal class StubServer : AutoCloseable {
     fun start() {
         server.createContext("/api/platforms") { exchange ->
             respond(exchange, platformsStatus, platformsBody, json = true)
+        }
+        server.createContext("/api/play-sessions") { exchange ->
+            lastPlaySessionsBody = exchange.requestBody.readBytes().decodeToString()
+            respond(exchange, playSessionsStatus, playSessionsBody, json = true)
         }
         server.createContext("/api/firmware") { exchange ->
             val path = exchange.requestURI.toString()

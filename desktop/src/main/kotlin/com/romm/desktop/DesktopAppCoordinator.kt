@@ -35,6 +35,10 @@ import com.romm.androidtv.onboarding.RemoveOldestClientToken
 import com.romm.androidtv.onboarding.ValidateRommServer
 import com.romm.androidtv.romm.DeviceRegistrationResult
 import com.romm.androidtv.romm.FirmwareStagingOutcome
+import com.romm.androidtv.romm.RommApiError
+import com.romm.androidtv.romm.SaveConfirmResult
+import com.romm.androidtv.romm.SaveDownloadResult
+import com.romm.androidtv.romm.SaveListResult
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.databaseDir
 import com.romm.androidtv.storage.firmwareDir
@@ -92,7 +96,9 @@ import com.romm.desktop.storage.sqlite.SqliteSchedulerStateStore
 import com.romm.desktop.storage.sqlite.SqliteSessionRecordStore
 import com.romm.desktop.sync.BackgroundSyncSchedulerImpl
 import com.romm.desktop.sync.FileSaveContentGateway
+import com.romm.desktop.sync.GameLaunchRecorder
 import com.romm.desktop.sync.RommSyncApiGateway
+import com.romm.desktop.sync.RommSyncGateway
 import com.romm.desktop.sync.SaveConflictChoice
 import com.romm.desktop.sync.SaveConflictResolutionResult
 import com.romm.desktop.sync.SaveConflictResolver
@@ -101,12 +107,15 @@ import com.romm.desktop.sync.SaveSyncDrainExecutor
 import com.romm.desktop.sync.SaveSyncSession
 import com.romm.desktop.sync.SaveSyncSessionReader
 import com.romm.desktop.ui.image.DesktopImageLoader
+import com.romm.desktop.ui.screens.detail.SavePickerEntryUiModel
 import com.romm.desktop.ui.screens.detail.SaveSyncStatusPresenter
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.Collections
 import java.util.UUID
 import java.util.logging.Level
@@ -156,9 +165,13 @@ import kotlinx.coroutines.launch
  * @param saveSyncDrainExecutorOverride Test seam: inject a [SaveSyncDrainExecutor] backed by fake
  *                                 sync seams so drain tests never touch the network; production
  *                                 wires [FileSaveContentGateway] + [RommSyncApiGateway].
- * @param saveConflictResolverOverride Test seam: inject a [SaveConflictResolver] over fake seams
- *                                 so conflict-resolution tests never touch the network/filesystem.
- */
+     * @param saveConflictResolverOverride Test seam: inject a [SaveConflictResolver] over fake seams
+     *                                 so conflict-resolution tests never touch the network/filesystem.
+     * @param gameLaunchRecorderOverride Test seam: inject a [GameLaunchRecorder] over a fake
+     *                                 [com.romm.desktop.sync.RommSyncGateway] so play-session
+     *                                 tests never touch the network; production records through
+     *                                 [RommSyncApiGateway].
+     */
 
 /** Outcome of [DesktopAppCoordinator.launchPlayer]. */
 sealed interface PlayerLaunchResult {
@@ -173,6 +186,15 @@ sealed interface PlayerLaunchResult {
 sealed interface PlayerSessionEvent {
     /** The player process exited and its launch journal was reconciled ([report]). */
     data class Ended(val sessionId: String, val report: PlayerExitReport) : PlayerSessionEvent
+}
+
+/** Outcome of adopting an explicitly chosen server save into a launch's autosave path. */
+sealed interface ChosenSaveAdoption {
+    /** The chosen save's bytes now sit at the launch's save path; the player will restore it. */
+    data object Success : ChosenSaveAdoption
+
+    /** [reason] is safe to surface in the UI as-is; nothing was written and no launch happened. */
+    data class Failure(val reason: String) : ChosenSaveAdoption
 }
 
 /**
@@ -256,6 +278,9 @@ class DesktopAppCoordinator(
     saveStateStoreOverride: SaveStateStore? = null,
     saveSyncDrainExecutorOverride: SaveSyncDrainExecutor? = null,
     saveConflictResolverOverride: SaveConflictResolver? = null,
+    syncGatewayOverride: RommSyncGateway? = null,
+    saveSyncDeviceIdentityLoaderOverride: SaveSyncDeviceIdentityLoader? = null,
+    gameLaunchRecorderOverride: GameLaunchRecorder? = null,
 ) {
 
     // ------------------------------------------------------------------ storage
@@ -422,14 +447,19 @@ class DesktopAppCoordinator(
         SaveSyncSession(record.origin, record.username)
     }
 
-    /** Device-identity loader shared by the drain executor and the conflict resolver. */
-    private val saveSyncDeviceIdentityLoader = SaveSyncDeviceIdentityLoader { origin, username ->
-        // Runs on the scheduler's drain thread or a worker (never the UI thread), so blocking is fine.
-        when (val result = runBlocking { network.deviceRepository.ensureRegistered(origin, username) }) {
-            is DeviceRegistrationResult.Success -> result.identity
-            is DeviceRegistrationResult.Failure -> null
+    /**
+     * Device-identity loader shared by the drain executor, the conflict resolver, and the save
+     * picker ("Choose Save" listSaves + chosen-save adoption). Tests inject a fake via
+     * [saveSyncDeviceIdentityLoaderOverride] so those flows never register over the network.
+     */
+    private val saveSyncDeviceIdentityLoader: SaveSyncDeviceIdentityLoader =
+        saveSyncDeviceIdentityLoaderOverride ?: SaveSyncDeviceIdentityLoader { origin, username ->
+            // Runs on the scheduler's drain thread or a worker (never the UI thread), so blocking is fine.
+            when (val result = runBlocking { network.deviceRepository.ensureRegistered(origin, username) }) {
+                is DeviceRegistrationResult.Success -> result.identity
+                is DeviceRegistrationResult.Failure -> null
+            }
         }
-    }
 
     val saveSyncDrainExecutor: SaveSyncDrainExecutor by lazy {
         saveSyncDrainExecutorOverride ?: SaveSyncDrainExecutor(
@@ -457,6 +487,30 @@ class DesktopAppCoordinator(
             deviceIdentityLoader = saveSyncDeviceIdentityLoader,
             sync = RommSyncApiGateway(network.okHttpClient),
             shouldAutoclean = { settingsAdapter.autocleanSavesOnUpload() },
+        )
+    }
+
+    /**
+     * RomM sync HTTP surface for the save-picker UI ("Choose Save" — Phase 9 parity): lists the
+     * server saves for a ROM and downloads an explicitly chosen one. Production: [RommSyncApiGateway]
+     * on the authenticated client; tests inject a fake via [syncGatewayOverride].
+     */
+    val syncGateway: RommSyncGateway by lazy {
+        syncGatewayOverride ?: RommSyncApiGateway(network.okHttpClient)
+    }
+
+    /**
+     * Play-session recorder (parity with Android's `GameLaunchRecorder`): marks a ROM as played
+     * when its player session STARTS — a 1ms session ending at the launch instant, reported
+     * off-thread so `last_played`/`now_playing` (the Home screen's "Continue Playing" row)
+     * reflect the launch immediately. Shares the drain's session/identity seams and reports
+     * through [RommSyncApiGateway] on the authenticated client.
+     */
+    val gameLaunchRecorder: GameLaunchRecorder by lazy {
+        gameLaunchRecorderOverride ?: GameLaunchRecorder(
+            gateway = RommSyncApiGateway(network.okHttpClient),
+            sessionReader = saveSyncSessionReader,
+            deviceIdentityLoader = saveSyncDeviceIdentityLoader,
         )
     }
 
@@ -788,6 +842,62 @@ class DesktopAppCoordinator(
     }
 
     /**
+     * Downloads [entry]'s server save and atomically writes it to [savePath] (the launch's
+     * autosave path), so the player restores exactly the save the user picked in the "Choose
+     * Save" flow (Android `adoptChosenSave` parity). Validates against the server-reported
+     * content hash when the listing carried one; confirms the download best-effort AFTER a
+     * successful write (mirrors keep-server — never fails an otherwise-good launch). Never
+     * throws: every failure maps to [ChosenSaveAdoption.Failure] with a UI-safe reason, so the
+     * caller aborts the launch fail-closed. Unlike Android's negotiate-driven download path
+     * there is deliberately NO provenance gate: SRAM saves are cross-core compatible for the
+     * same platform and the user explicitly picked this save from this ROM's own listing.
+     */
+    private fun adoptChosenSave(entry: SavePickerEntryUiModel, savePath: Path): ChosenSaveAdoption {
+        val origin = settingsAdapter.currentProfile().origin
+        if (origin.isBlank()) return ChosenSaveAdoption.Failure("no active session — log in again to use a saved game")
+        val record = sessionStorage.coherentRecord(origin)
+            ?: return ChosenSaveAdoption.Failure("no active session — log in again to use a saved game")
+        if (record.kioskMode) return ChosenSaveAdoption.Failure("kiosk sessions have no server saves to adopt")
+        val username = record.username
+            ?: return ChosenSaveAdoption.Failure("no active session — log in again to use a saved game")
+        val deviceId = saveSyncDeviceIdentityLoader.load(origin, username)?.rommDeviceId
+            ?: return ChosenSaveAdoption.Failure("device not registered — cannot download the chosen save")
+
+        val bytes = when (val download = syncGateway.downloadSaveContent(origin, entry.saveId, deviceId, null)) {
+            is SaveDownloadResult.Success -> download.bytes
+            is SaveDownloadResult.Failure ->
+                return ChosenSaveAdoption.Failure("could not download the chosen save: ${download.error}")
+        }
+
+        // Validate against the server-reported content hash when available (no fabrication).
+        if (entry.contentHash != null && sha256Hex(bytes) != entry.contentHash) {
+            return ChosenSaveAdoption.Failure("chosen save failed verification (content hash mismatch)")
+        }
+
+        try {
+            val dir = checkNotNull(savePath.parent)
+            Files.createDirectories(dir)
+            val temp = dir.resolve("${savePath.fileName}.tmp")
+            Files.write(temp, bytes)
+            try {
+                Files.move(temp, savePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temp, savePath, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (e: Exception) {
+            return ChosenSaveAdoption.Failure("could not write the chosen save: ${e.message}")
+        }
+
+        // Best-effort download confirmation (mirrors keep-server); local adoption already succeeded.
+        when (val confirm = syncGateway.confirmDownload(origin, entry.saveId, deviceId)) {
+            is SaveConfirmResult.Success -> Unit
+            is SaveConfirmResult.Failure ->
+                log.warning("chosen-save adoption: confirmDownload failed (non-fatal): ${confirm.error}")
+        }
+        return ChosenSaveAdoption.Success
+    }
+
+    /**
      * Launches the desktop player for a ROM (Phase 8): resolves the ROM detail and an approved
      * core, stages real ROM content, commits request + journal atomically via [playerSupervisor], spawns
      * `rommulus_player`, and starts watching the process so reconciliation happens when it exits
@@ -859,6 +969,18 @@ class DesktopAppCoordinator(
         runCatching { Files.createDirectories(checkNotNull(savePath.parent)) }
             .getOrElse { return PlayerLaunchResult.Failed("cannot create saves directory: ${it.message}") }
 
+        // "Choose Save" (Android adoptChosenSave parity): an explicitly picked server save
+        // replaces whatever previously sat at the autosave path — the player restores exactly
+        // that save on launch. One-shot: consumed by this launch even if a later step fails
+        // (the user re-picks to retry). Fail-closed: an adoption failure aborts the launch.
+        val chosen = chosenSaves.remove(romId)
+        if (chosen != null) {
+            when (val adopted = adoptChosenSave(chosen, savePath)) {
+                is ChosenSaveAdoption.Success -> Unit
+                is ChosenSaveAdoption.Failure -> return PlayerLaunchResult.Failed(adopted.reason)
+            }
+        }
+
         val coresDir = paths.dataDir.resolve("cores")
         val params = PlayerLaunchParams(
             coreId = core.coreId,
@@ -897,6 +1019,10 @@ class DesktopAppCoordinator(
                     coreBuildRevision = core.releaseTag.ifBlank { core.commitSha },
                 )
                 watchPlayerExit(result.launch, sessionId)
+                // Parity with Android (MainActivity → GameLaunchRecorder.recordLaunch): mark the
+                // ROM played as soon as the session starts. Non-blocking (background thread) and
+                // failure-swallowing — it must never break the launch flow.
+                gameLaunchRecorder.recordLaunch(romId)
                 PlayerLaunchResult.Started(sessionId)
             }
             is PrepareLaunchResult.Failed -> PlayerLaunchResult.Failed(result.reason)
@@ -998,7 +1124,7 @@ class DesktopAppCoordinator(
                         if (stale != null) {
                             network.authRepository.clearExpiredSession(stale.origin, stale.username.orEmpty())
                         }
-                        appMode = AppMode.ONBOARDING
+                        invalidateSessionAndReOnboard()
                     }
                 }
             }
@@ -1010,12 +1136,46 @@ class DesktopAppCoordinator(
         enterMainMode()
     }
 
+    /**
+     * Explicit sign-out (parity with Android's `SettingsViewModel` `clearSessionFn` +
+     * `onSessionInvalidated` pair): clears the durable client token for the current session,
+     * clears the session record, and routes the app back to onboarding. Android has no
+     * confirmation dialog for this action, so neither does desktop. Safe to call with no
+     * active session (best-effort clears, still routes to onboarding).
+     */
+    fun logout() {
+        val record = sessionStorage.coherentRecord(settingsAdapter.currentProfile().origin)
+        if (record != null) {
+            clientTokenStorage.clearToken(record.origin, record.username.orEmpty())
+        }
+        settingsAdapter.clearSession()
+        invalidateSessionAndReOnboard()
+    }
+
+    /**
+     * Routes the app back to onboarding after a session has been invalidated (explicit logout
+     * or a server-origin change), mirroring Android's `enterOnboarding(startStep =
+     * OnboardingStep.SERVER)` (Phase 5a, spec §5.3): the memoized onboarding presenter is
+     * dropped so the next entry rebuilds it with the CURRENT profile origin prefilled at the
+     * SERVER step, and the app leaves MAIN mode.
+     */
+    private fun invalidateSessionAndReOnboard() {
+        onboardingInitialStep = OnboardingStep.SERVER
+        onboardingPresenterInstance = null
+        appMode = AppMode.ONBOARDING
+    }
+
     // ------------------------------------------------------------------ navigation
 
     /** Main-mode back moves up one view; Home remains the root and never exits the app. */
     fun onBack() {
         if (appMode != AppMode.MAIN) return
-        if (currentScreen == Screen.GAME_DETAIL) detailPresenters.clear()
+        // Leaving the detail screen also drops any pending "Choose Save" selection — a save
+        // picked for one ROM must never leak into a launch of another.
+        if (currentScreen == Screen.GAME_DETAIL) {
+            detailPresenters.clear()
+            chosenSaves.clear()
+        }
         currentScreen = when (currentScreen) {
             Screen.HOME -> Screen.HOME
             Screen.GAME_DETAIL -> gameDetailParent
@@ -1068,8 +1228,6 @@ class DesktopAppCoordinator(
     }
 
     // ------------------------------------------------------------------ presenters (lazy per screen)
-
-    fun onboardingPresenter(): OnboardingPresenter = onboardingPresenterLazy
 
     fun settingsPresenter(): SettingsPresenter = settingsPresenterLazy
 
@@ -1190,6 +1348,50 @@ class DesktopAppCoordinator(
     fun resolveSaveConflict(romId: Long, keepLocal: Boolean): SaveConflictResolutionResult =
         resolveSaveConflict(romId, if (keepLocal) SaveConflictChoice.KEEP_LOCAL else SaveConflictChoice.KEEP_SERVER)
 
+    // ------------------------------------------------------------------ save picker ("Choose Save")
+
+    /**
+     * One-shot pre-launch save selection (the "Choose Save" flow — Android `adoptChosenSave`
+     * parity): the entry picked in the save picker, keyed by ROM id. Consumed (removed) by the
+     * NEXT [launchPlayer] for that ROM, which adopts the chosen server save into the launch's
+     * autosave path so the player restores exactly that save instead of whatever was there.
+     * Cleared when navigation leaves GAME_DETAIL. Synchronized: written on the Compose main
+     * thread, read/removed from [launchPlayer]'s worker thread.
+     */
+    private val chosenSaves: MutableMap<Long, SavePickerEntryUiModel> =
+        Collections.synchronizedMap(mutableMapOf())
+
+    /** Records the user's save-picker choice for [romId]'s upcoming launch (one-shot). */
+    fun chooseSaveForLaunch(romId: Long, entry: SavePickerEntryUiModel) {
+        chosenSaves[romId] = entry
+    }
+
+    /** The pending save-picker choice for [romId], or null when none is recorded. */
+    internal fun chosenSaveForLaunch(romId: Long): SavePickerEntryUiModel? = chosenSaves[romId]
+
+    /**
+     * Lists every server save for [romId] (all cores/devices — SRAM saves are cross-core
+     * compatible for the same platform, so no core filter is applied; Android
+     * `listSavesForRom` parity). The game-detail "Choose Save" flow calls this before rendering
+     * its entries. Blocking network I/O — callers dispatch off the UI thread. Kiosk sessions
+     * expose no server saves (empty success, matching Android).
+     */
+    fun listSavesForRom(romId: Long): SaveListResult {
+        val origin = settingsAdapter.currentProfile().origin
+        if (origin.isBlank()) return SaveListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val record = sessionStorage.coherentRecord(origin)
+            ?: return SaveListResult.Failure(RommApiError.AUTH_EXPIRED)
+        if (record.kioskMode) return SaveListResult.Success(emptyList())
+        val username = record.username
+            ?: return SaveListResult.Failure(RommApiError.AUTH_EXPIRED)
+        // Optional for the API, but supplied when known so the server can attach this device's
+        // sync status per save (Android parity). A registration failure degrades to a
+        // device-agnostic list rather than failing the picker.
+        val deviceId = runCatching { saveSyncDeviceIdentityLoader.load(origin, username) }
+            .getOrNull()?.rommDeviceId
+        return syncGateway.listSaves(origin, romId, deviceId)
+    }
+
     fun biosConfigurationPresenter(platformSlug: String): BiosConfigurationPresenter =
         BiosConfigurationPresenter(scope, biosConfigurationProvider(platformSlug))
 
@@ -1225,8 +1427,30 @@ class DesktopAppCoordinator(
     /** Whether [platformSlug] has an approved, installed Linux desktop core. */
     fun isPlatformPlayable(platformSlug: String): Boolean = resolveLaunchCore(platformSlug) != null
 
-    private val onboardingPresenterLazy by lazy {
-        OnboardingPresenter(
+    /**
+     * The step a (re-)entered onboarding starts at. First launch is [OnboardingStep.WELCOME];
+     * after a session invalidation (logout / server replacement) it is [OnboardingStep.SERVER]
+     * with the current origin prefilled, mirroring Android's
+     * `enterOnboarding(startStep = OnboardingStep.SERVER)`.
+     */
+    private var onboardingInitialStep: OnboardingStep = OnboardingStep.WELCOME
+
+    /**
+     * The onboarding presenter for the current onboarding entry. Unlike the other per-screen
+     * presenters this one is NOT memoized for the coordinator's lifetime: Android builds a
+     * FRESH OnboardingViewModel on every onboarding entry (so `initialServerInput` picks up the
+     * newly selected origin), and desktop must do the same — [invalidateSessionAndReOnboard]
+     * drops the instance so the next [onboardingPresenter] call rebuilds it with the current
+     * profile origin. Volatile: [settingsPresenterLazy]'s `onSessionInvalidated` fires from the
+     * settings presenter's scope (Dispatchers.Default) while the UI thread reads it via
+     * `remember(coordinator)`.
+     */
+    @Volatile
+    private var onboardingPresenterInstance: OnboardingPresenter? = null
+
+    fun onboardingPresenter(): OnboardingPresenter {
+        onboardingPresenterInstance?.let { return it }
+        val presenter = OnboardingPresenter(
                 scope = scope,
                 validateRommServer = ValidateRommServer { origin -> network.authRepository.validateServer(origin) },
                 persistValidatedOrigin = PersistValidatedOrigin { origin -> settingsAdapter.persistValidatedOrigin(origin) },
@@ -1242,9 +1466,28 @@ class DesktopAppCoordinator(
                 beginQrLogin = BeginQrLogin { origin -> network.qrLoginRepository.start(origin) },
                 pollQrLogin = PollQrLogin { origin, session -> network.qrLoginRepository.poll(origin, session) },
                 initialServerInput = settingsAdapter.currentProfile().origin,
-                initialStep = OnboardingStep.WELCOME,
+                initialStep = onboardingInitialStep,
                 initialUsername = "",
             )
+        onboardingPresenterInstance = presenter
+        return presenter
+    }
+
+    /**
+     * Raw (NOT coherence-checked) session record — parity with Android's `sessionStore.current()`
+     * (the seam's [SessionStorage.coherentRecord] additionally requires the record's origin to
+     * match the profile origin). The settings presenter needs the raw record:
+     * [SettingsPresenter.onSave] persists the NEW origin BEFORE checking for a session to
+     * invalidate, so a coherence-checked read would already see the new origin and miss the
+     * old-origin record — the server-replacement invalidation would never fire.
+     */
+    private fun rawSessionRecord(): SessionStorage.Record? = sessionRecordStore.current()?.let {
+        SessionStorage.Record(
+            origin = it.origin,
+            username = it.username,
+            verifiedAtEpochMillis = it.verifiedAtEpochMillis,
+            kioskMode = it.kioskMode,
+        )
     }
 
     private val settingsPresenterLazy by lazy {
@@ -1253,14 +1496,21 @@ class DesktopAppCoordinator(
                 getCurrentProfile = { settingsAdapter.currentProfile() },
                 setOriginFn = settingsAdapter::setOrigin,
                 clearOverrideFn = settingsAdapter::clearOverride,
-                getSessionRecord = { settingsAdapter.sessionRecord() },
-                clearSessionFn = settingsAdapter::clearSession,
+                getSessionRecord = { rawSessionRecord() },
+                clearSessionFn = {
+                    // Mirror Android's SettingsViewModel.Factory.clearSessionFn: drop the durable
+                    // client token for the session being cleared BEFORE the session record, so a
+                    // server-origin change (or restore-default) invalidates the old origin's token.
+                    val session = rawSessionRecord()
+                    session?.let { s -> clientTokenStorage.clearToken(s.origin, s.username.orEmpty()) }
+                    settingsAdapter.clearSession()
+                },
                 checkHeartbeatFn = { origin -> network.authRepository.checkHeartbeat(origin) },
                 loginFn = { origin, username, password ->
                     network.authRepository.login(origin, username, password)
                 },
                 onLoginSuccess = { currentScreen = Screen.HOME },
-                onSessionInvalidated = { appMode = AppMode.ONBOARDING },
+                onSessionInvalidated = { invalidateSessionAndReOnboard() },
                 getHideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
                 setHideUnsupportedSystemsFn = settingsAdapter::setHideUnsupportedSystems,
                 getVerifySha1OnLaunch = { settingsAdapter.verifySha1OnLaunch() },

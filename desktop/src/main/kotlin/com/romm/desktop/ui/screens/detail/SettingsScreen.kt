@@ -85,7 +85,9 @@ private val ErrorRed = Color(0xFFF44336)
  *    with `coordinator.settingsAdapter.currentTheme` (live), so this screen does not wrap.
  *
  * Session invalidation needs no handling here: the coordinator's `onSessionInvalidated`
- * hook already routes the app back to onboarding.
+ * hook already routes the app back to onboarding. The Session section's "Log Out" button
+ * calls [DesktopAppCoordinator.logout] (clears the durable client token + session record and
+ * re-onboards) — Android has no confirmation dialog for this action, so neither does desktop.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -95,6 +97,9 @@ fun SettingsScreen(
 ) {
     val presenter = remember { coordinator.settingsPresenter() }
     val uiState by presenter.uiState.collectAsState()
+    // The Session section only offers "Log Out" while a session is active (a username is
+    // recorded); the focus chain below skips the absent button when not logged in.
+    val loggedIn = uiState.currentUsername != null
     var showThemeDialog by remember { mutableStateOf(false) }
     var restoreThemeFocus by remember { mutableStateOf(false) }
     var privacyOpenError by remember { mutableStateOf(false) }
@@ -107,6 +112,7 @@ fun SettingsScreen(
     val usernameFocus = remember { FocusRequester() }
     val passwordFocus = remember { FocusRequester() }
     val loginFocus = remember { FocusRequester() }
+    val logoutFocus = remember { FocusRequester() }
     val hideUnsupportedFocus = remember { FocusRequester() }
     val themeFocus = remember { FocusRequester() }
     val segaCdFocus = remember { FocusRequester() }
@@ -316,7 +322,7 @@ fun SettingsScreen(
                     .focusRequester(loginFocus)
                     .focusProperties {
                         up = passwordFocus
-                        down = hideUnsupportedFocus
+                        down = if (loggedIn) logoutFocus else hideUnsupportedFocus
                     }
                     .focusableItem("settings:login", navigator) {
                         if (uiState.loginState !is SettingsLoginState.Loading) presenter.onLogin()
@@ -335,6 +341,25 @@ fun SettingsScreen(
                 else -> Unit
             }
 
+            // Log Out (visible only while a session is active): clears the durable client token
+            // + session record and re-onboards via the coordinator (mirrors Android's
+            // clearSessionFn + onSessionInvalidated pair; no confirmation step, as on Android).
+            if (loggedIn) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TvOutlinedButton(
+                    onClick = coordinator::logout,
+                    modifier = Modifier
+                        .focusRequester(logoutFocus)
+                        .focusProperties {
+                            up = loginFocus
+                            down = hideUnsupportedFocus
+                        }
+                        .focusableItem("settings:logout", navigator) { coordinator.logout() },
+                ) {
+                    Text("Log Out")
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             // ---- Library section ----
@@ -345,7 +370,7 @@ fun SettingsScreen(
                 checked = uiState.hideUnsupportedSystems,
                 onCheckedChange = presenter::onHideUnsupportedSystemsChanged,
                 focusRequester = hideUnsupportedFocus,
-                upFocus = loginFocus,
+                upFocus = if (loggedIn) logoutFocus else loginFocus,
                 downFocus = themeFocus,
                 colors = colors,
                 navigator = navigator,

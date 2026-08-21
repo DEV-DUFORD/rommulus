@@ -1,6 +1,8 @@
 package com.romm.desktop.sync
 
 import com.romm.androidtv.romm.DeviceIdentity
+import com.romm.androidtv.romm.PlaySessionIngestRequest
+import com.romm.androidtv.romm.PlaySessionIngestResult
 import com.romm.androidtv.romm.SaveConfirmResult
 import com.romm.androidtv.romm.SaveDownloadResult
 import com.romm.androidtv.romm.SaveUploadRequest
@@ -80,7 +82,7 @@ class FakeSaveContentGateway : SaveContentGateway {
 }
 
 /** Scripted [RommSyncGateway] — every call recorded, results configurable per test. */
-class FakeRommSyncGateway : RommSyncGateway {
+open class FakeRommSyncGateway : RommSyncGateway {
 
     var negotiateResult: SyncNegotiateResult = SyncNegotiateResult.Failure(com.romm.androidtv.romm.RommApiError.NETWORK_ERROR)
     var completeSessionResult: SyncCompleteResult = SyncCompleteResult.Success("completed")
@@ -89,6 +91,7 @@ class FakeRommSyncGateway : RommSyncGateway {
     var confirmResult: SaveConfirmResult = SaveConfirmResult.Success
     var listSavesResult: com.romm.androidtv.romm.SaveListResult =
         com.romm.androidtv.romm.SaveListResult.Failure(com.romm.androidtv.romm.RommApiError.NETWORK_ERROR)
+    var ingestPlaySessionsResult: PlaySessionIngestResult = PlaySessionIngestResult.Success(1, 0)
 
     val negotiateCalls = mutableListOf<Pair<String, SyncNegotiateRequest>>()
     val completeSessionCalls = mutableListOf<Triple<String, Long, SyncCompleteRequest>>()
@@ -96,6 +99,7 @@ class FakeRommSyncGateway : RommSyncGateway {
     val downloadCalls = mutableListOf<Quadruple>()
     val confirmCalls = mutableListOf<Triple<String, Long, String>>()
     val listSavesCalls = mutableListOf<Pair<String, Long>>()
+    val ingestPlaySessionsCalls = mutableListOf<Pair<String, PlaySessionIngestRequest>>()
 
     data class Quadruple(val origin: String, val saveId: Long, val deviceId: String, val sessionId: Long?)
 
@@ -132,6 +136,11 @@ class FakeRommSyncGateway : RommSyncGateway {
     override fun listSaves(origin: String, romId: Long, deviceId: String?): com.romm.androidtv.romm.SaveListResult {
         listSavesCalls.add(origin to romId)
         return listSavesResult
+    }
+
+    open override fun ingestPlaySessions(origin: String, request: PlaySessionIngestRequest): PlaySessionIngestResult {
+        ingestPlaySessionsCalls.add(origin to request)
+        return ingestPlaySessionsResult
     }
 }
 

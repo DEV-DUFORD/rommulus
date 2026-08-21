@@ -62,6 +62,7 @@ import com.romm.androidtv.library.GameDetailAlert
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.library.SiblingRomInfo
 import com.romm.androidtv.library.SectionState
+import com.romm.androidtv.romm.SaveListResult
 import com.romm.androidtv.storage.records.SaveSyncStatus
 import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.PlayerLaunchResult
@@ -271,6 +272,28 @@ private fun GameDetailContent(
 
     val loadedDetail = (uiState.detail as? SectionState.Loaded)?.data
 
+    // Save picker ("Choose Save" — Android parity): lists this ROM's server saves via the
+    // coordinator; picking an entry records the choice for the upcoming launch
+    // (coordinator.chooseSaveForLaunch) — the user then presses Play, no auto-launch.
+    var savePickerState by remember { mutableStateOf<SavePickerState?>(null) }
+
+    fun loadSavesForPicker() {
+        savePickerState = SavePickerState.Loading
+        launchScope.launch {
+            // listSaves does network I/O — keep it off the compose thread.
+            val result = withContext(Dispatchers.Default) { coordinator.listSavesForRom(romId) }
+            savePickerState = when (result) {
+                is SaveListResult.Success -> SavePickerState.Loaded(
+                    SavePickerUiModel(
+                        romTitle = loadedDetail?.title ?: "Game #$romId",
+                        entries = buildSavePickerEntries(result.saves),
+                    ),
+                )
+                is SaveListResult.Failure -> SavePickerState.Error("Couldn't load saves (${result.error})")
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ── Main scrollable content ──────────────────────────────────────
         when (val section = uiState.detail) {
@@ -326,6 +349,7 @@ private fun GameDetailContent(
                 onOpenSibling = { siblingId ->
                     coordinator.openGameDetail(siblingId, coordinator.gameDetailParent)
                 },
+                onChooseSaveClick = { loadSavesForPicker() },
                 onChooseFileClick = { showVersionPicker = true },
                 firstScreenshotFocusRequester = firstScreenshotFocusRequester,
                 screenshotUpFocusRequester = favoriteFocusRequester,
@@ -385,6 +409,21 @@ private fun GameDetailContent(
             )
         }
 
+        // ── Save picker overlay ("Choose Save" — records the launch's save) ──
+        savePickerState?.let { state ->
+            if (loadedDetail != null) {
+                SavePickerOverlay(
+                    state = state,
+                    onSelect = { entry ->
+                        savePickerState = null
+                        coordinator.chooseSaveForLaunch(romId, entry)
+                    },
+                    onRetry = { loadSavesForPicker() },
+                    onDismiss = { savePickerState = null },
+                )
+            }
+        }
+
         // ── Favorite failure alert (rendered outside the dialog) ─────────
         if (uiState.alert is GameDetailAlert.FavoriteFailure) {
             val operation = (uiState.alert as GameDetailAlert.FavoriteFailure).operation
@@ -436,6 +475,7 @@ private fun GameDetailBody(
     onViewQuarantine: () -> Unit,
     onOpenScreenshot: (List<String>, Int) -> Unit,
     onOpenSibling: (Long) -> Unit,
+    onChooseSaveClick: () -> Unit,
     onChooseFileClick: () -> Unit,
     firstScreenshotFocusRequester: FocusRequester,
     screenshotUpFocusRequester: FocusRequester,
@@ -499,6 +539,9 @@ private fun GameDetailBody(
                             onPlayClick = onPlayClick,
                             modifier = Modifier.weight(1f),
                         )
+                        // "Choose Save" (Android parity): opens the save picker overlay listing
+                        // this ROM's server saves; picking one re-scopes the next launch.
+                        ChooseSaveButton(onClick = onChooseSaveClick)
                         // "Choose File" (Android parity): only when the ROM has sibling versions.
                         if (shouldShowChooseFileButton(rom)) {
                             ChooseFileButton(onClick = onChooseFileClick)
@@ -662,6 +705,225 @@ private fun ChooseFileButton(onClick: () -> Unit) {
             style = MaterialTheme.typography.titleMedium,
             color = colors.textPrimary,
         )
+    }
+}
+
+/**
+ * The "Choose Save" affordance next to Play/Choose File (Android parity with `ChooseSaveButton`):
+ * opens the save picker overlay, which lists every server save for this ROM (newest first, the
+ * newest autosave checked as the default). Picking a row records the choice for the upcoming
+ * launch — the user then presses Play.
+ */
+@Composable
+private fun ChooseSaveButton(onClick: () -> Unit) {
+    val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.nightLo)
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) colors.romm300 else colors.textSecondary.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(8.dp),
+            )
+            .focusableItem("detail:choose-save", navigator, onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = "Choose Save",
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.textPrimary,
+        )
+    }
+}
+
+/**
+ * Save picker overlay (desktop adaptation of Android's full-screen `SavePickerScreen`,
+ * "Choose Save"): a scrim + centered panel listing every server save for the current ROM —
+ * newest first, each row showing file name, core badge, size and timestamp, with the newest
+ * autosave checked as the default. Escape dismisses; picking a row records the choice for the
+ * upcoming launch via [onSelect] (no auto-launch — Android parity: the user presses Play).
+ */
+@Composable
+@OptIn(ExperimentalComposeUiApi::class)
+private fun SavePickerOverlay(
+    state: SavePickerState,
+    onSelect: (SavePickerEntryUiModel) -> Unit,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val focusManager = LocalFocusManager.current
+    val focusOverrideOwner = remember { Any() }
+    val overlayFocusRequester = remember { FocusRequester() }
+    val initialFocusRequester = remember { FocusRequester() }
+
+    DisposableEffect(navigator, focusManager, focusOverrideOwner, onDismiss) {
+        navigator.installSpatialFocusOverride(
+            owner = focusOverrideOwner,
+            moveFocus = focusManager::moveFocus,
+            onBack = onDismiss,
+        )
+        onDispose { navigator.removeSpatialFocusOverride(focusOverrideOwner) }
+    }
+    LaunchedEffect(Unit) { overlayFocusRequester.requestFocusSafely() }
+    LaunchedEffect(state) { initialFocusRequester.requestFocusSafely() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .focusProperties { exit = { FocusRequester.Cancel } }
+            .focusGroup()
+            .focusRequester(overlayFocusRequester)
+            // Swallow stray clicks so the scrim doesn't pass through to the rail behind it.
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            // Escape dismisses the picker (must win over the screen-level back shortcut).
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                    onDismiss()
+                    true
+                } else {
+                    false
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(420.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.nightLo)
+                .padding(20.dp),
+        ) {
+            when (val pickerState = state) {
+                is SavePickerState.Loading -> Box(
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    LoadingIndicator()
+                }
+
+                is SavePickerState.Error -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ErrorBanner(message = pickerState.message)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TvButton(
+                            onClick = onRetry,
+                            modifier = Modifier
+                                .focusRequester(initialFocusRequester)
+                                .focusableItem("save-picker:retry", navigator, onRetry),
+                        ) {
+                            Text("Retry")
+                        }
+                        TvOutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.focusableItem("save-picker:back", navigator, onDismiss),
+                        ) {
+                            Text("Back")
+                        }
+                    }
+                }
+
+                is SavePickerState.Loaded -> {
+                    Text(
+                        text = "Choose Save",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.textPrimary,
+                    )
+                    Text(
+                        text = pickerState.model.romTitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.romm300,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (pickerState.model.entries.isEmpty()) {
+                        Text(
+                            text = "No saves found for this game yet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            itemsIndexed(pickerState.model.entries, key = { _, entry -> entry.saveId }) { index, entry ->
+                                SavePickerRow(
+                                    entry = entry,
+                                    onClick = { onSelect(entry) },
+                                    modifier = Modifier.then(
+                                        if (index == 0) {
+                                            Modifier.focusRequester(initialFocusRequester)
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One focusable/clickable save row: file name, checkmark on the default (newest autosave), core • size • date meta line. */
+@Composable
+private fun SavePickerRow(
+    entry: SavePickerEntryUiModel,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isFocused) colors.romm600.copy(alpha = 0.3f) else Color.Transparent)
+            .focusableItem("save-picker:${entry.saveId}", navigator, onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.width(28.dp)) {
+            if (entry.isDefaultSelection) {
+                Text(text = "✓", color = colors.romm300, style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.fileName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isFocused) colors.romm300 else colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val meta = listOfNotNull(entry.coreId, entry.sizeText, entry.updatedAtText)
+            if (meta.isNotEmpty()) {
+                Text(
+                    text = meta.joinToString("  •  "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
     }
 }
 

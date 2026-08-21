@@ -1,5 +1,7 @@
 package com.romm.desktop.sync
 
+import com.romm.androidtv.romm.PlaySessionIngestRequest
+import com.romm.androidtv.romm.PlaySessionIngestResult
 import com.romm.androidtv.romm.RommSyncApi
 import com.romm.androidtv.romm.SaveConfirmResult
 import com.romm.androidtv.romm.SaveDownloadResult
@@ -40,4 +42,7 @@ class RommSyncApiGateway(private val client: OkHttpClient) : RommSyncGateway {
 
     override fun listSaves(origin: String, romId: Long, deviceId: String?): SaveListResult =
         RommSyncApi.listSaves(client, origin, romId, deviceId)
+
+    override fun ingestPlaySessions(origin: String, request: PlaySessionIngestRequest): PlaySessionIngestResult =
+        RommSyncApi.ingestPlaySessions(client, origin, request)
 }
