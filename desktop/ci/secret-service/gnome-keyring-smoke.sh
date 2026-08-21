@@ -32,8 +32,9 @@ dbus_method() { # dbus_method <object-path> <method> [args...]
 # --- inner phase: runs INSIDE dbus-run-session ---------------------------------
 if [[ "${1:-}" == "--inner" ]]; then
     cd "$REPO_ROOT" # ./gradlew below must resolve from the repo root regardless of caller CWD
-    gnome-keyring-daemon --components=secrets --daemonize 2>/dev/null || true
-    trap 'pkill -f gnome-keyring-daemon 2>/dev/null || true' EXIT
+    gnome-keyring-daemon --components=secrets --foreground >/tmp/rommulus-keyring.log 2>&1 &
+    KEYRING_PID=$!
+    trap 'kill "$KEYRING_PID" 2>/dev/null || true' EXIT
 
     # Wait (<=15s) for the daemon to own org.freedesktop.secrets.
     for _ in $(seq 1 75); do
@@ -59,7 +60,8 @@ sys.exit(0 if m.NameHasOwner("org.freedesktop.secrets") else 1)' \
         org.freedesktop.Secret.Service.ReadAlias "default" | sed -n "s/^\('[^']*'\).*/\1/p")"
     if [[ -z "$ALIAS_PATH" || "$ALIAS_PATH" == "/" ]]; then
         dbus_method /org/freedesktop/secrets \
-            org.freedesktop.Secret.Service.CreateCollection "{Label: <s>rommulus-smoke}" "default"
+            org.freedesktop.Secret.Service.CreateCollection \
+            "{'org.freedesktop.Secret.Collection.Label': <'rommulus-smoke'>}" "default"
         ALIAS_PATH="$(dbus_method /org/freedesktop/secrets \
             org.freedesktop.Secret.Service.ReadAlias "default" | sed -n "s/^\('[^']*'\).*/\1/p")"
     fi

@@ -951,7 +951,9 @@ jobs:
       - name: Assert — no world-writable files (packaging tree + package)
         run: |
           set -euo pipefail
-          ww="$(find packaging audit/extract -perm -o+w)"
+          # Symlink modes are ignored on Linux and conventionally appear as
+          # 0777; enforce the policy on regular files.
+          ww="$(find packaging audit/extract -type f -perm -o+w)"
           if [ -n "$ww" ]; then
             echo "::error::world-writable files found:"
             printf '%s\n' "$ww"

@@ -141,7 +141,9 @@ else
 fi
 
 # --- Release assertions (plans/LINUX_X64.md §15) -----------------------------
-ww="$(find "$STAGE" -perm -o+w -print)"
+# Symlinks conventionally report mode 0777, but their mode is ignored by
+# Linux. Only regular files can violate the package write-permission policy.
+ww="$(find "$STAGE" -type f -perm -o+w -print)"
 [ -z "$ww" ] || die "world-writable files found in package: $ww"
 echo "=== Executable inventory (review for undeclared executables) ==="
 find "$STAGE" -type f -perm -u+x | sed "s|^$STAGE/||" | LC_ALL=C sort
