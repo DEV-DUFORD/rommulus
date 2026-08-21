@@ -38,6 +38,7 @@ import com.romm.androidtv.romm.FirmwareStagingOutcome
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.databaseDir
 import com.romm.androidtv.storage.firmwareDir
+import com.romm.androidtv.storage.ports.ContentIndexStore
 import com.romm.androidtv.storage.ports.SaveReplicaScope
 import com.romm.androidtv.storage.ports.SaveStateStore
 import com.romm.androidtv.storage.records.PendingOperationRecord
@@ -78,6 +79,7 @@ import com.romm.desktop.storage.DesktopClientTokenStorage
 import com.romm.desktop.storage.DesktopSessionStorage
 import com.romm.desktop.storage.FileLockAppInstanceLock
 import com.romm.desktop.storage.NoopSessionCookieSync
+import com.romm.desktop.storage.contentindex.JsonContentIndexStore
 import com.romm.desktop.storage.secret.SecretBackend
 import com.romm.desktop.storage.secret.SecretServiceClientTokenStore
 import com.romm.desktop.storage.settings.JsonSettingsStore
@@ -121,9 +123,10 @@ import kotlinx.coroutines.launch
  *
  * Owns the full dependency graph from the Phase 5/6 desktop infrastructure:
  *
- *  - storage: [JsonSettingsStore] (settings JSON), [SqliteDatabase] + its SQLite stores
- *    (session records, save state, controller bindings, device identity, scheduler state),
- *    the [SecretBackend]-backed [SecretServiceClientTokenStore];
+ *  - storage: [JsonSettingsStore] (settings JSON), [JsonContentIndexStore] (content cache
+ *    index), [SqliteDatabase] + its SQLite stores (session records, save state,
+ *    controller bindings, device identity, scheduler state), the [SecretBackend]-backed
+ *    [SecretServiceClientTokenStore];
  *  - network seams: [DesktopSessionStorage], [DesktopClientTokenStorage],
  *    [NoopSessionCookieSync], and the [DesktopNetworkModule] client stack;
  *  - adapters/presenters: [DesktopSettingsAdapter] and lazy per-screen presenters;
@@ -258,6 +261,16 @@ class DesktopAppCoordinator(
     // ------------------------------------------------------------------ storage
 
     val settingsStore: JsonSettingsStore = JsonSettingsStore(paths.settingsFile())
+
+    /**
+     * Content cache index (parity with Android's `CacheDatabaseContentIndexStore`): a
+     * JSON-file-backed LRU index over the evictable ROM/firmware cache files, at
+     * `cacheDir/content-index.json`. Parity infrastructure for now — the stager will
+     * upsert records once cache-eviction logic lands.
+     */
+    val contentIndexStore: ContentIndexStore by lazy {
+        JsonContentIndexStore(paths.cacheDir.resolve(JsonContentIndexStore.FILE_NAME))
+    }
 
     val database: SqliteDatabase = SqliteDatabase.open(paths.databaseDir().resolve(DB_FILE_NAME))
         .getOrElse { throw IllegalStateException("Failed to open desktop database at ${paths.databaseDir()}", it) }
