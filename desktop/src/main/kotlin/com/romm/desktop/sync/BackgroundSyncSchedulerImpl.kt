@@ -78,6 +78,9 @@ class BackgroundSyncSchedulerImpl(
     @Volatile
     private var shutdown = false
 
+    /** Coalesces requests received while a drain is active into one follow-up drain. */
+    private var drainRequestedWhileRunning = false
+
     private var pendingRetry: ScheduledFuture<*>? = null
 
     private val scheduler: ScheduledExecutorService =
@@ -101,7 +104,10 @@ class BackgroundSyncSchedulerImpl(
 
     override fun requestDrain(reason: String): Boolean {
         val started = lock.withLock {
-            if (shutdown || draining.get()) {
+            if (shutdown) {
+                false
+            } else if (draining.get()) {
+                drainRequestedWhileRunning = true
                 false
             } else {
                 draining.set(true)
@@ -114,15 +120,25 @@ class BackgroundSyncSchedulerImpl(
         return started
     }
 
-    override fun markDrained(): Boolean = lock.withLock {
-        if (draining.get()) {
-            draining.set(false)
-            stateStore.clear()
-            stateRef.set(SchedulerState.Idle)
-            true
-        } else {
-            false
+    override fun markDrained(): Boolean {
+        var runAgain = false
+        val marked = lock.withLock {
+            if (!draining.get()) {
+                false
+            } else {
+                stateStore.clear()
+                if (drainRequestedWhileRunning && !shutdown) {
+                    drainRequestedWhileRunning = false
+                    runAgain = true
+                } else {
+                    draining.set(false)
+                    stateRef.set(SchedulerState.Idle)
+                }
+                true
+            }
         }
+        if (runAgain) submitDrain()
+        return marked
     }
 
     override fun scheduleRetryAfter(tentativeAttemptCount: Int, cause: String): Boolean {
@@ -132,6 +148,7 @@ class BackgroundSyncSchedulerImpl(
             val valid = draining.get()
             if (valid) {
                 draining.set(false)
+                drainRequestedWhileRunning = false
                 stateStore.persist(tentativeAttemptCount, nextAttempt)
                 cancelPendingRetry()
                 stateRef.set(SchedulerState.Waiting(nextAttempt))
@@ -148,6 +165,7 @@ class BackgroundSyncSchedulerImpl(
             shutdown = true
             cancelPendingRetry()
             draining.set(false)
+            drainRequestedWhileRunning = false
             // The durable SQLite queue is untouched by shutdown: queued operations survive.
             // Retry state was already persisted on scheduleRetryAfter; nothing to add here.
             stateRef.set(SchedulerState.Idle)

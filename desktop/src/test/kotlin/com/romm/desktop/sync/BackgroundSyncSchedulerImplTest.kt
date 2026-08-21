@@ -92,7 +92,7 @@ class BackgroundSyncSchedulerImplTest {
     }
 
     @Test
-    fun `concurrent requestDrain coalesces to one active drain`() {
+    fun `request during active drain schedules one non-overlapping follow-up`() {
         val release = CountDownLatch(1)
         val blockingDrain: () -> Unit = {
             drainCalls.incrementAndGet()
@@ -104,17 +104,19 @@ class BackgroundSyncSchedulerImplTest {
         awaitDrain(1) // startup drain is now blocking, holding the one-active-drain mutex
         assertThat(drainCalls.get()).isEqualTo(1)
 
-        // Coalesced while draining: rejected, no overlapping drain started.
+        // Requests are coalesced while the first drain remains active.
         assertThat(s.requestDrain("auth")).isFalse()
         assertThat(s.requestDrain("network-restored")).isFalse()
         assertThat(drainCalls.get()).isEqualTo(1)
 
-        release.countDown() // let the in-flight drain finish
-        Thread.sleep(50)
+        release.countDown()
+        assertThat(s.markDrained()).isTrue()
+        awaitDrain(2)
+        assertThat(drainCalls.get()).isEqualTo(2)
         assertThat(s.currentState()).isEqualTo(SchedulerState.Draining)
         s.markDrained()
         s.shutdown()
-        assertThat(drainCalls.get()).isEqualTo(1)
+        assertThat(drainCalls.get()).isEqualTo(2)
     }
 
     @Test
