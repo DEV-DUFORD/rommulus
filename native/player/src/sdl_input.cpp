@@ -10,6 +10,7 @@
 #include <libretro.h>
 
 #include "emulation_session.h"
+#include "native/player/pause_chord.h"
 
 namespace romm::player {
 namespace {
@@ -274,15 +275,12 @@ bool SdlInput::pollPauseTrigger() {
         const bool leftStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
         const bool rightStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
 
-        // Select maps to Back on SDL pads, so Android's Start+Select combo is
-        // polled as Start+Back; L3+R3 is its default binding. Back by itself
-        // must remain available to games as Select, unlike Android TV's
-        // system-level Back key. Both combos are edge-detected, mirroring the
-        // Android router's evaluatePauseMenuCombination().
-        const bool comboNow = (start && back) || (leftStick && rightStick);
-        const bool comboPrev = (prev.start && prev.back) ||
-                               (prev.leftStick && prev.rightStick);
-        if (comboNow && !comboPrev) {
+        if (pauseChordPressed(
+                leftStick,
+                rightStick,
+                prev.leftStick,
+                prev.rightStick
+            )) {
             trigger = true;
         }
 

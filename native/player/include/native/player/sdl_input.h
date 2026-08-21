@@ -66,11 +66,9 @@ public:
     // neutral state rather than going stale).
     void updateSession(romm::EmulationSession& session);
 
-    // Edge-detected pause trigger (Android's quick-Back / pause-combo):
-    // true on the single frame in which any gamepad newly presses Back, or
-    // its Start+Select or L3+R3 combination transitions from not-held to
-    // held. Call once per frame while gameplay input is active (SDL pads map
-    // Select to Back, so "Start+Select" is polled as Start+Back).
+    // Edge-detected pause trigger: true on the single frame in which a
+    // gamepad's L3+R3 pause combination transitions from not-held to held.
+    // Call once per frame while gameplay input is active.
     bool pollPauseTrigger();
 
     // Edge-detected menu navigation for the pause overlay: d-pad up/down/

@@ -105,4 +105,5 @@ romm_add_player_test(test_pause_menu)
 # the include paths above — no SDL involved.
 romm_add_player_test(test_controller_capture)
 romm_add_player_test(test_binding_table)
+romm_add_player_test(test_pause_chord)
 romm_add_player_test(test_presentation_dirty_state)
