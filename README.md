@@ -6,8 +6,8 @@ cartridge/disc images, and plays them locally through vendored libretro emulator
 client-side, no cloud gaming.
 
 > [!NOTE]
-> RomMulus currently supports ARM-based Android TV devices only. Release APKs include
-> `armeabi-v7a` and `arm64-v8a`; x86 and x86_64 devices are not supported.
+> RomMulus supports ARM-based Android TV devices and an x86_64 Linux desktop build for
+> Ubuntu 24.04. The portable Linux bundle also targets Steam Deck desktop mode.
 
 ![RomMulus home screen](docs/images/home-page.png)
 
@@ -53,7 +53,10 @@ Maintainers can run the **Release Android build** workflow from the repository's
 a new `X.Y.Z` version. The workflow updates the app version, builds and signs the release APK and
 Android App Bundle, commits and tags the version, and publishes them as
 `rommulus-X.Y.Z-arm.apk` and `rommulus-X.Y.Z-arm.aab` with release notes generated from commits
-since the previous release. Upload the AAB to Google Play; use the APK for direct installation.
+since the previous release. Publishing the GitHub release also builds and attaches
+`rommulus-X.Y.Z-linux-x86_64.tar.zst` and its checksum. Linux and Steam Deck users can extract
+that self-contained archive (`tar --zstd -xf <archive>`) and launch `bin/rommulus`; upload the
+AAB to Google Play and use the APK for direct Android installation.
 
 ## Permissions
 

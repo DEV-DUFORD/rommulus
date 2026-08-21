@@ -42,7 +42,15 @@ on:
     branches: [main, zd/linux-build]
   pull_request:
     branches: [main, zd/linux-build]
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Package version (for example, 1.2.3)
+        required: false
+        default: 0.1.0-dev
+        type: string
 
 permissions:
   contents: read
@@ -193,8 +201,10 @@ jobs:
           # timeout exit code 124 means the process was still running when
           # the timer fired — i.e. the Compose Desktop window opened and
           # did not crash immediately.
+          set +e
           timeout 30 xvfb-run -a ./gradlew --offline --no-daemon --configure-on-demand :desktop:run
           rc=$?
+          set -e
           if [ $rc -eq 124 ]; then
             echo "✓ Desktop window stayed alive for 30s — smoke pass."
             exit 0
@@ -246,7 +256,8 @@ jobs:
           set -euo pipefail
           echo "=== Secret Service tooling ==="
           dbus-daemon --version | head -1
-          gdbus --version
+          gdbus help >/dev/null
+          echo "gdbus OK"
           python3 -c 'import dbus; print("python3-dbus OK")'
           gnome-keyring-daemon --version
           echo "================================"
@@ -394,9 +405,9 @@ jobs:
   # =================================================================
   # 7. player-build  — Phase 8 (SDL3 rommulus-player)
   # =================================================================
-  # Builds rommulus-player from source with a vendored SDL3 build
-  # (release-3.4.14).  SDL3 is not in the noble repos; we build it
-  # from source and install to /usr/local before configuring the player.
+  # Builds rommulus-player from source with a vendored static SDL3 build
+  # (release-3.4.14). SDL3 is not in the noble repos; static linkage keeps
+  # the downloadable player from requiring a separately installed SDL3.
   player-build:
     name: Player build (SDL3)
     runs-on: ubuntu-24.04
@@ -479,10 +490,12 @@ jobs:
           echo "Configuring SDL3 Release build (prefix=/usr/local)..."
           cmake -S deps/sdl3 -B build/sdl \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DSDL_SHARED=OFF \
+            -DSDL_STATIC=ON
           cmake --build build/sdl -j"$(nproc)"
           sudo cmake --install build/sdl
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
           echo "SDL3 installed to /usr/local."
           pkg-config --modversion SDL3 2>/dev/null && echo "✓ SDL3 pkg-config OK" || echo "⚠ SDL3 pkg-config not found"
@@ -490,7 +503,7 @@ jobs:
       - name: Configure player (Release)
         run: |
           set -euo pipefail
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
           cmake -S native/player -B build/player \
             -DCMAKE_C_COMPILER=clang-18 \
@@ -500,7 +513,7 @@ jobs:
       - name: Build player
         run: |
           set -euo pipefail
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
           cmake --build build/player
 
@@ -599,6 +612,8 @@ jobs:
     name: Package tarball
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ROMMULUS_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.version || '0.1.0-dev' }}
 
     steps:
       - name: Check out repository
@@ -682,7 +697,9 @@ jobs:
           echo "Configuring SDL3 Release build (prefix=/usr/local)..."
           cmake -S deps/sdl3 -B build/sdl \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DSDL_SHARED=OFF \
+            -DSDL_STATIC=ON
           cmake --build build/sdl -j"$(nproc)"
           sudo cmake --install build/sdl
           pkg-config --modversion SDL3 2>/dev/null && echo "✓ SDL3 pkg-config OK" || echo "⚠ SDL3 pkg-config not found"
@@ -690,7 +707,7 @@ jobs:
       - name: Configure and build player + cores (Release)
         run: |
           set -euo pipefail
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
           cmake -S native/player -B build/player \
             -DCMAKE_C_COMPILER=clang-18 \
@@ -746,16 +763,18 @@ jobs:
       - name: Assemble tarball (packaging/build-tarball.sh)
         run: |
           set -euo pipefail
-          # No repo-level version property exists yet, so use the script's
-          # default (0.1.0) explicitly. build-tarball.sh validates its inputs,
-          # core-manifest.json, world-writable files, and prints the executable
-          # inventory (§15 "no undeclared executable" review).
-          packaging/build-tarball.sh 0.1.0
+          VERSION="${ROMMULUS_VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Package version must resemble X.Y.Z (optionally with a prerelease suffix)."
+            exit 1
+          fi
+          packaging/build-tarball.sh "$VERSION"
 
       - name: Verify tarball artifact
         run: |
           set -euo pipefail
-          ARTIFACT="dist/rommulus-0.1.0-linux-x86_64.tar.zst"
+          VERSION="${ROMMULUS_VERSION#v}"
+          ARTIFACT="dist/rommulus-${VERSION}-linux-x86_64.tar.zst"
           if [ ! -f "$ARTIFACT" ]; then
             echo "::error::artifact missing: $ARTIFACT"
             ls -la dist/ 2>/dev/null || echo "(dist/ does not exist)"
@@ -784,13 +803,16 @@ jobs:
         with:
           name: rommulus-linux-x86_64-tarball
           path: dist/*.tar.zst
+          if-no-files-found: error
+          compression-level: 0
 
       - name: Smoke — launcher fails fast without the bundled runtime (exit 5)
         run: |
           set -uo pipefail
           SMOKE="$(mktemp -d)"
           trap 'rm -rf "$SMOKE"' EXIT
-          tar --zstd -xf dist/rommulus-0.1.0-linux-x86_64.tar.zst -C "$SMOKE"
+          VERSION="${ROMMULUS_VERSION#v}"
+          tar --zstd -xf "dist/rommulus-${VERSION}-linux-x86_64.tar.zst" -C "$SMOKE"
           # Sanity: the shipped bundle contains the jlink runtime...
           if [ ! -x "$SMOKE/lib/runtime/bin/java" ]; then
             echo "::error::bundled runtime (lib/runtime/bin/java) missing from tarball"
@@ -865,7 +887,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p audit/extract
-          tar --zstd -xf dist/rommulus-0.1.0-linux-x86_64.tar.zst -C audit/extract
+          artifact="$(find dist -maxdepth 1 -name 'rommulus-*-linux-x86_64.tar.zst' -print -quit)"
+          [ -n "$artifact" ] || { echo "::error::Linux tarball was not downloaded"; exit 1; }
+          tar --zstd -xf "$artifact" -C audit/extract
 
       - name: Assert — no Android imports in shared modules
         run: |
@@ -985,29 +1009,18 @@ jobs:
       - name: Assert — player has no direct JVM/Android dependency
         run: |
           set -euo pipefail
-          # ldd exits non-zero when a shared library cannot be resolved. The
-          # audit runner installs only zstd (no SDL3), so the expected,
-          # tolerated failure is exactly one line:
-          #   libSDL3.so.0 => not found
-          # Any other unresolved library would be an undeclared dependency —
-          # fail on it. The assertion itself (§15) is that the player has no
-          # direct JVM/Android library dependency; SDL3 is a declared,
-          # expected dependency of the player.
-          if ! ldd audit/extract/bin/rommulus-player > /tmp/player-ldd.txt; then
-            unexpected="$(grep 'not found' /tmp/player-ldd.txt | grep -v 'libSDL3\.so\.0 => not found' || true)"
-            if [ -n "$unexpected" ]; then
-              echo "::error::rommulus-player has unresolved dependencies other than libSDL3.so.0:"
-              printf '%s\n' "$unexpected"
-              exit 1
-            fi
-          fi
+          ldd audit/extract/bin/rommulus-player > /tmp/player-ldd.txt
           [ -s /tmp/player-ldd.txt ] || { echo "::error::ldd produced no output"; exit 1; }
           cat /tmp/player-ldd.txt
+          if grep -q 'not found' /tmp/player-ldd.txt; then
+            echo "::error::rommulus-player has unresolved runtime dependencies"
+            exit 1
+          fi
           if grep -iE 'libjvm|libjava|android' /tmp/player-ldd.txt; then
             echo "::error::rommulus-player links against JVM/Android libraries"
             exit 1
           fi
-          echo "✓ rommulus-player has no direct JVM/Android library dependency (SDL3 not-found tolerated on the zstd-only audit runner)"
+          echo "✓ rommulus-player has no unresolved or direct JVM/Android library dependency"
 
       - name: Note — §15 assertions deferred to follow-up sub-units
         run: |
@@ -1016,3 +1029,30 @@ jobs:
           echo "  • core SHA and provenance match — pin binaryChecksums.\"linux-x86_64\" into core-manifest.json"
           echo "  • exported symbols match allowlist — no symbol-allowlist artifact exists yet"
           echo "  • desktop bundle starts with bundled runtime — needs a display; covered by desktop-tests"
+
+  publish-linux-release:
+    name: Publish Linux release package
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    needs: [package-tarball, license-and-provenance-audit]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download validated tarball
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rommulus-linux-x86_64-tarball
+          path: dist
+
+      - name: Attach package and checksum to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          artifact="$(find dist -maxdepth 1 -name 'rommulus-*-linux-x86_64.tar.zst' -print -quit)"
+          [ -n "$artifact" ] || { echo "::error::Validated Linux tarball is missing"; exit 1; }
+          sha256sum "$artifact" > "${artifact}.sha256"
+          gh release upload "$RELEASE_TAG" "$artifact" "${artifact}.sha256" --clobber

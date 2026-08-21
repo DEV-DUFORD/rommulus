@@ -11,6 +11,10 @@ it was proven, and what is not yet available.
   desktop end-to-end flow and every per-core gate were actually run
   (`docs/linux-support-manifest.md`). If you hit a problem, this is the environment it was
   proven in.
+- **Steam Deck desktop mode (x86_64) — targeted, NOT yet validated.** The release archive
+  statically links SDL3 and bundles its JVM, so it does not require either component to be
+  installed through SteamOS. Physical Deck validation is still required before claiming full
+  support.
 - **Fedora (current release) and Arch-class systems — targeted, NOT yet validated.** The plan's
   physical Linux matrix (`plans/LINUX_X64.md` §17.5) requires validation on one current Fedora
   and one Arch-class system before the first release is complete. That validation has not been

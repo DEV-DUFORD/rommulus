@@ -50,7 +50,7 @@ Notes:
 ## Assembling the tarball (Linux only)
 
 Prereqs on the Ubuntu 24.04 box: `zstd`, GNU tar, coreutils, clang-18/cmake/
-ninja/nasm + SDL3 (for the player build), JDK 17 (Gradle + jlink).
+ninja/nasm + SDL3 (statically linked into the player), JDK 17 (Gradle + jlink).
 
 ```sh
 # 1. Build the player and cores (Release):
@@ -196,9 +196,8 @@ pending — see `share/icons/README.md`.
 
 ## Known follow-ups (later Phase 14 sub-units)
 
-- Release publish flow (`release.yml`): upload the tarball +
-  `PACKAGE.sha256.asc` and publish the release key fingerprint. (GPG signing
-  itself is implemented in `build-tarball.sh` — see §"Signing".)
+- Published GitHub releases trigger `.github/workflows/linux-x64.yml`, which
+  attaches the validated tarball and its SHA-256 file to the release.
 - Pin Linux x86_64 core `.so` SHA-256s into `CoreManifest.kt` and
   `core-manifest.json` (`binaryChecksums."linux-x86_64"` is currently null).
 - The `package-tarball` / `license-and-provenance-audit` CI jobs in
