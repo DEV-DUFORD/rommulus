@@ -942,13 +942,13 @@ jobs:
           set -euo pipefail
           # The only regular files that may carry +x inside the bundle are the
           # launcher, the player, and the jlink runtime's own executables: a
-          # real JDK 17 jlink image ships bin/java plus bin/keytool and
-          # lib/jspawnhelper as +x regular files (verified against a local
+          # real Temurin 17 jlink image ships bin/java plus bin/keytool,
+          # lib/jexec, and lib/jspawnhelper as +x regular files
           # OpenJDK 17 jlink output). (bin/rommulus_player is a symlink, not a
           # regular file; *.so shared libraries legitimately carry the exec bit
           # and are excluded.)
           actual="$(find audit/extract -type f -perm -u+x ! -name '*.so' | sed 's|^audit/extract/||' | LC_ALL=C sort)"
-          expected="$(printf '%s\n' bin/rommulus bin/rommulus-player lib/runtime/bin/java lib/runtime/bin/keytool lib/runtime/lib/jspawnhelper | LC_ALL=C sort)"
+          expected="$(printf '%s\n' bin/rommulus bin/rommulus-player lib/runtime/bin/java lib/runtime/bin/keytool lib/runtime/lib/jexec lib/runtime/lib/jspawnhelper | LC_ALL=C sort)"
           if [ "$actual" != "$expected" ]; then
             echo "::error::executable inventory differs from the declared set:"
             diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
