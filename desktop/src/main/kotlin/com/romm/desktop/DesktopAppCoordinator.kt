@@ -1442,6 +1442,7 @@ class DesktopAppCoordinator(
     /** Main-mode back moves up one view; Home remains the root and never exits the app. */
     fun onBack() {
         if (appMode != AppMode.MAIN) return
+        val previousScreen = currentScreen
         // Leaving the detail screen also drops any pending "Choose Save" selection — a save
         // picked for one ROM must never leak into a launch of another.
         if (currentScreen == Screen.GAME_DETAIL) {
@@ -1455,10 +1456,19 @@ class DesktopAppCoordinator(
             Screen.COLLECTION_DETAIL -> collectionDetailParent
             else -> currentScreen.parent()
         }
+        refreshContinuePlayingOnHomeEntry(previousScreen)
     }
 
     fun navigate(screen: Screen) {
+        val previousScreen = currentScreen
         currentScreen = screen
+        refreshContinuePlayingOnHomeEntry(previousScreen)
+    }
+
+    private fun refreshContinuePlayingOnHomeEntry(previousScreen: Screen) {
+        if (previousScreen != Screen.HOME && currentScreen == Screen.HOME) {
+            refreshContinuePlayingIfInitialized()
+        }
     }
 
     fun openPlatformDetail(platformId: Long) {

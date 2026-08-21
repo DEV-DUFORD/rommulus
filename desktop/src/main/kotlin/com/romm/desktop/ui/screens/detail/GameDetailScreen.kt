@@ -304,6 +304,9 @@ private fun GameDetailContent(
     // coordinator; picking an entry records the choice for the upcoming launch
     // (coordinator.chooseSaveForLaunch) — the user then presses Play, no auto-launch.
     var savePickerState by remember { mutableStateOf<SavePickerState?>(null) }
+    var loadedSaveFileName by remember(romId) {
+        mutableStateOf(coordinator.chosenSaveForLaunch(romId)?.fileName)
+    }
     var serverSaveAvailability by remember(romId) {
         mutableStateOf(ServerSaveAvailability.Checking)
     }
@@ -381,6 +384,7 @@ private fun GameDetailContent(
                 playStatus = playStatus,
                 saveUiState = saveUiState,
                 serverSaveAvailability = serverSaveAvailability,
+                loadedSaveFileName = loadedSaveFileName,
                 saveActionMessage = saveActionMessage,
                 onSaveSyncNow = {
                     launchScope.launch {
@@ -470,6 +474,7 @@ private fun GameDetailContent(
                     onSelect = { entry ->
                         savePickerState = null
                         coordinator.chooseSaveForLaunch(romId, entry)
+                        loadedSaveFileName = entry.fileName
                     },
                     onRetry = { loadSavesForPicker() },
                     onDismiss = { savePickerState = null },
@@ -533,6 +538,7 @@ private fun GameDetailBody(
     playStatus: PlayerLaunchResult?,
     saveUiState: SaveSyncUiState,
     serverSaveAvailability: ServerSaveAvailability,
+    loadedSaveFileName: String?,
     saveActionMessage: String?,
     onSaveSyncNow: () -> Unit,
     onSaveKeepLocal: () -> Unit,
@@ -661,6 +667,7 @@ private fun GameDetailBody(
                     SaveStatusLine(
                         state = saveUiState,
                         serverAvailability = serverSaveAvailability,
+                        loadedSaveFileName = loadedSaveFileName,
                         actionMessage = saveActionMessage,
                         onSyncNow = onSaveSyncNow,
                         onKeepLocal = onSaveKeepLocal,
@@ -1210,6 +1217,7 @@ private val NEEDS_ATTENTION_SYNC_STATUSES = setOf(SaveSyncStatus.CONFLICT, SaveS
 private fun SaveStatusLine(
     state: SaveSyncUiState,
     serverAvailability: ServerSaveAvailability,
+    loadedSaveFileName: String?,
     actionMessage: String?,
     onSyncNow: () -> Unit,
     onKeepLocal: () -> Unit,
@@ -1226,7 +1234,7 @@ private fun SaveStatusLine(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = saveStatusLabel(state, serverAvailability),
+            text = saveStatusLabel(state, serverAvailability, loadedSaveFileName),
             style = MaterialTheme.typography.bodySmall,
             color = if (needsAttention) PlayButtonErrorColor else colors.textSecondary,
         )

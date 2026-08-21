@@ -163,6 +163,26 @@ class DesktopAppCoordinatorTest {
         assertThat(c.exitRequested).isFalse()
     }
 
+    @Test
+    fun `returning home refreshes Continue Playing`(@TempDir dir: Path) {
+        val server = StubServer().apply { start() }
+        try {
+            val c = coordinator(dir.testRoot())
+            c.settingsStore.write(mapOf(SettingsKeys.ORIGIN to server.origin))
+            c.appMode = AppMode.MAIN
+            c.homePresenter()
+            awaitContinuePlayingRequests(server, expected = 1)
+
+            c.openGameDetail(romId = 7L, parent = Screen.HOME)
+            c.onBack()
+
+            awaitContinuePlayingRequests(server, expected = 2)
+            assertThat(c.currentScreen).isEqualTo(Screen.HOME)
+        } finally {
+            server.close()
+        }
+    }
+
     // ---------------------------------------------------------------- controller settings (E2)
 
     @Test
@@ -1188,4 +1208,14 @@ class DesktopAppCoordinatorTest {
     }
 
     private fun Path.testRoot(): AppPaths = TestAppPaths(this)
+
+    private fun awaitContinuePlayingRequests(server: StubServer, expected: Int) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (server.romRequestPaths.count { "last_played=true" in it } < expected) {
+            check(System.currentTimeMillis() < deadline) {
+                "Continue Playing request count did not reach $expected; requests=${server.romRequestPaths}"
+            }
+            Thread.sleep(10)
+        }
+    }
 }

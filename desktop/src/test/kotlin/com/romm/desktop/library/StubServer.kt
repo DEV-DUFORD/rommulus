@@ -8,6 +8,7 @@ import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.io.IOException
 import java.net.InetSocketAddress
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Per-endpoint, per-test-response stub for the RomM firmware/platforms API.
@@ -27,6 +28,8 @@ internal class StubServer : AutoCloseable {
     @Volatile var firmwareBody = "[]"
     @Volatile var contentStatus = 200
     @Volatile var contentBytes = ByteArray(0)
+    @Volatile var romsStatus = 200
+    @Volatile var romsBody = """{"items": [], "total": 0}"""
 
     @Volatile var playSessionsStatus = 200
     @Volatile var playSessionsBody = """{"results": [], "created_count": 1, "skipped_count": 0}"""
@@ -34,6 +37,7 @@ internal class StubServer : AutoCloseable {
     @Volatile var lastFirmwarePath: String? = null
     @Volatile var lastContentPath: String? = null
     @Volatile var lastPlaySessionsBody: String? = null
+    val romRequestPaths = CopyOnWriteArrayList<String>()
 
     val origin: String
         get() = "http://127.0.0.1:" + (server.address as InetSocketAddress).port
@@ -41,6 +45,10 @@ internal class StubServer : AutoCloseable {
     fun start() {
         server.createContext("/api/platforms") { exchange ->
             respond(exchange, platformsStatus, platformsBody, json = true)
+        }
+        server.createContext("/api/roms") { exchange ->
+            romRequestPaths += exchange.requestURI.toString()
+            respond(exchange, romsStatus, romsBody, json = true)
         }
         server.createContext("/api/play-sessions") { exchange ->
             lastPlaySessionsBody = exchange.requestBody.readBytes().decodeToString()

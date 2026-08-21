@@ -43,14 +43,34 @@ enum class ServerSaveAvailability {
 fun saveStatusLabel(
     state: SaveSyncUiState,
     serverAvailability: ServerSaveAvailability = ServerSaveAvailability.None,
-): String = when (state) {
-    is SaveSyncUiState.NoSave -> when (serverAvailability) {
-        ServerSaveAvailability.Checking -> "Save: checking server…"
-        ServerSaveAvailability.Available -> "Save: available on server"
-        ServerSaveAvailability.None -> "Save: none"
-        ServerSaveAvailability.Unavailable -> "Save: server unavailable"
+    loadedSaveFileName: String? = null,
+): String {
+    if (loadedSaveFileName != null) {
+        return "Save: ${compactLoadedSaveName(loadedSaveFileName)} Loaded"
     }
-    is SaveSyncUiState.Replica -> "Save: ${state.syncStatus.uiLabel}"
+    return when (state) {
+        is SaveSyncUiState.NoSave -> when (serverAvailability) {
+            ServerSaveAvailability.Checking -> "Save: checking server…"
+            ServerSaveAvailability.Available -> "Save: Autosave Loaded"
+            ServerSaveAvailability.None -> "Save: none"
+            ServerSaveAvailability.Unavailable -> "Save: server unavailable"
+        }
+        is SaveSyncUiState.Replica -> "Save: ${state.syncStatus.uiLabel}"
+    }
+}
+
+/**
+ * Keeps the uploaded timestamp suffix readable while preventing a chosen save name from crowding
+ * the detail actions. RomM names uploaded saves like `autosave [2026-07-31_00-55-06].srm`.
+ */
+fun compactLoadedSaveName(fileName: String): String {
+    val normalized = fileName.trim()
+    val timestampStart = normalized.indexOf('[')
+    return if (timestampStart > 7) {
+        normalized.take(7) + "..." + normalized.substring(timestampStart)
+    } else {
+        normalized
+    }
 }
 
 /**

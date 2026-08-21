@@ -87,10 +87,21 @@ class SaveSyncStatusPresenterTest {
         ).isEqualTo("Save: checking server…")
         assertThat(
             saveStatusLabel(SaveSyncUiState.NoSave, ServerSaveAvailability.Available),
-        ).isEqualTo("Save: available on server")
+        ).isEqualTo("Save: Autosave Loaded")
         assertThat(
             saveStatusLabel(SaveSyncUiState.NoSave, ServerSaveAvailability.Unavailable),
         ).isEqualTo("Save: server unavailable")
+    }
+
+    @Test
+    fun `chosen save label keeps the full timestamp suffix and shortens the name`() {
+        assertThat(
+            saveStatusLabel(
+                SaveSyncUiState.NoSave,
+                ServerSaveAvailability.Available,
+                "autosave [2026-07-31_00-55-06].srm",
+            ),
+        ).isEqualTo("Save: autosav...[2026-07-31_00-55-06].srm Loaded")
     }
 
     @Test
