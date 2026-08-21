@@ -137,8 +137,8 @@ sealed interface SyncCompleteResult {
 // Drives the server's `rom_user.last_played`/`now_playing` fields (backend/handler/play_session_handler.py),
 // which is what the RomM Home screen's "Continue Playing" row is actually sourced from
 // (`last_played=true&order_by=last_played` — see LibraryApi.kt's RomQuery.ContinuePlaying). Native
-// play never called this endpoint at all, so titles played through the native library never
-// appeared there even though gameplay and save-sync both worked correctly.
+// play reports a minimal session when launch succeeds so titles played through the native library
+// appear in the row immediately.
 
 /** Mirrors the backend's `PlaySessionEntry` (`endpoints/play_sessions.py`). */
 data class PlaySessionEntry(

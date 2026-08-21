@@ -16,6 +16,18 @@ class EmulationSurfaceAspectRatioTest {
     }
 
     @Test
+    fun `fitted size is height-constrained for a GBA aspect ratio`() {
+        assertThat(computeAspectFittedSize(3f / 2f, maxWidthPx = 1920, maxHeightPx = 1080))
+            .isEqualTo(androidx.compose.ui.unit.IntSize(1620, 1080))
+    }
+
+    @Test
+    fun `fitted size is width-constrained when height has room`() {
+        assertThat(computeAspectFittedSize(4f / 3f, maxWidthPx = 1440, maxHeightPx = 1200))
+            .isEqualTo(androidx.compose.ui.unit.IntSize(1440, 1080))
+    }
+
+    @Test
     fun `scale is width-constrained when available width is the binding constraint`() {
         assertThat(computeIntegerScale(320, 240, 4f / 3f, maxWidthPx = 1920f, maxHeightPx = 100_000f))
             .isEqualTo(6)

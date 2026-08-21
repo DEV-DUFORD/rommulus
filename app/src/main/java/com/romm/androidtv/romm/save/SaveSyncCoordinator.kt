@@ -85,9 +85,9 @@ interface SaveSyncCoordinator {
     suspend fun finalizeAdoption(request: FinalizeAdoptionRequest): FinalizeAdoptionResult
 
     /**
-     * Reports a completed gameplay session so the server can advance `rom_user.last_played`
-     * (drives the RomM Home screen's "Continue Playing" row). Best-effort: a [PlaySessionRecordResult.Failure]
-     * must never block save-sync, gameplay, or journal cleanup — callers should log and move on.
+     * Reports gameplay to advance `rom_user.last_played` (drives the RomM Home screen's
+     * "Continue Playing" row). Best-effort: a [PlaySessionRecordResult.Failure] must never block
+     * save-sync, gameplay, or journal cleanup — callers should log and move on.
      */
     suspend fun recordPlaySession(request: PlaySessionRecordRequest): PlaySessionRecordResult
 }
@@ -205,8 +205,8 @@ data class ResolveConflictRequest(
 )
 
 /**
- * Request to record a completed gameplay session for "Continue Playing" tracking.
- * Best-effort: has no bearing on save-sync correctness.
+ * Request to record gameplay for "Continue Playing" tracking. Best-effort: has no bearing on
+ * save-sync correctness.
  */
 data class PlaySessionRecordRequest(
     val romId: Long,

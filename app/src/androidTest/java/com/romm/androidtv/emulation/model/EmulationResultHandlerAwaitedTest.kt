@@ -11,8 +11,6 @@ import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.romm.save.ConflictResolutionResult
 import com.romm.androidtv.romm.save.FinalizeAdoptionRequest
 import com.romm.androidtv.romm.save.FinalizeAdoptionResult
-import com.romm.androidtv.romm.save.PlaySessionRecordRequest
-import com.romm.androidtv.romm.save.PlaySessionRecordResult
 import com.romm.androidtv.romm.save.PostPlayCheckpointRequest
 import com.romm.androidtv.romm.save.PostPlayCheckpointResult
 import com.romm.androidtv.romm.save.ResolveConflictRequest
@@ -217,7 +215,7 @@ class EmulationResultHandlerAwaitedTest {
     }
 
     @Test
-    fun handleEmulationResultWithoutSaveMemoryStillRecordsPlaySession() {
+    fun handleEmulationResultWithoutSaveMemoryDoesNotRecordPlaySession() {
         runBlocking {
             seedSession()
             val sessionId = UUID.randomUUID().toString()
@@ -240,16 +238,11 @@ class EmulationResultHandlerAwaitedTest {
                 checkpointedPath = null,
                 checkpointedHash = null,
                 resultRomId = 31754L,
-                playSessionStartEpochMs = 1_000L,
-                playSessionEndEpochMs = 61_000L,
             )
 
             assertTrue(result)
             assertFalse(fakeCoordinator.syncPostPlayCalled)
-            assertTrue(fakeCoordinator.recordPlaySessionCalled)
-            assertEquals(31754L, fakeCoordinator.recordPlaySessionRequest?.romId)
-            assertEquals(1_000L, fakeCoordinator.recordPlaySessionRequest?.startEpochMs)
-            assertEquals(61_000L, fakeCoordinator.recordPlaySessionRequest?.endEpochMs)
+            assertFalse(fakeCoordinator.recordPlaySessionCalled)
             assertFalse(journal.read(sessionId) != null)
         }
     }
@@ -681,16 +674,11 @@ class EmulationResultHandlerAwaitedTest {
         }
 
         var recordPlaySessionCalled = false
-        var recordPlaySessionRequest: PlaySessionRecordRequest? = null
-        var recordPlaySessionResult: PlaySessionRecordResult = PlaySessionRecordResult.Success(1, 0)
-        var recordPlaySessionThrows: Throwable? = null
-
-        override suspend fun recordPlaySession(request: PlaySessionRecordRequest): PlaySessionRecordResult {
+        override suspend fun recordPlaySession(
+            request: com.romm.androidtv.romm.save.PlaySessionRecordRequest,
+        ): com.romm.androidtv.romm.save.PlaySessionRecordResult {
             recordPlaySessionCalled = true
-            recordPlaySessionRequest = request
-            val e = recordPlaySessionThrows
-            if (e != null) throw e
-            return recordPlaySessionResult
+            return com.romm.androidtv.romm.save.PlaySessionRecordResult.Success(1, 0)
         }
 
         override suspend fun findReplicaByScope(

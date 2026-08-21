@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
@@ -54,33 +55,42 @@ internal fun computeIntegerScale(
     return min(scale, maxSafeScale)
 }
 
+/**
+ * Returns the largest whole-pixel rectangle with [aspectRatio] that fits
+ * within the supplied bounds.
+ */
+internal fun computeAspectFittedSize(
+    aspectRatio: Float,
+    maxWidthPx: Int,
+    maxHeightPx: Int,
+): IntSize {
+    if (!aspectRatio.isFinite() || aspectRatio <= 0f || maxWidthPx <= 0 || maxHeightPx <= 0) {
+        return IntSize.Zero
+    }
+
+    return if (maxWidthPx.toFloat() / maxHeightPx > aspectRatio) {
+        IntSize(
+            width = (maxHeightPx * aspectRatio).roundToInt().coerceAtMost(maxWidthPx),
+            height = maxHeightPx,
+        )
+    } else {
+        IntSize(
+            width = maxWidthPx,
+            height = (maxWidthPx / aspectRatio).roundToInt().coerceAtMost(maxHeightPx),
+        )
+    }
+}
+
 private class EmulationSurfaceView(context: Context) : SurfaceView(context) {
     private var bufferWidth = 0
     private var bufferHeight = 0
-    private var sourceWidth = 0
-    private var sourceHeight = 0
-    private var sharpFilterEnabled = false
 
     init {
         holder.setFormat(PixelFormat.RGBA_8888)
     }
 
-    fun setVideoConfiguration(width: Int, height: Int, sharpFilterEnabled: Boolean) {
-        sourceWidth = width
-        sourceHeight = height
-        this.sharpFilterEnabled = sharpFilterEnabled
-        applyBufferSize()
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        applyBufferSize()
-    }
-
-    private fun applyBufferSize() {
-        if (sourceWidth <= 0 || sourceHeight <= 0) return
-        val width = if (sharpFilterEnabled && this.width > 0) this.width else sourceWidth
-        val height = if (sharpFilterEnabled && this.height > 0) this.height else sourceHeight
+    fun setBufferSize(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
         if (width == bufferWidth && height == bufferHeight) return
         bufferWidth = width
         bufferHeight = height
@@ -98,12 +108,10 @@ private class EmulationSurfaceView(context: Context) : SurfaceView(context) {
  * GPU copy through the view hierarchy) is the better fit and matches how
  * most Libretro/RetroArch-style frontends render on Android.
  *
- * The `AndroidView`'s `modifier` is re-applied by Compose on every
- * recomposition (unlike `factory`, which only runs once), so passing an
- * `aspectRatio` modifier here keeps the visible surface correctly
- * pillarboxed/letterboxed as [coreWidth]/[coreHeight] change — including
- * the synthetic test core's one deliberate geometry change
- * (320x240 -> 384x288 at frame 300).
+ * Compose recalculates the aspect-corrected content bounds whenever the
+ * available display area changes. Those same bounds are used for a sharp
+ * buffer, keeping the fixed surface size in sync with the visible surface as
+ * system bars or core geometry change.
  *
  * When [integerScalingEnabled] is true, the surface is sized to the largest
  * clean integer multiple of the core's native resolution that fits entirely on
@@ -126,74 +134,45 @@ fun EmulationSurface(
 ) {
     val aspect = resolveDisplayAspectRatio(coreWidth, coreHeight, displayAspectRatio)
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (integerScalingEnabled && coreWidth > 0 && coreHeight > 0) {
-            // Integer scaling branch: measure available space, compute largest integer scale.
-            BoxWithConstraints {
-                val density = LocalDensity.current
-                val maxWidthPx = with(density) { maxWidth.toPx() }
-                val maxHeightPx = with(density) { maxHeight.toPx() }
-
-                val scale = computeIntegerScale(coreWidth, coreHeight, aspect, maxWidthPx, maxHeightPx)
-                val useIntegerScale = scale >= 1
-
-                // Size the box from the buffer (not the other way around) so the buffer can
-                // never exceed the box: vertical is an integer multiple of coreHeight, and the
-                // width is aspect-corrected (coreHeight * aspect * scale), preserving the
-                // display aspect ratio while keeping the display box at an integer scale.
-                val scaledWidthPx = if (useIntegerScale) (coreHeight * aspect * scale).roundToInt() else coreWidth
-                val bufferH = if (useIntegerScale) coreHeight * scale else coreHeight
-
-                // When integer scaling is active and valid, size the box to exact scaled px;
-                // otherwise fall back to aspectRatio fit-to-screen.
-                val innerBoxModifier = if (useIntegerScale) {
-                    Modifier.size(
-                        width = with(density) { scaledWidthPx.toDp() },
-                        height = with(density) { bufferH.toDp() },
-                    )
-                } else {
-                    Modifier.aspectRatio(aspect)
-                }
-
-                Box(modifier = innerBoxModifier) {
-                    AndroidView(
-                        factory = { context ->
-                            EmulationSurfaceView(context).apply {
-                                holder.addCallback(object : SurfaceHolder.Callback {
-                                    override fun surfaceCreated(holder: SurfaceHolder) {
-                                        host.nativeSetSurface(holder.surface)
-                                    }
-
-                                    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                                        // Buffer sizing is driven by AndroidView.update below.
-                                        // Native rendering continues against this same Surface.
-                                    }
-
-                                    override fun surfaceDestroyed(holder: SurfaceHolder) {
-                                        // Synchronous: nativeSetSurface(null) blocks until the
-                                        // native ANativeWindow reference is released, honoring
-                                        // the "don't touch the Surface after this returns"
-                                        // contract this callback requires.
-                                        host.nativeSetSurface(null)
-                                    }
-                                })
-                            }
-                        },
-                        update = { surfaceView ->
-                            surfaceView.setVideoConfiguration(coreWidth, coreHeight, sharpFilterEnabled)
-                        },
-                        modifier = Modifier.matchParentSize(),
-                    )
-                    if (scanlinesEnabled) {
-                        ScanlineOverlay(
-                            coreHeight = coreHeight,
-                            modifier = Modifier.matchParentSize(),
-                        )
-                    }
-                }
+        BoxWithConstraints {
+            val density = LocalDensity.current
+            val maxWidthPx = with(density) { maxWidth.roundToPx() }
+            val maxHeightPx = with(density) { maxHeight.roundToPx() }
+            val fittedSize = computeAspectFittedSize(aspect, maxWidthPx, maxHeightPx)
+            val integerScale = if (integerScalingEnabled) {
+                computeIntegerScale(
+                    coreWidth,
+                    coreHeight,
+                    aspect,
+                    maxWidthPx.toFloat(),
+                    maxHeightPx.toFloat(),
+                )
+            } else {
+                0
             }
-        } else {
-            // Non-integer-scaling branch: original fit-to-screen with fractional upscale.
-            Box(modifier = Modifier.aspectRatio(aspect)) {
+            val contentSize = if (integerScale >= 1) {
+                IntSize(
+                    width = (coreHeight * aspect * integerScale).roundToInt(),
+                    height = coreHeight * integerScale,
+                )
+            } else {
+                fittedSize
+            }
+            val innerBoxModifier = if (contentSize != IntSize.Zero) {
+                Modifier.size(
+                    width = with(density) { contentSize.width.toDp() },
+                    height = with(density) { contentSize.height.toDp() },
+                )
+            } else {
+                Modifier.aspectRatio(aspect)
+            }
+            val bufferSize = if (sharpFilterEnabled && contentSize != IntSize.Zero) {
+                contentSize
+            } else {
+                IntSize(coreWidth, coreHeight)
+            }
+
+            Box(modifier = innerBoxModifier) {
                 AndroidView(
                     factory = { context ->
                         EmulationSurfaceView(context).apply {
@@ -214,7 +193,7 @@ fun EmulationSurface(
                         }
                     },
                     update = { surfaceView ->
-                        surfaceView.setVideoConfiguration(coreWidth, coreHeight, sharpFilterEnabled)
+                        surfaceView.setBufferSize(bufferSize.width, bufferSize.height)
                     },
                     modifier = Modifier.matchParentSize(),
                 )

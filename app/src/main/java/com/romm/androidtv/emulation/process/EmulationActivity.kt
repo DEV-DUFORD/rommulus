@@ -158,14 +158,6 @@ class EmulationActivity : ComponentActivity() {
     /** SHA-256 hex of the last checkpointed SRAM, computed immediately after checkpointing. */
     @Volatile
     private var checkpointedHash: String? = null
-    /**
-     * Wall-clock start of this play session (captured once in [onCreate]), passed back to the
-     * caller in the result [Intent] so it can report a completed play session to
-     * `POST /api/play-sessions` — the only mechanism that advances the server's
-     * `rom_user.last_played`, which drives the RomM Home screen's "Continue Playing" row.
-     */
-    private var sessionStartEpochMs: Long = -1L
-
     // This activity runs in its own process (:emulation), so it cannot share
     // MainActivity's ControllerEventRouter instance — each owns its own,
     // exactly mirroring MainActivity's own registration/dispatch pattern
@@ -359,8 +351,6 @@ class EmulationActivity : ComponentActivity() {
             }
         })
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        sessionStartEpochMs = System.currentTimeMillis()
 
         if (!isSessionActive.compareAndSet(false, true)) {
             Log.w(TAG, "onCreate: a session is already active in this process — refusing to start a second one")
@@ -888,8 +878,6 @@ class EmulationActivity : ComponentActivity() {
                             sessionId = sid,
                             checkpointedSavePath = savePath,
                             checkpointedSaveHash = (checkpointedHash.takeIf { checkpointed }) ?: descriptor.checkpointedHash,
-                            startEpochMs = sessionStartEpochMs,
-                            endEpochMs = System.currentTimeMillis(),
                         )
                     ))
                 }
@@ -899,8 +887,6 @@ class EmulationActivity : ComponentActivity() {
                             sessionId = sid,
                             checkpointedSavePath = if (checkpointed) savePath else null,
                             checkpointedSaveHash = checkpointedHash.takeIf { checkpointed },
-                            startEpochMs = sessionStartEpochMs,
-                            endEpochMs = System.currentTimeMillis(),
                         )
                     ))
                 }
@@ -911,8 +897,6 @@ class EmulationActivity : ComponentActivity() {
                             sessionId = sid,
                             checkpointedSavePath = if (checkpointed) savePath else null,
                             checkpointedSaveHash = checkpointedHash.takeIf { checkpointed && savePath != null },
-                            startEpochMs = sessionStartEpochMs,
-                            endEpochMs = System.currentTimeMillis(),
                         )
                     ))
                 }
@@ -956,8 +940,6 @@ class EmulationActivity : ComponentActivity() {
             putExtra("session_id", result.sessionId)
             result.checkpointedSavePath?.let { putExtra("checkpointed_save_path", it) }
             result.checkpointedSaveHash?.let { putExtra("checkpointed_save_hash", it) }
-            if (result.startEpochMs > 0L) putExtra("play_session_start_epoch_ms", result.startEpochMs)
-            if (result.endEpochMs > 0L) putExtra("play_session_end_epoch_ms", result.endEpochMs)
             if (stageRomId > 0L) putExtra("rom_id", stageRomId)
             if (stageRomHash.isNotBlank()) putExtra("rom_hash", stageRomHash)
         }
