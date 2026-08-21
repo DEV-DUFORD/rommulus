@@ -30,6 +30,7 @@ class GameLaunchRecorder(
     private val executor: Executor = DEFAULT_EXECUTOR,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val log: Logger = Logger.getLogger("GameLaunchRecorder"),
+    private val onRecorded: (Long) -> Unit = {},
 ) {
     /**
      * Records a 1ms play session for [romId] ending at the launch instant. Non-blocking: the
@@ -64,6 +65,8 @@ class GameLaunchRecorder(
                     )
                     if (result is PlaySessionIngestResult.Failure) {
                         log.warning("recordLaunch: failed for ROM $romId error=${result.error} httpCode=${result.httpCode}")
+                    } else {
+                        onRecorded(romId)
                     }
                 } catch (e: Exception) {
                     log.log(Level.WARNING, "recordLaunch: threw for ROM $romId", e)

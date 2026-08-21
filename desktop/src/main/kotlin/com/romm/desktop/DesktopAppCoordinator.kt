@@ -602,6 +602,7 @@ class DesktopAppCoordinator(
             gateway = RommSyncApiGateway(network.okHttpClient),
             sessionReader = saveSyncSessionReader,
             deviceIdentityLoader = saveSyncDeviceIdentityLoader,
+            onRecorded = { refreshContinuePlayingIfInitialized() },
         )
     }
 
@@ -1502,7 +1503,7 @@ class DesktopAppCoordinator(
 
     fun settingsPresenter(): SettingsPresenter = settingsPresenterLazy
 
-    private val homePresenterLazy: HomePresenter by lazy {
+    private val homePresenterLazy = lazy {
         HomePresenter(
             scope = scope,
             repository = network.libraryRepository,
@@ -1510,7 +1511,13 @@ class DesktopAppCoordinator(
         )
     }
 
-    fun homePresenter(): HomePresenter = homePresenterLazy
+    fun homePresenter(): HomePresenter = homePresenterLazy.value
+
+    private fun refreshContinuePlayingIfInitialized() {
+        if (homePresenterLazy.isInitialized()) {
+            homePresenterLazy.value.retryContinuePlaying()
+        }
+    }
 
     fun searchPresenter(): SearchPresenter = SearchPresenter(
         scope = scope,

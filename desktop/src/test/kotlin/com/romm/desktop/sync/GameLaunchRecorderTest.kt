@@ -59,6 +59,44 @@ class GameLaunchRecorderTest {
     }
 
     @Test
+    fun `notifies after the server accepts the play session`() {
+        val gateway = FakeRommSyncGateway()
+        var recordedRomId: Long? = null
+        val recorder = GameLaunchRecorder(
+            gateway = gateway,
+            sessionReader = FakeSaveSyncSessionReader(SaveSyncSession(ORIGIN, USERNAME)),
+            deviceIdentityLoader = FakeDeviceIdentityLoader(DeviceIdentity("install-1", "device-1")),
+            executor = Executor { it.run() },
+            clock = { FIXED_NOW_MS },
+            onRecorded = { recordedRomId = it },
+        )
+
+        recorder.recordLaunch(42L)
+
+        assertThat(recordedRomId).isEqualTo(42L)
+    }
+
+    @Test
+    fun `does not notify when the server rejects the play session`() {
+        val gateway = FakeRommSyncGateway().apply {
+            ingestPlaySessionsResult = PlaySessionIngestResult.Failure(RommApiError.NETWORK_ERROR)
+        }
+        var notified = false
+        val recorder = GameLaunchRecorder(
+            gateway = gateway,
+            sessionReader = FakeSaveSyncSessionReader(SaveSyncSession(ORIGIN, USERNAME)),
+            deviceIdentityLoader = FakeDeviceIdentityLoader(DeviceIdentity("install-1", "device-1")),
+            executor = Executor { it.run() },
+            clock = { FIXED_NOW_MS },
+            onRecorded = { notified = true },
+        )
+
+        recorder.recordLaunch(42L)
+
+        assertThat(notified).isFalse()
+    }
+
+    @Test
     fun `skips the report when there is no coherent session (kiosk or anonymous)`() {
         val gateway = FakeRommSyncGateway()
         recorder(gateway, session = null, identity = DeviceIdentity("i", "d")).recordLaunch(1L)
