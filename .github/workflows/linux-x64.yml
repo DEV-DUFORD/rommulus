@@ -831,8 +831,11 @@ jobs:
           for command_name in env bash readlink dirname awk sha256sum cut; do
             ln -s "$(command -v "$command_name")" "$SMOKE_PATH/$command_name"
           done
-          err="$(env -u JAVA_HOME PATH="$SMOKE_PATH" "$SMOKE/bin/rommulus" 2>&1 >/dev/null)"
-          rc=$?
+          if err="$(env -u JAVA_HOME PATH="$SMOKE_PATH" "$SMOKE/bin/rommulus" 2>&1 >/dev/null)"; then
+            rc=0
+          else
+            rc=$?
+          fi
           echo "launcher exit code: ${rc}"
           printf '%s\n' "$err"
           if [ "$rc" -ne 5 ]; then
