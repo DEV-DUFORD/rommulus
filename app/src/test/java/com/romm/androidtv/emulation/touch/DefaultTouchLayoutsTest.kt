@@ -2,7 +2,6 @@ package com.romm.androidtv.emulation.touch
 
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.controller.config.CoreControllerProfiles
-import com.romm.androidtv.emulation.model.CoreManifest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -10,7 +9,7 @@ class DefaultTouchLayoutsTest {
 
     @Test
     fun `every approved profile selects one bespoke default layout`() {
-        val approvedCoreIds = CoreManifest.approvedEntries().map { it.coreId }
+        val approvedCoreIds = CoreControllerProfiles.forApprovedCores().map { it.coreId }
 
         assertThat(DefaultTouchLayouts.all.map { it.coreId })
             .containsExactlyInAnyOrderElementsOf(approvedCoreIds)
