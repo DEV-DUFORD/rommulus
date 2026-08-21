@@ -63,6 +63,11 @@ compose.desktop {
     }
 }
 
+tasks.register<Copy>("copyRuntimeClasspath") {
+    from(configurations.runtimeClasspath)
+    into(layout.buildDirectory.dir("runtime-libs"))
+}
+
 tasks.withType<Test> {
     useJUnitPlatform()
     // Plumb the D-Bus session address into the test JVM so the Linux Secret Service conformance

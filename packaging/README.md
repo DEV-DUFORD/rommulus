@@ -3,6 +3,7 @@
 Source of truth for the self-contained release tarball defined in
 `plans/LINUX_X64.md` §16.1. `build-tarball.sh` assembles the tarball from this
 directory plus the built player, cores, app jar, and jlink JVM runtime.
+`build-appimage.sh` wraps that validated bundle as a Steam-friendly AppImage.
 
 ## Tarball layout
 
@@ -18,6 +19,7 @@ rommulus-<version>-linux-x86_64.tar.zst
 │   ├── runtime/                 jlink JVM 17 image (bin/java, lib/, conf/)
 │   └── rommulus/
 │       ├── app.jar              Compose Multiplatform desktop application
+│       ├── lib/*.jar            Kotlin/Compose/runtime dependencies
 │       ├── *.so                 player runtime shared libraries (if any)
 │       └── cores/*.so           bundled Libretro cores (lib<core>_core.so)
 └── share/
@@ -61,7 +63,8 @@ cmake -S native/player -B build/player \
 cmake --build build/player
 
 # 2. Build the desktop app jar:
-./gradlew :desktop:jar          # -> desktop/build/libs/desktop.jar
+./gradlew :desktop:jar :desktop:copyRuntimeClasspath
+# -> desktop/build/libs/desktop.jar + desktop/build/runtime-libs/*.jar
 
 # 3. Build the jlink JVM runtime (see below):
 jlink ...                       # -> build/runtime/
@@ -69,9 +72,13 @@ jlink ...                       # -> build/runtime/
 # 4. Assemble:
 packaging/build-tarball.sh 0.1.0
 # -> dist/rommulus-0.1.0-linux-x86_64.tar.zst
+
+# 5. Wrap the bundle for desktop/Steam use:
+APPIMAGETOOL=/path/to/appimagetool packaging/build-appimage.sh 0.1.0
+# -> dist/rommulus-0.1.0-linux-x86_64.AppImage
 ```
 
-Overrides: `PLAYER_BUILD_DIR`, `APP_JAR`, `RUNTIME_DIR`, `OUT_DIR`,
+Overrides: `PLAYER_BUILD_DIR`, `APP_JAR`, `APP_LIB_DIR`, `RUNTIME_DIR`, `OUT_DIR`,
 `ROMMULUS_VERSION` (or the positional `VERSION` argument), and
 `ROMMULUS_SIGN_KEY` (or the `--sign <keyid>` flag) for optional GPG signing.
 
@@ -163,7 +170,7 @@ built runtime with the real app (run the desktop app against
    the player. No other environment is set.
 4. **No credentials in env** — RomM server tokens live in the freedesktop
    Secret Service (§10); the launcher sets no credential variables, ever.
-5. **exec** — replaces itself with `java -cp lib/rommulus/app.jar
+5. **exec** — replaces itself with `java -cp 'lib/rommulus/app.jar:lib/rommulus/lib/*'
    com.romm.desktop.MainKt [args]`.
 6. **XDG preservation** — `XDG_DATA_HOME` (and friends) are read with spec
    defaults but never modified. On first run the launcher seeds bundled cores

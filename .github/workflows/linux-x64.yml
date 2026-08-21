@@ -671,7 +671,8 @@ jobs:
             libpipewire-0.3-dev \
             libwayland-dev \
             libdecor-0-dev \
-            liburing-dev
+            liburing-dev \
+            xvfb
 
       - name: Verify toolchain versions
         run: |
@@ -734,8 +735,12 @@ jobs:
       - name: Build desktop app jar
         run: |
           set -euo pipefail
-          ./gradlew --configure-on-demand :desktop:jar
+          ./gradlew --configure-on-demand :desktop:jar :desktop:copyRuntimeClasspath
           ls -lh desktop/build/libs/desktop.jar
+          runtime_jar_count=$(find desktop/build/runtime-libs -maxdepth 1 -name '*.jar' | wc -l)
+          [ "$runtime_jar_count" -gt 0 ] \
+            || { echo "::error::desktop runtime classpath was not copied"; exit 1; }
+          echo "Desktop runtime dependency jars: $runtime_jar_count"
 
       - name: Build jlink JVM runtime (build/runtime)
         run: |
@@ -770,6 +775,26 @@ jobs:
           fi
           packaging/build-tarball.sh "$VERSION"
 
+      - name: Build AppImage
+        run: |
+          set -euo pipefail
+          VERSION="${ROMMULUS_VERSION#v}"
+          TOOL="build/appimagetool-1.9.1-x86_64.AppImage"
+          RUNTIME="build/appimage-runtime-20251108-x86_64"
+          wget -q \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage \
+            -O "$TOOL"
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $TOOL" \
+            | sha256sum --check
+          chmod +x "$TOOL"
+          wget -q \
+            https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64 \
+            -O "$RUNTIME"
+          echo "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d  $RUNTIME" \
+            | sha256sum --check
+          APPIMAGETOOL="$PWD/$TOOL" APPIMAGE_RUNTIME="$PWD/$RUNTIME" \
+            packaging/build-appimage.sh "$VERSION"
+
       - name: Verify tarball artifact
         run: |
           set -euo pipefail
@@ -797,13 +822,55 @@ jobs:
             printf '%s\n' "$listing" | grep -qx "$entry" \
               || { echo "::error::required entry missing from tarball: $entry"; exit 1; }
           done
+          printf '%s\n' "$listing" \
+            | grep -Eq '^\./lib/rommulus/lib/kotlin-stdlib-[^/]+\.jar$' \
+            || { echo "::error::Kotlin runtime is missing from tarball"; exit 1; }
           echo "✓ required entries present in tarball"
+
+      - name: Verify AppImage artifact
+        run: |
+          set -euo pipefail
+          VERSION="${ROMMULUS_VERSION#v}"
+          APPIMAGE="dist/rommulus-${VERSION}-linux-x86_64.AppImage"
+          [ -x "$APPIMAGE" ] \
+            || { echo "::error::executable AppImage missing: $APPIMAGE"; exit 1; }
+          size=$(stat -c%s "$APPIMAGE")
+          [ "$size" -gt 5242880 ] \
+            || { echo "::error::AppImage is smaller than 5 MiB"; exit 1; }
+          extract="$(mktemp -d)"
+          trap 'rm -rf "$extract"' EXIT
+          (
+            cd "$extract"
+            "$GITHUB_WORKSPACE/$APPIMAGE" --appimage-extract >/dev/null
+          )
+          [ -L "$extract/squashfs-root/AppRun" ]
+          [ -x "$extract/squashfs-root/bin/rommulus-player" ]
+          [ -x "$extract/squashfs-root/lib/runtime/bin/java" ]
+          [ -f "$extract/squashfs-root/lib/rommulus/app.jar" ]
+          find "$extract/squashfs-root/lib/rommulus/lib" -name 'kotlin-stdlib-*.jar' \
+            | grep -q .
+          echo "✓ AppImage contains AppRun and the complete application bundle"
+
+      - name: Smoke — AppImage starts and stays alive
+        run: |
+          set +e
+          VERSION="${ROMMULUS_VERSION#v}"
+          timeout 30 xvfb-run -a "dist/rommulus-${VERSION}-linux-x86_64.AppImage"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 124 ]; then
+            echo "::error::AppImage exited before its desktop window smoke timeout (rc=$rc)"
+            exit 1
+          fi
+          echo "✓ AppImage desktop process stayed alive for 30 seconds"
 
       - name: Upload tarball artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: rommulus-linux-x86_64-tarball
-          path: dist/*.tar.zst
+          path: |
+            dist/*.tar.zst
+            dist/*.AppImage
           if-no-files-found: error
           compression-level: 0
 
@@ -1063,7 +1130,13 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          artifact="$(find dist -maxdepth 1 -name 'rommulus-*-linux-x86_64.tar.zst' -print -quit)"
-          [ -n "$artifact" ] || { echo "::error::Validated Linux tarball is missing"; exit 1; }
-          sha256sum "$artifact" > "${artifact}.sha256"
-          gh release upload "$RELEASE_TAG" "$artifact" "${artifact}.sha256" --clobber
+          tarball="$(find dist -maxdepth 1 -name 'rommulus-*-linux-x86_64.tar.zst' -print -quit)"
+          appimage="$(find dist -maxdepth 1 -name 'rommulus-*-linux-x86_64.AppImage' -print -quit)"
+          [ -n "$tarball" ] || { echo "::error::Validated Linux tarball is missing"; exit 1; }
+          [ -n "$appimage" ] || { echo "::error::Validated Linux AppImage is missing"; exit 1; }
+          sha256sum "$tarball" > "${tarball}.sha256"
+          sha256sum "$appimage" > "${appimage}.sha256"
+          gh release upload "$RELEASE_TAG" \
+            "$tarball" "${tarball}.sha256" \
+            "$appimage" "${appimage}.sha256" \
+            --clobber

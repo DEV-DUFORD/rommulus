@@ -13,6 +13,9 @@
 #   APP_JAR           desktop/build/libs/desktop.jar
 #                     Compose Multiplatform desktop application jar
 #                     (./gradlew :desktop:jar)
+#   APP_LIB_DIR       desktop/build/runtime-libs
+#                     Runtime dependency jars
+#                     (./gradlew :desktop:copyRuntimeClasspath)
 #   RUNTIME_DIR       build/runtime           jlink JVM image with bin/java
 #                                             (see packaging/README.md §"JVM runtime")
 #
@@ -58,6 +61,7 @@ VERSION="${1:-${ROMMULUS_VERSION:-0.1.0}}"
 SIGN_KEY="${SIGN_KEY:-${ROMMULUS_SIGN_KEY:-}}"
 PLAYER_BUILD_DIR="${PLAYER_BUILD_DIR:-$REPO_ROOT/build/player}"
 APP_JAR="${APP_JAR:-$REPO_ROOT/desktop/build/libs/desktop.jar}"
+APP_LIB_DIR="${APP_LIB_DIR:-$REPO_ROOT/desktop/build/runtime-libs}"
 RUNTIME_DIR="${RUNTIME_DIR:-$REPO_ROOT/build/runtime}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/dist}"
 
@@ -66,6 +70,8 @@ command -v zstd >/dev/null 2>&1 || die "zstd is required (apt-get install zstd)"
   || die "player binary not found: $PLAYER_BUILD_DIR/rommulus_player — run 'cmake -S native/player -B build/player && cmake --build build/player' first"
 [ -f "$APP_JAR" ] \
   || die "desktop app jar not found: $APP_JAR — run './gradlew :desktop:jar' first (override with APP_JAR=...)"
+[ -d "$APP_LIB_DIR" ] \
+  || die "desktop runtime libraries not found: $APP_LIB_DIR — run './gradlew :desktop:copyRuntimeClasspath' first (override with APP_LIB_DIR=...)"
 [ -x "$RUNTIME_DIR/bin/java" ] \
   || die "jlink JVM runtime not found at $RUNTIME_DIR (needs bin/java) — build the jlink image per packaging/README.md, or override with RUNTIME_DIR=..."
 
@@ -78,7 +84,8 @@ fi
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/rommulus-stage.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 
-mkdir -p "$STAGE"/bin "$STAGE"/lib/runtime "$STAGE"/lib/rommulus/cores "$STAGE"/share
+mkdir -p "$STAGE"/bin "$STAGE"/lib/runtime "$STAGE"/lib/rommulus/lib \
+  "$STAGE"/lib/rommulus/cores "$STAGE"/share
 
 # --- bin/ ------------------------------------------------------------------
 install -m 0755 "$SCRIPT_DIR/bin/rommulus" "$STAGE/bin/rommulus"
@@ -94,6 +101,14 @@ cp -a "$RUNTIME_DIR"/. "$STAGE/lib/runtime/"
 
 # --- lib/rommulus/: app jar + player runtime libs; cores in cores/ ----------
 install -m 0644 "$APP_JAR" "$STAGE/lib/rommulus/app.jar"
+jar_count=0
+for f in "$APP_LIB_DIR"/*.jar; do
+  [ -f "$f" ] || continue
+  install -m 0644 "$f" "$STAGE/lib/rommulus/lib/"
+  jar_count=$((jar_count + 1))
+done
+[ "$jar_count" -gt 0 ] \
+  || die "no desktop runtime jars found in $APP_LIB_DIR"
 core_count=0
 for f in "$PLAYER_BUILD_DIR"/lib*.so; do
   [ -f "$f" ] || continue

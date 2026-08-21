@@ -135,8 +135,8 @@ reconciled from the journal/candidate files (§8.3). When reporting a crash, att
 
 - **No Flatpak.** Flatpak is Phase 14 work item 9 — only after tarball stability and sandbox
   spikes pass. Not available now.
-- **No AppImage, Snap, `.deb`, `.rpm`, or Steam packages** (§4 non-goals for the initial port).
-  The only install path today is extracting the tarball.
+- **AppImage is available** for direct desktop and Steam Deck launching. Snap, `.deb`, `.rpm`,
+  and native Steam packages remain unavailable.
 - **No Windows, macOS, ARM64 Linux, or musl Linux builds** (§4 non-goals).
 - **No save UI.** Saves are checkpointed on disk, but there is no Linux desktop saves screen yet;
   per-core criterion 9 round-trip verification is deferred (see above).

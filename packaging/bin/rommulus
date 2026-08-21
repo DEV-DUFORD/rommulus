@@ -85,6 +85,13 @@ for rel in "${REQUIRED_FILES[@]}"; do
     || die 3 "required bundle file is missing: $APP_ROOT/$rel — the installation is incomplete; re-extract a pristine tarball"
 done
 
+runtime_jar_count=0
+for f in "$APP_ROOT"/lib/rommulus/lib/*.jar; do
+  [ -f "$f" ] && runtime_jar_count=$((runtime_jar_count + 1))
+done
+[ "$runtime_jar_count" -gt 0 ] \
+  || die 3 "desktop runtime libraries are missing under $APP_ROOT/lib/rommulus/lib/ — the installation is incomplete; re-extract a pristine bundle"
+
 core_count=0
 for f in "$APP_ROOT"/lib/rommulus/cores/lib*.so; do
   [ -f "$f" ] && core_count=$((core_count + 1))
@@ -121,7 +128,9 @@ CRITICAL=(
   "lib/rommulus/app.jar"
   "share/rommulus/core-manifest.json"
 )
-for f in "$APP_ROOT"/lib/rommulus/*.so "$APP_ROOT"/lib/rommulus/cores/lib*.so; do
+for f in "$APP_ROOT"/lib/rommulus/lib/*.jar \
+  "$APP_ROOT"/lib/rommulus/*.so \
+  "$APP_ROOT"/lib/rommulus/cores/lib*.so; do
   [ -f "$f" ] || continue
   CRITICAL+=("${f#"$APP_ROOT"/}")
 done
@@ -218,4 +227,5 @@ if [ "${1:-}" = "--verify-full" ]; then
   ARGS=("${@:2}")
 fi
 
-exec "$JAVA_BIN" -cp "$APP_ROOT/lib/rommulus/app.jar" com.romm.desktop.MainKt ${ARGS+"${ARGS[@]}"}
+APP_CLASSPATH="$APP_ROOT/lib/rommulus/app.jar:$APP_ROOT/lib/rommulus/lib/*"
+exec "$JAVA_BIN" -cp "$APP_CLASSPATH" com.romm.desktop.MainKt ${ARGS+"${ARGS[@]}"}
