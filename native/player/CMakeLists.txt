@@ -90,6 +90,10 @@ target_include_directories(rommulus_player PRIVATE
     ${ROMM_LIBRETRO_INCLUDE}
     ${ROMM_REPO_ROOT}/third_party
 )
+target_compile_definitions(rommulus_player PRIVATE
+    ROMM_PAUSE_FONT_PATH="${MUPEN64_DIR}/mupen64plus-core/data/font.ttf"
+    ROMM_CONTROLLER_ART_PATH="${ROMM_REPO_ROOT}/assets/controllers"
+)
 target_link_libraries(rommulus_player PRIVATE SDL3::SDL3 m dl pthread)
 target_compile_options(rommulus_player PRIVATE -Wall -Wextra)
 

@@ -1,16 +1,9 @@
-// pause_overlay.h — SDL3 software rendering for the pause overlay.
+// pause_overlay.h — SDL3 rendering for the desktop pause overlay.
 //
-// Draws a dimmed backdrop, a centered panel with the four PauseMenu items
-// (Resume / Video Options / Controller Settings / Quit), the Video Options
-// and Controller Settings submenus, the editable Physical Controller
-// Settings binding list (12 RetroPad slots + Reset to Default, live from
-// SdlInput's BindingTable) plus its capture dialog, and the "Quit game?"
-// Yes/No dialog on top when the confirm state is active. Pure rectangles
-// plus an embedded 5x7 bitmap font — deliberately NOT a Compose-styling
-// replication; pause_menu.h owns the semantics, this class only draws them.
-// All drawing happens in the renderer's logical presentation coordinates
-// (the core's aspect space), so the overlay scales with the letterboxed
-// frame and stays aligned to it.
+// Mirrors the Android Compose menu's opaque backdrop, Material surfaces,
+// typography, pill buttons, focus rings, toggle rows, and dialogs. The video
+// sink invokes it in output-pixel coordinates so UI is never upscaled from a
+// low-resolution core canvas. Menu behavior remains owned by PauseMenu.
 #pragma once
 
 #include "native/player/binding_table.h"
@@ -30,13 +23,14 @@ public:
     // list; `captureSecondsLeft` is the remaining capture timeout while the
     // menu is in its binding-capture state (-1 otherwise).
     void draw(SDL_Renderer* renderer, const PauseMenu& menu, const BindingTable& bindings,
-              int captureSecondsLeft) const;
+              const BindingTable& secondaryBindings, int captureSecondsLeft,
+              const char* coreId) const;
 
-private:
-    // Draws `text` with its top-left at (x, y); each font pixel is a
-    // scale x scale rectangle. Unknown glyphs render as blanks.
+    // Public only so the translation unit's shared Material-control helpers
+    // can use the same cached typeface renderer.
+    // Draws anti-aliased TrueType text with its top-left at (x, y).
     void drawText(SDL_Renderer* renderer, float x, float y, const char* text,
-                  float scale, unsigned r, unsigned g, unsigned b,
+                  float size, unsigned r, unsigned g, unsigned b,
                   unsigned a) const;
 };
 

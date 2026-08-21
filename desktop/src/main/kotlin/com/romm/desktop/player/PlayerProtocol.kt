@@ -90,6 +90,7 @@ data class ControllerBindingDevice(
     val guid: String,
     val identity: ControllerBindingIdentity,
     val bindings: List<PlayerSlotBinding>,
+    val secondaryBindings: List<PlayerSlotBinding>? = null,
 )
 
 /** The v2 request's optional controllerBindings field (absent = player keeps its defaults). */
@@ -162,6 +163,8 @@ data class PlayerResult(
     val audioOverrunFrames: Long = 0L,
     val errorCode: String? = null,
     val errorMessage: String? = null,
+    /** Final runtime values, absent in older v2 result journals. */
+    val video: VideoSettings? = null,
 )
 
 /**
@@ -340,8 +343,22 @@ object PlayerProtocol {
                 }
                 writer.name("descriptor").value(device.identity.descriptor)
                 writer.endObject()
-                writer.name("bindings").beginArray()
-                for (binding in device.bindings) {
+                writeSlotBindings(writer, "bindings", device.bindings)
+                device.secondaryBindings?.let {
+                    writeSlotBindings(writer, "secondaryBindings", it)
+                }
+                writer.endObject()
+            }
+            writer.endArray()
+        }
+
+        private fun writeSlotBindings(
+            writer: JsonWriter,
+            name: String,
+            bindings: List<PlayerSlotBinding>,
+        ) {
+            writer.name(name).beginArray()
+            for (binding in bindings) {
                     writer.beginObject()
                     writer.name("slot").value(binding.slot)
                     when (binding.type) {
@@ -357,9 +374,6 @@ object PlayerProtocol {
                         }
                     }
                     writer.endObject()
-                }
-                writer.endArray()
-                writer.endObject()
             }
             writer.endArray()
         }
@@ -384,6 +398,7 @@ object PlayerProtocol {
             var audioOverrunFrames: Long? = null
             var errorCode: String? = null
             var errorMessage: String? = null
+            var video: VideoSettings? = null
 
             while (reader.peek() != JsonReader.Token.END_OBJECT) {
                 val name = reader.nextName()
@@ -411,6 +426,7 @@ object PlayerProtocol {
                     "audioOverrunFrames" -> audioOverrunFrames = readNonNegativeInt64(reader, name)
                     "errorCode" -> errorCode = readNullableString(reader, name)
                     "errorMessage" -> errorMessage = readNullableString(reader, name)
+                    "video" -> video = readVideo(reader)
                     else -> throw ProtocolException("unknown field: $name")
                 }
             }
@@ -435,6 +451,7 @@ object PlayerProtocol {
                 audioOverrunFrames = audioOverrunFrames!!,
                 errorCode = errorCode,
                 errorMessage = errorMessage,
+                video = video,
             )
         }
 
@@ -470,6 +487,14 @@ object PlayerProtocol {
                 writer.name("errorMessage").nullValue()
             } else {
                 writer.name("errorMessage").value(result.errorMessage)
+            }
+            result.video?.let { video ->
+                writer.name("video").beginObject()
+                writer.name("fullscreen").value(video.fullscreen)
+                writer.name("integerScaling").value(video.integerScaling)
+                writer.name("scanlines").value(video.scanlines)
+                writer.name("sharpFilter").value(video.sharpFilter)
+                writer.endObject()
             }
             writer.endObject()
         }
@@ -595,6 +620,7 @@ object PlayerProtocol {
         var guid: String? = null
         var identity: ControllerBindingIdentity? = null
         var bindings: List<PlayerSlotBinding>? = null
+        var secondaryBindings: List<PlayerSlotBinding>? = null
         while (reader.peek() != JsonReader.Token.END_OBJECT) {
             val name = reader.nextName()
             seen += name
@@ -602,6 +628,7 @@ object PlayerProtocol {
                 "guid" -> guid = readString(reader, name)
                 "identity" -> identity = readControllerBindingIdentity(reader)
                 "bindings" -> bindings = readSlotBindings(reader)
+                "secondaryBindings" -> secondaryBindings = readSlotBindings(reader)
                 else -> throw ProtocolException("unknown field: $name")
             }
         }
@@ -609,7 +636,12 @@ object PlayerProtocol {
         for (field in DEVICE_FIELDS) {
             if (field !in seen) throw ProtocolException("missing controllerBindings device field: $field")
         }
-        return ControllerBindingDevice(checkNotNull(guid), checkNotNull(identity), checkNotNull(bindings))
+        return ControllerBindingDevice(
+            checkNotNull(guid),
+            checkNotNull(identity),
+            checkNotNull(bindings),
+            secondaryBindings,
+        )
     }
 
     private fun readControllerBindingIdentity(reader: JsonReader): ControllerBindingIdentity {

@@ -105,6 +105,12 @@ done
 
 # --- share/ (desktop entry, icons, licenses, core manifest) ------------------
 cp -a "$SCRIPT_DIR/share"/. "$STAGE/share/"
+install -m 0644 \
+  "$REPO_ROOT/third_party/cores/mupen64plus_next/mupen64plus-core/data/font.ttf" \
+  "$STAGE/share/rommulus/font.ttf"
+mkdir -p "$STAGE/share/rommulus/controllers"
+install -m 0644 "$REPO_ROOT"/assets/controllers/*.png \
+  "$STAGE/share/rommulus/controllers/"
 
 # --- Checksum manifest over every shipped file (itself excluded) -------------
 ( cd "$STAGE" \

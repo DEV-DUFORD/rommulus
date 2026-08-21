@@ -94,6 +94,16 @@ class DesktopSettingsAdapter(
     fun sharpFilterEnabled(): Boolean =
         store.snapshot().boolean(SettingsKeys.SHARP_FILTER_ENABLED, default = false)
 
+    fun setVideoOptions(scanlines: Boolean, integerScaling: Boolean, sharpFilter: Boolean) {
+        store.write(
+            mapOf(
+                SettingsKeys.SCANLINES_ENABLED to scanlines.toString(),
+                SettingsKeys.INTEGER_SCALING_ENABLED to integerScaling.toString(),
+                SettingsKeys.SHARP_FILTER_ENABLED to sharpFilter.toString(),
+            ),
+        )
+    }
+
     fun theme(): String = store.snapshot().get(SettingsKeys.THEME) ?: DEFAULT_THEME
 
     private val _currentTheme = mutableStateOf(RommTheme.fromStorage(theme()))

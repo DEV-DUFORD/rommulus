@@ -54,6 +54,7 @@ struct ControllerBindingDevice {
     std::string guid;      // canonical lowercase SDL GUID, or "" = all controllers
     ControllerBindingIdentity identity;
     BindingTable table;    // the 12 RetroPad slot bindings, in slot order
+    BindingTable secondaryTable{false};  // optional on wire; unmapped when absent
 };
 
 // The v2 request's optional controllerBindings field: per-device binding
@@ -120,6 +121,9 @@ struct PlayerResult {
     int64_t audioOverrunFrames = 0;
     std::optional<std::string> errorCode;
     std::optional<std::string> errorMessage;
+    // Present in results from players that can change global video options
+    // at runtime. Absent keeps old v2 journals backward-compatible.
+    std::optional<VideoSettings> video;
 };
 
 // Strict parsing. Returns std::nullopt (and sets *error, when non-null)

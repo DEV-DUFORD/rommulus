@@ -1153,5 +1153,16 @@ class DesktopAppCoordinatorTest {
         assertThat(a.hideUnsupportedSystems()).isTrue()
     }
 
+    @Test
+    fun `settings adapter video options persist globally`(@TempDir dir: Path) {
+        val first = adapter(dir)
+        first.setVideoOptions(scanlines = true, integerScaling = true, sharpFilter = false)
+
+        val reloaded = adapter(dir)
+        assertThat(reloaded.scanlinesEnabled()).isTrue()
+        assertThat(reloaded.integerScalingEnabled()).isTrue()
+        assertThat(reloaded.sharpFilterEnabled()).isFalse()
+    }
+
     private fun Path.testRoot(): AppPaths = TestAppPaths(this)
 }

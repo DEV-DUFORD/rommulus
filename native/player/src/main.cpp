@@ -239,7 +239,8 @@ romm::player::TrustedRoots trustedRootsFromEnv() {
 // resultPath (unparseable request) means there is nowhere to report.
 void writeResult(const romm::player::PlayerRequest& request, romm::player::ExitKind exitKind,
                  bool checkpointWritten, int64_t frames, int64_t underrunFrames,
-                 int64_t overrunFrames, const std::string* errorMessage) {
+                 int64_t overrunFrames, const std::string* errorMessage,
+                 const romm::player::VideoSettings* appliedVideo = nullptr) {
     if (request.resultPath.empty()) return;
     romm::player::PlayerResult result;
     result.protocolVersion = romm::player::kProtocolVersion;
@@ -261,6 +262,7 @@ void writeResult(const romm::player::PlayerRequest& request, romm::player::ExitK
     result.audioUnderrunFrames = underrunFrames;
     result.audioOverrunFrames = overrunFrames;
     if (errorMessage != nullptr) result.errorMessage = *errorMessage;
+    result.video = appliedVideo != nullptr ? *appliedVideo : request.video;
     const std::string json = romm::player::serializeResult(result);
     if (!romm::atomicWriteFile(request.resultPath, json.data(), json.size())) {
         std::fprintf(stderr, "error: failed to write result file %s\n", request.resultPath.c_str());
@@ -492,7 +494,10 @@ int main(int argc, char* argv[]) {
     // empty field keeps the built-in defaults.
     if (request.controllerBindings.has_value() &&
         !request.controllerBindings->devices.empty()) {
-        input.setBindings(request.controllerBindings->devices.front().table);
+        input.setBindings(
+            request.controllerBindings->devices.front().table,
+            request.controllerBindings->devices.front().secondaryTable
+        );
     }
     romm::player::PauseMenu pauseMenu;
     romm::player::PauseOverlay pauseOverlay;
@@ -540,9 +545,8 @@ int main(int argc, char* argv[]) {
                 for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
                     if (input.hasGamepad(port)) captureDevices.push_back(port);
                 }
-                // The menu stops consuming gamepad input now; drop its edge
-                // latches so a button held across the transition cannot fire
-                // a spurious menu action when we return to the list.
+                // Seed edge history from live levels so the opening button
+                // cannot become another action when capture finishes.
                 input.resetMenuEdges();
                 captureCoordinator.begin(pauseMenu.selection(), captureDevices.data(),
                                          static_cast<int>(captureDevices.size()),
@@ -552,6 +556,9 @@ int main(int argc, char* argv[]) {
             case romm::player::PauseMenuEffect::kResetDefault:
                 // Reset to Default: restore the built-in mapping.
                 input.resetBindings();
+                break;
+            case romm::player::PauseMenuEffect::kClearMappings:
+                input.clearBindings();
                 break;
             default:
                 break;
@@ -677,15 +684,20 @@ int main(int argc, char* argv[]) {
                                                   romm::player::CapturedBinding::Kind::kAxisDirection
                                               ? result->polarity
                                               : 1);
-                            input.setBinding(pauseMenu.selection(), source);
+                            input.setBinding(
+                                pauseMenu.selection(), source, pauseMenu.bindingColumn()
+                            );
                         }
                         pauseMenu.exitCapture();
                         break;
                     }
                     case romm::player::CaptureState::kCleared:
                         // Held Back: clear the selected slot's binding.
-                        input.setBinding(pauseMenu.selection(),
-                                         romm::player::BindingSource::unbound());
+                        input.setBinding(
+                            pauseMenu.selection(),
+                            romm::player::BindingSource::unbound(),
+                            pauseMenu.bindingColumn()
+                        );
                         pauseMenu.exitCapture();
                         break;
                     case romm::player::CaptureState::kCancelled:
@@ -699,9 +711,8 @@ int main(int argc, char* argv[]) {
                         break;  // still capturing (or idle)
                 }
                 if (!pauseMenu.isCapturingBinding()) {
-                    // Left capture this frame: drop the menu edge latches so
-                    // a button held across the transition cannot fire a
-                    // spurious menu action on the list.
+                    // Seed from live levels: the newly mapped button may
+                    // still be held and must not navigate out of the editor.
                     input.resetMenuEdges();
                 }
             } else {
@@ -717,7 +728,10 @@ int main(int argc, char* argv[]) {
             const int captureSecondsLeft = pauseMenu.isCapturingBinding()
                 ? static_cast<int>(captureCoordinator.remainingTimeoutMs() / 1000)
                 : -1;
-            pauseOverlay.draw(renderer, pauseMenu, input.bindings(), captureSecondsLeft);
+            pauseOverlay.draw(
+                renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
+                captureSecondsLeft,
+                request.coreId.c_str());
         });
         if (session.diagnostics().coreRequestedShutdown.load()) running = false;
         if (g_signal_flag.load()) running = false;  // SIGTERM/SIGINT
@@ -744,7 +758,8 @@ int main(int argc, char* argv[]) {
     // normalized identity. The desktop ingestion of this file is a follow-up
     // sub-unit — writing it correctly is all this sub-unit owes. A default
     // table writes nothing (the built-in mapping needs no persistence).
-    if (!input.bindings().isDefault() && !request.resultPath.empty()) {
+    if ((!input.bindings().isDefault() || !input.secondaryBindings().isUnmapped()) &&
+        !request.resultPath.empty()) {
         std::vector<romm::player::DeviceBindings> devices;
         for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
             if (!input.hasGamepad(port)) continue;
@@ -752,6 +767,7 @@ int main(int argc, char* argv[]) {
             device.guid = input.joystickGuidString(port);
             device.identity = romm::player::normalizedDeviceIdentity(device.guid);
             device.table = input.bindings();
+            device.secondaryTable = input.secondaryBindings();
             devices.push_back(std::move(device));
         }
         if (!romm::player::writeBindingSidecar(
@@ -763,9 +779,13 @@ int main(int argc, char* argv[]) {
     const romm::player::ExitKind exitKind = session.diagnostics().coreRequestedShutdown.load()
                                                ? romm::player::ExitKind::CoreRequestedShutdown
                                                : romm::player::ExitKind::Completed;
+    romm::player::VideoSettings finalVideo = request.video;
+    finalVideo.integerScaling = pauseMenu.integerScalingEnabled();
+    finalVideo.scanlines = pauseMenu.scanlinesEnabled();
+    finalVideo.sharpFilter = pauseMenu.sharpFilterEnabled();
     writeResult(request, exitKind, checkpointWritten,
                 static_cast<int64_t>(session.diagnostics().frameCount.load()), underrunFrames,
-                overrunFrames, nullptr);
+                overrunFrames, nullptr, &finalVideo);
 
     // 13. Cleanup. A core is allowed to take time to deinitialize, but it
     // must not keep the desktop shell waiting forever. A process-level alarm

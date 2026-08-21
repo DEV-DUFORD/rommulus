@@ -44,3 +44,8 @@ FFI stack (jnr-ffi, jnr-unixsocket, ...) required by the dbus-java transport,
 okio, and exact Kotlin stdlib/reflect versions must be enumerated from a Gradle
 :desktop runtimeClasspath dependency report, with license texts added to
 third_party_licenses, before release.
+
+Native player UI dependencies
+- stb_truetype v1.26 (pinned commit f58f558c120e9b32c217290b80bad1a0729fbb2c) — MIT
+- stb_image v2.30 (pinned commit f58f558c120e9b32c217290b80bad1a0729fbb2c) — MIT
+- Bitstream Vera Sans Roman 1.10 (font.ttf) — Bitstream Vera font license

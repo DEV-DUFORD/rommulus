@@ -72,6 +72,7 @@ ControllerBindings sampleControllerBindings() {
     usb.table.set(9, BindingSource::ofButton(PadButton::kDpadDown));   // dpad_down
     usb.table.set(10, BindingSource::axisDirection(PadAxis::kLeftX, -1));      // dpad_left
     usb.table.set(11, BindingSource::ofButton(PadButton::kDpadRight));  // dpad_right
+    usb.secondaryTable.set(0, BindingSource::ofButton(PadButton::kNorth));
     cb.devices.push_back(std::move(usb));
 
     romm::player::ControllerBindingDevice any;
@@ -97,6 +98,7 @@ PlayerResult sampleResult() {
     r.audioOverrunFrames = 0;
     r.errorCode = std::nullopt;
     r.errorMessage = std::nullopt;
+    r.video = romm::player::VideoSettings{false, true, true, false};
     return r;
 }
 
@@ -140,6 +142,7 @@ void checkRoundTripRequest(const PlayerRequest& in) {
             CHECK_EQ(a[d].identity.descriptor, b[d].identity.descriptor);
             for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
                 CHECK(a[d].table.get(slot) == b[d].table.get(slot));
+                CHECK(a[d].secondaryTable.get(slot) == b[d].secondaryTable.get(slot));
             }
         }
     }
@@ -166,6 +169,13 @@ void checkRoundTripResult(const PlayerResult& in) {
     CHECK_EQ(out->audioOverrunFrames, in.audioOverrunFrames);
     CHECK(out->errorCode == in.errorCode);
     CHECK(out->errorMessage == in.errorMessage);
+    CHECK(out->video.has_value() == in.video.has_value());
+    if (in.video.has_value() && out->video.has_value()) {
+        CHECK_EQ(out->video->fullscreen, in.video->fullscreen);
+        CHECK_EQ(out->video->integerScaling, in.video->integerScaling);
+        CHECK_EQ(out->video->scanlines, in.video->scanlines);
+        CHECK_EQ(out->video->sharpFilter, in.video->sharpFilter);
+    }
 }
 
 void expectRequestRejected(const std::string& json, const char* label) {

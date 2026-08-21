@@ -127,6 +127,16 @@ std::string serializeBindingSidecar(const std::vector<DeviceBindings>& devices) 
             bindings.push_back(std::move(bindingEntry));
         }
         entry["bindings"] = std::move(bindings);
+        if (!device.secondaryTable.isUnmapped()) {
+            json secondary = json::array();
+            for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
+                json bindingEntry;
+                bindingEntry["slot"] = retroPadSlotName(slot);
+                bindingEntry.update(bindingSourceToJson(device.secondaryTable.get(slot)));
+                secondary.push_back(std::move(bindingEntry));
+            }
+            entry["secondaryBindings"] = std::move(secondary);
+        }
         deviceArray.push_back(std::move(entry));
     }
     root["devices"] = std::move(deviceArray);

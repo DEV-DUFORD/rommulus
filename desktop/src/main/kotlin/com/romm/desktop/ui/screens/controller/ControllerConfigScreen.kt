@@ -1,104 +1,768 @@
 package com.romm.desktop.ui.screens.controller
 
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.sp
 import com.romm.androidtv.controller.capture.CaptureTarget
+import com.romm.androidtv.controller.config.BindingAddress
 import com.romm.androidtv.controller.config.BindingSlot
-import com.romm.androidtv.controller.config.CoreControllerConfig
 import com.romm.androidtv.controller.config.CoreControlDescriptor
 import com.romm.androidtv.controller.config.CoreControlId
+import com.romm.androidtv.controller.config.CoreControllerConfig
 import com.romm.androidtv.controller.config.CoreControllerProfile
 import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.controller.config.InputKind
 import com.romm.androidtv.controller.config.PhysicalBinding
+import com.romm.androidtv.controller.config.isPauseMenuControl
 import com.romm.androidtv.controller.model.NeutralAxis
 import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.controller.DesktopCaptureCoordinator
 import com.romm.desktop.controller.DesktopCapturePump
 import com.romm.desktop.controller.DesktopCaptureState
-import com.romm.desktop.controller.captureActive
-import com.romm.desktop.ui.components.LocalRommulusColors
-import com.romm.desktop.ui.components.TvButton
-import com.romm.desktop.ui.components.TvOutlinedButton
-import com.romm.desktop.ui.components.tvFocusRing
 import com.romm.desktop.ui.controller.ControllerArtworkResolver
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
-import com.romm.desktop.ui.navigation.keyboardShortcuts
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/**
- * The player port configured on this screen (E2: one player tab for now, matching the
- * player's single-table model — [com.romm.desktop.player.RetroPadControlMapping.PLAYER_INDEX]).
- */
-private const val PLAYER_INDEX = 0
+private data class PendingCapture(
+    val playerIndex: Int,
+    val descriptor: CoreControlDescriptor,
+    val slot: BindingSlot,
+)
 
-/** Brief non-blocking confirmation under the binding list (mirrors Android's lastAppliedMessage). */
-private const val FEEDBACK_DISMISS_MILLIS = 2_000L
+private data class PendingConflict(
+    val playerIndex: Int,
+    val target: BindingAddress,
+    val conflicting: BindingAddress,
+    val binding: PhysicalBinding,
+)
 
-/** Back held this long inside the capture dialog clears the mapping instead of cancelling. */
-private const val HOLD_BACK_TO_CLEAR_MILLIS = 600L
+@Composable
+fun ControllerConfigScreen(coordinator: DesktopAppCoordinator) {
+    val coreId = coordinator.selectedControllerCoreId ?: return
+    ControllerConfigScreen(coreId, coordinator, coordinator::onBack)
+}
 
-/** Inline error-feedback color (mirrors the Android 0xFFF44336). */
-private val ErrorRed = Color(0xFFF44336)
+@Composable
+fun ControllerConfigScreen(
+    coreId: String,
+    coordinator: DesktopAppCoordinator,
+    onBack: () -> Unit,
+) {
+    val profile = remember(coreId) {
+        CoreControllerProfiles.byCoreId(coreId)
+            ?: error("No controller profile for core '$coreId'")
+    }
+    val repository = coordinator.controllerConfigRepository
+    val config by repository.observeCore(coreId).collectAsState(
+        initial = CoreControllerConfig(coreId, profile.defaults),
+    )
+    val scope = rememberCoroutineScope()
+    val focusNavigator = LocalFocusNavigator.current
+    val captureCoordinator = remember { DesktopCaptureCoordinator(scope) }
+    val capturePump = remember {
+        DesktopCapturePump(coordinator.controllerInputSource, captureCoordinator, scope)
+    }
+    val captureState by captureCoordinator.state.collectAsState()
 
-// --------------------------------------------------------------------------- pure logic
-// (extracted from the composables so it is unit-testable without a Compose runtime,
-// following the LibraryScreenLogic pattern)
+    var selectedPlayer by remember { mutableIntStateOf(0) }
+    var focusedControlId by remember { mutableStateOf<CoreControlId?>(null) }
+    var pendingCapture by remember { mutableStateOf<PendingCapture?>(null) }
+    var pendingConflict by remember { mutableStateOf<PendingConflict?>(null) }
+    var clearConfirmation by remember { mutableStateOf(false) }
+    var resetAllConfirmation by remember { mutableStateOf(false) }
+    var feedback by remember { mutableStateOf<String?>(null) }
+    val lastFocusedAddress = remember { mutableMapOf<Int, BindingAddress>() }
 
-/** One displayable binding row for a console control. */
+    val devices = coordinator.controllerInputSource.enumerate()
+    val controllerLabels = remember(devices.map { it.signature.name }, profile.playerCount) {
+        numberedControllerLabels(devices.map { it.signature.name }, profile.playerCount)
+    }
+    val activePlayer = devices.indices.firstOrNull()?.takeIf { it < profile.playerCount }
+
+    DisposableEffect(capturePump) {
+        capturePump.start()
+        onDispose {
+            captureCoordinator.cancel()
+            capturePump.stop()
+        }
+    }
+
+    LaunchedEffect(feedback) {
+        if (feedback != null) {
+            delay(2_500)
+            feedback = null
+        }
+    }
+
+    LaunchedEffect(coreId) {
+        val first = BindingAddress(profile.controls.first().id, BindingSlot.PRIMARY)
+        lastFocusedAddress[0] = first
+        val key = "controller-binding-0-${first.controlId.id}-${first.slot.name}"
+        repeat(10) {
+            if (focusNavigator.focusItem(key)) return@LaunchedEffect
+            delay(16)
+        }
+    }
+
+    fun bindingKey(address: BindingAddress, playerIndex: Int = selectedPlayer): String =
+        "controller-binding-$playerIndex-${address.controlId.id}-${address.slot.name}"
+
+    fun restoreBindingFocus(playerIndex: Int, address: BindingAddress) {
+        lastFocusedAddress[playerIndex] = address
+        scope.launch {
+            delay(80)
+            focusNavigator.focusItem(bindingKey(address, playerIndex))
+        }
+    }
+
+    fun finishCapture(message: String? = null) {
+        val capture = pendingCapture
+        pendingCapture = null
+        if (message != null) feedback = message
+        if (capture != null) {
+            restoreBindingFocus(
+                capture.playerIndex,
+                BindingAddress(capture.descriptor.id, capture.slot),
+            )
+        }
+    }
+
+    LaunchedEffect(captureState) {
+        val capture = pendingCapture ?: return@LaunchedEffect
+        when (val state = captureState) {
+            is DesktopCaptureState.Result -> {
+                val target = BindingAddress(capture.descriptor.id, capture.slot)
+                val playerBindings = config.players[capture.playerIndex]?.bindings.orEmpty()
+                val collision = playerBindings.entries.firstNotNullOfOrNull { (controlId, bindings) ->
+                    if (controlId.isPauseMenuControl || target.controlId.isPauseMenuControl) {
+                        null
+                    } else {
+                        bindings.entries()
+                            .firstOrNull { (slot, binding) ->
+                                BindingAddress(controlId, slot) != target && binding == state.binding
+                            }
+                            ?.let { (slot, _) -> BindingAddress(controlId, slot) }
+                    }
+                }
+                if (collision == null) {
+                    repository.setBinding(
+                        coreId,
+                        capture.playerIndex,
+                        capture.descriptor.id,
+                        state.binding,
+                        capture.slot,
+                    )
+                    finishCapture(
+                        "${capture.descriptor.label} mapped to ${desktopBindingLabel(state.binding)}",
+                    )
+                } else {
+                    pendingConflict = PendingConflict(
+                        playerIndex = capture.playerIndex,
+                        target = target,
+                        conflicting = collision,
+                        binding = state.binding,
+                    )
+                    pendingCapture = null
+                }
+            }
+            DesktopCaptureState.TimedOut -> finishCapture("Mapping timed out")
+            DesktopCaptureState.NoDeviceAssigned -> finishCapture("Connect a controller to remap inputs")
+            DesktopCaptureState.Cancelled -> finishCapture()
+            else -> Unit
+        }
+    }
+
+    val startCapture: (CoreControlDescriptor, BindingSlot) -> Unit = { descriptor, slot ->
+        val selectedDevice = coordinator.controllerInputSource.enumerate().getOrNull(selectedPlayer)
+        captureCoordinator.beginCapture(
+            slotIndex = selectedPlayer,
+            deviceId = selectedDevice?.id,
+            target = if (descriptor.inputKind == InputKind.ANALOG_STICK) {
+                CaptureTarget.Analog
+            } else {
+                CaptureTarget.Digital
+            },
+        )
+        pendingCapture = PendingCapture(selectedPlayer, descriptor, slot)
+    }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 32.dp),
+        ) {
+            ControllerHeader(
+                consoleName = profile.consoleName,
+                focusNavigator = focusNavigator,
+                onBack = onBack,
+                onResetPlayer = {
+                    scope.launch {
+                        repository.resetPlayer(coreId, selectedPlayer)
+                        feedback = "Player ${selectedPlayer + 1} controller reset"
+                    }
+                },
+                onClearMappings = { clearConfirmation = true },
+            )
+            Spacer(Modifier.height(18.dp))
+            PlayerTabs(
+                profile = profile,
+                selectedPlayer = selectedPlayer,
+                activePlayer = activePlayer,
+                controllerLabels = controllerLabels,
+                focusNavigator = focusNavigator,
+                onSelect = { player ->
+                    if (player == selectedPlayer) return@PlayerTabs
+                    captureCoordinator.cancel()
+                    selectedPlayer = player
+                    focusedControlId = null
+                    scope.launch {
+                        delay(80)
+                        val address = lastFocusedAddress[player]
+                            ?: BindingAddress(profile.controls.first().id, BindingSlot.PRIMARY)
+                        focusNavigator.focusItem(bindingKey(address, player))
+                    }
+                },
+            )
+            Spacer(Modifier.height(18.dp))
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(28.dp),
+            ) {
+                ControllerArtworkPanel(
+                    profile = profile,
+                    focusedControlId = focusedControlId,
+                    modifier = Modifier.weight(0.4f).fillMaxHeight(),
+                )
+                BindingList(
+                    profile = profile,
+                    config = config,
+                    selectedPlayer = selectedPlayer,
+                    focusNavigator = focusNavigator,
+                    onFocused = { descriptor, slot ->
+                        focusedControlId = descriptor.id
+                        lastFocusedAddress[selectedPlayer] = BindingAddress(descriptor.id, slot)
+                    },
+                    onCapture = startCapture,
+                    onResetAll = { resetAllConfirmation = true },
+                    modifier = Modifier.weight(0.6f).fillMaxHeight(),
+                )
+            }
+        }
+    }
+
+    feedback?.let { message ->
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(top = 18.dp, start = 48.dp, end = 48.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.inverseSurface,
+            shadowElevation = 8.dp,
+        ) {
+            Text(
+                text = message,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                color = MaterialTheme.colorScheme.inverseOnSurface,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+
+    pendingCapture?.let { capture ->
+        ControllerCaptureDialog(
+            playerLabel = "Player ${capture.playerIndex + 1}",
+            controlLabel = capture.descriptor.label,
+            slotLabel = capture.slot.displayName,
+            connectedController = controllerLabels.getOrNull(capture.playerIndex),
+            captureState = captureState,
+            onCancel = {
+                captureCoordinator.cancel()
+                finishCapture()
+            },
+            onClear = {
+                scope.launch {
+                    repository.clearBinding(
+                        coreId,
+                        capture.playerIndex,
+                        capture.descriptor.id,
+                        capture.slot,
+                    )
+                }
+                captureCoordinator.cancel()
+                finishCapture("${capture.descriptor.label} mapping cleared")
+            },
+        )
+    }
+
+    pendingConflict?.let { conflict ->
+        val targetLabel = profile.controls.first { it.id == conflict.target.controlId }.label
+        val conflictingLabel = profile.controls.first { it.id == conflict.conflicting.controlId }.label
+        AlertDialog(
+            onDismissRequest = {
+                pendingConflict = null
+                restoreBindingFocus(conflict.playerIndex, conflict.target)
+            },
+            title = { Text("Input already mapped") },
+            text = {
+                Text(
+                    "${desktopBindingLabel(conflict.binding)} is assigned to " +
+                        "$conflictingLabel. Swap the two mappings or replace the old one?",
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        repository.swapBindings(
+                            coreId,
+                            conflict.playerIndex,
+                            conflict.target,
+                            conflict.conflicting,
+                        )
+                        feedback = "$targetLabel swapped with $conflictingLabel"
+                    }
+                    pendingConflict = null
+                    restoreBindingFocus(conflict.playerIndex, conflict.target)
+                }) { Text("Swap") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        scope.launch {
+                            repository.replaceBinding(
+                                coreId,
+                                conflict.playerIndex,
+                                conflict.target,
+                                conflict.binding,
+                            )
+                            feedback = "$targetLabel mapped to ${desktopBindingLabel(conflict.binding)}"
+                        }
+                        pendingConflict = null
+                        restoreBindingFocus(conflict.playerIndex, conflict.target)
+                    }) { Text("Replace") }
+                    TextButton(onClick = {
+                        pendingConflict = null
+                        restoreBindingFocus(conflict.playerIndex, conflict.target)
+                    }) { Text("Cancel") }
+                }
+            },
+        )
+    }
+
+    if (clearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { clearConfirmation = false },
+            title = { Text("Clear Player ${selectedPlayer + 1} mappings?") },
+            text = { Text("Every mapping for this controller will be set to Unmapped.") },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        repository.clearPlayerMappings(coreId, selectedPlayer)
+                        feedback = "Player ${selectedPlayer + 1} mappings cleared"
+                    }
+                    clearConfirmation = false
+                }) { Text("Clear mappings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearConfirmation = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (resetAllConfirmation) {
+        AlertDialog(
+            onDismissRequest = { resetAllConfirmation = false },
+            title = { Text("Reset all controllers?") },
+            text = { Text("Mappings for every player will return to the defaults.") },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        repository.resetCore(coreId)
+                        feedback = "All controllers reset"
+                    }
+                    resetAllConfirmation = false
+                }) { Text("Reset all") }
+            },
+            dismissButton = {
+                TextButton(onClick = { resetAllConfirmation = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ControllerHeader(
+    consoleName: String,
+    focusNavigator: com.romm.desktop.ui.navigation.FocusNavigator,
+    onBack: () -> Unit,
+    onResetPlayer: () -> Unit,
+    onClearMappings: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(
+            onClick = onBack,
+            modifier = Modifier.focusableItem("controller-back", focusNavigator, onBack),
+        ) { Text("Back") }
+        Text(
+            text = "$consoleName Controller",
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+        )
+        TextButton(
+            onClick = onResetPlayer,
+            modifier = Modifier.focusableItem("controller-reset-player", focusNavigator, onResetPlayer),
+        ) { Text("Reset Controller") }
+        Spacer(Modifier.width(8.dp))
+        TextButton(
+            onClick = onClearMappings,
+            modifier = Modifier.focusableItem("controller-clear-player", focusNavigator, onClearMappings),
+        ) { Text("Clear Mappings") }
+    }
+}
+
+@Composable
+private fun PlayerTabs(
+    profile: CoreControllerProfile,
+    selectedPlayer: Int,
+    activePlayer: Int?,
+    controllerLabels: List<String?>,
+    focusNavigator: com.romm.desktop.ui.navigation.FocusNavigator,
+    onSelect: (Int) -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        repeat(profile.playerCount) { playerIndex ->
+            Tab(
+                selected = playerIndex == selectedPlayer,
+                onClick = { onSelect(playerIndex) },
+                modifier = Modifier
+                    .weight(1f)
+                    .focusableItem(
+                        "controller-player-tab-$playerIndex",
+                        focusNavigator,
+                    ) { onSelect(playerIndex) },
+                text = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = buildString {
+                                append("Player ${playerIndex + 1}")
+                                if (playerIndex == activePlayer) append(" • Active")
+                            },
+                            fontWeight = if (playerIndex == selectedPlayer) FontWeight.Bold else FontWeight.Medium,
+                        )
+                        Text(
+                            text = controllerLabels.getOrNull(playerIndex) ?: "No controller",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ControllerArtworkPanel(
+    profile: CoreControllerProfile,
+    focusedControlId: CoreControlId?,
+    modifier: Modifier = Modifier,
+) {
+    val artwork = remember(profile.artwork) {
+        ControllerArtworkResolver.imageVectorFor(profile.artwork)
+    }
+    val focused = profile.controls.firstOrNull { it.id == focusedControlId }
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            androidx.compose.foundation.Image(
+                imageVector = artwork,
+                contentDescription = "${profile.consoleName} controller",
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                contentScale = ContentScale.Fit,
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = focused?.label ?: "Select a control",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = profile.consoleSubtitle ?: profile.consoleName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BindingList(
+    profile: CoreControllerProfile,
+    config: CoreControllerConfig,
+    selectedPlayer: Int,
+    focusNavigator: com.romm.desktop.ui.navigation.FocusNavigator,
+    onFocused: (CoreControlDescriptor, BindingSlot) -> Unit,
+    onCapture: (CoreControlDescriptor, BindingSlot) -> Unit,
+    onResetAll: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val player = config.players[selectedPlayer]
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Control",
+                    modifier = Modifier.weight(0.9f),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Primary",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "Secondary",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HorizontalDivider()
+            Spacer(Modifier.height(4.dp))
+        }
+        itemsIndexed(profile.controls, key = { _, descriptor -> descriptor.id.id }) { _, descriptor ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = descriptor.label,
+                    modifier = Modifier.weight(0.9f).padding(horizontal = 14.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                BindingCell(
+                    label = desktopBindingLabel(
+                        player?.get(descriptor.id, BindingSlot.PRIMARY),
+                    ),
+                    key = "controller-binding-$selectedPlayer-${descriptor.id.id}-${BindingSlot.PRIMARY.name}",
+                    focusNavigator = focusNavigator,
+                    onFocus = { onFocused(descriptor, BindingSlot.PRIMARY) },
+                    onClick = { onCapture(descriptor, BindingSlot.PRIMARY) },
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(10.dp))
+                BindingCell(
+                    label = desktopBindingLabel(
+                        player?.get(descriptor.id, BindingSlot.SECONDARY),
+                    ),
+                    key = "controller-binding-$selectedPlayer-${descriptor.id.id}-${BindingSlot.SECONDARY.name}",
+                    focusNavigator = focusNavigator,
+                    onFocus = { onFocused(descriptor, BindingSlot.SECONDARY) },
+                    onClick = { onCapture(descriptor, BindingSlot.SECONDARY) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        item {
+            Spacer(Modifier.height(10.dp))
+            HorizontalDivider()
+            TextButton(
+                onClick = onResetAll,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .focusableItem("controller-reset-all", focusNavigator, onResetAll),
+            ) {
+                Text("Reset All Controllers")
+            }
+        }
+    }
+}
+
+@Composable
+private fun BindingCell(
+    label: String,
+    key: String,
+    focusNavigator: com.romm.desktop.ui.navigation.FocusNavigator,
+    onFocus: () -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Surface(
+        modifier = modifier
+            .height(48.dp)
+            .focusableItem(key, focusNavigator, onClick)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocus()
+            }
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(10.dp),
+        color = if (focused) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        border = BorderStroke(
+            if (focused) 2.dp else 1.dp,
+            if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = label,
+                maxLines = 1,
+                fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (label == "Unmapped") {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ControllerCaptureDialog(
+    playerLabel: String,
+    controlLabel: String,
+    slotLabel: String,
+    connectedController: String?,
+    captureState: DesktopCaptureState,
+    onCancel: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val phase = when (captureState) {
+        DesktopCaptureState.AwaitingNeutral -> "Release all controls"
+        DesktopCaptureState.Capturing -> "Press a button or move an axis"
+        DesktopCaptureState.NoDeviceAssigned -> "No controller connected"
+        DesktopCaptureState.TimedOut -> "Capture timed out"
+        else -> "Preparing capture"
+    }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Map $controlLabel") },
+        text = {
+            Column {
+                Text(
+                    text = "$playerLabel • $slotLabel",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                connectedController?.let {
+                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(Modifier.height(24.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (captureState is DesktopCaptureState.AwaitingNeutral ||
+                        captureState is DesktopCaptureState.Capturing
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
+                        Spacer(Modifier.width(14.dp))
+                    }
+                    Text(phase, style = MaterialTheme.typography.titleMedium)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "First valid input wins. Capture times out after 15 seconds.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { OutlinedButton(onClick = onCancel) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onClear) { Text("Clear mapping") } },
+    )
+}
+
+private fun numberedControllerLabels(names: List<String>, playerCount: Int): List<String?> {
+    val normalized = names.map { it.ifBlank { "Game controller" } }
+    val totals = normalized.groupingBy { it }.eachCount()
+    val seen = mutableMapOf<String, Int>()
+    return List(playerCount) { index ->
+        val name = normalized.getOrNull(index) ?: return@List null
+        if (totals.getValue(name) == 1) {
+            name
+        } else {
+            val number = (seen[name] ?: 0) + 1
+            seen[name] = number
+            "$name #$number"
+        }
+    }
+}
+
 data class ControllerBindingRowUi(
     val controlId: CoreControlId,
     val label: String,
@@ -106,15 +770,9 @@ data class ControllerBindingRowUi(
     val primaryBindingLabel: String,
     val secondaryBindingLabel: String,
 ) {
-    /** Compatibility alias for callers that only render the primary binding. */
     val bindingLabel: String get() = primaryBindingLabel
 }
 
-/**
- * Builds the binding rows shown on the controller config screen from a merged
- * [CoreControllerConfig] (catalog defaults + stored overrides), mirroring Android's
- * `ControllerSettingsViewModel.buildRows` — one row per profile control in catalog order.
- */
 fun buildBindingRows(
     profile: CoreControllerProfile,
     playerIndex: Int,
@@ -132,11 +790,6 @@ fun buildBindingRows(
     }
 }
 
-/**
- * Human-readable label for a [PhysicalBinding] (desktop port of Android's
- * `BindingLabelFormatter`, keyed by the shared neutral platform codes instead of the
- * Android constant literals). `null` renders as "Unmapped" (Android parity).
- */
 fun desktopBindingLabel(binding: PhysicalBinding?): String = when (binding) {
     null -> "Unmapped"
     is PhysicalBinding.Key -> keyLabel(binding.keyCode)
@@ -144,7 +797,7 @@ fun desktopBindingLabel(binding: PhysicalBinding?): String = when (binding) {
     is PhysicalBinding.AxisDirection -> axisDirectionLabel(binding.axis, binding.polarity)
 }
 
-private fun keyLabel(code: Int): String = when (val key = NeutralKey.fromPlatform(code)) {
+private fun keyLabel(code: Int): String = when (NeutralKey.fromPlatform(code)) {
     NeutralKey.BUTTON_A -> "Button A"
     NeutralKey.BUTTON_B -> "Button B"
     NeutralKey.BUTTON_X -> "Button X"
@@ -174,16 +827,15 @@ private fun axisLabel(code: Int): String = when (NeutralAxis.fromPlatform(code))
     else -> "Axis $code"
 }
 
-private fun axisDirectionLabel(axisCode: Int, polarity: Int): String = when (NeutralAxis.fromPlatform(axisCode)) {
-    NeutralAxis.X -> if (polarity > 0) "Left Stick Right" else "Left Stick Left"
-    NeutralAxis.Y -> if (polarity > 0) "Left Stick Down" else "Left Stick Up"
-    NeutralAxis.RX, NeutralAxis.Z -> if (polarity > 0) "Right Stick Right" else "Right Stick Left"
-    NeutralAxis.RY, NeutralAxis.RZ -> if (polarity > 0) "Right Stick Down" else "Right Stick Up"
-    // Triggers keep their base label for either polarity (Android parity).
-    else -> axisLabel(axisCode)
-}
+private fun axisDirectionLabel(axisCode: Int, polarity: Int): String =
+    when (NeutralAxis.fromPlatform(axisCode)) {
+        NeutralAxis.X -> if (polarity > 0) "Left Stick Right" else "Left Stick Left"
+        NeutralAxis.Y -> if (polarity > 0) "Left Stick Down" else "Left Stick Up"
+        NeutralAxis.RX, NeutralAxis.Z -> if (polarity > 0) "Right Stick Right" else "Right Stick Left"
+        NeutralAxis.RY, NeutralAxis.RZ -> if (polarity > 0) "Right Stick Down" else "Right Stick Up"
+        else -> axisLabel(axisCode)
+    }
 
-/** The rendered content of the capture overlay for one [DesktopCaptureState]. */
 data class CaptureDialogContent(
     val title: String,
     val body: String,
@@ -191,528 +843,38 @@ data class CaptureDialogContent(
     val isError: Boolean,
 )
 
-/** Back hint shown while a capture is waiting for input (Android parity wording). */
 const val CAPTURE_BACK_HINT = "Press Back to cancel \u2022 Hold Back to clear this mapping."
 
-/**
- * Maps a [DesktopCaptureState] onto the capture overlay's text content, mirroring the
- * Android `ControllerCaptureDialog` state→copy table. Terminal states that the caller is
- * expected to dismiss immediately (Idle / Cancelled) render empty placeholders.
- */
 fun captureDialogContent(
     state: DesktopCaptureState,
     controlLabel: String,
     playerLabel: String,
 ): CaptureDialogContent = when (state) {
-    DesktopCaptureState.Idle -> CaptureDialogContent("", "", "", false)
-
+    DesktopCaptureState.Idle,
+    DesktopCaptureState.Cancelled -> CaptureDialogContent("", "", "", false)
     DesktopCaptureState.AwaitingNeutral,
     DesktopCaptureState.Capturing -> CaptureDialogContent(
-        title = "Map $controlLabel",
-        body = "Press a button or move a stick on the controller for $playerLabel.",
-        secondary = CAPTURE_BACK_HINT,
-        isError = false,
+        "Map $controlLabel",
+        "Press a button or move a stick on the controller for $playerLabel.",
+        CAPTURE_BACK_HINT,
+        false,
     )
-
     is DesktopCaptureState.Result -> CaptureDialogContent(
-        title = "Map $controlLabel",
-        body = "Captured: ${desktopBindingLabel(state.binding)}",
-        secondary = "",
-        isError = false,
+        "Map $controlLabel",
+        "Captured: ${desktopBindingLabel(state.binding)}",
+        "",
+        false,
     )
-
-    DesktopCaptureState.Cancelled -> CaptureDialogContent("", "", "", false)
-
     DesktopCaptureState.TimedOut -> CaptureDialogContent(
-        title = "Map $controlLabel",
-        body = "No input detected",
-        secondary = CAPTURE_BACK_HINT,
-        isError = true,
+        "Map $controlLabel",
+        "No input detected",
+        CAPTURE_BACK_HINT,
+        true,
     )
-
     DesktopCaptureState.NoDeviceAssigned -> CaptureDialogContent(
-        title = "Map $controlLabel",
-        body = "Connect $playerLabel to remap inputs",
-        secondary = CAPTURE_BACK_HINT,
-        isError = true,
+        "Map $controlLabel",
+        "Connect $playerLabel to remap inputs",
+        CAPTURE_BACK_HINT,
+        true,
     )
-}
-
-// --------------------------------------------------------------------------- screen
-
-/**
- * Desktop controller-configuration screen for one core (E2) — the desktop mirror of
- * Android's [com.romm.androidtv.controller.ui.ControllerConfigScreen], focused on a single
- * player tab (the player's single-table model):
- *
- *  - binding rows from the merged config (catalog defaults + stored overrides via
- *    [DesktopAppCoordinator.controllerConfigRepository]); selecting a row starts a capture
- *    session through [DesktopCaptureCoordinator] fed by the shared JInput poll source;
- *  - a "Reset" header action restoring this player's catalog defaults
- *    (`repository.resetPlayer`);
- *  - Escape / Back returns to the console list via [DesktopAppCoordinator.onBack].
- */
-@OptIn(ExperimentalComposeUiApi::class)
-@Composable
-fun ControllerConfigScreen(
-    coordinator: DesktopAppCoordinator,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalRommulusColors.current
-    val coreId = coordinator.selectedControllerCoreId
-    val profile = remember(coreId) { coreId?.let(CoreControllerProfiles::byCoreId) }
-
-    if (profile == null || coreId == null) {
-        // Defensive: CONTROLLER_CONFIG without a selection — offer a way back.
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .background(colors.nightHi)
-                .keyboardShortcuts(
-                    onBack = { coordinator.onBack() },
-                    onSearch = { /* search is not reachable from this screen */ },
-                    onQuit = { /* window close is owned by the desktop shell */ },
-                )
-                .padding(32.dp),
-        ) {
-            Text("No console selected.", color = colors.textSecondary)
-            Spacer(modifier = Modifier.height(16.dp))
-            val navigator = LocalFocusNavigator.current
-            TvOutlinedButton(
-                onClick = { coordinator.onBack() },
-                modifier = Modifier.focusableItem("controller-config:missing-back", navigator) {
-                    coordinator.onBack()
-                },
-            ) { Text("Back") }
-        }
-        return
-    }
-
-    val repository = coordinator.controllerConfigRepository
-    // observeCore is statically a Flow (the impl is a per-core StateFlow); the plain-Flow
-    // collectAsState overload needs an initial — an empty config for this core, which the
-    // flow's first emission (the merged config) replaces before first frame settles.
-    val config by repository.observeCore(coreId)
-        .collectAsState(initial = CoreControllerConfig(coreId, emptyMap()))
-    val rows = remember(config) { buildBindingRows(profile, PLAYER_INDEX, config) }
-    val playerLabel = "Controller ${PLAYER_INDEX + 1}"
-
-    // ── Capture plumbing: one-shot coordinator + pump fed by the shared JInput source ──
-    val uiScope = rememberCoroutineScope()
-    val captureCoordinator = remember { DesktopCaptureCoordinator(uiScope) }
-    val pump = remember(coordinator.controllerInputSource, captureCoordinator) {
-        DesktopCapturePump(coordinator.controllerInputSource, captureCoordinator, uiScope)
-    }
-    DisposableEffect(pump) {
-        pump.start()
-        onDispose { pump.stop() }
-    }
-
-    var capturingControlId by remember { mutableStateOf<CoreControlId?>(null) }
-    var capturingSlot by remember { mutableStateOf(BindingSlot.PRIMARY) }
-    var captureStartedAtMillis by remember { mutableStateOf(0L) }
-    val captureState by captureCoordinator.state.collectAsState()
-
-    // Brief non-blocking confirmation (mirrors Android's lastAppliedMessage).
-    var feedback by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(feedback) {
-        if (feedback != null) {
-            delay(FEEDBACK_DISMISS_MILLIS)
-            feedback = null
-        }
-    }
-
-    // Terminal capture states: persist the result / clear on hold-Back, then close the overlay.
-    LaunchedEffect(captureState, capturingControlId) {
-        val controlId = capturingControlId ?: return@LaunchedEffect
-        when (val state = captureState) {
-            is DesktopCaptureState.Result -> {
-                repository.setBinding(coreId, PLAYER_INDEX, controlId, state.binding, capturingSlot)
-                feedback = "Mapped ${controlLabel(profile, controlId)} to ${desktopBindingLabel(state.binding)}"
-                capturingControlId = null
-            }
-            DesktopCaptureState.Cancelled -> capturingControlId = null
-            DesktopCaptureState.TimedOut -> {
-                feedback = "No input detected \u2014 mapping unchanged"
-                capturingControlId = null
-            }
-            DesktopCaptureState.NoDeviceAssigned -> {
-                feedback = "Connect a controller to remap inputs"
-                capturingControlId = null
-            }
-            else -> Unit
-        }
-    }
-
-    val startCapture: (CoreControlDescriptor, BindingSlot) -> Unit = { descriptor, slot ->
-        val deviceIds = coordinator.controllerInputSource.enumerate().mapTo(mutableSetOf()) { it.id }
-        captureCoordinator.beginCapture(
-            slotIndex = PLAYER_INDEX,
-            deviceIds = deviceIds,
-            target = if (descriptor.inputKind == InputKind.ANALOG_STICK) CaptureTarget.Analog else CaptureTarget.Digital,
-        )
-        captureStartedAtMillis = System.currentTimeMillis()
-        capturingControlId = descriptor.id
-        capturingSlot = slot
-    }
-
-    val resetPlayer: () -> Unit = {
-        uiScope.launch {
-            repository.resetPlayer(coreId, PLAYER_INDEX)
-            feedback = "${profile.consoleName} bindings reset to defaults"
-        }
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(colors.nightHi)
-            .keyboardShortcuts(
-                onBack = { coordinator.onBack() },
-                onSearch = { /* search is not reachable from this screen */ },
-                onQuit = { /* window close is owned by the desktop shell */ },
-            )
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        // ---- Header: Back / title / Reset ----
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val navigator = LocalFocusNavigator.current
-            TvOutlinedButton(
-                onClick = { coordinator.onBack() },
-                modifier = Modifier.focusableItem("controller-config:back", navigator) {
-                    coordinator.onBack()
-                },
-            ) { Text("Back") }
-            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(profile.consoleName, style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
-                profile.consoleSubtitle?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                }
-            }
-            TvButton(
-                onClick = resetPlayer,
-                modifier = Modifier.focusableItem("controller-config:reset", navigator, resetPlayer),
-            ) { Text("Reset") }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // ---- 40/60 artwork/binding split (mirrors Android's ControllerConfigScreen) ----
-        Row(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-        ) {
-            ArtworkPanel(
-                consoleName = profile.consoleName,
-                artwork = remember(profile) {
-                    ControllerArtworkResolver.imageVectorFor(profile.artwork)
-                },
-                modifier = Modifier.weight(0.4f).padding(end = 20.dp),
-            )
-
-            // Binding rows (single player tab)
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .weight(0.6f)
-                    .fillMaxHeight()
-                    .padding(bottom = 8.dp),
-            ) {
-                items(rows, key = { it.controlId.id }) { row ->
-                    BindingRowItem(
-                        row = row,
-                        onSlotClick = { slot ->
-                            profile.controls.firstOrNull { it.id == row.controlId }?.let { descriptor ->
-                                startCapture(descriptor, slot)
-                            }
-                        },
-                    )
-                }
-            }
-        }
-
-        // ---- Footer hint (Android parity) ----
-        Text(
-            text = "Select a control to remap it \u2022 Back to return",
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.textSecondary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        feedback?.let {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(it, style = MaterialTheme.typography.bodySmall, color = colors.romm300)
-        }
-    }
-
-    // ---- Capture overlay (mirrors Android's ControllerCaptureDialog) ----
-    val capturingDescriptor = capturingControlId?.let { id -> profile.controls.firstOrNull { it.id == id } }
-    if (capturingDescriptor != null) {
-        DesktopControllerCaptureDialog(
-            controlLabel = capturingDescriptor.label,
-            playerLabel = playerLabel,
-            state = captureState,
-            startedAtMillis = captureStartedAtMillis,
-            timeoutMillis = DesktopCaptureCoordinator.DEFAULT_TIMEOUT_MILLIS,
-            onDismiss = { captureCoordinator.cancel() },
-            onClear = {
-                uiScope.launch {
-                    repository.clearBinding(coreId, PLAYER_INDEX, capturingDescriptor.id, capturingSlot)
-                    feedback = "${capturingDescriptor.label} cleared"
-                }
-                captureCoordinator.cancel()
-            },
-        )
-    }
-}
-
-/** The console-native label for a [CoreControlId] within [profile]. */
-fun controlLabel(profile: CoreControllerProfile, controlId: CoreControlId): String =
-    profile.controls.firstOrNull { it.id == controlId }?.label ?: controlId.id
-
-// --------------------------------------------------------------------------- artwork panel
-
-/**
- * Artwork panel — desktop mirror of Android's `ArtworkPlaceholder`: a themed card with the
- * console name and the profile's controller silhouette. [ControllerArtworkResolver] maps the
- * shared [com.romm.androidtv.controller.config.ControllerArtwork] resource-name string to an
- * [ImageVector] converted 1:1 from the Android vector drawable.
- */
-@Composable
-private fun ArtworkPanel(
-    consoleName: String,
-    artwork: ImageVector,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalRommulusColors.current
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.nightLo),
-    ) {
-        Text(
-            text = consoleName,
-            style = MaterialTheme.typography.titleMedium,
-            color = colors.textPrimary,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(20.dp),
-        )
-        Image(
-            imageVector = artwork,
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            alpha = 0.72f,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(36.dp),
-        )
-    }
-}
-
-// --------------------------------------------------------------------------- row
-
-/**
- * One binding row with independently focusable primary and secondary mapping cells.
- */
-@Composable
-private fun BindingRowItem(
-    row: ControllerBindingRowUi,
-    onSlotClick: (BindingSlot) -> Unit,
-) {
-    val colors = LocalRommulusColors.current
-    val navigator = LocalFocusNavigator.current
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(colors.nightLo)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = row.label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = colors.textPrimary,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
-        BindingCell(row.controlId, BindingSlot.PRIMARY, row.primaryBindingLabel, onSlotClick)
-        Spacer(Modifier.width(8.dp))
-        BindingCell(row.controlId, BindingSlot.SECONDARY, row.secondaryBindingLabel, onSlotClick)
-    }
-}
-
-@Composable
-private fun BindingCell(
-    controlId: CoreControlId,
-    slot: BindingSlot,
-    label: String,
-    onClick: (BindingSlot) -> Unit,
-) {
-    val navigator = LocalFocusNavigator.current
-    TvOutlinedButton(
-        onClick = { onClick(slot) },
-        modifier = Modifier.focusableItem("controller-config:${controlId.id}:${slot.name}", navigator) {
-            onClick(slot)
-        },
-    ) {
-        Text(label, maxLines = 1)
-    }
-}
-
-// --------------------------------------------------------------------------- capture dialog
-
-/**
- * Desktop capture overlay (E2) — the desktop mirror of Android's
- * [com.romm.androidtv.controller.ui.ControllerCaptureDialog]: a centered modal telling the
- * user to press a button or move an axis, with a timeout countdown.
- *
- * Like the Android original it renders NO focusable Cancel/OK buttons — Back is the escape:
- *  - a quick Back cancels the capture ([onDismiss] → coordinator.cancel());
- *  - holding Back (keyboard Escape held past [HOLD_BACK_TO_CLEAR_MILLIS]) clears the
- *    selected mapping instead ([onClear]). Controller Back arrives as a single rising edge
- *    through the shell's focus router (JInput emits no auto-repeat), so it always cancels.
- *
- * The dialog is its own desktop window (like [com.romm.desktop.ui.screens.detail.ThemePickerDialog]
- * in SettingsScreen): it installs the shared navigator's spatial-focus override so controller
- * Move/Back route here, and it owns its key handling for the hold-to-clear gesture.
- */
-@OptIn(ExperimentalComposeUiApi::class)
-@Composable
-fun DesktopControllerCaptureDialog(
-    controlLabel: String,
-    playerLabel: String,
-    state: DesktopCaptureState,
-    startedAtMillis: Long,
-    timeoutMillis: Long,
-    onDismiss: () -> Unit,
-    onClear: () -> Unit,
-) {
-    val colors = LocalRommulusColors.current
-    val navigator = LocalFocusNavigator.current
-    val content = remember(state, controlLabel, playerLabel) {
-        captureDialogContent(state, controlLabel, playerLabel)
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
-    ) {
-        // Route controller Move/Back to this modal while it is up (shell's handleBack then
-        // invokes the override's back action — a quick Back cancels the capture).
-        val dialogFocusManager = LocalFocusManager.current
-        val focusOverrideOwner = remember { Any() }
-        DisposableEffect(navigator, dialogFocusManager, focusOverrideOwner) {
-            navigator.installSpatialFocusOverride(focusOverrideOwner, dialogFocusManager::moveFocus, onDismiss)
-            onDispose { navigator.removeSpatialFocusOverride(focusOverrideOwner) }
-        }
-
-        // The modal has no buttons — make the card itself the focus anchor so key events
-        // dispatch to it.
-        val rootFocus = remember { FocusRequester() }
-        LaunchedEffect(Unit) { rootFocus.requestFocus() }
-
-        // Timeout countdown: the coordinator's timeout window starts at beginCapture
-        // (startedAtMillis), so count down from wall-clock elapsed time.
-        var remainingSeconds by remember { mutableStateOf((timeoutMillis / 1000L + 1).toInt()) }
-        LaunchedEffect(startedAtMillis, timeoutMillis) {
-            while (true) {
-                val remaining = timeoutMillis - (System.currentTimeMillis() - startedAtMillis)
-                remainingSeconds = ((remaining + 999L) / 1000L).coerceAtLeast(0L).toInt()
-                if (remaining <= 0L) break
-                delay(250L)
-            }
-        }
-
-        // Hold-Back-to-clear: a fresh Escape KeyDown arms the hold timer; release before it
-        // fires cancels instead. Repeat KeyDown events (auto-repeat) are ignored while held.
-        val scope = rememberCoroutineScope()
-        var clearJob by remember { mutableStateOf<Job?>(null) }
-        var clearedByBackHold by remember { mutableStateOf(false) }
-        var backDown by remember { mutableStateOf(false) }
-        DisposableEffect(Unit) {
-            onDispose { clearJob?.cancel() }
-        }
-
-        Column(
-            modifier = Modifier
-                .width(420.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(colors.nightLo)
-                .focusRequester(rootFocus)
-                .focusable()
-                .onPreviewKeyEvent { event ->
-                    if (event.key != Key.Escape) return@onPreviewKeyEvent false
-                    when (event.type) {
-                        KeyEventType.KeyDown -> {
-                            if (!backDown) {
-                                clearedByBackHold = false
-                                clearJob?.cancel()
-                                clearJob = scope.launch {
-                                    delay(HOLD_BACK_TO_CLEAR_MILLIS)
-                                    onClear()
-                                    clearedByBackHold = true
-                                }
-                            }
-                            backDown = true
-                            true
-                        }
-                        KeyEventType.KeyUp -> {
-                            backDown = false
-                            clearJob?.cancel()
-                            clearJob = null
-                            if (!clearedByBackHold) onDismiss()
-                            clearedByBackHold = false
-                            true
-                        }
-                        else -> false
-                    }
-                }
-                .padding(horizontal = 36.dp, vertical = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = content.title,
-                style = MaterialTheme.typography.headlineSmall,
-                color = colors.textPrimary,
-                textAlign = TextAlign.Center,
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = content.body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (content.isError) ErrorRed else colors.textPrimary,
-                textAlign = TextAlign.Center,
-            )
-
-            if (captureActive(state)) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Times out in $remainingSeconds s",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textSecondary,
-                    textAlign = TextAlign.Center,
-                )
-            }
-
-            if (content.secondary.isNotBlank()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = content.secondary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textSecondary,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-    }
 }

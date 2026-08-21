@@ -1,452 +1,860 @@
-// pause_overlay.cpp — SDL3 software rendering for the pause overlay.
-//
-// See pause_overlay.h for the contract. Deliberately minimal: rectangles
-// plus an embedded 5x7 bitmap font (no SDL_ttf dependency). Everything is
-// drawn in the renderer's logical presentation coordinates so the overlay
-// scales and letterboxes together with the game frame. Draws the main menu,
-// the Video Options submenu, the Controller Settings submenu, the editable
-// Physical Controller Settings binding list (12 RetroPad slots + Reset to
-// Default) and its capture dialog, and the "Quit game?" confirm dialog on
-// top when active.
+// Native SDL rendering for the desktop in-game pause UI.
 #include "native/player/pause_overlay.h"
 
 #include <SDL3/SDL.h>
 
 #include "native/player/pause_menu.h"
 
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb/stb_truetype.h>
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+#include <stb/stb_image.h>
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 #include <algorithm>
-#include <cstddef>
+#include <array>
+#include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace romm::player {
 namespace {
 
-struct Glyph5x7 {
-    char c;           // the character this glyph stands for (documentation + validation)
-    uint8_t rows[7];  // top to bottom; bit 4 = leftmost pixel
+struct Color {
+    Uint8 r;
+    Uint8 g;
+    Uint8 b;
+    Uint8 a = 255;
 };
 
-// Classic 5x7 bitmap font. Only the glyphs the pause overlay can show are
-// defined; undefined entries render as blanks. Indexed by char - 32 for
-// printable ASCII (32..126).
-const Glyph5x7 kFont[95] = {
-    {' ', {0, 0, 0, 0, 0, 0, 0}},
-    {'!', {4, 4, 4, 4, 4, 0, 4}},
-    {'"', {0, 0, 0, 0, 0, 0, 0}},
-    {'#', {0, 0, 0, 0, 0, 0, 0}},
-    {'$', {0, 0, 0, 0, 0, 0, 0}},
-    {'%', {0, 0, 0, 0, 0, 0, 0}},
-    {'&', {0, 0, 0, 0, 0, 0, 0}},
-    {'\'', {4, 4, 2, 0, 0, 0, 0}},
-    {'(', {2, 4, 4, 4, 4, 4, 2}},
-    {')', {8, 4, 4, 4, 4, 4, 8}},
-    {'*', {0, 0, 0, 0, 0, 0, 0}},
-    {'+', {0, 0, 4, 14, 4, 0, 0}},
-    {',', {0, 0, 0, 0, 0, 4, 4}},
-    {'-', {0, 0, 0, 14, 0, 0, 0}},
-    {'.', {0, 0, 0, 0, 0, 0, 4}},
-    {'/', {1, 1, 2, 4, 8, 16, 16}},
-    {'0', {14, 17, 19, 21, 25, 17, 14}},
-    {'1', {4, 12, 4, 4, 4, 4, 14}},
-    {'2', {14, 17, 1, 2, 4, 8, 31}},
-    {'3', {14, 17, 1, 6, 1, 17, 14}},
-    {'4', {2, 6, 10, 18, 31, 2, 2}},
-    {'5', {31, 16, 30, 1, 1, 17, 14}},
-    {'6', {6, 8, 16, 30, 17, 17, 14}},
-    {'7', {31, 1, 2, 4, 8, 8, 8}},
-    {'8', {14, 17, 17, 14, 17, 17, 14}},
-    {'9', {14, 17, 17, 15, 1, 2, 12}},
-    {':', {0, 4, 4, 0, 4, 4, 0}},
-    {';', {0, 4, 4, 0, 4, 4, 4}},
-    {'<', {0, 0, 1, 2, 4, 2, 1}},
-    {'=', {0, 0, 30, 0, 30, 0, 0}},
-    {'>', {0, 0, 16, 8, 4, 8, 16}},
-    {'?', {14, 17, 1, 2, 4, 0, 4}},
-    {'@', {0, 0, 0, 0, 0, 0, 0}},
-    {'A', {14, 17, 17, 31, 17, 17, 17}},
-    {'B', {30, 17, 17, 30, 17, 17, 30}},
-    {'C', {14, 17, 16, 16, 16, 17, 14}},
-    {'D', {30, 17, 17, 17, 17, 17, 30}},
-    {'E', {31, 16, 16, 30, 16, 16, 31}},
-    {'F', {31, 16, 16, 30, 16, 16, 16}},
-    {'G', {14, 17, 16, 23, 17, 17, 15}},
-    {'H', {17, 17, 17, 31, 17, 17, 17}},
-    {'I', {14, 4, 4, 4, 4, 4, 14}},
-    {'J', {7, 2, 2, 2, 2, 18, 12}},
-    {'K', {17, 18, 20, 24, 20, 18, 17}},
-    {'L', {16, 16, 16, 16, 16, 16, 31}},
-    {'M', {17, 27, 21, 21, 17, 17, 17}},
-    {'N', {17, 19, 21, 25, 17, 17, 17}},
-    {'O', {14, 17, 17, 17, 17, 17, 14}},
-    {'P', {30, 17, 17, 30, 16, 16, 16}},
-    {'Q', {14, 17, 17, 17, 21, 18, 11}},
-    {'R', {30, 17, 17, 30, 20, 18, 17}},
-    {'S', {14, 17, 16, 14, 1, 17, 14}},
-    {'T', {31, 4, 4, 4, 4, 4, 4}},
-    {'U', {17, 17, 17, 17, 17, 17, 14}},
-    {'V', {17, 17, 17, 17, 17, 10, 4}},
-    {'W', {17, 17, 17, 21, 21, 21, 10}},
-    {'X', {17, 17, 10, 4, 10, 17, 17}},
-    {'Y', {17, 17, 10, 4, 4, 4, 4}},
-    {'Z', {31, 1, 2, 4, 8, 16, 31}},
-    {'[', {14, 16, 16, 16, 16, 16, 14}},
-    {'\\', {16, 16, 8, 4, 2, 1, 1}},
-    {']', {14, 16, 16, 16, 16, 16, 14}},
-    {'^', {0, 0, 0, 0, 0, 0, 0}},
-    {'_', {0, 0, 0, 0, 0, 0, 31}},
-    {'`', {4, 2, 0, 0, 0, 0, 0}},
-    {'a', {0, 0, 14, 1, 14, 17, 14}},
-    {'b', {16, 16, 19, 17, 17, 17, 14}},
-    {'c', {0, 0, 14, 16, 16, 16, 14}},
-    {'d', {1, 1, 11, 19, 17, 19, 11}},
-    {'e', {0, 0, 14, 1, 31, 16, 14}},
-    {'f', {6, 9, 8, 28, 8, 8, 8}},
-    {'g', {0, 14, 17, 17, 15, 1, 14}},
-    {'h', {16, 16, 22, 25, 17, 17, 17}},
-    {'i', {4, 0, 6, 4, 4, 4, 14}},
-    {'j', {2, 0, 6, 2, 2, 18, 12}},
-    {'k', {16, 16, 18, 20, 24, 20, 18}},
-    {'l', {6, 4, 4, 4, 4, 4, 14}},
-    {'m', {0, 0, 22, 21, 21, 21, 21}},
-    {'n', {0, 0, 19, 21, 17, 17, 17}},
-    {'o', {0, 0, 14, 17, 17, 17, 14}},
-    {'p', {0, 30, 17, 17, 30, 16, 16}},
-    {'q', {0, 15, 17, 17, 15, 1, 1}},
-    {'r', {0, 0, 23, 22, 16, 16, 16}},
-    {'s', {0, 0, 14, 16, 14, 1, 30}},
-    {'t', {2, 2, 30, 2, 2, 10, 12}},
-    {'u', {0, 0, 17, 17, 17, 19, 14}},
-    {'v', {0, 0, 17, 17, 17, 10, 4}},
-    {'w', {0, 0, 17, 17, 21, 21, 10}},
-    {'x', {0, 0, 17, 10, 4, 10, 17}},
-    {'y', {0, 17, 17, 17, 15, 1, 14}},
-    {'z', {0, 0, 31, 2, 4, 8, 31}},
-    {'{', {2, 4, 4, 8, 4, 4, 2}},
-    {'|', {4, 4, 4, 4, 4, 4, 4}},
-    {'}', {8, 4, 4, 2, 4, 4, 8}},
-    {'~', {0, 0, 0, 0, 0, 0, 0}},
-};
+// Android's default RomMulus palette.
+constexpr Color kBlack{0, 0, 0};
+constexpr Color kNightLo{15, 31, 33};
+constexpr Color kRomm300{165, 200, 207};
+constexpr Color kRomm500{63, 144, 153};
+constexpr Color kRomm600{40, 97, 106};
+constexpr Color kTextPrimary{255, 255, 255};
+constexpr Color kTextSecondary{179, 198, 202};
+constexpr Color kDialogScrim{0, 0, 0, 150};
 
-const Glyph5x7* glyphFor(char c) {
-    const int index = static_cast<unsigned char>(c) - 32;
-    if (index < 0 || index >= 95) return nullptr;
-    if (kFont[index].c != c) return nullptr;  // undefined slot renders blank
-    return &kFont[index];
+void setColor(SDL_Renderer* renderer, Color color) {
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
 }
 
-// Colors (packed RGBA).
-constexpr unsigned kDimAlpha = 160;
-constexpr unsigned kPanelBgR = 10, kPanelBgG = 23, kPanelBgB = 25;
-constexpr unsigned kAccentR = 63, kAccentG = 144, kAccentB = 153;
-constexpr unsigned kDialogBgR = 15, kDialogBgG = 31, kDialogBgB = 33;
-constexpr unsigned kButtonIdleR = 40, kButtonIdleG = 97, kButtonIdleB = 106;
-
-void fillRect(SDL_Renderer* renderer, float x, float y, float w, float h,
-              unsigned r, unsigned g, unsigned b, unsigned a) {
-    SDL_SetRenderDrawColor(renderer, static_cast<Uint8>(r), static_cast<Uint8>(g),
-                           static_cast<Uint8>(b), static_cast<Uint8>(a));
-    const SDL_FRect rect{x, y, w, h};
+void fillRect(SDL_Renderer* renderer, float x, float y, float w, float h, Color color) {
+    setColor(renderer, color);
+    const SDL_FRect rect{x, y, std::max(0.0f, w), std::max(0.0f, h)};
     SDL_RenderFillRect(renderer, &rect);
 }
 
-float textWidth(const char* text, float scale) {
-    std::size_t length = 0;
-    while (text[length] != '\0') ++length;
-    // 5 font columns + 1 tracking column per character, minus the trailing
-    // tracking of the last one.
-    return static_cast<float>(length) * 6.0f * scale - scale;
+void fillRoundedRect(
+    SDL_Renderer* renderer,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius,
+    Color color
+) {
+    radius = std::clamp(radius, 0.0f, std::min(w, h) * 0.5f);
+    if (radius < 1.0f) {
+        fillRect(renderer, x, y, w, h, color);
+        return;
+    }
+
+    fillRect(renderer, x + radius, y, w - radius * 2.0f, h, color);
+    fillRect(renderer, x, y + radius, radius, h - radius * 2.0f, color);
+    fillRect(renderer, x + w - radius, y + radius, radius, h - radius * 2.0f, color);
+
+    setColor(renderer, color);
+    const int rows = std::max(1, static_cast<int>(std::ceil(radius)));
+    for (int row = 0; row < rows; ++row) {
+        const float dy = radius - (static_cast<float>(row) + 0.5f);
+        const float dx = std::sqrt(std::max(0.0f, radius * radius - dy * dy));
+        const float inset = radius - dx;
+        const SDL_FRect top{x + inset, y + static_cast<float>(row), w - inset * 2.0f, 1.1f};
+        const SDL_FRect bottom{
+            x + inset,
+            y + h - static_cast<float>(row) - 1.1f,
+            w - inset * 2.0f,
+            1.1f,
+        };
+        SDL_RenderFillRect(renderer, &top);
+        SDL_RenderFillRect(renderer, &bottom);
+    }
+}
+
+void strokeRoundedRect(
+    SDL_Renderer* renderer,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius,
+    float stroke,
+    Color border,
+    Color interior
+) {
+    fillRoundedRect(renderer, x, y, w, h, radius, border);
+    fillRoundedRect(
+        renderer,
+        x + stroke,
+        y + stroke,
+        w - stroke * 2.0f,
+        h - stroke * 2.0f,
+        std::max(0.0f, radius - stroke),
+        interior
+    );
+}
+
+std::vector<unsigned char> readFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input) return {};
+    const std::streamsize size = input.tellg();
+    if (size <= 0) return {};
+    input.seekg(0, std::ios::beg);
+    std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
+    if (!input.read(reinterpret_cast<char*>(bytes.data()), size)) return {};
+    return bytes;
+}
+
+std::vector<std::filesystem::path> fontCandidates() {
+    std::vector<std::filesystem::path> paths;
+    if (const char* base = SDL_GetBasePath(); base != nullptr) {
+        paths.emplace_back(std::filesystem::path(base) / "../share/rommulus/font.ttf");
+    }
+#ifdef ROMM_PAUSE_FONT_PATH
+    paths.emplace_back(ROMM_PAUSE_FONT_PATH);
+#endif
+    paths.emplace_back("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
+    paths.emplace_back("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+    paths.emplace_back("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf");
+    return paths;
+}
+
+struct RasterText {
+    float width = 0.0f;
+    float height = 0.0f;
+    std::array<std::vector<SDL_FRect>, 16> alphaRects;
+};
+
+class TrueTypeFont {
+public:
+    TrueTypeFont() {
+        for (const auto& path : fontCandidates()) {
+            data_ = readFile(path);
+            if (!data_.empty() &&
+                stbtt_InitFont(&font_, data_.data(), stbtt_GetFontOffsetForIndex(data_.data(), 0))) {
+                ready_ = true;
+                break;
+            }
+            data_.clear();
+        }
+    }
+
+    bool ready() const { return ready_; }
+
+    float width(const char* text, float pixelHeight) {
+        if (!ready_ || text == nullptr || *text == '\0') return 0.0f;
+        const float scale = stbtt_ScaleForPixelHeight(&font_, pixelHeight);
+        float result = 0.0f;
+        for (const char* p = text; *p != '\0'; ++p) {
+            int advance = 0;
+            int bearing = 0;
+            stbtt_GetCodepointHMetrics(&font_, static_cast<unsigned char>(*p), &advance, &bearing);
+            result += static_cast<float>(advance) * scale;
+            if (p[1] != '\0') {
+                result += static_cast<float>(
+                    stbtt_GetCodepointKernAdvance(
+                        &font_,
+                        static_cast<unsigned char>(*p),
+                        static_cast<unsigned char>(p[1])
+                    )
+                ) * scale;
+            }
+        }
+        return result;
+    }
+
+    const RasterText& raster(const char* text, float pixelHeight) {
+        const int quantizedHeight = std::max(4, static_cast<int>(std::lround(pixelHeight)));
+        const std::string key = std::to_string(quantizedHeight) + '\n' + text;
+        const auto found = cache_.find(key);
+        if (found != cache_.end()) return found->second;
+
+        RasterText raster;
+        const float scale = stbtt_ScaleForPixelHeight(&font_, static_cast<float>(quantizedHeight));
+        int ascent = 0;
+        int descent = 0;
+        int lineGap = 0;
+        stbtt_GetFontVMetrics(&font_, &ascent, &descent, &lineGap);
+        const int baseline = static_cast<int>(std::ceil(static_cast<float>(ascent) * scale));
+        raster.height = std::ceil(static_cast<float>(ascent - descent) * scale);
+
+        float penX = 0.0f;
+        for (const char* p = text; *p != '\0'; ++p) {
+            const int codepoint = static_cast<unsigned char>(*p);
+            int glyphW = 0;
+            int glyphH = 0;
+            int offsetX = 0;
+            int offsetY = 0;
+            unsigned char* bitmap = stbtt_GetCodepointBitmap(
+                &font_,
+                0.0f,
+                scale,
+                codepoint,
+                &glyphW,
+                &glyphH,
+                &offsetX,
+                &offsetY
+            );
+            if (bitmap != nullptr) {
+                for (int row = 0; row < glyphH; ++row) {
+                    int col = 0;
+                    while (col < glyphW) {
+                        const int bucket =
+                            (static_cast<int>(bitmap[row * glyphW + col]) * 15 + 127) / 255;
+                        if (bucket == 0) {
+                            ++col;
+                            continue;
+                        }
+                        const int start = col++;
+                        while (col < glyphW) {
+                            const int next =
+                                (static_cast<int>(bitmap[row * glyphW + col]) * 15 + 127) / 255;
+                            if (next != bucket) break;
+                            ++col;
+                        }
+                        raster.alphaRects[static_cast<std::size_t>(bucket)].push_back(
+                            SDL_FRect{
+                                penX + static_cast<float>(offsetX + start),
+                                static_cast<float>(baseline + offsetY + row),
+                                static_cast<float>(col - start),
+                                1.0f,
+                            }
+                        );
+                    }
+                }
+                stbtt_FreeBitmap(bitmap, nullptr);
+            }
+
+            int advance = 0;
+            int bearing = 0;
+            stbtt_GetCodepointHMetrics(&font_, codepoint, &advance, &bearing);
+            penX += static_cast<float>(advance) * scale;
+            if (p[1] != '\0') {
+                penX += static_cast<float>(
+                    stbtt_GetCodepointKernAdvance(
+                        &font_,
+                        codepoint,
+                        static_cast<unsigned char>(p[1])
+                    )
+                ) * scale;
+            }
+        }
+        raster.width = penX;
+        return cache_.emplace(key, std::move(raster)).first->second;
+    }
+
+private:
+    std::vector<unsigned char> data_;
+    stbtt_fontinfo font_{};
+    bool ready_ = false;
+    std::unordered_map<std::string, RasterText> cache_;
+};
+
+TrueTypeFont& font() {
+    static TrueTypeFont instance;
+    return instance;
+}
+
+float textWidth(const char* text, float size) {
+    return font().ready() ? font().width(text, size)
+                          : static_cast<float>(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE) *
+                                static_cast<float>(std::char_traits<char>::length(text));
+}
+
+std::vector<std::string> wrapText(const char* text, float size, float maxWidth) {
+    std::vector<std::string> lines;
+    std::string current;
+    std::string word;
+    const std::string input(text);
+    for (std::size_t i = 0; i <= input.size(); ++i) {
+        if (i < input.size() && input[i] != ' ') {
+            word += input[i];
+            continue;
+        }
+        const std::string candidate = current.empty() ? word : current + " " + word;
+        if (!current.empty() && textWidth(candidate.c_str(), size) > maxWidth) {
+            lines.push_back(current);
+            current = word;
+        } else {
+            current = candidate;
+        }
+        word.clear();
+    }
+    if (!current.empty()) lines.push_back(current);
+    return lines;
+}
+
+void drawSwitch(
+    SDL_Renderer* renderer,
+    float x,
+    float y,
+    float scale,
+    bool checked
+) {
+    const float w = 48.0f * scale;
+    const float h = 28.0f * scale;
+    const float padding = 4.0f * scale;
+    const Color track = checked ? kRomm600 : Color{63, 73, 75};
+    fillRoundedRect(renderer, x, y, w, h, h * 0.5f, track);
+    const float thumb = h - padding * 2.0f;
+    const float thumbX = checked ? x + w - padding - thumb : x + padding;
+    fillRoundedRect(renderer, thumbX, y + padding, thumb, thumb, thumb * 0.5f,
+                    checked ? kTextPrimary : Color{125, 139, 142});
+}
+
+void drawButton(
+    const PauseOverlay& overlay,
+    SDL_Renderer* renderer,
+    float x,
+    float y,
+    float w,
+    float h,
+    const char* label,
+    float scale,
+    bool selected,
+    bool primary = false
+) {
+    const float radius = h * 0.5f;
+    const Color interior = primary ? kRomm500 : kBlack;
+    const float stroke = (selected ? 3.0f : 1.0f) * scale;
+    const Color border = selected ? kRomm300 : Color{125, 139, 142};
+    if (primary && !selected) {
+        fillRoundedRect(renderer, x, y, w, h, radius, interior);
+    } else {
+        strokeRoundedRect(renderer, x, y, w, h, radius, stroke, border, interior);
+    }
+    const float textSize = 14.0f * scale;
+    overlay.drawText(
+        renderer,
+        x + (w - textWidth(label, textSize)) * 0.5f,
+        y + (h - textSize) * 0.5f - scale,
+        label,
+        textSize,
+        kTextPrimary.r,
+        kTextPrimary.g,
+        kTextPrimary.b,
+        kTextPrimary.a
+    );
+}
+
+bool toggleState(const PauseMenu& menu, int index) {
+    if (index == PauseMenu::kScanlinesItem) return menu.scanlinesEnabled();
+    if (index == PauseMenu::kIntegerScalingItem) return menu.integerScalingEnabled();
+    return menu.sharpFilterEnabled();
+}
+
+const char* videoDescription(int index) {
+    switch (index) {
+        case PauseMenu::kScanlinesItem:
+            return "Adds subtle horizontal lines for a classic CRT look.";
+        case PauseMenu::kIntegerScalingItem:
+            return "Scales by a clean integer factor for crisp, aspect-correct pixels.";
+        case PauseMenu::kSharpFilterItem:
+            return "Uses nearest-neighbor scaling to keep pixel art crisp.";
+        default:
+            return "";
+    }
+}
+
+const char* consoleNameForCore(const char* coreId) {
+    const std::string id = coreId != nullptr ? coreId : "";
+    if (id == "genesis_plus_gx") return "Sega Systems";
+    if (id == "snes9x") return "Super Nintendo";
+    if (id == "fceumm") return "Nintendo Entertainment System";
+    if (id == "mgba") return "Game Boy Advance";
+    if (id == "stella") return "Atari 2600";
+    if (id == "gambatte") return "Game Boy / Game Boy Color";
+    if (id == "beetle_pce_fast") return "TurboGrafx-16";
+    if (id == "mednafen_ngp") return "Neo Geo Pocket";
+    if (id == "mednafen_wswan") return "WonderSwan";
+    if (id == "handy") return "Atari Lynx";
+    if (id == "prosystem") return "Atari 7800";
+    if (id == "pcsx_rearmed") return "PlayStation";
+    if (id == "mupen64plus_next") return "Nintendo 64";
+    return "Controller Settings";
+}
+
+const char* controlLabelForCoreSlot(const char* coreId, int slot) {
+    const std::string id = coreId != nullptr ? coreId : "";
+    if (slot >= kSlotDpadUp && slot <= kSlotDpadRight) return retroPadSlotLabel(slot);
+    if (id == "genesis_plus_gx") {
+        static constexpr const char* labels[] = {
+            "C", "B", "Y", "A", "Mode", "Start", "X", "Z",
+        };
+        if (slot >= 0 && slot < 8) return labels[slot];
+    } else if (id == "stella") {
+        if (slot == kSlotA) return "Trigger";
+        if (slot == kSlotB) return "Fire";
+        if (slot == kSlotY) return "Booster";
+    } else if (id == "beetle_pce_fast") {
+        static constexpr const char* labels[] = {
+            "I", "II", "IV", "III", "Select", "Run", "V", "VI",
+        };
+        if (slot >= 0 && slot < 8) return labels[slot];
+    } else if (id == "mednafen_ngp") {
+        if (slot == kSlotA) return "B";
+        if (slot == kSlotB) return "A";
+        if (slot == kSlotStart) return "Option";
+    } else if (id == "handy") {
+        if (slot == kSlotLeftShoulder) return "Option 1";
+        if (slot == kSlotRightShoulder) return "Option 2";
+        if (slot == kSlotStart) return "Pause";
+    } else if (id == "prosystem") {
+        if (slot == kSlotA) return "Button 2";
+        if (slot == kSlotB) return "Button 1";
+        if (slot == kSlotStart) return "Pause";
+    } else if (id == "pcsx_rearmed") {
+        static constexpr const char* labels[] = {
+            "Circle", "Cross", "Triangle", "Square", "Select", "Start", "L1", "R1",
+        };
+        if (slot >= 0 && slot < 8) return labels[slot];
+    } else if (id == "mupen64plus_next") {
+        static constexpr const char* labels[] = {
+            "C-Down", "A Button", "C-Up", "B Button",
+            "L Shoulder", "Start", "C-Left", "C-Right",
+        };
+        if (slot >= 0 && slot < 8) return labels[slot];
+    } else if (id == "mgba") {
+        if (slot == kSlotLeftShoulder) return "L";
+        if (slot == kSlotRightShoulder) return "R";
+    }
+    return retroPadSlotLabel(slot);
+}
+
+const char* artworkNameForCore(const char* coreId) {
+    const std::string id = coreId != nullptr ? coreId : "";
+    if (id == "genesis_plus_gx") return "controller_outline_genesis.png";
+    if (id == "snes9x") return "controller_outline_snes.png";
+    if (id == "fceumm") return "controller_outline_nes.png";
+    if (id == "mgba") return "controller_outline_gba.png";
+    if (id == "stella") return "controller_outline_atari2600.png";
+    if (id == "gambatte") return "controller_outline_gb.png";
+    if (id == "beetle_pce_fast") return "controller_outline_tg16.png";
+    if (id == "mednafen_ngp") return "controller_outline_ngp.png";
+    if (id == "mednafen_wswan") return "controller_outline_wswan.png";
+    if (id == "handy") return "controller_outline_lynx.png";
+    if (id == "prosystem") return "controller_outline_atari7800.png";
+    if (id == "pcsx_rearmed") return "controller_outline_ps1.png";
+    if (id == "mupen64plus_next") return "controller_outline_n64.png";
+    return "controller_outline_generic_gamepad.png";
+}
+
+std::vector<std::filesystem::path> artworkCandidates(const char* fileName) {
+    std::vector<std::filesystem::path> paths;
+    if (const char* base = SDL_GetBasePath(); base != nullptr) {
+        paths.emplace_back(
+            std::filesystem::path(base) / "../share/rommulus/controllers" / fileName
+        );
+    }
+#ifdef ROMM_CONTROLLER_ART_PATH
+    paths.emplace_back(std::filesystem::path(ROMM_CONTROLLER_ART_PATH) / fileName);
+#endif
+    return paths;
+}
+
+SDL_Texture* controllerTexture(SDL_Renderer* renderer, const char* coreId) {
+    static std::unordered_map<std::string, SDL_Texture*> textures;
+    const std::string name = artworkNameForCore(coreId);
+    if (const auto found = textures.find(name); found != textures.end()) {
+        return found->second;
+    }
+
+    for (const auto& path : artworkCandidates(name.c_str())) {
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        stbi_uc* pixels = stbi_load(path.string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        if (pixels == nullptr || width <= 0 || height <= 0) {
+            stbi_image_free(pixels);
+            continue;
+        }
+        SDL_Texture* texture = SDL_CreateTexture(
+            renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, width, height
+        );
+        if (texture != nullptr &&
+            SDL_UpdateTexture(texture, nullptr, pixels, width * STBI_rgb_alpha)) {
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+            stbi_image_free(pixels);
+            textures.emplace(name, texture);
+            return texture;
+        }
+        SDL_DestroyTexture(texture);
+        stbi_image_free(pixels);
+    }
+    textures.emplace(name, nullptr);
+    return nullptr;
+}
+
+void drawControllerArtwork(
+    const PauseOverlay& overlay,
+    SDL_Renderer* renderer,
+    float x,
+    float y,
+    float w,
+    float h,
+    float scale,
+    const char* consoleName,
+    const char* coreId,
+    const char* focusedControl
+) {
+    fillRoundedRect(renderer, x, y, w, h, 12.0f * scale, kNightLo);
+    if (SDL_Texture* texture = controllerTexture(renderer, coreId); texture != nullptr) {
+        const float labelSpace = 74.0f * scale;
+        const float size = std::min(w - 32.0f * scale, h - labelSpace);
+        const SDL_FRect destination{
+            x + (w - size) * 0.5f,
+            y + std::max(8.0f * scale, (h - labelSpace - size) * 0.5f),
+            size,
+            size,
+        };
+        SDL_RenderTexture(renderer, texture, nullptr, &destination);
+        overlay.drawText(
+            renderer, x + 20.0f * scale, y + h - 56.0f * scale, focusedControl,
+            18.0f * scale, 255, 255, 255, 255
+        );
+        overlay.drawText(
+            renderer, x + 20.0f * scale, y + h - 30.0f * scale, consoleName,
+            13.0f * scale, kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255
+        );
+        return;
+    }
+
+    const float bodyW = std::min(w * 0.72f, 280.0f * scale);
+    const float bodyH = std::min(h * 0.34f, 150.0f * scale);
+    const float bodyX = x + (w - bodyW) * 0.5f;
+    const float bodyY = y + (h - bodyH) * 0.52f;
+    const Color outline{125, 151, 156};
+    strokeRoundedRect(renderer, bodyX, bodyY, bodyW, bodyH, 34.0f * scale,
+                      std::max(2.0f, 3.0f * scale), outline, Color{20, 45, 49});
+
+    const float handleW = bodyW * 0.28f;
+    const float handleH = bodyH * 0.55f;
+    fillRoundedRect(renderer, bodyX + bodyW * 0.06f, bodyY + bodyH * 0.68f,
+                    handleW, handleH, handleW * 0.45f, Color{20, 45, 49});
+    fillRoundedRect(renderer, bodyX + bodyW * 0.66f, bodyY + bodyH * 0.68f,
+                    handleW, handleH, handleW * 0.45f, Color{20, 45, 49});
+
+    const float dpadX = bodyX + bodyW * 0.25f;
+    const float dpadY = bodyY + bodyH * 0.52f;
+    fillRoundedRect(renderer, dpadX - 20.0f * scale, dpadY - 6.0f * scale,
+                    40.0f * scale, 12.0f * scale, 3.0f * scale, outline);
+    fillRoundedRect(renderer, dpadX - 6.0f * scale, dpadY - 20.0f * scale,
+                    12.0f * scale, 40.0f * scale, 3.0f * scale, outline);
+
+    const float buttonSize = 14.0f * scale;
+    const float buttonsX = bodyX + bodyW * 0.74f;
+    const float buttonsY = bodyY + bodyH * 0.49f;
+    fillRoundedRect(renderer, buttonsX, buttonsY - buttonSize, buttonSize, buttonSize,
+                    buttonSize * 0.5f, kRomm300);
+    fillRoundedRect(renderer, buttonsX + buttonSize * 1.25f, buttonsY, buttonSize, buttonSize,
+                    buttonSize * 0.5f, kRomm500);
+    fillRoundedRect(renderer, buttonsX, buttonsY + buttonSize, buttonSize, buttonSize,
+                    buttonSize * 0.5f, kRomm600);
+    fillRoundedRect(renderer, buttonsX - buttonSize * 1.25f, buttonsY, buttonSize, buttonSize,
+                    buttonSize * 0.5f, outline);
 }
 
 }  // namespace
 
-void PauseOverlay::drawText(SDL_Renderer* renderer, float x, float y, const char* text,
-                            float scale, unsigned r, unsigned g, unsigned b,
-                            unsigned a) const {
-    SDL_SetRenderDrawColor(renderer, static_cast<Uint8>(r), static_cast<Uint8>(g),
-                           static_cast<Uint8>(b), static_cast<Uint8>(a));
-    for (const char* p = text; *p != '\0'; ++p) {
-        const Glyph5x7* glyph = glyphFor(*p);
-        if (glyph != nullptr) {
-            for (int row = 0; row < 7; ++row) {
-                const unsigned char bits = glyph->rows[row];
-                int col = 0;
-                while (col < 5) {
-                    if ((bits & (1u << (4 - col))) == 0) {
-                        ++col;
-                        continue;
-                    }
-                    int runStart = col;
-                    while (col < 5 && (bits & (1u << (4 - col))) != 0) ++col;
-                    const SDL_FRect rect{x + static_cast<float>(runStart) * scale,
-                                         y + static_cast<float>(row) * scale,
-                                         static_cast<float>(col - runStart) * scale, scale};
-                    SDL_RenderFillRect(renderer, &rect);
-                }
+void PauseOverlay::drawText(
+    SDL_Renderer* renderer,
+    float x,
+    float y,
+    const char* text,
+    float size,
+    unsigned r,
+    unsigned g,
+    unsigned b,
+    unsigned a
+) const {
+    if (!font().ready()) {
+        setColor(
+            renderer,
+            Color{
+                static_cast<Uint8>(r),
+                static_cast<Uint8>(g),
+                static_cast<Uint8>(b),
+                static_cast<Uint8>(a),
             }
+        );
+        SDL_RenderDebugText(renderer, x, y, text);
+        return;
+    }
+
+    const RasterText& raster = font().raster(text, size);
+    std::array<std::vector<SDL_FRect>, 16> translated;
+    for (std::size_t bucket = 1; bucket < raster.alphaRects.size(); ++bucket) {
+        auto& target = translated[bucket];
+        target.reserve(raster.alphaRects[bucket].size());
+        for (const SDL_FRect& rect : raster.alphaRects[bucket]) {
+            target.push_back(SDL_FRect{x + rect.x, y + rect.y, rect.w, rect.h});
         }
-        x += 6.0f * scale;
+        if (target.empty()) continue;
+        const unsigned alpha = (a * static_cast<unsigned>(bucket) + 7u) / 15u;
+        SDL_SetRenderDrawColor(
+            renderer,
+            static_cast<Uint8>(r),
+            static_cast<Uint8>(g),
+            static_cast<Uint8>(b),
+            static_cast<Uint8>(alpha)
+        );
+        SDL_RenderFillRects(renderer, target.data(), static_cast<int>(target.size()));
     }
 }
 
-void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu,
-                        const BindingTable& bindings, int captureSecondsLeft) const {
+void PauseOverlay::draw(
+    SDL_Renderer* renderer,
+    const PauseMenu& menu,
+    const BindingTable& bindings,
+    const BindingTable& secondaryBindings,
+    int captureSecondsLeft,
+    const char* coreId
+) const {
     if (renderer == nullptr || !menu.isOpen()) return;
 
-    // Prefer the logical presentation space (the core's aspect, letterboxed);
-    // fall back to the raw window size before any frame has set it up.
-    int W = 0;
-    int H = 0;
+    int width = 0;
+    int height = 0;
     SDL_RendererLogicalPresentation mode = SDL_LOGICAL_PRESENTATION_DISABLED;
-    if (!SDL_GetRenderLogicalPresentation(renderer, &W, &H, &mode) || W <= 0 || H <= 0) {
-        SDL_GetRenderOutputSize(renderer, &W, &H);
+    if (!SDL_GetRenderLogicalPresentation(renderer, &width, &height, &mode) ||
+        width <= 0 || height <= 0) {
+        SDL_GetRenderOutputSize(renderer, &width, &height);
     }
-    if (W <= 0 || H <= 0) return;
+    if (width <= 0 || height <= 0) return;
 
-    const float Wf = static_cast<float>(W);
-    const float Hf = static_cast<float>(H);
-    // One layout unit: keeps the overlay proportional at any core resolution
-    // (240p handheld cores up to 720p+).
-    // Keep the bitmap fallback legible without turning it into oversized pixel art on
-    // modern displays. The former 560x160 reference scaled glyphs aggressively at 720p+.
-    const float s = std::clamp(std::min(Wf / 720.0f, Hf / 300.0f), 1.0f, 4.0f);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    const float W = static_cast<float>(width);
+    const float H = static_cast<float>(height);
+    const float scale = std::max(0.12f, std::min(W / 1280.0f, H / 720.0f));
+    const auto dp = [scale](float value) { return value * scale; };
 
-    // 1. Dim backdrop — the frozen last frame shows through.
-    fillRect(renderer, 0.0f, 0.0f, Wf, Hf, 0, 0, 0, kDimAlpha);
+    // Android intentionally replaces the frozen game with an opaque black pause screen.
+    fillRect(renderer, 0.0f, 0.0f, W, H, kBlack);
 
-    const float pad = 6.0f * s;
-    const float rowH = 9.0f * s;
-    const float titleH = 8.0f * s;
-    const float gap = 2.0f * s;
-    const float hintH = 7.0f * s;
-
-    // 2a. Video Options submenu: title + three toggle rows (label left,
-    // ON/OFF state right) + a "BACK TO RETURN" hint. Replaces the main menu
-    // panel while visible (the Quit dialog is never shown at the same time).
     if (menu.state() == PauseMenuState::kVideoOptions) {
-        const float panelW = std::min(Wf * 0.85f, 132.0f * s);
-        const float panelH = pad * 2.0f + titleH + gap +
-                             static_cast<float>(PauseMenu::kVideoOptionCount) * rowH +
-                             gap + hintH;
-        const float px = (Wf - panelW) / 2.0f;
-        const float py = (Hf - panelH) / 2.0f;
-        fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
+        const float panelW = std::min(dp(540.0f), W - dp(32.0f));
+        const float panelH = std::min(dp(474.0f), H - dp(24.0f));
+        const float x = (W - panelW) * 0.5f;
+        const float y = (H - panelH) * 0.5f;
+        strokeRoundedRect(renderer, x, y, panelW, panelH, dp(16), std::max(1.0f, dp(1)),
+                          Color{56, 67, 69}, kNightLo);
 
-        const char* title = "VIDEO OPTIONS";
-        drawText(renderer, px + (panelW - textWidth(title, s)) / 2.0f, py + pad, title, s,
-                 255, 255, 255, 255);
+        const float titleSize = dp(24);
+        const char* title = "Video Options";
+        drawText(renderer, x + (panelW - textWidth(title, titleSize)) * 0.5f, y + dp(27),
+                 title, titleSize, 255, 255, 255, 255);
 
-        const float itemsX = px + pad;
-        const float itemsW = panelW - 2.0f * pad;
-        const float itemsY = py + pad + titleH + gap;
+        const float rowX = x + dp(28);
+        const float rowW = panelW - dp(56);
+        const float rowH = dp(88);
+        float rowY = y + dp(76);
         for (int i = 0; i < PauseMenu::kVideoOptionCount; ++i) {
             const bool selected = menu.selection() == i;
             if (selected) {
-                fillRect(renderer, itemsX, itemsY + static_cast<float>(i) * rowH, itemsW, rowH,
-                         kAccentR, kAccentG, kAccentB, 255);
+                strokeRoundedRect(renderer, rowX, rowY, rowW, rowH, dp(8), dp(3),
+                                  kRomm300, kNightLo);
             }
-            const float ty = itemsY + static_cast<float>(i) * rowH + (rowH - 7.0f * s) / 2.0f;
-            drawText(renderer, itemsX + 2.0f * s, ty, PauseMenu::videoOptionLabel(i), s,
-                     255, 255, 255, 255);
-            const bool on = i == PauseMenu::kScanlinesItem ? menu.scanlinesEnabled()
-                         : i == PauseMenu::kIntegerScalingItem ? menu.integerScalingEnabled()
-                                                               : menu.sharpFilterEnabled();
-            const char* stateText = on ? "ON" : "OFF";
-            drawText(renderer, itemsX + itemsW - 2.0f * s - textWidth(stateText, s), ty,
-                     stateText, s, on ? kAccentR : 189, on ? kAccentG : 189,
-                     on ? kAccentB : 189, 255);
+            drawText(renderer, rowX + dp(18), rowY + dp(13),
+                     PauseMenu::videoOptionLabel(i), dp(16), 255, 255, 255, 255);
+            const auto lines = wrapText(videoDescription(i), dp(12), rowW - dp(100));
+            float lineY = rowY + dp(39);
+            for (const std::string& line : lines) {
+                drawText(renderer, rowX + dp(18), lineY, line.c_str(), dp(12),
+                         kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
+                lineY += dp(15);
+            }
+            drawSwitch(renderer, rowX + rowW - dp(66), rowY + (rowH - dp(28)) * 0.5f,
+                       scale, toggleState(menu, i));
+            rowY += rowH + dp(12);
         }
-
-        const char* hint = "BACK TO RETURN";
-        drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
-                 hint, s, 189, 189, 189, 255);
+        drawButton(*this, renderer, rowX, y + panelH - dp(76), rowW, dp(48), "Return",
+                   scale, false);
         return;
     }
 
-    // 2b. Controller Settings submenu: title + two items (Physical
-    // Controller Settings / Return — Android's subpage minus its touch-only
-    // rows) + a "BACK TO RETURN" hint. Replaces the main menu panel while
-    // visible.
-    if (menu.state() == PauseMenuState::kControllerSettings) {
-        const float panelW = std::min(Wf * 0.9f, 185.0f * s);
-        const float panelH = pad * 2.0f + titleH + gap +
-                             static_cast<float>(PauseMenu::kControllerOptionCount) * rowH +
-                             gap + hintH;
-        const float px = (Wf - panelW) / 2.0f;
-        const float py = (Hf - panelH) / 2.0f;
-        fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
-
-        const char* title = "CONTROLLER SETTINGS";
-        drawText(renderer, px + (panelW - textWidth(title, s)) / 2.0f, py + pad, title, s,
-                 255, 255, 255, 255);
-
-        const float itemsX = px + pad;
-        const float itemsW = panelW - 2.0f * pad;
-        const float itemsY = py + pad + titleH + gap;
-        for (int i = 0; i < PauseMenu::kControllerOptionCount; ++i) {
-            const bool selected = menu.selection() == i;
-            if (selected) {
-                fillRect(renderer, itemsX, itemsY + static_cast<float>(i) * rowH, itemsW, rowH,
-                         kAccentR, kAccentG, kAccentB, 255);
-            }
-            const float ty = itemsY + static_cast<float>(i) * rowH + (rowH - 7.0f * s) / 2.0f;
-            drawText(renderer, itemsX + 2.0f * s, ty, PauseMenu::controllerOptionLabel(i), s,
-                     255, 255, 255, 255);
-        }
-
-        const char* hint = "BACK TO RETURN";
-        drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
-                 hint, s, 189, 189, 189, 255);
-        return;
-    }
-
-    // 2c. Physical Controller Settings: the EDITABLE binding list — the 12
-    // RetroPad slots (slot label left, its current binding right, read live
-    // from SdlInput's BindingTable) plus a Reset to Default row. Confirming
-    // a slot row enters capture mode (drawn in 2c-below).
     if (menu.state() == PauseMenuState::kPhysicalBindings) {
-        const float panelW = std::min(Wf * 0.95f, 210.0f * s);
-        const float panelH = pad * 2.0f + titleH + gap +
-                             static_cast<float>(PauseMenu::kPhysicalRowCount) * rowH +
-                             gap + hintH;
-        const float px = (Wf - panelW) / 2.0f;
-        const float py = (Hf - panelH) / 2.0f;
-        fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
+        fillRect(renderer, 0, 0, W, H, Color{10, 23, 25});
+        const char* consoleName = consoleNameForCore(coreId);
+        const float marginX = dp(32);
+        const float headerY = dp(24);
+        drawButton(*this, renderer, marginX, headerY, dp(84), dp(42), "Back",
+                   scale, false);
+        const std::string title = std::string(consoleName) + " Controller";
+        drawText(renderer, (W - textWidth(title.c_str(), dp(24))) * 0.5f, headerY + dp(5),
+                 title.c_str(), dp(24), 255, 255, 255, 255);
+        const float clearW = dp(142);
+        const float resetW = dp(154);
+        const float clearX = W - marginX - clearW;
+        const float resetX = clearX - dp(8) - resetW;
+        drawButton(*this, renderer, resetX, headerY, resetW, dp(42), "Reset Controller",
+                   scale, menu.selection() == PauseMenu::kResetDefaultItem);
+        drawButton(*this, renderer, clearX, headerY, clearW, dp(42), "Clear Mappings",
+                   scale, menu.selection() == PauseMenu::kClearMappingsItem);
 
-        const char* title = "PHYSICAL CONTROLLER SETTINGS";
-        drawText(renderer, px + (panelW - textWidth(title, s)) / 2.0f, py + pad, title, s,
+        const float tabY = dp(76);
+        fillRoundedRect(renderer, marginX, tabY, W - marginX * 2.0f, dp(38), dp(8), kNightLo);
+        fillRect(renderer, marginX, tabY + dp(35), W - marginX * 2.0f, dp(3), kRomm300);
+        const char* playerTab = "Player 1  |  Active";
+        drawText(renderer, marginX + dp(18), tabY + dp(10), playerTab, dp(14),
                  255, 255, 255, 255);
 
-        const float itemsX = px + pad;
-        const float itemsW = panelW - 2.0f * pad;
-        const float itemsY = py + pad + titleH + gap;
-        for (int i = 0; i < PauseMenu::kPhysicalRowCount; ++i) {
+        const float contentY = dp(128);
+        const float contentH = H - contentY - dp(46);
+        const float contentW = W - marginX * 2.0f;
+        const float artW = contentW * 0.4f - dp(10);
+        const float listX = marginX + artW + dp(20);
+        const float listW = contentW - artW - dp(20);
+        const char* focusedControl = menu.selection() < PauseMenu::kBindingSlotCount
+            ? controlLabelForCoreSlot(coreId, menu.selection())
+            : "Controller mappings";
+        drawControllerArtwork(*this, renderer, marginX, contentY, artW, contentH,
+                              scale, consoleName, coreId, focusedControl);
+
+        const float headerH = dp(26);
+        const float labelW = listW * 0.34f;
+        const float primaryW = listW * 0.33f;
+        drawText(renderer, listX + dp(10), contentY + dp(3), "Control", dp(12),
+                 kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
+        drawText(renderer, listX + labelW + dp(10), contentY + dp(3), "Primary", dp(12),
+                 kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
+        drawText(renderer, listX + labelW + primaryW + dp(10), contentY + dp(3),
+                 "Secondary", dp(12), kTextSecondary.r, kTextSecondary.g,
+                 kTextSecondary.b, 255);
+        fillRect(renderer, listX, contentY + headerH - dp(2), listW, dp(1),
+                 Color{56, 67, 69});
+
+        const float gap = dp(5);
+        const float rowH = std::min(
+            dp(48),
+            (contentH - headerH -
+             gap * static_cast<float>(PauseMenu::kBindingSlotCount - 1)) /
+                static_cast<float>(PauseMenu::kBindingSlotCount)
+        );
+        for (int i = 0; i < PauseMenu::kBindingSlotCount; ++i) {
+            const float rowY = contentY + headerH + static_cast<float>(i) * (rowH + gap);
             const bool selected = menu.selection() == i;
-            if (selected) {
-                fillRect(renderer, itemsX, itemsY + static_cast<float>(i) * rowH, itemsW, rowH,
-                         kAccentR, kAccentG, kAccentB, 255);
-            }
-            const float ty = itemsY + static_cast<float>(i) * rowH + (rowH - 7.0f * s) / 2.0f;
-            drawText(renderer, itemsX + 2.0f * s, ty, PauseMenu::physicalRowLabel(i), s,
-                     255, 255, 255, 255);
-            if (i < PauseMenu::kBindingSlotCount) {
-                const std::string bindingText = bindings.get(i).display();
-                drawText(renderer, itemsX + itemsW - 2.0f * s - textWidth(bindingText.c_str(), s),
-                         ty, bindingText.c_str(), s, kAccentR, kAccentG, kAccentB, 255);
-            }
-        }
+            drawText(renderer, listX + dp(16), rowY + (rowH - dp(15)) * 0.5f - dp(1),
+                     controlLabelForCoreSlot(coreId, i), dp(15), 255, 255, 255, 255);
 
-        const char* hint = "BACK TO CONTROLLER SETTINGS";
-        drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
-                 hint, s, 189, 189, 189, 255);
+            const std::string value = bindings.get(i).display();
+            const std::string secondaryValue = secondaryBindings.get(i).display();
+            const float cellY = rowY + dp(3);
+            const float cellH = rowH - dp(6);
+            const float primaryX = listX + labelW;
+            const float secondaryX = primaryX + primaryW + dp(6);
+            const float secondaryW = listW - labelW - primaryW - dp(6);
+            if (selected && menu.bindingColumn() == 0) {
+                strokeRoundedRect(renderer, primaryX, cellY, primaryW - dp(6), cellH,
+                                  dp(8), dp(2), kRomm300, Color{20, 45, 49});
+            } else {
+                strokeRoundedRect(renderer, primaryX, cellY, primaryW - dp(6), cellH,
+                                  dp(8), dp(1), Color{56, 67, 69}, kNightLo);
+            }
+            if (selected && menu.bindingColumn() == 1) {
+                strokeRoundedRect(renderer, secondaryX, cellY, secondaryW, cellH,
+                                  dp(8), dp(2), kRomm300, Color{20, 45, 49});
+            } else {
+                strokeRoundedRect(renderer, secondaryX, cellY, secondaryW, cellH,
+                                  dp(8), dp(1), Color{56, 67, 69}, kNightLo);
+            }
+            drawText(renderer, primaryX + dp(12), cellY + (cellH - dp(12)) * 0.5f - dp(1),
+                     value.c_str(), dp(12), 255, 255, 255, 255);
+            drawText(renderer, secondaryX + dp(12), cellY + (cellH - dp(12)) * 0.5f - dp(1),
+                     secondaryValue.c_str(), dp(12), kTextSecondary.r, kTextSecondary.g,
+                     kTextSecondary.b, 255);
+        }
+        const char* footer = "Select a control to remap it  |  Back to return";
+        drawText(renderer, (W - textWidth(footer, dp(12))) * 0.5f, H - dp(28),
+                 footer, dp(12), kTextSecondary.r, kTextSecondary.g,
+                 kTextSecondary.b, 255);
         return;
     }
 
-    // 2c-below. Binding capture dialog (kBindingCapture): "Map <slot>" plus
-    // the prompt and remaining timeout — mirrors Android's
-    // ControllerCaptureDialog (no focusable cancel button; Back cancels,
-    // held Back clears).
     if (menu.state() == PauseMenuState::kBindingCapture) {
+        fillRect(renderer, 0, 0, W, H, kDialogScrim);
+        const float dialogW = std::min(dp(480), W - dp(32));
+        const float dialogH = dp(220);
+        const float x = (W - dialogW) * 0.5f;
+        const float y = (H - dialogH) * 0.5f;
+        fillRoundedRect(renderer, x, y, dialogW, dialogH, dp(28), kNightLo);
         const std::string title =
-            std::string("MAP ") + retroPadSlotLabel(menu.selection());
-        const char* body = "PRESS A BUTTON OR MOVE AN AXIS";
-        std::string timeoutText;
-        if (captureSecondsLeft >= 0) {
-            char buffer[32];
-            std::snprintf(buffer, sizeof(buffer), "TIME LEFT: %ds", captureSecondsLeft);
-            timeoutText = buffer;
-        }
-        const float panelW = std::min(Wf * 0.9f, 150.0f * s);
-        const float subH = 7.0f * s;
-        const float panelH = pad * 2.0f + titleH + gap + subH + gap +
-                             (timeoutText.empty() ? 0.0f : subH) + hintH;
-        const float px = (Wf - panelW) / 2.0f;
-        const float py = (Hf - panelH) / 2.0f;
-        fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
-
-        drawText(renderer, px + (panelW - textWidth(title.c_str(), s)) / 2.0f, py + pad,
-                 title.c_str(), s, 255, 255, 255, 255);
-        const float bodyY = py + pad + titleH + gap;
-        drawText(renderer, px + (panelW - textWidth(body, s)) / 2.0f, bodyY, body, s,
+            std::string("Map ") + controlLabelForCoreSlot(coreId, menu.selection());
+        drawText(renderer, x + dp(28), y + dp(28), title.c_str(), dp(24),
                  255, 255, 255, 255);
-        if (!timeoutText.empty()) {
-            drawText(renderer, px + (panelW - textWidth(timeoutText.c_str(), s)) / 2.0f,
-                     bodyY + subH + gap, timeoutText.c_str(), s, kAccentR, kAccentG, kAccentB, 255);
+        drawText(renderer, x + dp(28), y + dp(82), "Press a button or move an axis.", dp(16),
+                 kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
+        if (captureSecondsLeft >= 0) {
+            char timeout[32];
+            std::snprintf(timeout, sizeof(timeout), "Time left: %d seconds", captureSecondsLeft);
+            drawText(renderer, x + dp(28), y + dp(116), timeout, dp(14),
+                     kRomm300.r, kRomm300.g, kRomm300.b, 255);
         }
-
-        const char* hint = "BACK CANCELS - HOLD BACK TO CLEAR";
-        drawText(renderer, px + (panelW - textWidth(hint, s)) / 2.0f, py + panelH - pad - hintH,
-                 hint, s, 189, 189, 189, 255);
+        drawText(renderer, x + dp(28), y + dp(166),
+                 "Back cancels  |  Hold Back to clear", dp(13),
+                 kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
         return;
     }
 
-    // 2d. Menu panel: title + four items (all live now; see
-    // PauseMenu::itemEnabled).
-    const float panelW = std::min(Wf * 0.7f, 130.0f * s);
-    const float panelH = pad * 2.0f + titleH + gap +
-                         static_cast<float>(PauseMenu::kItemCount) * rowH;
-    const float px = (Wf - panelW) / 2.0f;
-    const float py = (Hf - panelH) / 2.0f;
-    fillRect(renderer, px, py, panelW, panelH, kPanelBgR, kPanelBgG, kPanelBgB, 255);
-
-    {
-        const char* title = "PAUSED";
-        drawText(renderer, px + (panelW - textWidth(title, s)) / 2.0f, py + pad, title, s,
-                 255, 255, 255, 255);
-    }
-
-    const float itemsX = px + pad;
-    const float itemsW = panelW - 2.0f * pad;
-    const float itemsY = py + pad + titleH + gap;
+    const float columnW = std::min(dp(420), W - dp(64));
+    const float columnH = dp(320);
+    const float x = (W - columnW) * 0.5f;
+    const float y = (H - columnH) * 0.5f;
+    drawText(renderer, x, y, "Paused", dp(24), 255, 255, 255, 255);
+    float buttonY = y + dp(52);
+    const int mainMenuSelection = menu.state() == PauseMenuState::kQuitConfirm
+        ? PauseMenu::kQuitItem
+        : menu.selection();
     for (int i = 0; i < PauseMenu::kItemCount; ++i) {
-        const bool selected = menu.state() == PauseMenuState::kOpen && menu.selection() == i;
-        const bool enabled = PauseMenu::itemEnabled(i);
-        if (selected) {
-            fillRect(renderer, itemsX, itemsY + static_cast<float>(i) * rowH, itemsW, rowH,
-                     kAccentR, kAccentG, kAccentB, 255);
-        }
-        const char* label = PauseMenu::itemLabel(i);
-        const float tx = itemsX + (itemsW - textWidth(label, s)) / 2.0f;
-        const float ty = itemsY + static_cast<float>(i) * rowH + (rowH - 7.0f * s) / 2.0f;
-        drawText(renderer, tx, ty, label, s, 255, 255, 255, selected || enabled ? 255 : 96);
+        drawButton(*this, renderer, x, buttonY, columnW, dp(48), PauseMenu::itemLabel(i),
+                   scale, mainMenuSelection == i, i == PauseMenu::kResumeItem);
+        buttonY += dp(56);
     }
 
-    // 3. "Quit game?" confirm dialog on top of the menu (extra scrim + box).
-    if (menu.state() == PauseMenuState::kQuitConfirm) {
-        fillRect(renderer, 0.0f, 0.0f, Wf, Hf, 0, 0, 0, 128);
+    if (menu.state() != PauseMenuState::kQuitConfirm) return;
 
-        const char* title = "Quit game?";
-        const char* body = "Are you sure you want to quit?";
-        const float buttonW = 26.0f * s;
-        const float buttonH = 8.0f * s;
-        const float gapX = 4.0f * s;
-        const float buttonsW = 2.0f * buttonW + gapX;
-        const float innerW = std::max(textWidth(title, s), textWidth(body, s));
-        const float dialogW = std::min(Wf * 0.9f, std::max(innerW, buttonsW) + 2.0f * pad);
-        const float vgap = 3.0f * s;
-        const float dialogH = 2.0f * pad + titleH + vgap + titleH + vgap + buttonH;
-        const float dx = (Wf - dialogW) / 2.0f;
-        const float dy = (Hf - dialogH) / 2.0f;
-        fillRect(renderer, dx, dy, dialogW, dialogH, kDialogBgR, kDialogBgG, kDialogBgB, 255);
+    fillRect(renderer, 0, 0, W, H, kDialogScrim);
+    const float dialogW = std::min(dp(440), W - dp(32));
+    const float dialogH = dp(210);
+    const float dx = (W - dialogW) * 0.5f;
+    const float dy = (H - dialogH) * 0.5f;
+    fillRoundedRect(renderer, dx, dy, dialogW, dialogH, dp(28), kNightLo);
+    drawText(renderer, dx + dp(28), dy + dp(28), "Quit game?", dp(24),
+             255, 255, 255, 255);
+    drawText(renderer, dx + dp(28), dy + dp(78), "Are you sure you want to quit?", dp(14),
+             kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
 
-        drawText(renderer, dx + pad, dy + pad, title, s, 255, 255, 255, 255);
-        drawText(renderer, dx + pad, dy + pad + titleH + vgap, body, s, 189, 189, 189, 255);
-
-        // No (left) / Yes (right), matching the Android dialog's button order.
-        const float bx = dx + (dialogW - buttonsW) / 2.0f;
-        const float by = dy + dialogH - pad - buttonH;
-        for (int i = 0; i < 2; ++i) {
-            const int option = i == 0 ? PauseMenu::kConfirmNo : PauseMenu::kConfirmYes;
-            const bool selected = menu.selection() == option;
-            fillRect(renderer, bx + static_cast<float>(i) * (buttonW + gapX), by, buttonW,
-                     buttonH, selected ? kAccentR : kButtonIdleR,
-                     selected ? kAccentG : kButtonIdleG,
-                     selected ? kAccentB : kButtonIdleB, 255);
-            const char* label = PauseMenu::confirmOptionLabel(option);
-            drawText(renderer, bx + static_cast<float>(i) * (buttonW + gapX) +
-                                (buttonW - textWidth(label, s)) / 2.0f,
-                     by + (buttonH - 7.0f * s) / 2.0f, label, s, 255, 255, 255, 255);
-        }
-    }
+    const float buttonW = dp(88);
+    const float buttonH = dp(44);
+    const float noX = dx + dialogW - dp(28) - buttonW * 2.0f - dp(8);
+    const float yesX = dx + dialogW - dp(28) - buttonW;
+    drawButton(*this, renderer, noX, dy + dialogH - dp(64), buttonW, buttonH, "No", scale,
+               menu.selection() == PauseMenu::kConfirmNo);
+    drawButton(*this, renderer, yesX, dy + dialogH - dp(64), buttonW, buttonH, "Yes", scale,
+               menu.selection() == PauseMenu::kConfirmYes);
 }
 
 }  // namespace romm::player

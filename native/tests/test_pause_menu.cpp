@@ -212,9 +212,6 @@ void testLabels() {
     CHECK(std::string(PauseMenu::videoOptionLabel(PauseMenu::kIntegerScalingItem)) ==
           "Integer Scaling");
     CHECK(std::string(PauseMenu::videoOptionLabel(PauseMenu::kSharpFilterItem)) == "Sharp Filter");
-    CHECK(std::string(PauseMenu::controllerOptionLabel(PauseMenu::kPhysicalItem)) ==
-          "Physical Controller Settings");
-    CHECK(std::string(PauseMenu::controllerOptionLabel(PauseMenu::kReturnItem)) == "Return");
 }
 
 void testCloseResetsFocus() {
@@ -346,57 +343,21 @@ void testCloseFromVideoOptionsResetsFocus() {
 }
 
 // ---------------------------------------------------------------------------
-// Controller Settings submenu (mirrors Android's controller-settings subpage,
-// minus its touch-only rows) and the read-only physical binding placeholder.
+// Controller Settings opens the active configuration directly, like Android.
 
 void testControllerSettingsOpensFocusedOnPhysical() {
     PauseMenu menu;
     selectControllerSettings(menu);
     CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
-    CHECK(menu.state() == PauseMenuState::kControllerSettings);
+    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
     CHECK(menu.isOpen());
-    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);  // first row focused
-}
-
-void testControllerSettingsNavigationWraps() {
-    PauseMenu menu;
-    selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> submenu, Physical selected
-    // Down walks to Return; Up wraps Return -> Physical and Down wraps
-    // Physical -> Return.
-    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
-    CHECK_EQ(menu.selection(), PauseMenu::kReturnItem);
-    CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
-    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);  // wrap the other way
-    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
-    CHECK_EQ(menu.selection(), PauseMenu::kReturnItem);  // wrap
-    CHECK(menu.state() == PauseMenuState::kControllerSettings);  // never leaves
-}
-
-void testControllerSettingsLeftRightIgnored() {
-    PauseMenu menu;
-    selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> submenu
-    CHECK_EQ(menu.handle(leftAction()), PauseMenuEffect::kNone);
-    CHECK_EQ(menu.handle(rightAction()), PauseMenuEffect::kNone);
-    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);  // unchanged
-}
-
-void testControllerSettingsReturnItemToMenu() {
-    PauseMenu menu;
-    selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> submenu, Physical selected
-    menu.handle(downAction());     // -> Return
-    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
-    CHECK(menu.state() == PauseMenuState::kOpen);
-    CHECK(menu.isOpen());
-    CHECK_EQ(menu.selection(), PauseMenu::kControllerSettingsItem);  // back on the item
+    CHECK_EQ(menu.selection(), 0);
 }
 
 void testControllerSettingsCancelToMenuThenClose() {
     PauseMenu menu;
     selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> submenu
+    menu.handle(confirmAction());  // -> active configuration
     // Back/Escape returns to the MAIN menu (does not close it), focused on
     // Controller Settings.
     CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
@@ -408,23 +369,21 @@ void testControllerSettingsCancelToMenuThenClose() {
     CHECK(!menu.isOpen());
 }
 
-// Opens the menu and enters the editable binding list (Controller Settings ->
-// Physical Controller Settings).
+// Opens the menu and enters the active controller configuration.
 void selectBindingList(PauseMenu& menu) {
     selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> submenu, Physical selected
     CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
     CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
 }
 
-void testBindingListOpensFromSubmenu() {
+void testBindingListOpensDirectly() {
     PauseMenu menu;
     selectBindingList(menu);
     CHECK(menu.isOpen());
     CHECK_EQ(menu.selection(), 0);  // first slot (A) focused
 }
 
-void testBindingListNavigationWrapsOverThirteenRows() {
+void testBindingListNavigationWrapsOverFourteenRows() {
     PauseMenu menu;
     selectBindingList(menu);
     // Down walks the 12 slot rows to Reset to Default.
@@ -432,11 +391,13 @@ void testBindingListNavigationWrapsOverThirteenRows() {
         CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     }
     CHECK_EQ(menu.selection(), PauseMenu::kResetDefaultItem);
-    // Down wraps to the first slot; Up wraps back to Reset to Default.
+    // Clear Mappings follows Reset; then navigation wraps to the first slot.
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kClearMappingsItem);
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), 0);
     CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
-    CHECK_EQ(menu.selection(), PauseMenu::kResetDefaultItem);
+    CHECK_EQ(menu.selection(), PauseMenu::kClearMappingsItem);
     CHECK(menu.state() == PauseMenuState::kPhysicalBindings);  // never leaves
 }
 
@@ -450,6 +411,19 @@ void testBindingListConfirmEntersCapture() {
     CHECK(menu.state() == PauseMenuState::kBindingCapture);
     CHECK(menu.isCapturingBinding());
     CHECK_EQ(menu.selection(), 1);
+}
+
+void testBindingListNavigatesSecondaryColumn() {
+    PauseMenu menu;
+    selectBindingList(menu);
+    CHECK_EQ(menu.bindingColumn(), 0);
+    CHECK_EQ(menu.handle(rightAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.bindingColumn(), 1);
+    CHECK_EQ(menu.handle(leftAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.bindingColumn(), 0);
+    CHECK_EQ(menu.handle(rightAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kBeginCapture);
+    CHECK_EQ(menu.bindingColumn(), 1);
 }
 
 void testBindingCaptureCancelExitsToList() {
@@ -484,20 +458,30 @@ void testBindingListResetDefaultRow() {
     CHECK_EQ(menu.selection(), PauseMenu::kResetDefaultItem);
 }
 
-void testBindingListCancelReturnsToSubmenu() {
+void testBindingListClearMappingsAction() {
     PauseMenu menu;
     selectBindingList(menu);
-    // Back/Escape returns to the Controller Settings submenu (it never
-    // closes the pause menu itself).
+    for (int i = 0; i <= PauseMenu::kBindingSlotCount; ++i) {
+        menu.handle(downAction());
+    }
+    CHECK_EQ(menu.selection(), PauseMenu::kClearMappingsItem);
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kClearMappings);
+    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
+}
+
+void testBindingListCancelReturnsToMenu() {
+    PauseMenu menu;
+    selectBindingList(menu);
+    // Back/Escape returns to the pause menu focused on Controller Settings.
     CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
-    CHECK(menu.state() == PauseMenuState::kControllerSettings);
-    CHECK_EQ(menu.selection(), PauseMenu::kPhysicalItem);
+    CHECK(menu.state() == PauseMenuState::kOpen);
+    CHECK_EQ(menu.selection(), PauseMenu::kControllerSettingsItem);
 }
 
 void testCloseFromControllerSettingsResetsFocus() {
     PauseMenu menu;
     selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> submenu
+    menu.handle(confirmAction());  // -> active configuration
     menu.close();
     CHECK(!menu.isOpen());
     menu.open();
@@ -530,16 +514,15 @@ int main() {
     testVideoOptionsCancelThenMenuCancelCloses();
     testCloseFromVideoOptionsResetsFocus();
     testControllerSettingsOpensFocusedOnPhysical();
-    testControllerSettingsNavigationWraps();
-    testControllerSettingsLeftRightIgnored();
-    testControllerSettingsReturnItemToMenu();
     testControllerSettingsCancelToMenuThenClose();
-    testBindingListOpensFromSubmenu();
-    testBindingListNavigationWrapsOverThirteenRows();
+    testBindingListOpensDirectly();
+    testBindingListNavigationWrapsOverFourteenRows();
     testBindingListConfirmEntersCapture();
+    testBindingListNavigatesSecondaryColumn();
     testBindingCaptureCancelExitsToList();
     testBindingListResetDefaultRow();
-    testBindingListCancelReturnsToSubmenu();
+    testBindingListClearMappingsAction();
+    testBindingListCancelReturnsToMenu();
     testCloseFromControllerSettingsResetsFocus();
     return rommtest::finish("test_pause_menu");
 }

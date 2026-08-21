@@ -13,20 +13,18 @@
 // Sharp Filter. The state machine owns the toggle states (so the overlay can
 // draw ON/OFF); handle() reports each change as a kToggle* effect and the
 // caller applies it to the video sink immediately. Controller Settings opens
-// a submenu (kControllerSettings) mirroring Android's controller-settings
-// subpage minus its touch-only rows: Physical Controller Settings and
-// Return. Activating Physical Controller Settings opens the EDITABLE
-// kPhysicalBindings list — the 12 RetroPad slots (each showing its current
-// binding, read from SdlInput's BindingTable) plus a Reset to Default row.
+// the active core's editable configuration directly, matching Android. The
+// kPhysicalBindings list contains the 12 RetroPad slots (each showing its current
+// binding, read from SdlInput's BindingTable) plus Reset Controller and Clear
+// Mappings actions.
 // Confirming a slot row enters kBindingCapture: the caller starts the
 // capture coordinator (binding_capture.h, ported Android semantics) for that
 // slot and feeds it raw gamepad levels each frame — while capturing, the
 // overlay owns NO menu actions (confirm/cancel come from the coordinator's
 // terminal states, not handle()). Confirming Reset to Default reports a
 // kResetDefault effect; the caller restores the default mapping. Back/Escape
-// from kPhysicalBindings or kBindingCapture returns one level up (to the
-// Controller Settings submenu / back to the slot list) — it never closes
-// the pause menu itself.
+// from kPhysicalBindings returns to the pause menu; capture completion or
+// cancellation returns to the same focused binding row.
 //
 // This class is intentionally SDL-free so it can be unit-tested on the host
 // (native/tests/test_pause_menu.cpp). The caller feeds it one frame of
@@ -42,8 +40,7 @@ enum class PauseMenuState {
     kOpen,               // The pause menu (Resume / Video Options / Controller Settings / Quit) is visible.
     kQuitConfirm,        // The "Quit game?" Yes/No dialog is visible on top of the menu.
     kVideoOptions,       // The Video Options submenu (Scanlines / Integer Scaling / Sharp Filter) is visible.
-    kControllerSettings, // The Controller Settings submenu (Physical Controller Settings / Return).
-    kPhysicalBindings,   // The editable binding list: 12 RetroPad slots + Reset to Default.
+    kPhysicalBindings,   // The editable binding list plus reset/clear header actions.
     kBindingCapture,     // Capturing a new binding for the slot in selection() —
                          // gamepad input is owned by the capture coordinator;
                          // handle() only serves cancel (keyboard Escape).
@@ -81,6 +78,8 @@ enum class PauseMenuEffect {
     // Reset to Default was confirmed in kPhysicalBindings: restore SdlInput's
     // default binding table.
     kResetDefault,
+    // Clear Mappings was confirmed in kPhysicalBindings: explicitly unmap all slots.
+    kClearMappings,
 };
 
 class PauseMenu {
@@ -100,25 +99,22 @@ public:
     static constexpr int kScanlinesItem = 0;
     static constexpr int kIntegerScalingItem = 1;
     static constexpr int kSharpFilterItem = 2;
-    // Selection indices while in kControllerSettings, in the same order as
-    // Android's controller-settings subpage (minus its touch-only rows).
-    static constexpr int kControllerOptionCount = 2;
-    static constexpr int kPhysicalItem = 0;
-    static constexpr int kReturnItem = 1;
-    // Row indices while in kPhysicalBindings: the 12 RetroPad slots (0..11,
-    // RetroPadSlot order) followed by the Reset to Default row.
+    // Selection indices while in kPhysicalBindings: the 12 RetroPad slots
+    // followed by the Reset Controller and Clear Mappings header actions.
     static constexpr int kBindingSlotCount = kRetroPadSlotCount;
     static constexpr int kResetDefaultItem = kBindingSlotCount;
-    static constexpr int kPhysicalRowCount = kBindingSlotCount + 1;
+    static constexpr int kClearMappingsItem = kBindingSlotCount + 1;
+    static constexpr int kPhysicalRowCount = kBindingSlotCount + 2;
 
     PauseMenuState state() const { return state_; }
     bool isOpen() const { return state_ != PauseMenuState::kClosed; }
     // Current selection: an item index in kOpen, a confirm option in
-    // kQuitConfirm, a toggle-row index in kVideoOptions, a subpage-item
-    // index (kPhysicalItem / kReturnItem) in kControllerSettings, or a
-    // row index (0..12) in kPhysicalBindings. In kBindingCapture it is the
+    // kQuitConfirm, a toggle-row index in kVideoOptions, or a row index
+    // (0..12) in kPhysicalBindings. In kBindingCapture it is the
     // RetroPad slot being captured. Meaningless in kClosed.
     int selection() const { return selection_; }
+    // 0 = Primary, 1 = Secondary while a binding row is selected.
+    int bindingColumn() const { return bindingColumn_; }
 
     // True while capturing a binding for the slot in selection(). While this
     // is true the caller must feed the capture coordinator raw gamepad
@@ -151,10 +147,7 @@ public:
     static const char* confirmOptionLabel(int index);  // "Yes" / "No"
     // Toggle-row labels while in kVideoOptions ("Scanlines" / ...).
     static const char* videoOptionLabel(int index);
-    // Subpage-item labels while in kControllerSettings.
-    static const char* controllerOptionLabel(int index);
-    // Row labels while in kPhysicalBindings (slot label, or "Reset to
-    // Default" for kResetDefaultItem).
+    // Labels while in kPhysicalBindings.
     static const char* physicalRowLabel(int index);
 
     // CLOSED -> OPEN with Resume focused (Android requests focus on RESUME
@@ -185,8 +178,6 @@ public:
                 return handleQuitConfirm(a);
             case PauseMenuState::kVideoOptions:
                 return handleVideoOptions(a);
-            case PauseMenuState::kControllerSettings:
-                return handleControllerSettings(a);
             case PauseMenuState::kPhysicalBindings:
                 return handlePhysicalBindings(a);
             case PauseMenuState::kBindingCapture:
@@ -210,12 +201,6 @@ private:
     // three (always-enabled) toggle rows.
     void moveVideoSelection(int delta) {
         selection_ = (selection_ + delta + kVideoOptionCount) % kVideoOptionCount;
-    }
-
-    // Moves the Controller Settings submenu selection by +/-1, wrapping over
-    // its two (always-enabled) items.
-    void moveControllerSelection(int delta) {
-        selection_ = (selection_ + delta + kControllerOptionCount) % kControllerOptionCount;
     }
 
     // Moves the physical-binding list selection by +/-1, wrapping over its
@@ -245,11 +230,11 @@ private:
                     selection_ = kScanlinesItem;
                     return PauseMenuEffect::kNone;
                 case kControllerSettingsItem:
-                    // Open the Controller Settings submenu, focused on
-                    // Physical Controller Settings (Android requests focus
-                    // on that row in its subpage).
-                    state_ = PauseMenuState::kControllerSettings;
-                    selection_ = kPhysicalItem;
+                    // Android opens the active core's full controller
+                    // configuration directly; desktop does the same.
+                    state_ = PauseMenuState::kPhysicalBindings;
+                    selection_ = kSlotA;
+                    bindingColumn_ = 0;
                     return PauseMenuEffect::kNone;
                 case kQuitItem:
                     // The user already expressed intent to quit, so the
@@ -293,44 +278,20 @@ private:
         return PauseMenuEffect::kNone;
     }
 
-    PauseMenuEffect handleControllerSettings(const PauseMenuActions& a) {
-        if (a.up) moveControllerSelection(-1);
-        if (a.down) moveControllerSelection(+1);
-        if (a.cancel) {
-            // Back/Escape returns to the main menu, focused on Controller
-            // Settings (Android's quickBackTransition: CONTROLLER_SETTINGS ->
-            // MENU; it does NOT close the pause menu itself).
-            state_ = PauseMenuState::kOpen;
-            selection_ = kControllerSettingsItem;
-            return PauseMenuEffect::kNone;
-        }
-        if (a.confirm) {
-            switch (selection_) {
-                case kPhysicalItem:
-                    // Open the editable binding list, focused on the first
-                    // slot (A).
-                    state_ = PauseMenuState::kPhysicalBindings;
-                    selection_ = kSlotA;
-                    return PauseMenuEffect::kNone;
-                case kReturnItem:
-                    state_ = PauseMenuState::kOpen;
-                    selection_ = kControllerSettingsItem;
-                    return PauseMenuEffect::kNone;
-                default:
-                    break;  // unreachable: the submenu only has these two rows
-            }
-        }
-        return PauseMenuEffect::kNone;
-    }
-
     PauseMenuEffect handlePhysicalBindings(const PauseMenuActions& a) {
         if (a.up) movePhysicalSelection(-1);
         if (a.down) movePhysicalSelection(+1);
+        if (selection_ < kBindingSlotCount) {
+            if (a.left) bindingColumn_ = 0;
+            if (a.right) bindingColumn_ = 1;
+        } else {
+            bindingColumn_ = 0;
+        }
         if (a.cancel) {
-            // Back/Escape returns to the Controller Settings submenu, focused
-            // on Physical Controller Settings (it never closes the pause menu).
-            state_ = PauseMenuState::kControllerSettings;
-            selection_ = kPhysicalItem;
+            // Back/Escape returns directly to the pause menu, focused on the
+            // Controller Settings item, matching Android's active-core page.
+            state_ = PauseMenuState::kOpen;
+            selection_ = kControllerSettingsItem;
             return PauseMenuEffect::kNone;
         }
         if (a.confirm) {
@@ -341,8 +302,9 @@ private:
                 state_ = PauseMenuState::kBindingCapture;
                 return PauseMenuEffect::kBeginCapture;
             }
-            // Reset to Default: the caller restores SdlInput's default table.
-            return PauseMenuEffect::kResetDefault;
+            return selection_ == kResetDefaultItem
+                ? PauseMenuEffect::kResetDefault
+                : PauseMenuEffect::kClearMappings;
         }
         return PauseMenuEffect::kNone;
     }
@@ -383,6 +345,7 @@ private:
 
     PauseMenuState state_ = PauseMenuState::kClosed;
     int selection_ = 0;
+    int bindingColumn_ = 0;
     bool scanlinesEnabled_ = false;
     bool integerScalingEnabled_ = false;
     bool sharpFilterEnabled_ = false;
@@ -399,8 +362,7 @@ inline const char* PauseMenu::itemLabel(int index) {
 }
 
 inline bool PauseMenu::itemEnabled(int index) {
-    // All four items are live: Video Options opens the kVideoOptions submenu
-    // and Controller Settings opens the kControllerSettings submenu.
+    // All four items are live.
     return index == kResumeItem || index == kVideoOptionsItem ||
            index == kControllerSettingsItem || index == kQuitItem;
 }
@@ -418,16 +380,9 @@ inline const char* PauseMenu::videoOptionLabel(int index) {
     }
 }
 
-inline const char* PauseMenu::controllerOptionLabel(int index) {
-    switch (index) {
-        case kPhysicalItem: return "Physical Controller Settings";
-        case kReturnItem: return "Return";
-        default: return "";
-    }
-}
-
 inline const char* PauseMenu::physicalRowLabel(int index) {
     if (index == kResetDefaultItem) return "Reset to Default";
+    if (index == kClearMappingsItem) return "Clear Mappings";
     if (index >= 0 && index < kBindingSlotCount) return retroPadSlotLabel(index);
     return "";
 }

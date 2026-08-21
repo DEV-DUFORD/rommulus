@@ -209,22 +209,24 @@ void SdlInput::poll() {
         int32_t mask = 0;
         if (gamepad != nullptr) {
             for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
-                const BindingSource& source = bindings_.get(slot);
-                bool pressed = false;
-                switch (source.kind) {
-                    case BindingSource::Kind::kButton:
-                        pressed = SDL_GetGamepadButton(gamepad, toSdlButton(source.button));
-                        break;
-                    case BindingSource::Kind::kAxisDirection: {
-                        const Sint16 raw = SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis));
-                        const int16_t value = applyDeadzone(raw);
-                        pressed = source.polarity > 0 ? (value >= kAxisBindLevel)
-                                                      : (value <= -kAxisBindLevel);
-                        break;
+                const auto sourcePressed = [gamepad](const BindingSource& source) {
+                    switch (source.kind) {
+                        case BindingSource::Kind::kButton:
+                            return SDL_GetGamepadButton(gamepad, toSdlButton(source.button));
+                        case BindingSource::Kind::kAxisDirection: {
+                            const Sint16 raw =
+                                SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis));
+                            const int16_t value = applyDeadzone(raw);
+                            return source.polarity > 0 ? (value >= kAxisBindLevel)
+                                                       : (value <= -kAxisBindLevel);
+                        }
+                        case BindingSource::Kind::kUnbound:
+                            return false;
                     }
-                    case BindingSource::Kind::kUnbound:
-                        break;
-                }
+                    return false;
+                };
+                const bool pressed = sourcePressed(bindings_.get(slot)) ||
+                    sourcePressed(secondaryBindings_.get(slot));
                 if (pressed) {
                     mask |= (1 << retroPadSlotJoypadBit(slot));
                 }
@@ -356,6 +358,28 @@ SdlInput::CaptureFrame SdlInput::captureFrame() {
     return frame;
 }
 
+void SdlInput::resetMenuEdges() {
+    prevButtons_ = {};
+    prevBackHeld_ = {};
+    for (int port = 0; port < kPorts; ++port) {
+        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+        if (gamepad == nullptr) continue;
+
+        PrevButtons& prev = prevButtons_[port];
+        prev.up = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP);
+        prev.down = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+        prev.left = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+        prev.right = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+        prev.south = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
+        prev.east = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST);
+        prev.back = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK);
+        prev.start = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
+        prev.leftStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+        prev.rightStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        prevBackHeld_[port] = prev.back;
+    }
+}
+
 std::string SdlInput::joystickGuidString(int port) const {
     if (!hasGamepad(port)) return "";
     SDL_Joystick* joystick = SDL_GetGamepadJoystick(gamepads_[port].gamepad);
@@ -371,8 +395,7 @@ void SdlInput::reset() {
     for (auto& port : ports_) {
         port = PortState{};
     }
-    // Drop the edge-detection latches too: any button held while this is
-    // called must not fire a spurious "new press" on the next poll.
+    // Seed edge history too: a held button must not become a fresh press.
     resetMenuEdges();
 }
 

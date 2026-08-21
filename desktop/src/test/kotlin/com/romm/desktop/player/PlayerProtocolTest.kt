@@ -63,6 +63,7 @@ class PlayerProtocolTest {
         audioOverrunFrames = 0L,
         errorCode = null,
         errorMessage = null,
+        video = VideoSettings(integerScaling = true, scanlines = true, sharpFilter = false),
     )
 
     // ------------------------------------------------------------------ round trips
@@ -98,6 +99,14 @@ class PlayerProtocolTest {
         assertThat(PlayerProtocol.parseResult(json).getOrNull()).isEqualTo(original)
     }
 
+    @Test
+    fun `legacy v2 result without video settings remains readable`() {
+        val original = sampleResult().copy(video = null)
+        val json = PlayerProtocol.serializeResult(original)
+        assertThat(json).doesNotContain("\"video\"")
+        assertThat(PlayerProtocol.parseResult(json).getOrNull()).isEqualTo(original)
+    }
+
     // ------------------------------------------------------------------ v2 controllerBindings
 
     @Test
@@ -106,6 +115,27 @@ class PlayerProtocolTest {
         val parsed = PlayerProtocol.parseRequest(PlayerProtocol.serializeRequest(original))
         assertThat(parsed.isSuccess).isTrue()
         assertThat(parsed.getOrNull()).isEqualTo(original)
+    }
+
+    @Test
+    fun `secondary controller bindings round-trip`() {
+        val base = sampleControllerBindings()
+        val device = base.devices.single()
+        val secondary = device.bindings.map { binding ->
+            if (binding.slot == "a") {
+                PlayerSlotBinding("a", PlayerBindingType.BUTTON, button = "north")
+            } else {
+                PlayerSlotBinding(binding.slot, PlayerBindingType.UNBOUND)
+            }
+        }
+        val original = sampleRequest().copy(
+            controllerBindings = ControllerBindings(
+                listOf(device.copy(secondaryBindings = secondary)),
+            ),
+        )
+        assertThat(
+            PlayerProtocol.parseRequest(PlayerProtocol.serializeRequest(original)).getOrNull(),
+        ).isEqualTo(original)
     }
 
     @Test

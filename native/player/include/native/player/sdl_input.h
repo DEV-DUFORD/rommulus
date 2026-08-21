@@ -86,13 +86,29 @@ public:
     // control; poll() consults it instead of a hardcoded mapping. Defaults
     // are the built-in mapping; the editor mutates it at runtime.
     const BindingTable& bindings() const { return bindings_; }
-    const BindingSource& bindingForSlot(int slot) const { return bindings_.get(slot); }
-    void setBinding(int slot, BindingSource source) { bindings_.set(slot, source); }
+    const BindingTable& secondaryBindings() const { return secondaryBindings_; }
+    const BindingSource& bindingForSlot(int slot, int bindingSlot = 0) const {
+        return bindingSlot == 1 ? secondaryBindings_.get(slot) : bindings_.get(slot);
+    }
+    void setBinding(int slot, BindingSource source, int bindingSlot = 0) {
+        (bindingSlot == 1 ? secondaryBindings_ : bindings_).set(slot, source);
+    }
     // Replaces the ENTIRE table at once (the v2 launch request seeds stored
     // bindings before the first frame; the editor mutates per slot).
-    void setBindings(const BindingTable& table) { bindings_ = table; }
+    void setBindings(const BindingTable& table, const BindingTable& secondary = BindingTable(false)) {
+        bindings_ = table;
+        secondaryBindings_ = secondary;
+    }
     // Restores the built-in default mapping (the editor's Reset to Default).
-    void resetBindings() { bindings_.reset(); }
+    void resetBindings() {
+        bindings_.reset();
+        secondaryBindings_.clear();
+    }
+    // Explicitly unmaps every slot (the editor's Clear Mappings action).
+    void clearBindings() {
+        bindings_.clear();
+        secondaryBindings_.clear();
+    }
 
     // True when a gamepad occupies the port.
     bool hasGamepad(int port) const {
@@ -119,13 +135,10 @@ public:
     };
     CaptureFrame captureFrame();
 
-    // Drops the menu edge-detection latches (call when entering/leaving
-    // capture mode so a button held across the transition cannot fire a
-    // spurious menu action on the next pollMenuActions()).
-    void resetMenuEdges() {
-        prevButtons_ = {};
-        prevBackHeld_ = {};
-    }
+    // Seeds menu/capture edge history from current controller levels. Call
+    // when entering/leaving capture so the button that opened or completed
+    // capture cannot become a fresh confirm/cancel on the next frame.
+    void resetMenuEdges();
 
     // The canonical SDL joystick GUID string for a port's pad (the stable
     // persistence key, LINUX_X64.md section 11.9), or "" when no pad is on
@@ -167,6 +180,7 @@ private:
     // the editor (setBinding / resetBindings); defaults are the built-in
     // mapping. See binding_table.h.
     BindingTable bindings_{};
+    BindingTable secondaryBindings_{false};
 
     // Port 0 bit flags accumulated from KEY_DOWN/KEY_UP events (see
     // keyboardButtonBit). Merged into port 0's snapshot by poll() each

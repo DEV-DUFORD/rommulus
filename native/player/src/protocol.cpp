@@ -226,7 +226,9 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         return false;
     }
 
-    static const std::array<const char*, 3> kDeviceFields = {
+    static const std::array<const char*, 4> kDeviceFields = {
+        {"guid", "identity", "bindings", "secondaryBindings"}};
+    static const std::array<const char*, 3> kRequiredDeviceFields = {
         {"guid", "identity", "bindings"}};
     static const std::array<const char*, 3> kIdentityFields = {
         {"vendorId", "productId", "descriptor"}};
@@ -238,7 +240,7 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         }
         checkUnknownFields(d, kDeviceFields, error);
         if (!error.empty()) return false;
-        for (const char* key : kDeviceFields) {
+        for (const char* key : kRequiredDeviceFields) {
             if (!d.contains(key)) {
                 error = std::string("missing controllerBindings device field: ") + key;
                 return false;
@@ -277,6 +279,20 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         for (size_t i = 0; i < bindings.size(); ++i) {
             if (!parseBindingEntry(bindings[i], static_cast<int>(i), device.table, error)) {
                 return false;
+            }
+        }
+        if (d.contains("secondaryBindings")) {
+            const ordered_json& secondary = d["secondaryBindings"];
+            if (!secondary.is_array() ||
+                secondary.size() != static_cast<size_t>(kRetroPadSlotCount)) {
+                error = "controllerBindings secondaryBindings must carry exactly 12 entries";
+                return false;
+            }
+            for (size_t i = 0; i < secondary.size(); ++i) {
+                if (!parseBindingEntry(
+                        secondary[i], static_cast<int>(i), device.secondaryTable, error)) {
+                    return false;
+                }
             }
         }
 
@@ -431,19 +447,25 @@ std::optional<PlayerResult> parseResult(const std::string& text,
     if (!j.is_object())
         return reject<PlayerResult>(error, "top-level JSON must be an object");
 
-    static const std::array<const char*, 12> kFields = {{
+    static const std::array<const char*, 12> kRequiredFields = {{
         "protocolVersion", "sessionId", "exitKind", "checkpointWritten",
         "candidateSavePath", "saveHash", "saveSize", "frames",
         "audioUnderrunFrames", "audioOverrunFrames", "errorCode",
         "errorMessage",
     }};
-    for (const char* key : kFields) {
+    static const std::array<const char*, 13> kKnownFields = {{
+        "protocolVersion", "sessionId", "exitKind", "checkpointWritten",
+        "candidateSavePath", "saveHash", "saveSize", "frames",
+        "audioUnderrunFrames", "audioOverrunFrames", "errorCode",
+        "errorMessage", "video",
+    }};
+    for (const char* key : kRequiredFields) {
         if (!j.contains(key))
             return reject<PlayerResult>(error,
                                         std::string("missing required field: ") +
                                             key);
     }
-    checkUnknownFields(j, kFields, err);
+    checkUnknownFields(j, kKnownFields, err);
     if (!err.empty()) return reject<PlayerResult>(error, err);
 
     PlayerResult r;
@@ -492,6 +514,27 @@ std::optional<PlayerResult> parseResult(const std::string& text,
         return reject<PlayerResult>(error, err);
     if (!getNullableString(j, "errorMessage", r.errorMessage, err))
         return reject<PlayerResult>(error, err);
+    if (j.contains("video")) {
+        if (!j["video"].is_object())
+            return reject<PlayerResult>(error, "video must be an object");
+        const ordered_json& v = j["video"];
+        static const std::array<const char*, 4> kVideoFields = {{
+            "fullscreen", "integerScaling", "scanlines", "sharpFilter",
+        }};
+        for (const char* key : kVideoFields) {
+            if (!v.contains(key) || !v[key].is_boolean())
+                return reject<PlayerResult>(
+                    error, std::string("video.") + key + " must be a boolean");
+        }
+        checkUnknownFields(v, kVideoFields, err);
+        if (!err.empty()) return reject<PlayerResult>(error, err);
+        VideoSettings video;
+        video.fullscreen = v["fullscreen"].get<bool>();
+        video.integerScaling = v["integerScaling"].get<bool>();
+        video.scanlines = v["scanlines"].get<bool>();
+        video.sharpFilter = v["sharpFilter"].get<bool>();
+        r.video = video;
+    }
 
     return r;
 }
@@ -562,6 +605,30 @@ std::string serializeRequest(const PlayerRequest& r) {
                 bindings.push_back(std::move(bindingEntry));
             }
             entry["bindings"] = std::move(bindings);
+            if (!device.secondaryTable.isUnmapped()) {
+                ordered_json secondary = ordered_json::array();
+                for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
+                    ordered_json bindingEntry;
+                    bindingEntry["slot"] = retroPadSlotName(slot);
+                    const BindingSource& source = device.secondaryTable.get(slot);
+                    switch (source.kind) {
+                        case BindingSource::Kind::kUnbound:
+                            bindingEntry["type"] = "unbound";
+                            break;
+                        case BindingSource::Kind::kButton:
+                            bindingEntry["type"] = "button";
+                            bindingEntry["button"] = padButtonName(source.button);
+                            break;
+                        case BindingSource::Kind::kAxisDirection:
+                            bindingEntry["type"] = "axis_direction";
+                            bindingEntry["axis"] = padAxisName(source.axis);
+                            bindingEntry["polarity"] = source.polarity < 0 ? -1 : 1;
+                            break;
+                    }
+                    secondary.push_back(std::move(bindingEntry));
+                }
+                entry["secondaryBindings"] = std::move(secondary);
+            }
             devices.push_back(std::move(entry));
         }
         ordered_json controllerBindings;
@@ -597,6 +664,14 @@ std::string serializeResult(const PlayerResult& r) {
         j["errorMessage"] = *r.errorMessage;
     else
         j["errorMessage"] = ordered_json(nullptr);
+    if (r.video.has_value()) {
+        ordered_json video;
+        video["fullscreen"] = r.video->fullscreen;
+        video["integerScaling"] = r.video->integerScaling;
+        video["scanlines"] = r.video->scanlines;
+        video["sharpFilter"] = r.video->sharpFilter;
+        j["video"] = std::move(video);
+    }
     return j.dump(2);
 }
 

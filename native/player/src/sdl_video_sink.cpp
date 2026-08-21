@@ -238,6 +238,10 @@ bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
 
     // Render outside the lock: the texture owns a copy of the last frame,
     // and the emulation thread may convert the next one while we present.
+    // Render state is shared with the pause overlay, whose last operation is
+    // commonly white text. Set the clear color explicitly so letterbox bars
+    // are always black rather than inheriting that stale draw color.
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);
     if (texture_ != nullptr) {
         SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
@@ -258,11 +262,28 @@ bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
         }
     }
 
-    // The overlay (pause menu) draws in the same logical coordinate space on
-    // top of whatever is currently presented — the frozen last frame while
-    // paused, or a clear before the first frame arrives.
+    // Draw UI in output pixels, not in the core's low-resolution logical
+    // canvas. Otherwise a 240p core rasterizes the pause menu at 240p and SDL
+    // enlarges it with the game, making even TrueType text visibly pixelated.
+    // Restore the game presentation immediately afterward so the next frame
+    // retains its configured aspect ratio and integer-scaling behavior.
     if (overlay) {
+        int logicalWidth = 0;
+        int logicalHeight = 0;
+        int outputWidth = 0;
+        int outputHeight = 0;
+        SDL_RendererLogicalPresentation logicalMode = SDL_LOGICAL_PRESENTATION_DISABLED;
+        SDL_GetRenderLogicalPresentation(
+                renderer_, &logicalWidth, &logicalHeight, &logicalMode);
+        SDL_GetRenderOutputSize(renderer_, &outputWidth, &outputHeight);
+        if (outputWidth > 0 && outputHeight > 0) {
+            SDL_SetRenderLogicalPresentation(
+                    renderer_, outputWidth, outputHeight,
+                    SDL_LOGICAL_PRESENTATION_DISABLED);
+        }
         overlay(renderer_);
+        SDL_SetRenderLogicalPresentation(
+                renderer_, logicalWidth, logicalHeight, logicalMode);
     }
 
     SDL_RenderPresent(renderer_);

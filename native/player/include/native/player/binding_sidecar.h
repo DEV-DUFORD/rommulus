@@ -51,6 +51,7 @@ struct DeviceBindings {
     std::string guid;      // canonical 32-hex-char SDL joystick GUID string
     std::string identity;  // normalized descriptor (normalizedDeviceIdentity)
     BindingTable table;
+    BindingTable secondaryTable{false};
 };
 
 // Builds the normalized identity descriptor for a canonicalized (lowercase,

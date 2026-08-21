@@ -103,15 +103,21 @@ void testSetGetReset() {
     CHECK(table.get(romm::player::kSlotDpadLeft) ==
           BindingSource::ofButton(PadButton::kDpadLeft));
     CHECK(table.get(romm::player::kSlotSelect) == BindingSource::ofButton(PadButton::kBack));
+
+    table.clear();
+    CHECK(!table.isDefault());
+    for (int slot = 0; slot < romm::player::kRetroPadSlotCount; ++slot) {
+        CHECK(table.get(slot).kind == BindingSource::Kind::kUnbound);
+    }
 }
 
 void testDisplayLabels() {
-    CHECK(std::string(BindingSource::ofButton(PadButton::kSouth).display()) == "SOUTH");
+    CHECK(std::string(BindingSource::ofButton(PadButton::kSouth).display()) == "Button A");
     CHECK(std::string(BindingSource::axisDirection(PadAxis::kLeftX, 1).display()) ==
-          "LEFT X +");
+          "Left Stick X +");
     CHECK(std::string(BindingSource::axisDirection(PadAxis::kRightY, -1).display()) ==
-          "RIGHT Y -");
-    CHECK(std::string(BindingSource::unbound().display()) == "UNBOUND");
+          "Right Stick Y -");
+    CHECK(std::string(BindingSource::unbound().display()) == "Unmapped");
     // Slot names used by the sidecar JSON.
     CHECK(std::string(romm::player::retroPadSlotName(romm::player::kSlotA)) == "a");
     CHECK(std::string(romm::player::retroPadSlotName(romm::player::kSlotSelect)) ==

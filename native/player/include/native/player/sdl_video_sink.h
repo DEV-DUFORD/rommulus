@@ -41,7 +41,7 @@ public:
 
     // Main-thread presentation loop.
     // Presents the latest converted frame if one is ready, then draws `overlay`
-    // (if any) on top of it before presenting; returns false when no
+    // (if any) in output-pixel coordinates before presenting; returns false when no
     // renderer is attached. While paused the last frame stays in the texture
     // and is re-presented each call, so an overlay renders over a frozen
     // frame. Pass nullptr for `overlay` to present without one.

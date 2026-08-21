@@ -728,9 +728,18 @@ class DesktopAppCoordinator(
         // network — the actual sync happens later on the scheduler's drain thread. A failure here
         // must never break reconciliation reporting; the durable journal/queue state is untouched.
         when (report) {
-            is PlayerExitReport.Reconciled -> playerLaunchContexts.remove(sessionId)?.let { context ->
-                runCatching { enqueuePostPlaySync(context, report.adoption) }
-                    .onFailure { e -> log.warning("post-play save-sync enqueue failed for session $sessionId: $e") }
+            is PlayerExitReport.Reconciled -> {
+                report.result.video?.let { video ->
+                    settingsAdapter.setVideoOptions(
+                        scanlines = video.scanlines,
+                        integerScaling = video.integerScaling,
+                        sharpFilter = video.sharpFilter,
+                    )
+                }
+                playerLaunchContexts.remove(sessionId)?.let { context ->
+                    runCatching { enqueuePostPlaySync(context, report.adoption) }
+                        .onFailure { e -> log.warning("post-play save-sync enqueue failed for session $sessionId: $e") }
+                }
             }
             // Journal deleted (reconciliation committed elsewhere) or never existed — the context
             // has served its purpose (or there was no launch to begin with).

@@ -80,14 +80,27 @@ object RetroPadControlMapping {
      * table is complete and launch serialization can reconstruct it exactly.
      */
     fun toRecords(coreId: String, device: ControllerBindingDevice): List<ControllerBindingRecord> =
-        device.bindings.map { slot ->
+        buildList {
+            device.bindings.forEach { slot ->
+                add(toRecord(coreId, slot, BindingSlots.PRIMARY))
+            }
+            device.secondaryBindings?.forEach { slot ->
+                add(toRecord(coreId, slot, BindingSlots.SECONDARY))
+            }
+        }
+
+    private fun toRecord(
+        coreId: String,
+        slot: PlayerSlotBinding,
+        bindingSlot: Int,
+    ): ControllerBindingRecord {
             val controlId = SLOT_TO_CONTROL_ID.getValue(slot.slot)
-            when (slot.type) {
+            return when (slot.type) {
                 PlayerBindingType.UNBOUND -> ControllerBindingRecord(
                     coreId = coreId,
                     playerIndex = PLAYER_INDEX,
                     controlId = controlId,
-                    bindingSlot = BindingSlots.PRIMARY,
+                    bindingSlot = bindingSlot,
                     bindingType = TYPE_UNMAPPED,
                     inputCode = 0,
                     polarity = null,
@@ -96,7 +109,7 @@ object RetroPadControlMapping {
                     coreId = coreId,
                     playerIndex = PLAYER_INDEX,
                     controlId = controlId,
-                    bindingSlot = BindingSlots.PRIMARY,
+                    bindingSlot = bindingSlot,
                     bindingType = TYPE_KEY,
                     inputCode = PAD_BUTTON_NAMES.indexOf(checkNotNull(slot.button)),
                     polarity = null,
@@ -105,7 +118,7 @@ object RetroPadControlMapping {
                     coreId = coreId,
                     playerIndex = PLAYER_INDEX,
                     controlId = controlId,
-                    bindingSlot = BindingSlots.PRIMARY,
+                    bindingSlot = bindingSlot,
                     bindingType = TYPE_AXIS_DIRECTION,
                     inputCode = PAD_AXIS_NAMES.indexOf(checkNotNull(slot.axis)),
                     polarity = checkNotNull(slot.polarity),
@@ -120,13 +133,13 @@ object RetroPadControlMapping {
      */
     fun toLaunchBindings(records: List<ControllerBindingRecord>): ControllerBindings? {
         if (records.isEmpty()) return null
-        // Prefer the PRIMARY row when a controlId has several slots persisted.
-        val byControlId = records.groupBy { it.controlId }
-            .mapValues { (_, rows) -> rows.firstOrNull { it.bindingSlot == BindingSlots.PRIMARY } ?: rows.first() }
+        val byAddress = records.associateBy { it.controlId to it.bindingSlot }
 
-        val slots = mutableListOf<PlayerSlotBinding>()
-        for (slotName in RETRO_PAD_SLOT_NAMES) {
-            val record = byControlId[SLOT_TO_CONTROL_ID.getValue(slotName)] ?: return null
+        fun slotsFor(bindingSlot: Int, required: Boolean): List<PlayerSlotBinding>? {
+            val slots = mutableListOf<PlayerSlotBinding>()
+            for (slotName in RETRO_PAD_SLOT_NAMES) {
+                val record = byAddress[SLOT_TO_CONTROL_ID.getValue(slotName) to bindingSlot]
+                    ?: if (required) return null else return null
             when (record.bindingType) {
                 TYPE_UNMAPPED -> slots += PlayerSlotBinding(slotName, PlayerBindingType.UNBOUND)
                 TYPE_KEY -> {
@@ -142,6 +155,14 @@ object RetroPadControlMapping {
                 // in a digital RetroPad slot: omit the field rather than fabricate semantics.
                 else -> return null
             }
+            }
+            return slots
+        }
+        val slots = slotsFor(BindingSlots.PRIMARY, required = true) ?: return null
+        val secondarySlots = if (records.any { it.bindingSlot == BindingSlots.SECONDARY }) {
+            slotsFor(BindingSlots.SECONDARY, required = true) ?: return null
+        } else {
+            null
         }
 
         // The desktop store keys bindings by core, not device: serialize ONE entry with an
@@ -151,6 +172,7 @@ object RetroPadControlMapping {
             guid = "",
             identity = ControllerBindingIdentity(vendorId = null, productId = null, descriptor = ""),
             bindings = slots,
+            secondaryBindings = secondarySlots,
         )
         return ControllerBindings(listOf(device))
     }

@@ -207,35 +207,35 @@ inline std::optional<PadAxis> padAxisFromName(const std::string& name) {
     return std::nullopt;
 }
 
-// Uppercase display name for the editor list (5x7 font is case-aware).
+// User-facing names match the shared Android/Desktop binding formatter.
 inline const char* padButtonDisplay(PadButton button) {
     switch (button) {
-        case PadButton::kSouth: return "SOUTH";
-        case PadButton::kEast: return "EAST";
-        case PadButton::kWest: return "WEST";
-        case PadButton::kNorth: return "NORTH";
-        case PadButton::kBack: return "BACK";
-        case PadButton::kStart: return "START";
-        case PadButton::kLeftShoulder: return "LEFT SHOULDER";
-        case PadButton::kRightShoulder: return "RIGHT SHOULDER";
-        case PadButton::kDpadUp: return "DPAD UP";
-        case PadButton::kDpadDown: return "DPAD DOWN";
-        case PadButton::kDpadLeft: return "DPAD LEFT";
-        case PadButton::kDpadRight: return "DPAD RIGHT";
-        case PadButton::kLeftStick: return "LEFT STICK";
-        case PadButton::kRightStick: return "RIGHT STICK";
+        case PadButton::kSouth: return "Button A";
+        case PadButton::kEast: return "Button B";
+        case PadButton::kWest: return "Button X";
+        case PadButton::kNorth: return "Button Y";
+        case PadButton::kBack: return "Select";
+        case PadButton::kStart: return "Start";
+        case PadButton::kLeftShoulder: return "L1";
+        case PadButton::kRightShoulder: return "R1";
+        case PadButton::kDpadUp: return "D-Pad Up";
+        case PadButton::kDpadDown: return "D-Pad Down";
+        case PadButton::kDpadLeft: return "D-Pad Left";
+        case PadButton::kDpadRight: return "D-Pad Right";
+        case PadButton::kLeftStick: return "L3";
+        case PadButton::kRightStick: return "R3";
     }
     return "";
 }
 
 inline const char* padAxisDisplay(PadAxis axis) {
     switch (axis) {
-        case PadAxis::kLeftX: return "LEFT X";
-        case PadAxis::kLeftY: return "LEFT Y";
-        case PadAxis::kRightX: return "RIGHT X";
-        case PadAxis::kRightY: return "RIGHT Y";
-        case PadAxis::kLeftTrigger: return "LEFT TRIGGER";
-        case PadAxis::kRightTrigger: return "RIGHT TRIGGER";
+        case PadAxis::kLeftX: return "Left Stick X";
+        case PadAxis::kLeftY: return "Left Stick Y";
+        case PadAxis::kRightX: return "Right Stick X";
+        case PadAxis::kRightY: return "Right Stick Y";
+        case PadAxis::kLeftTrigger: return "Left Trigger";
+        case PadAxis::kRightTrigger: return "Right Trigger";
     }
     return "";
 }
@@ -279,11 +279,11 @@ struct BindingSource {
     }
     bool operator!=(const BindingSource& other) const { return !(*this == other); }
 
-    // Short display label for the editor list: "SOUTH", "LEFT X +", ...
+    // Short display label for the editor list: "Button A", "Left Stick X +", ...
     std::string display() const {
         switch (kind) {
             case Kind::kUnbound:
-                return "UNBOUND";
+                return "Unmapped";
             case Kind::kButton:
                 return padButtonDisplay(button);
             case Kind::kAxisDirection:
@@ -317,9 +317,11 @@ inline BindingSource defaultSourceForSlot(int slot) {
 // mapping; the editor mutates it at runtime and reset() restores defaults.
 class BindingTable {
 public:
-    BindingTable() {
-        for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
-            sources_[slot] = defaultSourceForSlot(slot);
+    explicit BindingTable(bool useDefaults = true) {
+        if (useDefaults) {
+            reset();
+        } else {
+            clear();
         }
     }
 
@@ -337,9 +339,20 @@ public:
         }
     }
 
+    void clear() {
+        sources_.fill(BindingSource::unbound());
+    }
+
     bool isDefault() const {
         for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
             if (sources_[slot] != defaultSourceForSlot(slot)) return false;
+        }
+        return true;
+    }
+
+    bool isUnmapped() const {
+        for (const BindingSource& source : sources_) {
+            if (source.kind != BindingSource::Kind::kUnbound) return false;
         }
         return true;
     }
