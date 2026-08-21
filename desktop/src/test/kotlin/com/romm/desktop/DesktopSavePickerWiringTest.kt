@@ -8,6 +8,7 @@ import com.romm.androidtv.romm.RommApiError
 import com.romm.androidtv.romm.SaveDownloadResult
 import com.romm.androidtv.romm.SaveListResult
 import com.romm.androidtv.romm.ServerSaveInfo
+import com.romm.androidtv.romm.save.SaveSyncOutcome
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.fakes.InMemorySaveStateStore
@@ -19,6 +20,7 @@ import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.storage.secret.FakeSecretBackend
 import com.romm.desktop.sync.FakeDeviceIdentityLoader
 import com.romm.desktop.sync.FakeRommSyncGateway
+import com.romm.desktop.sync.PreLaunchSaveSynchronizer
 import com.romm.desktop.ui.screens.detail.SavePickerEntryUiModel
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
@@ -46,6 +48,7 @@ class DesktopSavePickerWiringTest {
         const val ROM_ID = 7L
         const val FILE_NAME = "zelda.gb"
         const val CHosen_SAVE_ID = 42L
+        const val CHOSEN_ROMM_CONTENT_HASH = "6d3a0aaf65e2d1cf8b904f030edbeb50"
 
         val CHOSEN_BYTES = "chosen-save-bytes".toByteArray()
         /** FakeRomContentStager's deterministic content → the staged SHA-256 scoping the save path. */
@@ -111,6 +114,8 @@ class DesktopSavePickerWiringTest {
             romContentStagerOverride = stager,
             syncGatewayOverride = sync,
             saveSyncDeviceIdentityLoaderOverride = identityLoader,
+            preLaunchSaveSynchronizerOverride =
+                PreLaunchSaveSynchronizer { SaveSyncOutcome.NoOpSynced(0L) },
         )
         return Wired(c, sync, launcher, stager, supervisor, paths)
     }
@@ -132,7 +137,7 @@ class DesktopSavePickerWiringTest {
         ),
     )
 
-    private fun chosenEntry(contentHash: String? = sha256Hex(CHOSEN_BYTES)) = SavePickerEntryUiModel(
+    private fun chosenEntry(contentHash: String? = CHOSEN_ROMM_CONTENT_HASH) = SavePickerEntryUiModel(
         saveId = CHosen_SAVE_ID,
         fileName = "autosave [2026-07-31_00-55-06].srm",
         coreId = "gambatte",
@@ -269,8 +274,8 @@ class DesktopSavePickerWiringTest {
         val wired = wire(dir)
         signIn(wired.coordinator)
         wired.sync.downloadResult = SaveDownloadResult.Success(CHOSEN_BYTES)
-        // The listing reported a content hash the downloaded bytes do not match.
-        wired.coordinator.chooseSaveForLaunch(ROM_ID, chosenEntry(contentHash = "0".repeat(64)))
+        // The listing reported a valid RomM fingerprint the downloaded bytes do not match.
+        wired.coordinator.chooseSaveForLaunch(ROM_ID, chosenEntry(contentHash = "0".repeat(32)))
 
         val result = wired.coordinator.launchPlayer(ROM_ID)
 

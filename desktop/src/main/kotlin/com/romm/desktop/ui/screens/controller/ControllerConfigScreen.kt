@@ -98,13 +98,17 @@ private val ErrorRed = Color(0xFFF44336)
 // (extracted from the composables so it is unit-testable without a Compose runtime,
 // following the LibraryScreenLogic pattern)
 
-/** One displayable binding row for a console control (desktop: single PRIMARY slot). */
+/** One displayable binding row for a console control. */
 data class ControllerBindingRowUi(
     val controlId: CoreControlId,
     val label: String,
     val inputKind: InputKind,
-    val bindingLabel: String,
-)
+    val primaryBindingLabel: String,
+    val secondaryBindingLabel: String,
+) {
+    /** Compatibility alias for callers that only render the primary binding. */
+    val bindingLabel: String get() = primaryBindingLabel
+}
 
 /**
  * Builds the binding rows shown on the controller config screen from a merged
@@ -122,7 +126,8 @@ fun buildBindingRows(
             controlId = descriptor.id,
             label = descriptor.label,
             inputKind = descriptor.inputKind,
-            bindingLabel = desktopBindingLabel(bindings[descriptor.id]?.primary),
+            primaryBindingLabel = desktopBindingLabel(bindings[descriptor.id]?.primary),
+            secondaryBindingLabel = desktopBindingLabel(bindings[descriptor.id]?.secondary),
         )
     }
 }
@@ -304,6 +309,7 @@ fun ControllerConfigScreen(
     }
 
     var capturingControlId by remember { mutableStateOf<CoreControlId?>(null) }
+    var capturingSlot by remember { mutableStateOf(BindingSlot.PRIMARY) }
     var captureStartedAtMillis by remember { mutableStateOf(0L) }
     val captureState by captureCoordinator.state.collectAsState()
 
@@ -321,7 +327,7 @@ fun ControllerConfigScreen(
         val controlId = capturingControlId ?: return@LaunchedEffect
         when (val state = captureState) {
             is DesktopCaptureState.Result -> {
-                repository.setBinding(coreId, PLAYER_INDEX, controlId, state.binding, BindingSlot.PRIMARY)
+                repository.setBinding(coreId, PLAYER_INDEX, controlId, state.binding, capturingSlot)
                 feedback = "Mapped ${controlLabel(profile, controlId)} to ${desktopBindingLabel(state.binding)}"
                 capturingControlId = null
             }
@@ -338,7 +344,7 @@ fun ControllerConfigScreen(
         }
     }
 
-    val startCapture: (CoreControlDescriptor) -> Unit = { descriptor ->
+    val startCapture: (CoreControlDescriptor, BindingSlot) -> Unit = { descriptor, slot ->
         val deviceIds = coordinator.controllerInputSource.enumerate().mapTo(mutableSetOf()) { it.id }
         captureCoordinator.beginCapture(
             slotIndex = PLAYER_INDEX,
@@ -347,6 +353,7 @@ fun ControllerConfigScreen(
         )
         captureStartedAtMillis = System.currentTimeMillis()
         capturingControlId = descriptor.id
+        capturingSlot = slot
     }
 
     val resetPlayer: () -> Unit = {
@@ -417,8 +424,10 @@ fun ControllerConfigScreen(
                 items(rows, key = { it.controlId.id }) { row ->
                     BindingRowItem(
                         row = row,
-                        onClick = {
-                            profile.controls.firstOrNull { it.id == row.controlId }?.let(startCapture)
+                        onSlotClick = { slot ->
+                            profile.controls.firstOrNull { it.id == row.controlId }?.let { descriptor ->
+                                startCapture(descriptor, slot)
+                            }
                         },
                     )
                 }
@@ -452,7 +461,7 @@ fun ControllerConfigScreen(
             onDismiss = { captureCoordinator.cancel() },
             onClear = {
                 uiScope.launch {
-                    repository.clearBinding(coreId, PLAYER_INDEX, capturingDescriptor.id, BindingSlot.PRIMARY)
+                    repository.clearBinding(coreId, PLAYER_INDEX, capturingDescriptor.id, capturingSlot)
                     feedback = "${capturingDescriptor.label} cleared"
                 }
                 captureCoordinator.cancel()
@@ -509,16 +518,13 @@ private fun ArtworkPanel(
 // --------------------------------------------------------------------------- row
 
 /**
- * One focusable binding row: the console control label (main) and its current primary
- * binding (right). Selecting it starts a capture session for that control.
+ * One binding row with independently focusable primary and secondary mapping cells.
  */
 @Composable
 private fun BindingRowItem(
     row: ControllerBindingRowUi,
-    onClick: () -> Unit,
+    onSlotClick: (BindingSlot) -> Unit,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val focused by interactionSource.collectIsFocusedAsState()
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
 
@@ -526,26 +532,38 @@ private fun BindingRowItem(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (focused) colors.romm600.copy(alpha = 0.3f) else colors.nightLo)
-            .tvFocusRing(shape = RoundedCornerShape(8.dp))
-            .focusableItem("controller-config:${row.controlId.id}", navigator, onClick)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .background(colors.nightLo)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = row.label,
             style = MaterialTheme.typography.bodyLarge,
-            color = if (focused) colors.romm300 else colors.textPrimary,
+            color = colors.textPrimary,
             maxLines = 1,
             modifier = Modifier.weight(1f),
         )
-        Text(
-            text = row.bindingLabel,
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textSecondary,
-            maxLines = 1,
-        )
+        BindingCell(row.controlId, BindingSlot.PRIMARY, row.primaryBindingLabel, onSlotClick)
+        Spacer(Modifier.width(8.dp))
+        BindingCell(row.controlId, BindingSlot.SECONDARY, row.secondaryBindingLabel, onSlotClick)
+    }
+}
+
+@Composable
+private fun BindingCell(
+    controlId: CoreControlId,
+    slot: BindingSlot,
+    label: String,
+    onClick: (BindingSlot) -> Unit,
+) {
+    val navigator = LocalFocusNavigator.current
+    TvOutlinedButton(
+        onClick = { onClick(slot) },
+        modifier = Modifier.focusableItem("controller-config:${controlId.id}:${slot.name}", navigator) {
+            onClick(slot)
+        },
+    ) {
+        Text(label, maxLines = 1)
     }
 }
 

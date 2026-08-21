@@ -176,17 +176,8 @@ class DesktopBiosConfigurationProvider(
      * firmware on demand when the user has not configured one explicitly.
      */
     suspend fun prepareForLaunch(systemDirectory: Path): FirmwareStagingOutcome = withContext(Dispatchers.IO) {
-        val requirements = when (platformSlug) {
-            SEGA_CD_PLATFORM_SLUG -> FirmwareRequirements(
-                preferredSha1 = listOf(SEGA_CD_US_SHA1, SEGA_CD_EU_SHA1, SEGA_CD_JP_SHA1),
-                canonicalFileNames = CANONICAL_SEGA_CD_FILENAMES,
-            )
-            PSX_PLATFORM_SLUG -> FirmwareRequirements(
-                preferredSha1 = listOf(PSX_US_SHA1, PSX_EU_SHA1, PSX_JP_SHA1),
-                canonicalFileNames = CANONICAL_PSX_FILENAMES,
-            )
-            else -> return@withContext FirmwareStagingOutcome.Missing(emptyList())
-        }
+        val requirements = firmwareRequirements()
+            ?: return@withContext FirmwareStagingOutcome.Missing(emptyList())
 
         val catalog = when (val result = fetchCatalog()) {
             is BiosConfigurationCatalog.Success -> result
@@ -198,9 +189,7 @@ class DesktopBiosConfigurationProvider(
             catalog.options.firstOrNull { it.firmware.firmwareId == selectedId }?.firmware
         }
         val firmware = stagedSelection
-            ?: requirements.preferredSha1.firstNotNullOfOrNull { sha1 ->
-                catalog.options.firstOrNull { it.firmware.sha1Hash.equals(sha1, ignoreCase = true) }?.firmware
-            }
+            ?: autoSelectableFirmware(catalog.options, requirements)
             ?: return@withContext FirmwareStagingOutcome.Missing(requirements.canonicalFileNames)
 
         val source = stagedFileFor(firmware)?.takeIf {
@@ -226,6 +215,34 @@ class DesktopBiosConfigurationProvider(
                 systemDirectory.resolve(it).toAbsolutePath().toString()
             },
         )
+    }
+
+    /**
+     * Whether this catalog contains a hash-recognized BIOS that can be selected automatically.
+     *
+     * This mirrors Android's availability check: an explicit staged selection wins, but a known
+     * USA (then Europe, then Japan) image also makes the system ready for launch preparation.
+     */
+    fun hasAutoSelectableFirmware(catalog: BiosConfigurationCatalog.Success): Boolean =
+        autoSelectableFirmware(catalog.options, firmwareRequirements()) != null
+
+    private fun firmwareRequirements(): FirmwareRequirements? = when (platformSlug) {
+            SEGA_CD_PLATFORM_SLUG -> FirmwareRequirements(
+                preferredSha1 = listOf(SEGA_CD_US_SHA1, SEGA_CD_EU_SHA1, SEGA_CD_JP_SHA1),
+                canonicalFileNames = CANONICAL_SEGA_CD_FILENAMES,
+            )
+            PSX_PLATFORM_SLUG -> FirmwareRequirements(
+                preferredSha1 = listOf(PSX_US_SHA1, PSX_EU_SHA1, PSX_JP_SHA1),
+                canonicalFileNames = CANONICAL_PSX_FILENAMES,
+            )
+            else -> null
+        }
+
+    private fun autoSelectableFirmware(
+        options: List<BiosConfigurationOption>,
+        requirements: FirmwareRequirements?,
+    ): FirmwareInfo? = requirements?.preferredSha1?.firstNotNullOfOrNull { sha1 ->
+        options.firstOrNull { it.firmware.sha1Hash.equals(sha1, ignoreCase = true) }?.firmware
     }
 
     /**

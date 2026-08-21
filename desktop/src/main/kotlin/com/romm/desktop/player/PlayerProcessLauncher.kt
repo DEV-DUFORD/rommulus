@@ -152,8 +152,30 @@ class ProcessBuilderPlayerLauncher(
     }
 
     companion object {
-        /** Default binary location: `rommulus_player` resolved via PATH (matches the CMake executable). */
-        fun defaultFor(journalsRoot: Path, appPaths: AppPaths, playerBinaryPath: Path = Path.of("rommulus_player")): ProcessBuilderPlayerLauncher =
-            ProcessBuilderPlayerLauncher(playerBinaryPath, journalsRoot, appPaths)
+        /**
+         * Resolves the locally built player for development runs; release bundles put
+         * `rommulus_player` on PATH through their launcher.
+         */
+        fun defaultFor(
+            journalsRoot: Path,
+            appPaths: AppPaths,
+            playerBinaryPath: Path = Path.of("rommulus_player"),
+        ): ProcessBuilderPlayerLauncher {
+            val resolvedPlayer = if (playerBinaryPath == Path.of("rommulus_player")) {
+                findDevelopmentPlayer() ?: playerBinaryPath
+            } else {
+                playerBinaryPath
+            }
+            return ProcessBuilderPlayerLauncher(resolvedPlayer, journalsRoot, appPaths)
+        }
+
+        private fun findDevelopmentPlayer(): Path? {
+            var directory = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize()
+            while (true) {
+                val candidate = directory.resolve("build").resolve("player").resolve("rommulus_player")
+                if (Files.isExecutable(candidate)) return candidate
+                directory = directory.parent ?: return null
+            }
+        }
     }
 }

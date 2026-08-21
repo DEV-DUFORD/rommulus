@@ -506,7 +506,7 @@ class OnboardingPresenter(
                     }
                 QrLoginStartResult.PersistenceFailure ->
                     _uiState.update {
-                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.PERSISTENCE))
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.DEVICE_IDENTITY_PERSISTENCE))
                     }
                 is QrLoginStartResult.Ready -> pollQrSession(origin, start.session)
             }
@@ -549,9 +549,27 @@ class OnboardingPresenter(
                     }
                     return
                 }
-                QrLoginPollResult.PersistenceFailure -> {
+                QrLoginPollResult.TokenPersistenceFailure -> {
                     _uiState.update {
-                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.PERSISTENCE))
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.TOKEN_PERSISTENCE))
+                    }
+                    return
+                }
+                QrLoginPollResult.TokenVerificationFailure -> {
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.TOKEN_VERIFICATION))
+                    }
+                    return
+                }
+                QrLoginPollResult.DeviceIdentityPersistenceFailure -> {
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.DEVICE_IDENTITY_PERSISTENCE))
+                    }
+                    return
+                }
+                QrLoginPollResult.SessionPersistenceFailure -> {
+                    _uiState.update {
+                        it.copy(qrLoginState = QrLoginUiState.Error(QrLoginError.SESSION_PERSISTENCE))
                     }
                     return
                 }

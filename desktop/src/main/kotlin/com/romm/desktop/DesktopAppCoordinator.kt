@@ -40,6 +40,8 @@ import com.romm.androidtv.romm.RommApiError
 import com.romm.androidtv.romm.SaveConfirmResult
 import com.romm.androidtv.romm.SaveDownloadResult
 import com.romm.androidtv.romm.SaveListResult
+import com.romm.androidtv.romm.save.SaveSyncOutcome
+import com.romm.androidtv.romm.save.SaveSyncRequest
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.databaseDir
 import com.romm.androidtv.storage.firmwareDir
@@ -96,8 +98,15 @@ import com.romm.desktop.storage.sqlite.SqliteSaveStateStore
 import com.romm.desktop.storage.sqlite.SqliteSchedulerStateStore
 import com.romm.desktop.storage.sqlite.SqliteSessionRecordStore
 import com.romm.desktop.sync.BackgroundSyncSchedulerImpl
+import com.romm.desktop.sync.DefaultRommSaveContentVerifier
+import com.romm.desktop.sync.DesktopSaveLaunchSynchronizer
 import com.romm.desktop.sync.FileSaveContentGateway
 import com.romm.desktop.sync.GameLaunchRecorder
+import com.romm.desktop.sync.PreLaunchDeviceIdentityLoader
+import com.romm.desktop.sync.PreLaunchSaveSynchronizer
+import com.romm.desktop.sync.RommSaveContentHash
+import com.romm.desktop.sync.RommSaveContentVerification
+import com.romm.desktop.sync.RommSaveContentVerifier
 import com.romm.desktop.sync.RommSyncApiGateway
 import com.romm.desktop.sync.RommSyncGateway
 import com.romm.desktop.sync.SaveConflictChoice
@@ -113,6 +122,7 @@ import com.romm.desktop.ui.screens.detail.SaveSyncStatusPresenter
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.io.IOException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -172,6 +182,10 @@ import kotlinx.coroutines.launch
      *                                 [com.romm.desktop.sync.RommSyncGateway] so play-session
      *                                 tests never touch the network; production records through
      *                                 [RommSyncApiGateway].
+     * @param preLaunchSaveSynchronizerOverride Test seam for synchronous save negotiation before
+     *                                 the player is staged/spawned.
+     * @param chosenSaveContentVerifierOverride Test seam for RomM `content_hash` verification in
+     *                                 the explicit Choose Save flow.
      */
 
 /** Outcome of [DesktopAppCoordinator.launchPlayer]. */
@@ -321,6 +335,8 @@ class DesktopAppCoordinator(
     saveConflictResolverOverride: SaveConflictResolver? = null,
     syncGatewayOverride: RommSyncGateway? = null,
     saveSyncDeviceIdentityLoaderOverride: SaveSyncDeviceIdentityLoader? = null,
+    preLaunchSaveSynchronizerOverride: PreLaunchSaveSynchronizer? = null,
+    chosenSaveContentVerifierOverride: RommSaveContentVerifier? = null,
     gameLaunchRecorderOverride: GameLaunchRecorder? = null,
 ) {
 
@@ -485,7 +501,7 @@ class DesktopAppCoordinator(
         // coherentRecord is null without a non-blank username — kiosk sessions therefore
         // drain as AUTH_REQUIRED, matching Android's "no active session" classification.
         val record = sessionStorage.coherentRecord(origin) ?: return@SaveSyncSessionReader null
-        SaveSyncSession(record.origin, record.username)
+        SaveSyncSession(origin, record.username, record.kioskMode)
     }
 
     /**
@@ -502,14 +518,24 @@ class DesktopAppCoordinator(
             }
         }
 
+    private val preLaunchDeviceIdentityLoader = PreLaunchDeviceIdentityLoader { origin, username ->
+        if (saveSyncDeviceIdentityLoaderOverride != null) {
+            saveSyncDeviceIdentityLoaderOverride.load(origin, username)?.let {
+                DeviceRegistrationResult.Success(it, alreadyExisted = true)
+            } ?: DeviceRegistrationResult.Failure(RommApiError.AUTH_EXPIRED)
+        } else {
+            runBlocking { network.deviceRepository.ensureRegistered(origin, username) }
+        }
+    }
+
     val saveSyncDrainExecutor: SaveSyncDrainExecutor by lazy {
         saveSyncDrainExecutorOverride ?: SaveSyncDrainExecutor(
             pendingOperations = saveStateStore,
             saveReplicas = saveStateStore,
-            content = FileSaveContentGateway(paths.dataDir.toFile()),
+            content = saveContentGateway,
             sessionReader = saveSyncSessionReader,
             deviceIdentityLoader = saveSyncDeviceIdentityLoader,
-            sync = RommSyncApiGateway(network.okHttpClient),
+            sync = syncGateway,
             shouldAutoclean = { settingsAdapter.autocleanSavesOnUpload() },
         )
     }
@@ -523,10 +549,10 @@ class DesktopAppCoordinator(
     val saveConflictResolver: SaveConflictResolver by lazy {
         saveConflictResolverOverride ?: SaveConflictResolver(
             saveReplicas = saveStateStore,
-            content = FileSaveContentGateway(paths.dataDir.toFile()),
+            content = saveContentGateway,
             sessionReader = saveSyncSessionReader,
             deviceIdentityLoader = saveSyncDeviceIdentityLoader,
-            sync = RommSyncApiGateway(network.okHttpClient),
+            sync = syncGateway,
             shouldAutoclean = { settingsAdapter.autocleanSavesOnUpload() },
         )
     }
@@ -538,6 +564,28 @@ class DesktopAppCoordinator(
      */
     val syncGateway: RommSyncGateway by lazy {
         syncGatewayOverride ?: RommSyncApiGateway(network.okHttpClient)
+    }
+
+    private val chosenSaveContentVerifier =
+        chosenSaveContentVerifierOverride ?: DefaultRommSaveContentVerifier
+
+    private val saveContentGateway by lazy {
+        FileSaveContentGateway(paths.dataDir.toFile())
+    }
+
+    /**
+     * Synchronous Android-equivalent pre-launch negotiation. It shares the durable save store,
+     * authenticated gateway, device identity, and filesystem layout used by the background drain.
+     */
+    val preLaunchSaveSynchronizer: PreLaunchSaveSynchronizer by lazy {
+        preLaunchSaveSynchronizerOverride ?: DesktopSaveLaunchSynchronizer(
+            saveState = saveStateStore,
+            content = saveContentGateway,
+            sessionReader = saveSyncSessionReader,
+            deviceIdentityLoader = preLaunchDeviceIdentityLoader,
+            sync = syncGateway,
+            onOperationQueued = { scheduler.requestDrain("pre-launch") },
+        )
     }
 
     /**
@@ -928,8 +976,8 @@ class DesktopAppCoordinator(
     /**
      * Downloads [entry]'s server save and atomically writes it to [savePath] (the launch's
      * autosave path), so the player restores exactly the save the user picked in the "Choose
-     * Save" flow (Android `adoptChosenSave` parity). Validates against the server-reported
-     * content hash when the listing carried one; confirms the download best-effort AFTER a
+     * Save" flow (Android `adoptChosenSave` parity). Validates recognized RomM server fingerprints
+     * when the listing carried one; confirms the download best-effort AFTER a
      * successful write (mirrors keep-server — never fails an otherwise-good launch). Never
      * throws: every failure maps to [ChosenSaveAdoption.Failure] with a UI-safe reason, so the
      * caller aborts the launch fail-closed. Unlike Android's negotiate-driven download path
@@ -953,9 +1001,25 @@ class DesktopAppCoordinator(
                 return ChosenSaveAdoption.Failure("could not download the chosen save: ${download.error}")
         }
 
-        // Validate against the server-reported content hash when available (no fabrication).
-        if (entry.contentHash != null && sha256Hex(bytes) != entry.contentHash) {
-            return ChosenSaveAdoption.Failure("chosen save failed verification (content hash mismatch)")
+        val reportedHash = entry.contentHash
+        val expectedHash = RommSaveContentHash.parseOrNull(reportedHash)
+        if (reportedHash != null && expectedHash == null) {
+            // Android treats content_hash as carried server metadata rather than a SHA-256
+            // contract. Preserve that behavior for unknown/future formats instead of rejecting
+            // valid bytes with an invented digest algorithm.
+            log.warning("chosen-save adoption: unsupported RomM content_hash format; skipping hash verification")
+        } else if (expectedHash != null) {
+            when (chosenSaveContentVerifier.verify(bytes, expectedHash)) {
+                RommSaveContentVerification.Match -> Unit
+                is RommSaveContentVerification.Mismatch ->
+                    return ChosenSaveAdoption.Failure(
+                        "chosen save failed verification (content hash mismatch)",
+                    )
+                is RommSaveContentVerification.Unreadable ->
+                    return ChosenSaveAdoption.Failure(
+                        "chosen save failed verification (content could not be inspected)",
+                    )
+            }
         }
 
         try {
@@ -1035,17 +1099,20 @@ class DesktopAppCoordinator(
         }
 
         val sessionId = UUID.randomUUID().toString()
+        val coreBuildRevision = core.releaseTag.ifBlank { core.commitSha }
 
         // Stable per-ROM save identity via the shared [SavePathPolicy] (mirrors Android's
         // files/saves layout under the desktop data root — always under the data root, which the
         // player validates).
         val origin = settingsAdapter.currentProfile().origin
         val username = sessionStorage.coherentRecord(origin)?.username.orEmpty()
+        val serverKey = SavePathPolicy.sanitizeSegment(origin.ifBlank { NO_ORIGIN_KEY })
+        val userKey = SavePathPolicy.sanitizeSegment(username.ifBlank { ANONYMOUS_USER_KEY })
         val savePath = Path.of(
             SavePathPolicy.autosaveSramPath(
                 filesDir = paths.dataDir.toFile(),
-                serverKey = origin.ifBlank { NO_ORIGIN_KEY },
-                userKey = username.ifBlank { ANONYMOUS_USER_KEY },
+                serverKey = serverKey,
+                userKey = userKey,
                 romId = romId,
                 romHash = staged.sha256,
             ),
@@ -1057,26 +1124,123 @@ class DesktopAppCoordinator(
         // replaces whatever previously sat at the autosave path — the player restores exactly
         // that save on launch. One-shot: consumed by this launch even if a later step fails
         // (the user re-picks to retry). Fail-closed: an adoption failure aborts the launch.
+        val saveScope = SaveReplicaScope(
+            serverKey = serverKey,
+            userKey = userKey,
+            romId = romId,
+            romHash = staged.sha256,
+            slot = SavePathPolicy.AUTOSAVE_SLOT,
+        )
         val chosen = chosenSaves.remove(romId)
         if (chosen != null) {
             when (val adopted = adoptChosenSave(chosen, savePath)) {
-                is ChosenSaveAdoption.Success -> Unit
+                is ChosenSaveAdoption.Success -> {
+                    val bytes = try {
+                        Files.readAllBytes(savePath)
+                    } catch (e: IOException) {
+                        return PlayerLaunchResult.Failed(
+                            "could not record the chosen save: ${e.message}",
+                        )
+                    }
+                    val existingReplica = saveStateStore.findByScope(saveScope)
+                    val now = System.currentTimeMillis()
+                    val replica = (existingReplica ?: SaveReplicaRecord(
+                        serverKey = saveScope.serverKey,
+                        userKey = saveScope.userKey,
+                        romId = saveScope.romId,
+                        romHash = saveScope.romHash,
+                        slot = saveScope.slot,
+                        coreId = core.coreId,
+                        coreBuildRevision = coreBuildRevision,
+                    )).copy(
+                        coreId = core.coreId,
+                        coreBuildRevision = coreBuildRevision,
+                        localHash = sha256Hex(bytes),
+                        localSizeBytes = bytes.size.toLong(),
+                        localWrittenAtEpochMs = now,
+                        rommSaveId = chosen.saveId,
+                        serverHash = chosen.contentHash,
+                        syncStatus = SaveSyncStatus.SYNCED,
+                        lastError = null,
+                    )
+                    saveStateStore.upsert(replica).getOrElse {
+                        return PlayerLaunchResult.Failed("could not record the chosen save: ${it.message}")
+                    }
+                    saveSyncStatusPresenter().refresh(romId)
+                }
                 is ChosenSaveAdoption.Failure -> return PlayerLaunchResult.Failed(adopted.reason)
+            }
+        } else if (saveSyncSessionReader.current() != null) {
+            val existingReplica = saveStateStore.findByScope(saveScope)
+            // Desktop learns the core-produced SRAM size from prior checkpoints. Treat that
+            // durable local size as the trusted gate when an explicit expected size has not yet
+            // been persisted, so later server downloads can be validated before adoption.
+            val expectedSaveSize =
+                existingReplica?.expectedSramSizeBytes ?: existingReplica?.localSizeBytes
+            val syncOutcome = try {
+                preLaunchSaveSynchronizer.syncBeforeLaunch(
+                    SaveSyncRequest(
+                        romId = romId,
+                        romHash = staged.sha256,
+                        coreId = core.coreId,
+                        coreBuildRevision = coreBuildRevision,
+                        expectedSramSizeBytes = expectedSaveSize,
+                        fileName = detail.fileName,
+                    ),
+                )
+            } catch (e: Exception) {
+                return PlayerLaunchResult.Failed("Save sync error: ${e.message ?: "unknown"}")
+            }
+            runCatching { saveSyncStatusPresenter().refresh(romId) }
+                .onFailure { log.warning("pre-launch save-status refresh failed for ROM $romId: $it") }
+            when (syncOutcome) {
+                is SaveSyncOutcome.NoOpSynced,
+                is SaveSyncOutcome.Downloaded,
+                is SaveSyncOutcome.UploadQueued,
+                is SaveSyncOutcome.PlayOfflineLocal -> Unit
+
+                is SaveSyncOutcome.ConflictRequiresResolution ->
+                    return PlayerLaunchResult.Failed("Save conflict needs resolution before launch.")
+
+                is SaveSyncOutcome.Quarantined ->
+                    return PlayerLaunchResult.Failed(
+                        "Server save was quarantined (${syncOutcome.reason}); review it before launching.",
+                    )
+
+                is SaveSyncOutcome.AwaitingCoreValidation ->
+                    Unit // The player validates the staged candidate against the loaded core's SRAM.
+
+                is SaveSyncOutcome.Failure -> {
+                    if (syncOutcome.error == RommApiError.AUTH_EXPIRED) {
+                        return PlayerLaunchResult.Failed("Session expired; log in again before launching.")
+                    }
+                    return PlayerLaunchResult.Failed("Save sync failed: ${syncOutcome.error.name}.")
+                }
             }
         }
 
+        val expectedSaveSize = if (chosen == null) {
+            saveStateStore.findByScope(
+                SaveReplicaScope(serverKey, userKey, romId, staged.sha256, SavePathPolicy.AUTOSAVE_SLOT),
+            )?.let { it.expectedSramSizeBytes ?: it.localSizeBytes }
+        } else {
+            // Preserve the existing explicit picker behavior: it validates the server hash, but
+            // has no exact byte-size field to compare against an older replica before launch.
+            null
+        }
         val coresDir = paths.dataDir.resolve("cores")
         val params = PlayerLaunchParams(
             coreId = core.coreId,
             // The player validates request.coreBuildRevision against the derived
             // ROMM_PLAYER_ALLOWED_CORES value, so the manifest's releaseTag (falling back to
             // commitSha) is the authoritative revision pin.
-            coreBuildRevision = core.releaseTag.ifBlank { core.commitSha },
+            coreBuildRevision = coreBuildRevision,
             corePath = resolveCoreLibraryPath(coresDir, core.coreId),
             contentPath = staged.path,
             contentHash = staged.sha256,
             systemDir = paths.firmwareDir(),
             savePath = savePath,
+            expectedSaveSize = expectedSaveSize,
             // Persisted Video Options state (JsonSettingsStore via the settings
             // adapter): the player applies these at launch so a user's
             // scanlines / integer-scaling / sharp-filter choices survive relaunch.
@@ -1100,7 +1264,7 @@ class DesktopAppCoordinator(
                     romId = romId,
                     fileName = detail.fileName,
                     coreId = core.coreId,
-                    coreBuildRevision = core.releaseTag.ifBlank { core.commitSha },
+                    coreBuildRevision = coreBuildRevision,
                 )
                 watchPlayerExit(result.launch, sessionId)
                 // Parity with Android (MainActivity → GameLaunchRecorder.recordLaunch): mark the
@@ -1516,6 +1680,8 @@ class DesktopAppCoordinator(
                 catalog.options.isEmpty() -> RequiredBiosState.Missing
                 catalog.selectedFirmwareId != null &&
                     catalog.options.any { it.firmware.firmwareId == catalog.selectedFirmwareId } ->
+                    RequiredBiosState.Ready
+                biosConfigurationProvider(platformSlug).hasAutoSelectableFirmware(catalog) ->
                     RequiredBiosState.Ready
                 else -> RequiredBiosState.UnverifiedAvailable
             }

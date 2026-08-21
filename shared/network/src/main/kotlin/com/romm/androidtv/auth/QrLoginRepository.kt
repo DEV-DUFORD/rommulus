@@ -86,19 +86,19 @@ class QrLoginRepository(
         val username = user.username ?: return QrLoginPollResult.VerificationFailure
 
         if (tokenStorage.setToken(origin, username, approved.token) != TokenPersistResult.Success) {
-            return QrLoginPollResult.PersistenceFailure
+            return QrLoginPollResult.TokenPersistenceFailure
         }
         if (tokenStorage.getToken(origin, username)?.raw != approved.token.raw) {
             tokenStorage.clearToken(origin, username)
-            return QrLoginPollResult.PersistenceFailure
+            return QrLoginPollResult.TokenVerificationFailure
         }
         if (!identityStore.savePairedIdentity(origin, username, session.installationId, approved.deviceId)) {
             tokenStorage.clearToken(origin, username)
-            return QrLoginPollResult.PersistenceFailure
+            return QrLoginPollResult.DeviceIdentityPersistenceFailure
         }
         if (!sessionStore.save(origin, username)) {
             tokenStorage.clearToken(origin, username)
-            return QrLoginPollResult.PersistenceFailure
+            return QrLoginPollResult.SessionPersistenceFailure
         }
         return QrLoginPollResult.Success(user)
     }

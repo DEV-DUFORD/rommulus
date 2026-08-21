@@ -8,8 +8,9 @@ import java.time.ZoneId
 /**
  * Pure-UI row model for one entry in the desktop save picker (game-detail "Choose Save" flow —
  * Android parity with `SavePickerEntryUiModel`). Carries only what the overlay needs to render,
- * plus the server content hash so [com.romm.desktop.DesktopAppCoordinator.chooseSaveForLaunch]
- * can verify the adopted bytes without a second network round-trip.
+ * plus the opaque RomM server content fingerprint so
+ * [com.romm.desktop.DesktopAppCoordinator.chooseSaveForLaunch] can verify recognized formats
+ * without a second network round-trip.
  */
 data class SavePickerEntryUiModel(
     val saveId: Long,
@@ -23,7 +24,7 @@ data class SavePickerEntryUiModel(
     val updatedAtText: String?,
     /** True when this is the picker default: the newest save for the current ROM. */
     val isDefaultSelection: Boolean,
-    /** Server content hash carried through (not displayed) for adoption verification. */
+    /** Opaque RomM `content_hash`, carried through (not displayed) for adoption verification. */
     val contentHash: String? = null,
 )
 

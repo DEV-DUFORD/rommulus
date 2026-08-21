@@ -305,6 +305,20 @@ private fun GameDetailContent(
     // coordinator; picking an entry records the choice for the upcoming launch
     // (coordinator.chooseSaveForLaunch) — the user then presses Play, no auto-launch.
     var savePickerState by remember { mutableStateOf<SavePickerState?>(null) }
+    var serverSaveAvailability by remember(romId) {
+        mutableStateOf(ServerSaveAvailability.Checking)
+    }
+
+    LaunchedEffect(romId) {
+        serverSaveAvailability = when (
+            val result = withContext(Dispatchers.Default) { coordinator.listSavesForRom(romId) }
+        ) {
+            is SaveListResult.Success ->
+                if (result.saves.isEmpty()) ServerSaveAvailability.None
+                else ServerSaveAvailability.Available
+            is SaveListResult.Failure -> ServerSaveAvailability.Unavailable
+        }
+    }
 
     fun loadSavesForPicker() {
         savePickerState = SavePickerState.Loading
@@ -367,6 +381,7 @@ private fun GameDetailContent(
                 onDismissLaunchState = { coordinator.dismissGameLaunchState() },
                 playStatus = playStatus,
                 saveUiState = saveUiState,
+                serverSaveAvailability = serverSaveAvailability,
                 saveActionMessage = saveActionMessage,
                 onSaveSyncNow = {
                     launchScope.launch {
@@ -518,6 +533,7 @@ private fun GameDetailBody(
     onDismissLaunchState: () -> Unit,
     playStatus: PlayerLaunchResult?,
     saveUiState: SaveSyncUiState,
+    serverSaveAvailability: ServerSaveAvailability,
     saveActionMessage: String?,
     onSaveSyncNow: () -> Unit,
     onSaveKeepLocal: () -> Unit,
@@ -559,7 +575,13 @@ private fun GameDetailBody(
                     }
                 }
                 Spacer(modifier = Modifier.width(24.dp))
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        // The fixed top-right action row shares this header's vertical band.
+                        // Keep title/platform text clear of it rather than drawing beneath it.
+                        .padding(end = 420.dp),
+                ) {
                     Text(
                         text = rom.title,
                         style = MaterialTheme.typography.headlineMedium,
@@ -609,15 +631,25 @@ private fun GameDetailBody(
                             // "Choose Save" (Android parity): opens the save picker overlay listing
                             // this ROM's server saves; picking one re-scopes the next launch.
                             // Disabled while staging (Android parity).
-                            ChooseSaveButton(onClick = onChooseSaveClick, enabled = !isStaging)
+                            ChooseSaveButton(
+                                onClick = onChooseSaveClick,
+                                enabled = !isStaging,
+                                modifier = Modifier.weight(1f),
+                            )
                             // "Choose File" (Android parity): only when the ROM has sibling versions.
                             if (shouldShowChooseFileButton(rom)) {
-                                ChooseFileButton(onClick = onChooseFileClick, enabled = !isStaging)
+                                ChooseFileButton(
+                                    onClick = onChooseFileClick,
+                                    enabled = !isStaging,
+                                    modifier = Modifier.weight(1f),
+                                )
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(10.dp))
                     SaveStatusLine(
                         state = saveUiState,
+                        serverAvailability = serverSaveAvailability,
                         actionMessage = saveActionMessage,
                         onSyncNow = onSaveSyncNow,
                         onKeepLocal = onSaveKeepLocal,
@@ -703,6 +735,7 @@ private fun PlayButton(
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
+                .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
                 .background(
                     if (active) colors.romm500 else colors.textSecondary.copy(alpha = 0.25f),
@@ -726,6 +759,7 @@ private fun PlayButton(
                     onClick = onPlayClick,
                 )
                 .padding(horizontal = 28.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = if (isStaging) "Preparing…" else "▶  Play",
@@ -733,19 +767,20 @@ private fun PlayButton(
                 color = if (active) Color.White else Color.White.copy(alpha = 0.4f),
             )
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        when (status) {
-            is PlayerLaunchResult.Started -> Text(
-                text = "Launching player…",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.textSecondary,
-            )
-            is PlayerLaunchResult.Failed -> Text(
-                text = status.reason,
-                style = MaterialTheme.typography.bodySmall,
-                color = PlayButtonErrorColor,
-            )
-            null -> Unit
+        if (status != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            when (status) {
+                is PlayerLaunchResult.Started -> Text(
+                    text = "Launching player…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+                is PlayerLaunchResult.Failed -> Text(
+                    text = status.reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PlayButtonErrorColor,
+                )
+            }
         }
     }
 }
@@ -859,14 +894,19 @@ private fun DisabledPlayButton() {
  * this ROM and its siblings for re-scoping.
  */
 @Composable
-private fun ChooseFileButton(onClick: () -> Unit, enabled: Boolean = true) {
+private fun ChooseFileButton(
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     Box(
-        modifier = Modifier
+        modifier = modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(colors.nightLo)
             .border(
@@ -880,6 +920,7 @@ private fun ChooseFileButton(onClick: () -> Unit, enabled: Boolean = true) {
             )
             .clickable(interactionSource = interactionSource, indication = null, enabled = enabled, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             text = "Choose File",
@@ -896,14 +937,19 @@ private fun ChooseFileButton(onClick: () -> Unit, enabled: Boolean = true) {
  * launch — the user then presses Play.
  */
 @Composable
-private fun ChooseSaveButton(onClick: () -> Unit, enabled: Boolean = true) {
+private fun ChooseSaveButton(
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     Box(
-        modifier = Modifier
+        modifier = modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(colors.nightLo)
             .border(
@@ -917,6 +963,7 @@ private fun ChooseSaveButton(onClick: () -> Unit, enabled: Boolean = true) {
             )
             .clickable(interactionSource = interactionSource, indication = null, enabled = enabled, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             text = "Choose Save",
@@ -1130,6 +1177,7 @@ private val NEEDS_ATTENTION_SYNC_STATUSES = setOf(SaveSyncStatus.CONFLICT, SaveS
 @Composable
 private fun SaveStatusLine(
     state: SaveSyncUiState,
+    serverAvailability: ServerSaveAvailability,
     actionMessage: String?,
     onSyncNow: () -> Unit,
     onKeepLocal: () -> Unit,
@@ -1146,7 +1194,7 @@ private fun SaveStatusLine(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = saveStatusLabel(state),
+            text = saveStatusLabel(state, serverAvailability),
             style = MaterialTheme.typography.bodySmall,
             color = if (needsAttention) PlayButtonErrorColor else colors.textSecondary,
         )
@@ -1205,7 +1253,7 @@ private fun SaveActionButton(
     }
 }
 
-/** Fixed action rail: Favorite / Add-to-collection / Back (Android parity). */
+/** Header actions: Favorite / Add-to-collection / Back. */
 @Composable
 private fun GameDetailActionRail(
     favoriteState: FavoriteUiState,
@@ -1218,9 +1266,10 @@ private fun GameDetailActionRail(
 ) {
     val navigator = LocalFocusNavigator.current
     val favorite = remember(favoriteState) { favoriteRailUi(favoriteState) }
-    Column(
+    Row(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         TvOutlinedButton(
             onClick = onFavoriteClick,

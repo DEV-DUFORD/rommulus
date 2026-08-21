@@ -25,6 +25,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "atomic_file_store.h"
@@ -64,6 +65,11 @@ std::atomic<bool> g_signal_flag{false};
 int g_sessionLockFd = -1;
 
 void signalHandler(int) { g_signal_flag.store(true, std::memory_order_relaxed); }
+
+// Teardown can block inside an uncooperative core or its dependencies. The
+// result is committed before teardown starts, so this process-level timeout
+// can terminate safely without leaving the desktop supervisor waiting.
+void teardownTimeoutHandler(int) { ::_exit(0); }
 
 // Identity control lists for BindingCaptureCoordinator::sample(): the level
 // arrays in SdlInput::CapturePortSample are indexed by PadButton/PadAxis
@@ -754,8 +760,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    session.stop();
-
     const romm::player::ExitKind exitKind = session.diagnostics().coreRequestedShutdown.load()
                                                ? romm::player::ExitKind::CoreRequestedShutdown
                                                : romm::player::ExitKind::Completed;
@@ -763,7 +767,18 @@ int main(int argc, char* argv[]) {
                 static_cast<int64_t>(session.diagnostics().frameCount.load()), underrunFrames,
                 overrunFrames, nullptr);
 
-    // 13. Cleanup.
+    // 13. Cleanup. A core is allowed to take time to deinitialize, but it
+    // must not keep the desktop shell waiting forever. A process-level alarm
+    // is deliberately used instead of another thread: it still fires when
+    // teardown deadlocks on a runtime lock.
+    struct sigaction teardownTimeout {};
+    teardownTimeout.sa_handler = teardownTimeoutHandler;
+    sigemptyset(&teardownTimeout.sa_mask);
+    ::sigaction(SIGALRM, &teardownTimeout, nullptr);
+    ::alarm(5);
+    session.stop();
+    ::alarm(0);
+
     session.releaseProcessSlot();  // stop() already released; idempotent no-op
     SDL_Quit();
     return 0;

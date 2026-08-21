@@ -81,6 +81,19 @@ class SaveSyncStatusPresenterTest {
     }
 
     @Test
+    fun `no local save distinguishes server availability`() {
+        assertThat(
+            saveStatusLabel(SaveSyncUiState.NoSave, ServerSaveAvailability.Checking),
+        ).isEqualTo("Save: checking server…")
+        assertThat(
+            saveStatusLabel(SaveSyncUiState.NoSave, ServerSaveAvailability.Available),
+        ).isEqualTo("Save: available on server")
+        assertThat(
+            saveStatusLabel(SaveSyncUiState.NoSave, ServerSaveAvailability.Unavailable),
+        ).isEqualTo("Save: server unavailable")
+    }
+
+    @Test
     fun `no save offers no actions`() {
         assertThat(saveSyncUiActions(SaveSyncUiState.NoSave))
             .isEqualTo(SaveSyncUiActions(canSyncNow = false, canResolveConflict = false))

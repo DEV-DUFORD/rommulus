@@ -8,6 +8,7 @@ import com.romm.androidtv.romm.SyncAction
 import com.romm.androidtv.romm.SyncNegotiateInfo
 import com.romm.androidtv.romm.SyncNegotiateResult
 import com.romm.androidtv.romm.SyncOperation
+import com.romm.androidtv.romm.save.SaveSyncOutcome
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.firmwareDir
@@ -34,6 +35,7 @@ import com.romm.desktop.sync.FakeDeviceIdentityLoader
 import com.romm.desktop.sync.FakeRommSyncGateway
 import com.romm.desktop.sync.FakeSaveSyncSessionReader
 import com.romm.desktop.sync.FileSaveContentGateway
+import com.romm.desktop.sync.PreLaunchSaveSynchronizer
 import com.romm.desktop.sync.SaveSyncDrainExecutor
 import com.romm.desktop.sync.SaveSyncSession
 import org.assertj.core.api.Assertions.assertThat
@@ -174,6 +176,8 @@ class DesktopSaveSyncWiringTest {
                 deviceIdentityLoader = FakeDeviceIdentityLoader(DeviceIdentity("install-1", "device-1")),
                 sync = syncGateway,
             ),
+            preLaunchSaveSynchronizerOverride =
+                PreLaunchSaveSynchronizer { SaveSyncOutcome.NoOpSynced(0L) },
         )
         return Wired(c, supervisor, launcher, playerProcess)
     }

@@ -28,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
@@ -112,7 +114,16 @@ fun OnboardingScreen(
     Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(LocalRommulusColors.current.nightHi)
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            LocalRommulusColors.current.stageHi,
+                            LocalRommulusColors.current.stageLo,
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(1400f, 1400f),
+                    ),
+                )
                 .keyboardShortcuts(
                     onBack = {
                         if (state.step == OnboardingStep.WELCOME) {
@@ -574,7 +585,10 @@ internal fun qrErrorMessage(reason: QrLoginError): String = when (reason) {
     QrLoginError.NETWORK -> "Network error while polling the QR login."
     QrLoginError.INSUFFICIENT_SCOPES -> "Your ROMM account does not have the scopes required for QR login."
     QrLoginError.VERIFICATION -> "The server rejected the QR session verification."
-    QrLoginError.PERSISTENCE -> "Could not persist the QR login session on this device."
+    QrLoginError.TOKEN_PERSISTENCE -> "Could not save the QR token to this device's keyring."
+    QrLoginError.TOKEN_VERIFICATION -> "Could not read the QR token back from this device's keyring."
+    QrLoginError.DEVICE_IDENTITY_PERSISTENCE -> "Could not save this device's QR pairing."
+    QrLoginError.SESSION_PERSISTENCE -> "Could not save the QR login session on this device."
 }
 
 /**

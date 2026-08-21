@@ -77,9 +77,11 @@ class SecretServiceDbusBackendConformanceTest {
     @Test
     fun `scopes are isolated across origins`() {
         assumeAvailable()
-        assertThat(backend.store("origin-a|user", "value-a")).isTrue()
-        assertThat(backend.retrieve("origin-b|user")).isNull()
-        assertThat(backend.retrieve("origin-a|user")).isEqualTo("value-a")
+        val firstScope = "https://romm.example.com|user"
+        val secondScope = "https://other.example.com|user"
+        assertThat(backend.store(firstScope, "value-a")).isTrue()
+        assertThat(backend.retrieve(secondScope)).isNull()
+        assertThat(backend.retrieve(firstScope)).isEqualTo("value-a")
     }
 
     @Test

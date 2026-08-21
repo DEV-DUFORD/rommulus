@@ -45,6 +45,10 @@ data class AdoptSaveRequest(
      * the same platform, so a mismatch here is not treated as untrustworthy).
      */
     val chosenSaveEmulator: String?,
+    /**
+     * Opaque RomM `content_hash` metadata. The pinned server's value is MD5-based (including a
+     * special deterministic ZIP fingerprint), not a SHA-256 digest of the downloaded response.
+     */
     val chosenSaveContentHash: String?,
 )
 
@@ -86,9 +90,10 @@ sealed interface SaveSyncOutcome {
 
     /**
      * The server's save was downloaded and quarantined because [SaveSyncRequest.expectedSramSizeBytes]
-     * was unknown at pre-launch time. Provenance (core id) and hash were validated, but exact size
-     * cannot be confirmed until the emulation core loads the ROM. The candidate bytes are preserved
-     * at [quarantinedPath]; the RomM save is [rommSaveId]. Later orchestration must:
+     * was unknown at pre-launch time. Provenance (core id) was validated, but exact size cannot be
+     * confirmed until the emulation core loads the ROM. Server hash metadata is carried through
+     * for journaling; it is not itself the SRAM compatibility gate. The candidate bytes are
+     * preserved at [quarantinedPath]; the RomM save is [rommSaveId]. Later orchestration must:
      * (1) query JNI for the actual SRAM size, (2) compare against [downloadedSizeBytes],
      * (3) on exact match, restore candidate into core memory and atomically checkpoint,
      * (4) confirm the download via `/downloaded` and complete the sync session [sessionId].

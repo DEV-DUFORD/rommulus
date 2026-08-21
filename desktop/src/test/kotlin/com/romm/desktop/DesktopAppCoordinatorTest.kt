@@ -979,6 +979,32 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
+    fun `known BIOS hashes are ready before a manual desktop selection`(@TempDir dir: Path) = runBlocking {
+        val paths = dir.testRoot()
+        val server = StubServer().apply { start() }
+        try {
+            val c = coordinator(paths)
+            c.settingsStore.write(mapOf(SettingsKeys.ORIGIN to server.origin))
+
+            server.platformsJson(5L, "segacd")
+            server.firmwareJson(
+                """{"id": 41, "file_name": "custom-sega.bin", "file_size_bytes": 1, """ +
+                    """"sha1_hash": "f4f315adcef9b8feb0364c21ab7f0eaf5457f3ed", "is_verified": true}""",
+            )
+            assertThat(c.checkRequiredBiosAvailability("segacd")).isEqualTo(RequiredBiosState.Ready)
+
+            server.platformsJson(6L, "psx")
+            server.firmwareJson(
+                """{"id": 42, "file_name": "custom-psx.bin", "file_size_bytes": 1, """ +
+                    """"sha1_hash": "0555c6fae8906f3f09baf5988f00e55f88e9f30b", "is_verified": true}""",
+            )
+            assertThat(c.checkRequiredBiosAvailability("psx")).isEqualTo(RequiredBiosState.Ready)
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
     fun `launchPlayer surfaces the focused missing-BIOS message when the server has no Sega CD firmware`(@TempDir dir: Path) {
         val paths = dir.testRoot()
         installGenesisPlusGx(paths)

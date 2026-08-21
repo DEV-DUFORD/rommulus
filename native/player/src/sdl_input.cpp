@@ -273,13 +273,14 @@ bool SdlInput::pollPauseTrigger() {
         const bool rightStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
 
         // Select maps to Back on SDL pads, so Android's Start+Select combo is
-        // polled as Start+Back; L3+R3 is its default binding. Both are
-        // edge-detected (pressed && !wasPressed), mirroring the Android
-        // router's evaluatePauseMenuCombination().
+        // polled as Start+Back; L3+R3 is its default binding. Back by itself
+        // must remain available to games as Select, unlike Android TV's
+        // system-level Back key. Both combos are edge-detected, mirroring the
+        // Android router's evaluatePauseMenuCombination().
         const bool comboNow = (start && back) || (leftStick && rightStick);
         const bool comboPrev = (prev.start && prev.back) ||
                                (prev.leftStick && prev.rightStick);
-        if ((back && !prev.back) || (comboNow && !comboPrev)) {
+        if (comboNow && !comboPrev) {
             trigger = true;
         }
 

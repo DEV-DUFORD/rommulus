@@ -133,6 +133,9 @@ sealed interface QrLoginPollResult {
     data object Expired : QrLoginPollResult
     data object InsufficientScopes : QrLoginPollResult
     data object VerificationFailure : QrLoginPollResult
-    data object PersistenceFailure : QrLoginPollResult
+    data object TokenPersistenceFailure : QrLoginPollResult
+    data object TokenVerificationFailure : QrLoginPollResult
+    data object DeviceIdentityPersistenceFailure : QrLoginPollResult
+    data object SessionPersistenceFailure : QrLoginPollResult
     data object NetworkFailure : QrLoginPollResult
 }

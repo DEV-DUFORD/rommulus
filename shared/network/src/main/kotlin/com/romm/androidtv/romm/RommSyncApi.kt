@@ -276,6 +276,10 @@ data class ServerSaveInfo(
     val fileName: String,
     val slot: String?,
     val emulator: String?,
+    /**
+     * Opaque RomM save fingerprint. The pinned backend currently emits a 32-character MD5-based
+     * value (with deterministic per-entry hashing for ZIP saves); clients must not assume SHA-256.
+     */
     val contentHash: String?,
     val updatedAt: Instant?,
     val fileSizeBytes: Long,

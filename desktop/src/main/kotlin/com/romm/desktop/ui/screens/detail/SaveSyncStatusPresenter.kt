@@ -28,12 +28,28 @@ sealed interface SaveSyncUiState {
     ) : SaveSyncUiState
 }
 
+/** Server save availability shown before this device has a local autosave replica. */
+enum class ServerSaveAvailability {
+    Checking,
+    Available,
+    None,
+    Unavailable,
+}
+
 /**
  * The short status line shown under the detail screen's Play button. A pure function of
  * [SaveSyncUiState] so it is unit-testable without Compose.
  */
-fun saveStatusLabel(state: SaveSyncUiState): String = when (state) {
-    is SaveSyncUiState.NoSave -> "Save: none"
+fun saveStatusLabel(
+    state: SaveSyncUiState,
+    serverAvailability: ServerSaveAvailability = ServerSaveAvailability.None,
+): String = when (state) {
+    is SaveSyncUiState.NoSave -> when (serverAvailability) {
+        ServerSaveAvailability.Checking -> "Save: checking server…"
+        ServerSaveAvailability.Available -> "Save: available on server"
+        ServerSaveAvailability.None -> "Save: none"
+        ServerSaveAvailability.Unavailable -> "Save: server unavailable"
+    }
     is SaveSyncUiState.Replica -> "Save: ${state.syncStatus.uiLabel}"
 }
 

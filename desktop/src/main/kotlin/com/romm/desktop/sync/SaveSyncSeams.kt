@@ -27,9 +27,14 @@ import com.romm.androidtv.romm.SyncNegotiateResult
 /**
  * The currently authenticated session, as needed by the drain: the canonical server origin and,
  * when known, the username. Mirrors Android's `DurableSession`. Null from [SaveSyncSessionReader.current]
- * means "not signed in" (operations then classify AUTH_REQUIRED).
+ * means "not signed in" (operations then classify AUTH_REQUIRED). [SaveSyncSession.kioskMode]
+ * lets pre-launch synchronization preserve Android's local-only kiosk behavior.
  */
-data class SaveSyncSession(val origin: String, val username: String?)
+data class SaveSyncSession(
+    val origin: String,
+    val username: String?,
+    val kioskMode: Boolean = false,
+)
 
 /** Reads the durable current session. Production impl reads the desktop session record store. */
 fun interface SaveSyncSessionReader {
@@ -47,6 +52,42 @@ fun interface SaveSyncDeviceIdentityLoader {
 
 /** SHA-256 (lowercase hex) + byte size of a save payload. */
 data class SaveContentHash(val sha256Hex: String, val sizeBytes: Long)
+
+/**
+ * RomM's server-side `content_hash` for a save. This is deliberately distinct from
+ * [SaveContentHash]: the pinned RomM backend emits a 32-character MD5-based fingerprint
+ * (with a deterministic per-entry fingerprint for ZIP saves), not the client's SHA-256.
+ */
+@JvmInline
+value class RommSaveContentHash private constructor(val hex: String) {
+    companion object {
+        private val HEX_PATTERN = Regex("[0-9a-f]{32}")
+
+        fun parseOrNull(raw: String?): RommSaveContentHash? {
+            val normalized = raw?.trim()?.lowercase() ?: return null
+            return normalized.takeIf(HEX_PATTERN::matches)?.let(::RommSaveContentHash)
+        }
+
+        internal fun computed(hex: String): RommSaveContentHash =
+            checkNotNull(parseOrNull(hex)) { "computed RomM save hash was not 32-character hex" }
+    }
+}
+
+/** Typed result of checking downloaded bytes against a RomM save fingerprint. */
+sealed interface RommSaveContentVerification {
+    data object Match : RommSaveContentVerification
+    data class Mismatch(
+        val expected: RommSaveContentHash,
+        val actual: RommSaveContentHash,
+    ) : RommSaveContentVerification
+
+    data class Unreadable(val detail: String) : RommSaveContentVerification
+}
+
+/** Verifies downloaded save bytes using RomM's server-side `content_hash` algorithm. */
+fun interface RommSaveContentVerifier {
+    fun verify(bytes: ByteArray, expected: RommSaveContentHash): RommSaveContentVerification
+}
 
 /**
  * Local filesystem access for durable autosave SRAM bytes — the desktop mirror of Android's

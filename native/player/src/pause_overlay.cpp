@@ -135,11 +135,11 @@ const Glyph5x7* glyphFor(char c) {
 }
 
 // Colors (packed RGBA).
-constexpr unsigned kDimAlpha = 200;        // ~78% black backdrop over the frozen frame
-constexpr unsigned kPanelBgR = 20, kPanelBgG = 24, kPanelBgB = 29;
-constexpr unsigned kAccentR = 47, kAccentG = 111, kAccentB = 237;  // selection highlight
-constexpr unsigned kDialogBgR = 26, kDialogBgG = 32, kDialogBgB = 38;
-constexpr unsigned kButtonIdleR = 42, kButtonIdleG = 49, kButtonIdleB = 56;
+constexpr unsigned kDimAlpha = 160;
+constexpr unsigned kPanelBgR = 10, kPanelBgG = 23, kPanelBgB = 25;
+constexpr unsigned kAccentR = 63, kAccentG = 144, kAccentB = 153;
+constexpr unsigned kDialogBgR = 15, kDialogBgG = 31, kDialogBgB = 33;
+constexpr unsigned kButtonIdleR = 40, kButtonIdleG = 97, kButtonIdleB = 106;
 
 void fillRect(SDL_Renderer* renderer, float x, float y, float w, float h,
               unsigned r, unsigned g, unsigned b, unsigned a) {
@@ -206,7 +206,9 @@ void PauseOverlay::draw(SDL_Renderer* renderer, const PauseMenu& menu,
     const float Hf = static_cast<float>(H);
     // One layout unit: keeps the overlay proportional at any core resolution
     // (240p handheld cores up to 720p+).
-    const float s = std::clamp(std::min(Wf / 560.0f, Hf / 160.0f), 1.0f, 8.0f);
+    // Keep the bitmap fallback legible without turning it into oversized pixel art on
+    // modern displays. The former 560x160 reference scaled glyphs aggressively at 720p+.
+    const float s = std::clamp(std::min(Wf / 720.0f, Hf / 300.0f), 1.0f, 4.0f);
 
     // 1. Dim backdrop — the frozen last frame shows through.
     fillRect(renderer, 0.0f, 0.0f, Wf, Hf, 0, 0, 0, kDimAlpha);

@@ -58,6 +58,7 @@ compose.desktop {
             // TODO(phase 14): packaging per plan section 16 (tar.zst, then Flatpak).
             packageName = "rommulus"
             packageVersion = "1.0.0"
+            modules("java.sql", "jdk.security.auth")
         }
     }
 }
