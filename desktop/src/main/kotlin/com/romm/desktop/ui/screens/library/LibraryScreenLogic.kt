@@ -60,14 +60,17 @@ fun gridParentScreen(query: RomQuery): Screen = when (query) {
 }
 
 /**
- * Picks the best image URL for a platform tile: RomM's bundled glyph
- * candidates (SVG then ICO) first, falling back to the metadata-provider logo
- * (e.g. an IGDB photo/wordmark) only if the server has neither.
+ * Builds the fallback chain for a platform tile: RomM's bundled glyph
+ * candidates (SVG then ICO) first, followed by the metadata-provider logo
+ * (e.g. an IGDB photo/wordmark).
  */
+fun platformTileImageUrls(platform: PlatformSummary): List<String> =
+    (platform.iconUrlCandidates + listOfNotNull(platform.iconUrl, platform.logoUrl))
+        .filter(String::isNotBlank)
+        .distinct()
+
 fun platformTileImageUrl(platform: PlatformSummary): String? =
-    platform.iconUrlCandidates.firstOrNull { it.isNotBlank() }
-        ?: platform.iconUrl?.takeIf { it.isNotBlank() }
-        ?: platform.logoUrl?.takeIf { it.isNotBlank() }
+    platformTileImageUrls(platform).firstOrNull()
 
 /** The result-count number to display for a [SearchUiState], mirroring the Android label rule:
  * hide-unsupported ON → visible count; OFF → server total. */

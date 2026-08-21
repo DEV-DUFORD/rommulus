@@ -45,6 +45,7 @@ fun PlatformsScreen(coordinator: DesktopAppCoordinator) {
             title = platform.displayName,
             subtitle = "${platform.romCount} games",
             imageUrl = platformTileImageUrl(platform),
+            fallbackImageUrls = platformTileImageUrls(platform).drop(1),
             onClick = { coordinator.openPlatformDetail(platform.id) },
             modifier = modifier,
         )

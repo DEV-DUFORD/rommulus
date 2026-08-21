@@ -268,14 +268,13 @@ private fun GameDetailContent(
         }
     }
 
-    // Initial focus: once the detail loads, the rail composes — land keyboard/controller
-    // focus on its Favorite button. The Play button in the body is also focusable
-    // ("detail:play"); the rail keeps initial focus so the primary actions stay reachable.
-    val favoriteFocusRequester = remember { FocusRequester() }
+    // The primary action is the first controller/keyboard focus target, matching Android.
+    val playFocusRequester = remember { FocusRequester() }
+    val headerFocusRequester = remember { FocusRequester() }
     val firstScreenshotFocusRequester = remember { FocusRequester() }
     val detailLoaded = uiState.detail is SectionState.Loaded
     LaunchedEffect(detailLoaded) {
-        if (detailLoaded) favoriteFocusRequester.requestFocusSafely()
+        if (detailLoaded) playFocusRequester.requestFocusSafely()
     }
 
     val loadedDetail = (uiState.detail as? SectionState.Loaded)?.data
@@ -405,8 +404,10 @@ private fun GameDetailContent(
                 },
                 onChooseSaveClick = { loadSavesForPicker() },
                 onChooseFileClick = { showVersionPicker = true },
+                playFocusRequester = playFocusRequester,
+                playUpFocusRequester = headerFocusRequester,
                 firstScreenshotFocusRequester = firstScreenshotFocusRequester,
-                screenshotUpFocusRequester = favoriteFocusRequester,
+                screenshotUpFocusRequester = playFocusRequester,
             )
         }
 
@@ -420,10 +421,8 @@ private fun GameDetailContent(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(end = 32.dp, top = 24.dp),
-                favoriteFocusRequester = favoriteFocusRequester,
-                downFocusRequester = firstScreenshotFocusRequester.takeIf {
-                    loadedDetail.screenshotUrls.isNotEmpty()
-                },
+                downFocusRequester = playFocusRequester,
+                favoriteFocusRequester = headerFocusRequester,
             )
         }
 
@@ -543,10 +542,14 @@ private fun GameDetailBody(
     onOpenSibling: (Long) -> Unit,
     onChooseSaveClick: () -> Unit,
     onChooseFileClick: () -> Unit,
+    playFocusRequester: FocusRequester,
+    playUpFocusRequester: FocusRequester,
     firstScreenshotFocusRequester: FocusRequester,
     screenshotUpFocusRequester: FocusRequester,
 ) {
     val colors = LocalRommulusColors.current
+    val chooseSaveFocusRequester = remember { FocusRequester() }
+    val chooseFileFocusRequester = remember { FocusRequester() }
 
     LazyColumn(
         modifier = Modifier
@@ -626,6 +629,8 @@ private fun GameDetailBody(
                                 isStaging = isStaging,
                                 status = playStatus,
                                 onPlayClick = onPlayClick,
+                                focusRequester = playFocusRequester,
+                                upFocusRequester = playUpFocusRequester,
                                 modifier = Modifier.weight(1f),
                             )
                             // "Choose Save" (Android parity): opens the save picker overlay listing
@@ -634,6 +639,9 @@ private fun GameDetailBody(
                             ChooseSaveButton(
                                 onClick = onChooseSaveClick,
                                 enabled = !isStaging,
+                                focusRequester = chooseSaveFocusRequester,
+                                leftFocusRequester = playFocusRequester,
+                                upFocusRequester = playUpFocusRequester,
                                 modifier = Modifier.weight(1f),
                             )
                             // "Choose File" (Android parity): only when the ROM has sibling versions.
@@ -641,6 +649,9 @@ private fun GameDetailBody(
                                 ChooseFileButton(
                                     onClick = onChooseFileClick,
                                     enabled = !isStaging,
+                                    focusRequester = chooseFileFocusRequester,
+                                    leftFocusRequester = chooseSaveFocusRequester,
+                                    upFocusRequester = playUpFocusRequester,
                                     modifier = Modifier.weight(1f),
                                 )
                             }
@@ -718,10 +729,13 @@ private fun GameDetailBody(
  * is disabled — not focusable, not clickable (Android `PlayButton` parity).
  */
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun PlayButton(
     enabled: Boolean,
     status: PlayerLaunchResult?,
     onPlayClick: () -> Unit,
+    focusRequester: FocusRequester,
+    upFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
     isStaging: Boolean = false,
 ) {
@@ -745,6 +759,8 @@ private fun PlayButton(
                     color = if (active && isFocused) colors.romm300 else Color.Transparent,
                     shape = RoundedCornerShape(8.dp),
                 )
+                .focusRequester(focusRequester)
+                .focusProperties { up = upFocusRequester }
                 .then(
                     if (active) {
                         Modifier.focusableItem("detail:play", navigator, onPlayClick)
@@ -897,6 +913,9 @@ private fun DisabledPlayButton() {
 private fun ChooseFileButton(
     onClick: () -> Unit,
     enabled: Boolean = true,
+    focusRequester: FocusRequester,
+    leftFocusRequester: FocusRequester,
+    upFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalRommulusColors.current
@@ -914,6 +933,11 @@ private fun ChooseFileButton(
                 color = if (isFocused && enabled) colors.romm300 else colors.textSecondary.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(8.dp),
             )
+            .focusRequester(focusRequester)
+            .focusProperties {
+                left = leftFocusRequester
+                up = upFocusRequester
+            }
             .then(
                 // Disabled while staging (Android parity): not focusable, not clickable.
                 if (enabled) Modifier.focusableItem("detail:choose-file", navigator, onClick) else Modifier,
@@ -940,6 +964,9 @@ private fun ChooseFileButton(
 private fun ChooseSaveButton(
     onClick: () -> Unit,
     enabled: Boolean = true,
+    focusRequester: FocusRequester,
+    leftFocusRequester: FocusRequester,
+    upFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalRommulusColors.current
@@ -957,6 +984,11 @@ private fun ChooseSaveButton(
                 color = if (isFocused && enabled) colors.romm300 else colors.textSecondary.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(8.dp),
             )
+            .focusRequester(focusRequester)
+            .focusProperties {
+                left = leftFocusRequester
+                up = upFocusRequester
+            }
             .then(
                 // Disabled while staging (Android parity): not focusable, not clickable.
                 if (enabled) Modifier.focusableItem("detail:choose-save", navigator, onClick) else Modifier,
@@ -1255,14 +1287,15 @@ private fun SaveActionButton(
 
 /** Header actions: Favorite / Add-to-collection / Back. */
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun GameDetailActionRail(
     favoriteState: FavoriteUiState,
     onFavoriteClick: () -> Unit,
     onAddClick: () -> Unit,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
+    downFocusRequester: FocusRequester,
     favoriteFocusRequester: FocusRequester,
-    downFocusRequester: FocusRequester?,
 ) {
     val navigator = LocalFocusNavigator.current
     val favorite = remember(favoriteState) { favoriteRailUi(favoriteState) }
@@ -1276,9 +1309,10 @@ private fun GameDetailActionRail(
             enabled = favoriteState !is FavoriteUiState.Loading && favoriteState !is FavoriteUiState.Updating,
             modifier = Modifier
                 .focusRequester(favoriteFocusRequester)
-                .then(
-                    downFocusRequester?.let { Modifier.focusProperties { down = it } } ?: Modifier,
-                )
+                .focusProperties {
+                    down = downFocusRequester
+                    left = FocusRequester.Cancel
+                }
                 .focusableItem("detail:favorite", navigator, onFavoriteClick),
         ) {
             Icon(imageVector = favorite.icon, contentDescription = null)
@@ -1288,9 +1322,10 @@ private fun GameDetailActionRail(
         TvOutlinedButton(
             onClick = onAddClick,
             modifier = Modifier
-                .then(
-                    downFocusRequester?.let { Modifier.focusProperties { down = it } } ?: Modifier,
-                )
+                .focusProperties {
+                    down = downFocusRequester
+                    left = FocusRequester.Cancel
+                }
                 .focusableItem("detail:add-collection", navigator, onAddClick),
         ) {
             Icon(imageVector = Icons.Filled.Add, contentDescription = null)
@@ -1300,9 +1335,10 @@ private fun GameDetailActionRail(
         TvOutlinedButton(
             onClick = onBackClick,
             modifier = Modifier
-                .then(
-                    downFocusRequester?.let { Modifier.focusProperties { down = it } } ?: Modifier,
-                )
+                .focusProperties {
+                    down = downFocusRequester
+                    left = FocusRequester.Cancel
+                }
                 .focusableItem("detail:back", navigator, onBackClick),
         ) {
             Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)

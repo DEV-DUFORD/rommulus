@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -22,7 +21,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.SectionState
@@ -33,19 +31,13 @@ import com.romm.desktop.ui.components.ErrorBanner
 import com.romm.desktop.ui.components.GameCard
 import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.LoadingIndicator
-import com.romm.desktop.ui.components.TileCard
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
 
-/** Fixed width for platform/collection tiles inside the Home LazyRow shelves. */
-private val DesktopTileShelfTileWidth: Dp = 176.dp
-
 /**
- * Desktop Home screen (Phase 6): a vertically scrolling stack of five
- * independently-loading shelves — Continue Playing, Recently Added, and
- * Favorites (ROM shelves of [GameCard] in a [LazyRow]) plus Platforms and
- * Collections (tile shelves of [TileCard] in a [LazyRow]).
+ * Desktop Home screen: Android-parity shelves for Continue Playing, Recently
+ * Added, and Favorites.
  *
  * Drives the shared [com.romm.androidtv.library.HomePresenter] obtained from
  * the [DesktopAppCoordinator] (`coordinator.homePresenter()`). The presenter is
@@ -99,52 +91,6 @@ fun HomeScreen(
                 state = uiState.favorites,
                 onRetry = presenter::retryFavorites,
                 onCardClick = { rom -> coordinator.openGameDetail(rom.id, Screen.HOME) },
-            )
-        }
-        item {
-            TileShelf(
-                title = "Platforms",
-                state = uiState.platforms,
-                onRetry = presenter::retryPlatforms,
-                key = { it.id },
-                tile = { platform ->
-                    val navigator = LocalFocusNavigator.current
-                    TileCard(
-                        title = platform.displayName,
-                        subtitle = "${platform.romCount} games",
-                        // Prefer RomM's bundled platform glyphs (SVG then ICO), falling back to
-                        // the metadata-provider logo only if the server has neither.
-                        imageUrl = platformTileImageUrl(platform),
-                        onClick = { coordinator.openPlatformDetail(platform.id) },
-                        modifier = Modifier
-                            .width(DesktopTileShelfTileWidth)
-                            .focusableItem("home:platform:${platform.id}", navigator) {
-                                coordinator.openPlatformDetail(platform.id)
-                            },
-                    )
-                },
-            )
-        }
-        item {
-            TileShelf(
-                title = "Collections",
-                state = uiState.collections,
-                onRetry = presenter::retryCollections,
-                key = { it.id },
-                tile = { collection ->
-                    val navigator = LocalFocusNavigator.current
-                    TileCard(
-                        title = collection.name,
-                        subtitle = "${collection.romCount} games",
-                        imageUrl = collection.coverUrl,
-                        onClick = { coordinator.openCollectionDetail(collection.id) },
-                        modifier = Modifier
-                            .width(DesktopTileShelfTileWidth)
-                            .focusableItem("home:collection:${collection.id}", navigator) {
-                                coordinator.openCollectionDetail(collection.id)
-                            },
-                    )
-                },
             )
         }
     }
@@ -203,58 +149,6 @@ private fun RomShelf(
                             },
                         )
                     }
-                }
-            }
-
-            SectionDisplayState.EMPTY -> Unit
-        }
-    }
-}
-
-/**
- * A horizontally scrolling tile shelf (Platforms / Collections), generic over
- * the tile item type. Omitted entirely when its [SectionState] is empty-loaded.
- */
-@Composable
-private fun <T> TileShelf(
-    title: String,
-    state: SectionState<List<T>>,
-    onRetry: () -> Unit,
-    key: (T) -> Any,
-    tile: @Composable (T) -> Unit,
-) {
-    val colors = LocalRommulusColors.current
-
-    if (sectionDisplayState(state) == SectionDisplayState.EMPTY) return
-
-    Column(modifier = Modifier.padding(bottom = 28.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = colors.textPrimary,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
-
-        when (sectionDisplayState(state)) {
-            SectionDisplayState.LOADING -> ShelfPlaceholder {
-                LoadingIndicator()
-            }
-
-            SectionDisplayState.ERROR -> ShelfPlaceholder {
-                val error = (state as? SectionState.Error)?.error ?: RommApiError.SERVER_ERROR
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    ErrorBanner(message = "Couldn't load $title (${errorMessage(error)})")
-                    RetryButton(onRetry = onRetry)
-                }
-            }
-
-            SectionDisplayState.CONTENT -> {
-                val shelfItems = (state as? SectionState.Loaded<List<T>>)?.data ?: return
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    items(shelfItems, key = key) { item -> tile(item) }
                 }
             }
 

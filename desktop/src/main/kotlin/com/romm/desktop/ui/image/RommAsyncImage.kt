@@ -41,6 +41,7 @@ val LocalDesktopImageLoader = compositionLocalOf<DesktopImageLoader> {
  * @param size Target image size (default 200.dp), or null to use the caller's constraints.
  * @param contentScale How to resize/rotate image.
  * @param loader Optional loader override; the app-provided authenticated loader is used by default.
+ * @param onError Invoked from the image-loading coroutine when this model cannot be loaded.
  */
 @Composable
 fun RommAsyncImage(
@@ -50,6 +51,7 @@ fun RommAsyncImage(
     size: Dp? = 200.dp,
     contentScale: ContentScale = ContentScale.Crop,
     loader: DesktopImageLoader? = null,
+    onError: (() -> Unit)? = null,
 ) {
     val imageLoader = loader ?: LocalDesktopImageLoader.current
     var loadResult by remember(model) { mutableStateOf<ImageLoadResult>(ImageLoadResult.Loading) }
@@ -61,6 +63,7 @@ fun RommAsyncImage(
         } else {
             ImageLoadResult.Error
         }
+        if (loadResult is ImageLoadResult.Error) onError?.invoke()
     }
 
     val imageModifier = if (size != null) modifier.size(size) else modifier

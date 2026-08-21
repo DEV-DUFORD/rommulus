@@ -170,6 +170,28 @@ class LibraryScreenLogicTest {
         }
 
         @Test
+        fun `retains the ICO fallback for platforms without SVG artwork`() {
+            val platform = PlatformSummary(
+                id = 4L,
+                displayName = "Sega CD",
+                romCount = 5,
+                logoUrl = "https://igdb.example/sega-cd.png",
+                iconUrl = "https://romm.example/assets/platforms/segacd.svg",
+                iconUrlCandidates = listOf(
+                    "https://romm.example/assets/platforms/segacd.svg",
+                    "https://romm.example/assets/platforms/segacd.ico",
+                ),
+                slug = "segacd",
+            )
+
+            assertThat(platformTileImageUrls(platform)).containsExactly(
+                "https://romm.example/assets/platforms/segacd.svg",
+                "https://romm.example/assets/platforms/segacd.ico",
+                "https://igdb.example/sega-cd.png",
+            )
+        }
+
+        @Test
         fun `skips blank candidates and falls back to the logo`() {
             val platform = PlatformSummary(
                 id = 2L,

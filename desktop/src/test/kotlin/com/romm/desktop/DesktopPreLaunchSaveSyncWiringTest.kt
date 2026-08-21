@@ -191,13 +191,14 @@ class DesktopPreLaunchSaveSyncWiringTest {
 
         val result = wired.coordinator.launchPlayer(ROM_ID)
 
-        assertThat(result).isInstanceOf(PlayerLaunchResult.Started::class.java)
+        val started = result as PlayerLaunchResult.Started
         val request = wired.launcher.launches.single()
         assertThat(Files.readAllBytes(Path.of(request.savePath))).containsExactly(*SERVER_BYTES)
         assertThat(request.expectedSaveSize).isNull()
         assertThat(wired.store.findByScope(
             SaveReplicaScope(SERVER_KEY, USERNAME, ROM_ID, ROM_HASH, SLOT),
         )?.syncStatus).isEqualTo(SaveSyncStatus.AWAITING_CORE_VALIDATION)
+        waitForReconciled(wired, started.sessionId)
     }
 
     @Test

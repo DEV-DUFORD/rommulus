@@ -16,7 +16,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,12 +42,19 @@ private val TileCardShape = RoundedCornerShape(8.dp)
 fun TileCard(
     title: String,
     imageUrl: String?,
+    fallbackImageUrls: List<String> = emptyList(),
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    val imageUrls = remember(imageUrl, fallbackImageUrls) {
+        (listOfNotNull(imageUrl?.takeIf { it.isNotBlank() }) + fallbackImageUrls)
+            .filter(String::isNotBlank)
+            .distinct()
+    }
+    var imageIndex by remember(imageUrls) { mutableIntStateOf(0) }
 
     Column(
         modifier = modifier
@@ -69,12 +78,16 @@ fun TileCard(
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            if (imageUrl != null && imageUrl.isNotBlank()) {
+            val currentImageUrl = imageUrls.getOrNull(imageIndex)
+            if (currentImageUrl != null) {
                 RommAsyncImage(
-                    model = imageUrl,
+                    model = currentImageUrl,
                     contentDescription = title,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
+                    onError = {
+                        if (imageIndex < imageUrls.lastIndex) imageIndex += 1
+                    },
                 )
             } else {
                 // No icon placeholder on desktop — just the themed background.
