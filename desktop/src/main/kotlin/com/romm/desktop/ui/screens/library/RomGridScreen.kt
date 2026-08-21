@@ -1,21 +1,14 @@
 package com.romm.desktop.ui.screens.library
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,11 +25,9 @@ import com.romm.androidtv.library.RomQuery
 import com.romm.androidtv.library.SectionState
 import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.Screen
-import com.romm.desktop.ui.components.GameCard
 import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.LoadingIndicator
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
-import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
 
 /**
@@ -111,36 +102,19 @@ fun RomGridScreen(
                         itemCount = section.data.size,
                         onLoadMore = presenter::loadMore,
                     )
-                    LazyVerticalGrid(
-                        state = gridState,
-                        columns = GridCells.Adaptive(minSize = 136.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        // weight(1f) bounds the grid to the remaining Column height so it owns
-                        // its own scrolling — without it the last row can end up unreachable.
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                    ) {
-                        items(section.data, key = { it.id }) { rom ->
-                            GameCard(
-                                rom = rom,
-                                onClick = { coordinator.openGameDetail(rom.id, parent) },
-                                modifier = Modifier.focusableItem("grid:${rom.id}", navigator) {
-                                    coordinator.openGameDetail(rom.id, parent)
-                                },
-                            )
-                        }
-                        if (uiState.isLoadingMore) {
-                            item {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    CircularProgressIndicator(color = colors.romm500)
-                                }
-                            }
-                        }
-                    }
+                    // Positional D-pad grid navigation (Android positionalGridNeighbor parity):
+                    // Up/Down move to the card directly above/below, scrolling when needed.
+                    // weight(1f) bounds the grid to the remaining Column height so it owns its
+                    // own scrolling — without it the last row can end up unreachable.
+                    PositionalRomGrid(
+                        navigator = navigator,
+                        gridState = gridState,
+                        roms = section.data,
+                        cardKeyPrefix = "grid:",
+                        onOpen = { id -> coordinator.openGameDetail(id, parent) },
+                        modifier = Modifier.weight(1f),
+                        isLoadingMore = uiState.isLoadingMore,
+                    )
                 }
             }
         }

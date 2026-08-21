@@ -1,18 +1,12 @@
 package com.romm.desktop.ui.screens.library
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,11 +22,9 @@ import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.Screen
 import com.romm.desktop.ui.components.DesktopTextField
 import com.romm.desktop.ui.components.ErrorBanner
-import com.romm.desktop.ui.components.GameCard
 import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.LoadingIndicator
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
-import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
 
 /**
@@ -140,24 +132,16 @@ fun SearchScreen(
                     itemCount = uiState.roms.size,
                     onLoadMore = presenter::loadMore,
                 )
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Adaptive(minSize = 136.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                ) {
-                    items(uiState.roms, key = { it.id }) { rom ->
-                        GameCard(
-                            rom = rom,
-                            onClick = { coordinator.openGameDetail(rom.id, Screen.SEARCH) },
-                            modifier = Modifier.focusableItem("search:${rom.id}", navigator) {
-                                coordinator.openGameDetail(rom.id, Screen.SEARCH)
-                            },
-                        )
-                    }
-                }
+                // Positional D-pad grid navigation (Android positionalGridNeighbor parity):
+                // Up/Down move to the card directly above/below, scrolling when needed.
+                PositionalRomGrid(
+                    navigator = navigator,
+                    gridState = gridState,
+                    roms = uiState.roms,
+                    cardKeyPrefix = "search:",
+                    onOpen = { id -> coordinator.openGameDetail(id, Screen.SEARCH) },
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }

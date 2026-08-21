@@ -7,6 +7,7 @@ import com.romm.androidtv.emulation.model.CoreLicenseFinding
 import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.emulation.model.sha256Hex
+import com.romm.androidtv.library.BiosConfigurationCatalog
 import com.romm.androidtv.library.BiosConfigurationPresenter
 import com.romm.androidtv.library.BiosConfigurationProvider
 import com.romm.androidtv.library.HomePresenter
@@ -196,6 +197,46 @@ sealed interface ChosenSaveAdoption {
     /** [reason] is safe to surface in the UI as-is; nothing was written and no launch happened. */
     data class Failure(val reason: String) : ChosenSaveAdoption
 }
+
+/**
+ * Per-ROM game detail launch state (Android `SavePreLaunchState` parity): whether a launch is
+ * currently staging ("Preparing…" disabled Play button) or the session expired during the last
+ * attempt. Scoped by [romId] — the screen applies it only while [matchesScope] holds, so a stale
+ * state for another ROM never leaks across sibling versions. Transient failure messages are
+ * deliberately NOT here: desktop surfaces those via `PlayerLaunchResult.Failed` under the Play
+ * button (the screen's own `playStatus`).
+ */
+data class GameLaunchUiState(
+    val romId: Long,
+    val isStaging: Boolean = false,
+    val isAuthExpired: Boolean = false,
+) {
+    /** True when this state belongs to the given ROM (Android `matchesScope` parity). */
+    fun matchesScope(romId: Long): Boolean = this.romId == romId
+}
+
+/**
+ * Required-BIOS availability for a BIOS-required console (SEGA CD / PlayStation), desktop mirror
+ * of Android's `RequiredBiosState`. Drives the game detail screen's inline BIOS-unavailable
+ * state; [Ready] renders the normal Play row.
+ */
+sealed interface RequiredBiosState {
+    data object Checking : RequiredBiosState
+    data object Ready : RequiredBiosState
+    data object Missing : RequiredBiosState
+    data object UnverifiedAvailable : RequiredBiosState
+    data class Error(val message: String) : RequiredBiosState
+}
+
+/**
+ * Whether a [PlayerLaunchResult.Failed] reason is an auth-expired condition (the desktop
+ * counterpart of Android routing `PreparationResult.AuthExpired` / token-verification failures to
+ * `SavePreLaunchState.isAuthExpired`). The launch pipeline produces exactly two families: the
+ * BIOS staging "Session expired; log in again…" message and the chosen-save adoption's
+ * "no active session — …" messages.
+ */
+internal fun launchFailureIsAuthExpired(reason: String): Boolean =
+    reason.startsWith("Session expired") || reason.contains("no active session")
 
 /**
  * Maps a failed [FirmwareStagingOutcome] from launch-time BIOS staging to a focused,
@@ -581,6 +622,49 @@ class DesktopAppCoordinator(
      * suspend its own controller navigation while SDL owns game input.
      */
     val activePlayerSessionId = MutableStateFlow<String?>(null)
+
+    /**
+     * Game detail launch state for the current ROM (Android `preLaunchState` parity). The detail
+     * screen collects this to render the "Preparing…" staging Play button and the "Session
+     * expired" + Log in state. A StateFlow (not Compose snapshot state) because [finishGameLaunch]
+     * runs on a worker thread (the same one that calls [launchPlayer]).
+     */
+    val gameLaunchState = MutableStateFlow<GameLaunchUiState?>(null)
+
+    /**
+     * Begin a launch for [romId] (Android `nativeLibraryOnPlay` parity): publishes the staging
+     * state so the detail screen shows a disabled "Preparing…" Play button. Duplicate-entry guard:
+     * returns false without touching state when a launch for the same ROM is already staging, so
+     * repeated clicks cannot restart the pipeline.
+     */
+    fun beginGameLaunch(romId: Long): Boolean {
+        val existing = gameLaunchState.value
+        if (existing != null && existing.matchesScope(romId) && existing.isStaging) return false
+        gameLaunchState.value = GameLaunchUiState(romId, isStaging = true)
+        return true
+    }
+
+    /**
+     * End a launch for [romId] with its [result]: clears staging on success; on an auth-expired
+     * failure publishes the "Session expired" state so the detail screen offers the Log in action;
+     * any other failure clears the state entirely (the screen surfaces the reason via
+     * `PlayerLaunchResult.Failed` under the Play button). No-op when no launch for [romId] is
+     * tracked (e.g. the user navigated away mid-launch).
+     */
+    fun finishGameLaunch(romId: Long, result: PlayerLaunchResult) {
+        val current = gameLaunchState.value
+        if (current == null || !current.matchesScope(romId)) return
+        gameLaunchState.value = when {
+            result is PlayerLaunchResult.Failed && launchFailureIsAuthExpired(result.reason) ->
+                GameLaunchUiState(romId, isAuthExpired = true)
+            else -> null
+        }
+    }
+
+    /** Clears the detail screen's launch state (the "Dismiss" action on the auth-expired state). */
+    fun dismissGameLaunchState() {
+        gameLaunchState.value = null
+    }
 
     /** Post-exit reconciliation hook for a spawned player process (pass the process exit code). */
     fun onPlayerProcessExited(sessionId: String, exitCode: Int): PlayerExitReport {
@@ -1137,6 +1221,17 @@ class DesktopAppCoordinator(
     }
 
     /**
+     * The "Log in" action from the game detail's auth-expired state (Android `routeToCredentials`
+     * parity): routes the app back to onboarding at the SERVER step with the current origin
+     * prefilled so the user re-enters credentials — nothing is auto-submitted. Also clears the
+     * detail screen's launch state (Android sets `preLaunchState = null` on this action).
+     */
+    fun openLogin() {
+        dismissGameLaunchState()
+        invalidateSessionAndReOnboard()
+    }
+
+    /**
      * Explicit sign-out (parity with Android's `SettingsViewModel` `clearSessionFn` +
      * `onSessionInvalidated` pair): clears the durable client token for the current session,
      * clears the session record, and routes the app back to onboarding. Android has no
@@ -1402,6 +1497,36 @@ class DesktopAppCoordinator(
             firmwareDir = paths.firmwareDir(),
             platformSlug = platformSlug,
         )
+
+    /** Whether [platformSlug] is a BIOS-required console (SEGA CD / PlayStation). */
+    fun requiresBios(platformSlug: String): Boolean = platformSlug in BIOS_PLATFORM_SLUGS
+
+    /**
+     * Checks whether a ROM's required BIOS is available (Android `checkRequiredBiosAvailability`
+     * parity) for the game detail screen's inline display. Non-BIOS platforms are always [Ready].
+     * Maps the catalog fetch to [RequiredBiosState] with Android's semantics: a staged/selected
+     * file → [Ready]; an empty catalog → [Missing]; files present but none selected →
+     * [UnverifiedAvailable]; auth expiry / fetch failure → [Error]. Blocking network I/O — callers
+     * dispatch off the UI thread.
+     */
+    suspend fun checkRequiredBiosAvailability(platformSlug: String): RequiredBiosState {
+        if (platformSlug !in BIOS_PLATFORM_SLUGS) return RequiredBiosState.Ready
+        return when (val catalog = biosConfigurationProvider(platformSlug).fetchCatalog()) {
+            is BiosConfigurationCatalog.Success -> when {
+                catalog.options.isEmpty() -> RequiredBiosState.Missing
+                catalog.selectedFirmwareId != null &&
+                    catalog.options.any { it.firmware.firmwareId == catalog.selectedFirmwareId } ->
+                    RequiredBiosState.Ready
+                else -> RequiredBiosState.UnverifiedAvailable
+            }
+            BiosConfigurationCatalog.AuthExpired ->
+                RequiredBiosState.Error("Session expired. Log in again to check for BIOS files.")
+            is BiosConfigurationCatalog.Error ->
+                RequiredBiosState.Error(
+                    "Couldn't check BIOS files (${catalog.message.lowercase().replace('_', ' ')}).",
+                )
+        }
+    }
 
     // ------------------------------------------------------------------ internals
 

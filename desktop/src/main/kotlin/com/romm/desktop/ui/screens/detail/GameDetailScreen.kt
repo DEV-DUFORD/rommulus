@@ -74,6 +74,7 @@ import com.romm.androidtv.storage.records.SaveSyncStatus
 import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.PlayerLaunchResult
 import com.romm.desktop.PlayerSessionEvent
+import com.romm.desktop.RequiredBiosState
 import com.romm.desktop.Screen
 import com.romm.desktop.player.PlayerExitKind
 import com.romm.desktop.player.PlayerExitReport
@@ -279,6 +280,27 @@ private fun GameDetailContent(
 
     val loadedDetail = (uiState.detail as? SectionState.Loaded)?.data
 
+    // Launch state from the coordinator (Android `preLaunchState` parity): "Preparing…" staging
+    // and "Session expired" + Log in. Scoped by romId so a stale state for another ROM never
+    // applies when a sibling version is opened.
+    val launchUiState by coordinator.gameLaunchState.collectAsState()
+    val isStaging = launchUiState?.let { it.matchesScope(romId) && it.isStaging } ?: false
+    val isAuthExpired = launchUiState?.let { it.matchesScope(romId) && it.isAuthExpired } ?: false
+
+    // Required-BIOS availability for SEGA CD / PlayStation (Android `checkRequiredBiosAvailability`
+    // parity): checked once per loaded ROM; the inline state renders only while not Ready. Runs
+    // off the compose thread (catalog fetch is network I/O).
+    var biosState by remember(romId) { mutableStateOf<RequiredBiosState>(RequiredBiosState.Ready) }
+    LaunchedEffect(loadedDetail?.id, loadedDetail?.platformSlug) {
+        val slug = loadedDetail?.platformSlug ?: return@LaunchedEffect
+        if (coordinator.requiresBios(slug)) {
+            biosState = RequiredBiosState.Checking
+            biosState = withContext(Dispatchers.Default) {
+                coordinator.checkRequiredBiosAvailability(slug)
+            }
+        }
+    }
+
     // Save picker ("Choose Save" — Android parity): lists this ROM's server saves via the
     // coordinator; picking an entry records the choice for the upcoming launch
     // (coordinator.chooseSaveForLaunch) — the user then presses Play, no auto-launch.
@@ -328,11 +350,21 @@ private fun GameDetailContent(
                 playEnabled = coordinator.isPlatformPlayable(section.data.platformSlug),
                 onPlayClick = {
                     launchScope.launch {
+                        // Android `nativeLibraryOnPlay` parity: publish the staging state (with
+                        // its duplicate-entry guard) BEFORE the blocking launch work; finish maps
+                        // the outcome back to UI state (staging cleared / auth-expired surfaced).
+                        if (!coordinator.beginGameLaunch(romId)) return@launch
                         val result = withContext(Dispatchers.Default) { coordinator.launchPlayer(romId) }
                         playStatus = result
                         launchedSessionId = (result as? PlayerLaunchResult.Started)?.sessionId
+                        coordinator.finishGameLaunch(romId, result)
                     }
                 },
+                isStaging = isStaging,
+                isAuthExpired = isAuthExpired,
+                biosState = biosState,
+                onLogin = { coordinator.openLogin() },
+                onDismissLaunchState = { coordinator.dismissGameLaunchState() },
                 playStatus = playStatus,
                 saveUiState = saveUiState,
                 saveActionMessage = saveActionMessage,
@@ -467,12 +499,23 @@ private fun GameDetailContent(
     }
 }
 
-/** Hero cover + title/platform + metadata chips + summary + Play button (+ save-sync status/actions). */
+/**
+ * Hero cover + title/platform + metadata chips + summary + the action row (+ save-sync
+ * status/actions). The action row mirrors Android's branch order: the auth-expired state
+ * ("Session expired" + Log in) takes precedence, then the proactive "not supported yet" state,
+ * then the required-BIOS-unavailable state (SEGA CD / PlayStation), else the normal
+ * Play / Choose Save / Choose File row (Play shows "Preparing…" and is disabled while staging).
+ */
 @Composable
 private fun GameDetailBody(
     rom: RomDetail,
     playEnabled: Boolean,
     onPlayClick: () -> Unit,
+    isStaging: Boolean,
+    isAuthExpired: Boolean,
+    biosState: RequiredBiosState,
+    onLogin: () -> Unit,
+    onDismissLaunchState: () -> Unit,
     playStatus: PlayerLaunchResult?,
     saveUiState: SaveSyncUiState,
     saveActionMessage: String?,
@@ -539,19 +582,38 @@ private fun GameDetailBody(
                         )
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        PlayButton(
-                            enabled = playEnabled,
-                            status = playStatus,
-                            onPlayClick = onPlayClick,
-                            modifier = Modifier.weight(1f),
+                    when {
+                        // Auth-expired takes precedence over everything (Android parity): the Play
+                        // row is replaced by the "Session expired" state with a Log in action.
+                        isAuthExpired -> AuthExpiredState(
+                            onLogin = onLogin,
+                            onDismiss = onDismissLaunchState,
                         )
-                        // "Choose Save" (Android parity): opens the save picker overlay listing
-                        // this ROM's server saves; picking one re-scopes the next launch.
-                        ChooseSaveButton(onClick = onChooseSaveClick)
-                        // "Choose File" (Android parity): only when the ROM has sibling versions.
-                        if (shouldShowChooseFileButton(rom)) {
-                            ChooseFileButton(onClick = onChooseFileClick)
+
+                        // Proactive "not supported yet" state (Android parity): checked up front
+                        // from CoreManifest, so the user never presses Play to discover a failure.
+                        !playEnabled -> UnsupportedSystemState(platformDisplayName = rom.platformDisplayName)
+
+                        // Required-BIOS-unavailable state for SEGA CD / PlayStation (Android
+                        // `RequiredBiosUnavailableState` parity): disabled Play + per-state message.
+                        biosState !is RequiredBiosState.Ready -> RequiredBiosUnavailableState(biosState)
+
+                        else -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            PlayButton(
+                                enabled = playEnabled,
+                                isStaging = isStaging,
+                                status = playStatus,
+                                onPlayClick = onPlayClick,
+                                modifier = Modifier.weight(1f),
+                            )
+                            // "Choose Save" (Android parity): opens the save picker overlay listing
+                            // this ROM's server saves; picking one re-scopes the next launch.
+                            // Disabled while staging (Android parity).
+                            ChooseSaveButton(onClick = onChooseSaveClick, enabled = !isStaging)
+                            // "Choose File" (Android parity): only when the ROM has sibling versions.
+                            if (shouldShowChooseFileButton(rom)) {
+                                ChooseFileButton(onClick = onChooseFileClick, enabled = !isStaging)
+                            }
                         }
                     }
                     SaveStatusLine(
@@ -619,6 +681,9 @@ private fun GameDetailBody(
  * the button it renders the last launch outcome — "Launching player…" for
  * [PlayerLaunchResult.Started], or the failure reason in the theme error color for
  * [PlayerLaunchResult.Failed] (nothing until the first click).
+ *
+ * When [isStaging] is true (content being staged for launch), the button shows "Preparing…" and
+ * is disabled — not focusable, not clickable (Android `PlayButton` parity).
  */
 @Composable
 private fun PlayButton(
@@ -626,26 +691,29 @@ private fun PlayButton(
     status: PlayerLaunchResult?,
     onPlayClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isStaging: Boolean = false,
 ) {
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    // Staging disables the button exactly like an unsupported platform (Android parity).
+    val active = enabled && !isStaging
 
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
                 .background(
-                    if (enabled) colors.romm500 else colors.textSecondary.copy(alpha = 0.25f),
+                    if (active) colors.romm500 else colors.textSecondary.copy(alpha = 0.25f),
                 )
                 .border(
-                    width = if (enabled && isFocused) 2.dp else 0.dp,
-                    color = if (enabled && isFocused) colors.romm300 else Color.Transparent,
+                    width = if (active && isFocused) 2.dp else 0.dp,
+                    color = if (active && isFocused) colors.romm300 else Color.Transparent,
                     shape = RoundedCornerShape(8.dp),
                 )
                 .then(
-                    if (enabled) {
+                    if (active) {
                         Modifier.focusableItem("detail:play", navigator, onPlayClick)
                     } else {
                         Modifier
@@ -654,15 +722,15 @@ private fun PlayButton(
                 .clickable(
                     interactionSource = interactionSource,
                     indication = null,
-                    enabled = enabled,
+                    enabled = active,
                     onClick = onPlayClick,
                 )
                 .padding(horizontal = 28.dp, vertical = 12.dp),
         ) {
             Text(
-                text = "▶  Play",
+                text = if (isStaging) "Preparing…" else "▶  Play",
                 style = MaterialTheme.typography.titleMedium,
-                color = if (enabled) Color.White else Color.White.copy(alpha = 0.4f),
+                color = if (active) Color.White else Color.White.copy(alpha = 0.4f),
             )
         }
         Spacer(modifier = Modifier.height(8.dp))
@@ -683,12 +751,115 @@ private fun PlayButton(
 }
 
 /**
+ * Inline auth-expired state replacing the Play row (Android `AuthExpiredState` parity): a
+ * "Session expired" message with a Log in action (routes to onboarding/login via
+ * [DesktopAppCoordinator.openLogin] — nothing is auto-submitted) and Dismiss. Takes precedence
+ * over every other action-row state.
+ */
+@Composable
+private fun AuthExpiredState(
+    onLogin: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val navigator = LocalFocusNavigator.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Session expired; please log in to continue",
+            style = MaterialTheme.typography.bodySmall,
+            color = PlayButtonErrorColor,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TvButton(
+                onClick = onLogin,
+                modifier = Modifier.focusableItem("detail:login", navigator, onLogin),
+            ) {
+                Text("Log in")
+            }
+            TvOutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.focusableItem("detail:dismiss-auth-expired", navigator, onDismiss),
+            ) {
+                Text("Dismiss")
+            }
+        }
+    }
+}
+
+/**
+ * Proactive "not supported yet" state (Android `UnsupportedSystemState` parity): a disabled Play
+ * button + the reason, shown instead of the Play row when no approved desktop core exists for the
+ * platform — the user never has to press Play to discover a launch will fail.
+ */
+@Composable
+private fun UnsupportedSystemState(platformDisplayName: String) {
+    val colors = LocalRommulusColors.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        DisabledPlayButton()
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Not supported yet — no native emulator core for $platformDisplayName",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+        )
+    }
+}
+
+/**
+ * Inline required-BIOS-unavailable state (Android `RequiredBiosUnavailableState` parity): a
+ * disabled Play button + the per-state message for SEGA CD / PlayStation while the BIOS is not
+ * [RequiredBiosState.Ready].
+ */
+@Composable
+private fun RequiredBiosUnavailableState(state: RequiredBiosState) {
+    val colors = LocalRommulusColors.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        DisabledPlayButton()
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = requiredBiosUnavailableMessage(state),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+        )
+    }
+}
+
+/** The user-facing message for each non-Ready [RequiredBiosState] (Android parity). */
+internal fun requiredBiosUnavailableMessage(state: RequiredBiosState): String = when (state) {
+    RequiredBiosState.Checking -> "Checking for required BIOS files…"
+    RequiredBiosState.Missing ->
+        "Missing BIOS files on server. Please contact your RomM administrator."
+    RequiredBiosState.UnverifiedAvailable ->
+        "No verified BIOS file found. Please choose one in Settings."
+    is RequiredBiosState.Error -> state.message
+    RequiredBiosState.Ready -> ""
+}
+
+/** A disabled (non-focusable, non-clickable) Play button for the unavailable states. */
+@Composable
+private fun DisabledPlayButton() {
+    val colors = LocalRommulusColors.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.textSecondary.copy(alpha = 0.25f))
+            .padding(horizontal = 28.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = "▶  Play",
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White.copy(alpha = 0.4f),
+        )
+    }
+}
+
+/**
  * The "Choose File" affordance next to Play, rendered only when the ROM has sibling versions
  * (Android parity with `ChooseVersionButton`): opens the version picker overlay, which lists
  * this ROM and its siblings for re-scoping.
  */
 @Composable
-private fun ChooseFileButton(onClick: () -> Unit) {
+private fun ChooseFileButton(onClick: () -> Unit, enabled: Boolean = true) {
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
     val interactionSource = remember { MutableInteractionSource() }
@@ -699,18 +870,21 @@ private fun ChooseFileButton(onClick: () -> Unit) {
             .clip(RoundedCornerShape(8.dp))
             .background(colors.nightLo)
             .border(
-                width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) colors.romm300 else colors.textSecondary.copy(alpha = 0.4f),
+                width = if (isFocused && enabled) 2.dp else 1.dp,
+                color = if (isFocused && enabled) colors.romm300 else colors.textSecondary.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(8.dp),
             )
-            .focusableItem("detail:choose-file", navigator, onClick)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .then(
+                // Disabled while staging (Android parity): not focusable, not clickable.
+                if (enabled) Modifier.focusableItem("detail:choose-file", navigator, onClick) else Modifier,
+            )
+            .clickable(interactionSource = interactionSource, indication = null, enabled = enabled, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(
             text = "Choose File",
             style = MaterialTheme.typography.titleMedium,
-            color = colors.textPrimary,
+            color = if (enabled) colors.textPrimary else colors.textSecondary,
         )
     }
 }
@@ -722,7 +896,7 @@ private fun ChooseFileButton(onClick: () -> Unit) {
  * launch — the user then presses Play.
  */
 @Composable
-private fun ChooseSaveButton(onClick: () -> Unit) {
+private fun ChooseSaveButton(onClick: () -> Unit, enabled: Boolean = true) {
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
     val interactionSource = remember { MutableInteractionSource() }
@@ -733,18 +907,21 @@ private fun ChooseSaveButton(onClick: () -> Unit) {
             .clip(RoundedCornerShape(8.dp))
             .background(colors.nightLo)
             .border(
-                width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) colors.romm300 else colors.textSecondary.copy(alpha = 0.4f),
+                width = if (isFocused && enabled) 2.dp else 1.dp,
+                color = if (isFocused && enabled) colors.romm300 else colors.textSecondary.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(8.dp),
             )
-            .focusableItem("detail:choose-save", navigator, onClick)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .then(
+                // Disabled while staging (Android parity): not focusable, not clickable.
+                if (enabled) Modifier.focusableItem("detail:choose-save", navigator, onClick) else Modifier,
+            )
+            .clickable(interactionSource = interactionSource, indication = null, enabled = enabled, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(
             text = "Choose Save",
             style = MaterialTheme.typography.titleMedium,
-            color = colors.textPrimary,
+            color = if (enabled) colors.textPrimary else colors.textSecondary,
         )
     }
 }

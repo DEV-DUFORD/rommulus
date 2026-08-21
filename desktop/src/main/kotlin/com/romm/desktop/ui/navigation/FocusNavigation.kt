@@ -40,6 +40,9 @@ class FocusNavigator {
     private var spatialFocusOverride: ((FocusDirection) -> Boolean)? = null
     private var backOverride: (() -> Unit)? = null
 
+    private var gridNavigationOwner: Any? = null
+    private var gridNavigationHandler: ((FocusDirection) -> Boolean)? = null
+
     /** Data class returned by [snapshot]. */
     data class RegisteredItem(val key: Any, val requester: FocusRequester)
 
@@ -143,10 +146,42 @@ class FocusNavigator {
         }
     }
 
+    /**
+     * Installs a positional vertical-movement handler for a 2D grid (the desktop counterpart of
+     * Android's `positionalGridNeighbor` D-pad handling on grid screens): while [owner] is
+     * installed, Up/Down movements are delegated to [moveVertical], which should focus the item
+     * directly above/below and return `true` when it handled the move. Left/Right keep their
+     * normal behavior and Back is unaffected — this is NOT a modal override (a modal's
+     * [installSpatialFocusOverride] still wins). Only one grid handler is active at a time: the
+     * most recently installed screen wins, and screens remove theirs on dispose.
+     */
+    internal fun installGridNavigation(owner: Any, moveVertical: (FocusDirection) -> Boolean) {
+        gridNavigationOwner = owner
+        gridNavigationHandler = moveVertical
+    }
+
+    /** Removes the grid navigation handler installed by [owner] (no-op when it is not active). */
+    internal fun removeGridNavigation(owner: Any) {
+        if (gridNavigationOwner == owner) {
+            gridNavigationOwner = null
+            gridNavigationHandler = null
+        }
+    }
+
     fun moveSpatialFocus(
         direction: FocusDirection,
         fallback: (FocusDirection) -> Boolean,
-    ): Boolean = spatialFocusOverride?.invoke(direction) ?: fallback(direction)
+    ): Boolean {
+        // A modal override decides outright (true = consumed; false = it declined, matching the
+        // original elvis semantics — no fall-through).
+        spatialFocusOverride?.invoke(direction)?.let { return it }
+        // A grid handler only consumes a move when it ACCEPTS it (returns true); a decline
+        // (grid edge / no card focused) falls through to default traversal.
+        if (direction == FocusDirection.Up || direction == FocusDirection.Down) {
+            gridNavigationHandler?.let { handler -> if (handler(direction)) return true }
+        }
+        return fallback(direction)
+    }
 
     /** Invoke a modal's back action, returning false when no modal owns controller focus. */
     fun handleBack(): Boolean {
@@ -218,6 +253,24 @@ class FocusNavigator {
     }
 
     private fun findIndex(key: Any): Int = entries.keys.indexOf(key)
+}
+
+/**
+ * Returns the item directly above or below [currentIndex] in a grid with [columnCount] columns.
+ * Desktop mirror of Android's `positionalGridNeighbor` (RomGridScreen): keeping this calculation
+ * independent of Compose makes vertical D-pad movement deterministic when the destination row has
+ * not yet been composed. Returns null at a grid edge (or for invalid input) so the caller can
+ * fall back to default focus traversal.
+ */
+internal fun positionalGridNeighbor(
+    currentIndex: Int,
+    columnCount: Int,
+    itemCount: Int,
+    moveDown: Boolean,
+): Int? {
+    if (currentIndex !in 0 until itemCount || columnCount <= 0) return null
+    val candidate = currentIndex + if (moveDown) columnCount else -columnCount
+    return candidate.takeIf { it in 0 until itemCount }
 }
 
 // ------------------------------------------------------------------------- Compose helpers
