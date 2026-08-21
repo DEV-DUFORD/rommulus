@@ -424,6 +424,29 @@ class DesktopAppCoordinatorTest {
         waitForReconciled(supervisor, started.sessionId)
     }
 
+    @Test
+    fun `launchPlayer enables fullscreen under Gamescope`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb") },
+            romContentStagerOverride = FakeRomContentStager(),
+            desktopEnvironment = mapOf("XDG_CURRENT_DESKTOP" to "gamescope"),
+        )
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+
+        assertThat(launcher.launches.single().video).isEqualTo(VideoSettings(fullscreen = true))
+        waitForReconciled(supervisor, started.sessionId)
+    }
+
     // ---------------------------------------------------------------- controller bindings (Phase 9, §11.9)
 
     /** A sidecar the fake player writes at shutdown: one USB pad with a non-default table. */

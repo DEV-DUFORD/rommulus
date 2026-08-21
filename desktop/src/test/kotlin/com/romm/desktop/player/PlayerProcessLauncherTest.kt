@@ -10,6 +10,8 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermission
+import java.util.concurrent.TimeUnit
 
 @DisplayName("ProcessBuilderPlayerLauncher — allowed-cores derivation")
 class PlayerProcessLauncherTest {
@@ -168,5 +170,53 @@ class PlayerProcessLauncherTest {
 
         assertThat(outcome).isEqualTo(LaunchOutcome.Started(4242L))
         assertThat(capturedEnv[0]!!["ROMM_PLAYER_ALLOWED_CORES"]).isEmpty()
+    }
+
+    @Test
+    fun `player output larger than a pipe cannot block exit observation or reconciliation`(@TempDir dir: Path) {
+        val paths = TestAppPaths(dir)
+        val journalsRoot = paths.stateDir.resolve("journals")
+        val syntheticPlayer = dir.resolve("synthetic-player.sh")
+        Files.writeString(
+            syntheticPlayer,
+            """
+            #!/bin/sh
+            head -c 2097152 /dev/zero >&2
+            sleep 1
+            exit 0
+            """.trimIndent(),
+        )
+        Files.setPosixFilePermissions(
+            syntheticPlayer,
+            setOf(
+                PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.OWNER_EXECUTE,
+            ),
+        )
+        val launcher = ProcessBuilderPlayerLauncher(syntheticPlayer, journalsRoot, paths)
+        val supervisor = LaunchJournalSupervisor(journalsRoot, launcher)
+        val prepared = supervisor.prepareLaunch(
+            PlayerLaunchParams(
+                coreId = "test_core",
+                coreBuildRevision = "test",
+                corePath = paths.dataDir.resolve("cores").resolve("libtest_core.so"),
+                systemDir = paths.firmwareDir(),
+                savePath = paths.dataDir.resolve("saves").resolve("synthetic.srm"),
+            ),
+            sessionId = "output-regression",
+        )
+        assertThat(prepared).isInstanceOf(PrepareLaunchResult.Ready::class.java)
+        val ready = prepared as PrepareLaunchResult.Ready
+        val pid = (ready.launch as LaunchOutcome.Started).pid
+        val handle = ProcessHandle.of(pid).orElseThrow()
+
+        try {
+            handle.onExit().get(5, TimeUnit.SECONDS)
+            assertThat(supervisor.onPlayerExit(ready.session, -1))
+                .isInstanceOf(PlayerExitReport.CrashInterrupted::class.java)
+        } finally {
+            if (handle.isAlive) handle.destroyForcibly()
+        }
     }
 }

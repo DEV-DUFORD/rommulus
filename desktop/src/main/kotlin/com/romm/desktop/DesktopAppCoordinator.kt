@@ -338,7 +338,9 @@ class DesktopAppCoordinator(
     preLaunchSaveSynchronizerOverride: PreLaunchSaveSynchronizer? = null,
     chosenSaveContentVerifierOverride: RommSaveContentVerifier? = null,
     gameLaunchRecorderOverride: GameLaunchRecorder? = null,
+    desktopEnvironment: Map<String, String> = emptyMap(),
 ) {
+    private val displayPolicy = desktopDisplayPolicy(desktopEnvironment)
 
     // ------------------------------------------------------------------ storage
 
@@ -1254,6 +1256,7 @@ class DesktopAppCoordinator(
             // adapter): the player applies these at launch so a user's
             // scanlines / integer-scaling / sharp-filter choices survive relaunch.
             video = VideoSettings(
+                fullscreen = displayPolicy.fullscreen,
                 integerScaling = settingsAdapter.integerScalingEnabled(),
                 scanlines = settingsAdapter.scanlinesEnabled(),
                 sharpFilter = settingsAdapter.sharpFilterEnabled(),

@@ -112,6 +112,9 @@ class FocusNavigator {
     /** Returns whether [key] is the item currently holding controller/keyboard focus. */
     fun isFocused(key: Any): Boolean = focusedKey == key
 
+    /** Returns the stable key currently holding focus, or `null` when nothing is focused. */
+    internal fun currentFocusKey(): Any? = focusedKey
+
     /** Mark the item currently at [index] as focused. */
     internal fun setFocused(index: Int) {
         focusedKey = entries.keys.elementAtOrNull(index)

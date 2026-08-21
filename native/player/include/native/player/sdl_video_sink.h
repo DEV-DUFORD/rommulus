@@ -17,6 +17,7 @@
 #pragma once
 
 #include <native/engine/VideoSink.h>
+#include "native/player/presentation_dirty_state.h"
 
 #include <cstddef>
 #include <functional>
@@ -40,12 +41,14 @@ public:
                      size_t pitch, enum retro_pixel_format format) override;
 
     // Main-thread presentation loop.
-    // Presents the latest converted frame if one is ready, then draws `overlay`
-    // (if any) in output-pixel coordinates before presenting; returns false when no
-    // renderer is attached. While paused the last frame stays in the texture
-    // and is re-presented each call, so an overlay renders over a frozen
-    // frame. Pass nullptr for `overlay` to present without one.
+    // Presents only when a new frame or repaint request is pending, then draws
+    // `overlay` (if any) in output-pixel coordinates; returns true only when a
+    // frame was actually presented.
     bool present(const std::function<void(SDL_Renderer*)>& overlay = nullptr);
+
+    // Requests repainting of the retained frame, for window exposure/resize
+    // and overlay-only state changes while emulation is paused.
+    void requestRepaint();
 
     // Toggles integer scaling. Non-integer output is letterboxed.
     void setIntegerScaling(bool enabled);
@@ -88,8 +91,9 @@ private:
     unsigned width_ = 0;
     unsigned height_ = 0;
     double displayAspectRatio_ = 0.0;
-    bool presentationDirty_ = true;
+    bool logicalPresentationDirty_ = true;
     bool frameReady_ = false;
+    PresentationDirtyState presentationState_;
 
     // Presentation options (main thread).
     bool integerScaling_ = false;

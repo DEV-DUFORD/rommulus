@@ -412,6 +412,7 @@ int main(int argc, char* argv[]) {
     // other cores ignore this unknown option.
     session.setCoreOptionOverride("mupen64plus-rdp-plugin", "angrylion");
     session.setCoreOptionOverride("mupen64plus-rsp-plugin", "cxd4");
+    session.setCoreOptionOverride("mupen64plus-angrylion-multithread", "4");
     if (!session.acquireProcessSlot()) {
         const std::string error = "another emulation session is already active in this process";
         std::fprintf(stderr, "error: %s\n", error.c_str());
@@ -513,9 +514,11 @@ int main(int argc, char* argv[]) {
     romm::player::BindingCaptureCoordinator captureCoordinator;
     std::vector<int> captureDevices;
     auto lastFrameTime = std::chrono::steady_clock::now();
+    int lastCaptureSecondsLeft = -1;
 
     // Executes one pause-menu effect on the session (main thread).
     auto handlePauseEffect = [&](romm::player::PauseMenuEffect effect) {
+        videoSink->requestRepaint();
         switch (effect) {
             case romm::player::PauseMenuEffect::kResume:
                 // The menu closed via Resume (or cancel): unfreeze the core.
@@ -576,6 +579,7 @@ int main(int argc, char* argv[]) {
         input.reset();
         session.setPaused(true);
         pauseMenu.open();
+        videoSink->requestRepaint();
         takeCheckpoint(session, request);
     };
 
@@ -637,6 +641,12 @@ int main(int argc, char* argv[]) {
                 case SDL_EVENT_WINDOW_FOCUS_LOST:
                     input.reset();
                     break;
+                case SDL_EVENT_WINDOW_EXPOSED:
+                case SDL_EVENT_WINDOW_RESIZED:
+                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                    videoSink->requestRepaint();
+                    input.handleEvent(event);
+                    break;
                 default:
                     input.handleEvent(event);
                     break;
@@ -689,6 +699,7 @@ int main(int argc, char* argv[]) {
                             );
                         }
                         pauseMenu.exitCapture();
+                        videoSink->requestRepaint();
                         break;
                     }
                     case romm::player::CaptureState::kCleared:
@@ -699,6 +710,7 @@ int main(int argc, char* argv[]) {
                             pauseMenu.bindingColumn()
                         );
                         pauseMenu.exitCapture();
+                        videoSink->requestRepaint();
                         break;
                     case romm::player::CaptureState::kCancelled:
                     case romm::player::CaptureState::kTimedOut:
@@ -706,6 +718,7 @@ int main(int argc, char* argv[]) {
                         // Quick Back / 15 s timeout / no controller: back to
                         // the slot list, nothing saved.
                         pauseMenu.exitCapture();
+                        videoSink->requestRepaint();
                         break;
                     default:
                         break;  // still capturing (or idle)
@@ -718,16 +731,21 @@ int main(int argc, char* argv[]) {
             } else {
                 // The overlay owns controller input too (the core is paused,
                 // so nothing reaches the session while it is open).
-                handlePauseEffect(pauseMenu.handle(input.pollMenuActions()));
+                const auto actions = input.pollMenuActions();
+                if (actions.any()) handlePauseEffect(pauseMenu.handle(actions));
             }
         } else {
             if (input.pollPauseTrigger()) openPause();
             input.updateSession(session);
         }
+        const int captureSecondsLeft = pauseMenu.isCapturingBinding()
+            ? static_cast<int>(captureCoordinator.remainingTimeoutMs() / 1000)
+            : -1;
+        if (captureSecondsLeft != lastCaptureSecondsLeft) {
+            lastCaptureSecondsLeft = captureSecondsLeft;
+            videoSink->requestRepaint();
+        }
         videoSink->present([&](SDL_Renderer* renderer) {
-            const int captureSecondsLeft = pauseMenu.isCapturingBinding()
-                ? static_cast<int>(captureCoordinator.remainingTimeoutMs() / 1000)
-                : -1;
             pauseOverlay.draw(
                 renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
                 captureSecondsLeft,

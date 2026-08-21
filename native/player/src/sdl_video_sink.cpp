@@ -93,6 +93,7 @@ void SdlVideoSink::submitFrame(const void* data, unsigned width, unsigned height
     }
 
     frameReady_ = true;
+    presentationState_.request();
 }
 
 void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
@@ -113,6 +114,12 @@ void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
         return;
     }
 
+    if (!SDL_SetRenderVSync(renderer_, 1)) {
+        romm::log::sink().log(romm::log::Severity::Warn, kTag,
+                              std::string("SDL_SetRenderVSync failed: ") +
+                                  SDL_GetError());
+    }
+    presentationState_.request();
     applyLogicalPresentationLocked();
 }
 
@@ -146,7 +153,8 @@ void SdlVideoSink::setDisplayAspectRatio(double aspectRatio) {
     displayAspectRatio_ = aspectRatio > 0.0 && std::isfinite(aspectRatio)
             ? aspectRatio
             : 0.0;
-    presentationDirty_ = true;
+    logicalPresentationDirty_ = true;
+    presentationState_.request();
 }
 
 void SdlVideoSink::applyLogicalPresentationLocked() {
@@ -164,7 +172,7 @@ void SdlVideoSink::applyLogicalPresentationLocked() {
             renderer_, logicalWidth, logicalHeight,
             integerScaling_ ? SDL_LOGICAL_PRESENTATION_INTEGER_SCALE
                             : SDL_LOGICAL_PRESENTATION_LETTERBOX);
-    presentationDirty_ = false;
+    logicalPresentationDirty_ = false;
 }
 
 bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
@@ -178,6 +186,9 @@ bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
             // No window/renderer yet: leave the screen untouched.
             // frameReady_ stays set so the frame is presented once a
             // window is attached.
+            return false;
+        }
+        if (!presentationState_.consume()) {
             return false;
         }
 
@@ -209,12 +220,8 @@ bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
                     frameReady_ = false;
                     return false;
                 }
-                presentationDirty_ = true;
+                logicalPresentationDirty_ = true;
             }
-            if (presentationDirty_) {
-                applyLogicalPresentationLocked();
-            }
-
             // Copy the staging buffer into the texture, then clear the flag
             // under the lock (before rendering) so a frame converted during
             // the render below is not lost.
@@ -227,6 +234,9 @@ bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
                 return false;
             }
             frameReady_ = false;
+        }
+        if (logicalPresentationDirty_) {
+            applyLogicalPresentationLocked();
         }
 
         // Snapshot the texture height for the scanline section below (which
@@ -290,31 +300,43 @@ bool SdlVideoSink::present(const std::function<void(SDL_Renderer*)>& overlay) {
     return true;
 }
 
+void SdlVideoSink::requestRepaint() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    presentationState_.request();
+}
+
 void SdlVideoSink::setIntegerScaling(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (integerScaling_ == enabled) return;
     integerScaling_ = enabled;
-    presentationDirty_ = true;
+    logicalPresentationDirty_ = true;
+    presentationState_.request();
     applyLogicalPresentationLocked();
 }
 
 void SdlVideoSink::setScanlines(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (scanlines_ == enabled) return;
     scanlines_ = enabled;
+    presentationState_.request();
 }
 
 void SdlVideoSink::setSharpFilter(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (sharpFilter_ == enabled) return;
     sharpFilter_ = enabled;
     if (texture_ != nullptr) {
         SDL_SetTextureScaleMode(texture_, sharpFilter_ ? SDL_SCALEMODE_NEAREST
                                                        : SDL_SCALEMODE_LINEAR);
     }
+    presentationState_.request();
 }
 
 void SdlVideoSink::setFullscreen(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (window_ != nullptr) {
         SDL_SetWindowFullscreen(window_, enabled);
+        presentationState_.request();
     }
 }
 

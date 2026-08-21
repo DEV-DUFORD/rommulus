@@ -10,17 +10,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.SectionState
@@ -34,6 +42,7 @@ import com.romm.desktop.ui.components.LoadingIndicator
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
+import kotlinx.coroutines.launch
 
 /**
  * Desktop Home screen: Android-parity shelves for Continue Playing, Recently
@@ -56,8 +65,62 @@ fun HomeScreen(
     val presenter = remember { coordinator.homePresenter() }
     val uiState by presenter.uiState.collectAsState()
     val colors = LocalRommulusColors.current
+    val navigator = LocalFocusNavigator.current
+    val columnState = rememberLazyListState()
+    val continuePlayingState = rememberLazyListState()
+    val recentlyAddedState = rememberLazyListState()
+    val favoritesState = rememberLazyListState()
+    val shelfStates = mapOf(
+        HomeShelf.CONTINUE_PLAYING to continuePlayingState,
+        HomeShelf.RECENTLY_ADDED to recentlyAddedState,
+        HomeShelf.FAVORITES to favoritesState,
+    )
+    val rememberedCardIndices = remember { mutableStateMapOf<HomeShelf, Int>() }
+    val navigationScope = rememberCoroutineScope()
+    val navigationOwner = remember { Any() }
+    val navigationShelves = listOfNotNull(
+        uiState.continuePlaying.navigationSnapshot(
+            HomeShelf.CONTINUE_PLAYING,
+            rememberedCardIndices[HomeShelf.CONTINUE_PLAYING] ?: 0,
+        ),
+        uiState.recentlyAdded.navigationSnapshot(
+            HomeShelf.RECENTLY_ADDED,
+            rememberedCardIndices[HomeShelf.RECENTLY_ADDED] ?: 0,
+        ),
+        uiState.favorites.navigationSnapshot(
+            HomeShelf.FAVORITES,
+            rememberedCardIndices[HomeShelf.FAVORITES] ?: 0,
+        ),
+    )
+
+    DisposableEffect(navigator, navigationOwner, navigationShelves) {
+        navigator.installGridNavigation(navigationOwner) { direction ->
+            val target = homeShelfNavigationTarget(
+                focusedKey = navigator.currentFocusKey(),
+                shelves = navigationShelves,
+                moveDown = direction == FocusDirection.Down,
+            ) ?: return@installGridNavigation false
+
+            navigationScope.launch {
+                columnState.scrollToItem(target.shelf.listIndex)
+                withFrameNanos { }
+                withFrameNanos { }
+
+                val rowState = shelfStates.getValue(target.shelf)
+                if (rowState.layoutInfo.visibleItemsInfo.none { it.index == target.cardIndex }) {
+                    rowState.scrollToItem(target.cardIndex)
+                    withFrameNanos { }
+                    withFrameNanos { }
+                }
+                navigator.focusItem(target.cardKey)
+            }
+            true
+        }
+        onDispose { navigator.removeGridNavigation(navigationOwner) }
+    }
 
     LazyColumn(
+        state = columnState,
         modifier = modifier
             .fillMaxSize()
             .background(colors.nightHi)
@@ -71,26 +134,32 @@ fun HomeScreen(
     ) {
         item {
             RomShelf(
-                title = "Continue Playing",
+                shelf = HomeShelf.CONTINUE_PLAYING,
                 state = uiState.continuePlaying,
+                rowState = continuePlayingState,
                 onRetry = presenter::retryContinuePlaying,
                 onCardClick = { rom -> coordinator.openGameDetail(rom.id, Screen.HOME) },
+                onCardFocused = { rememberedCardIndices[HomeShelf.CONTINUE_PLAYING] = it },
             )
         }
         item {
             RomShelf(
-                title = "Recently Added",
+                shelf = HomeShelf.RECENTLY_ADDED,
                 state = uiState.recentlyAdded,
+                rowState = recentlyAddedState,
                 onRetry = presenter::retryRecentlyAdded,
                 onCardClick = { rom -> coordinator.openGameDetail(rom.id, Screen.HOME) },
+                onCardFocused = { rememberedCardIndices[HomeShelf.RECENTLY_ADDED] = it },
             )
         }
         item {
             RomShelf(
-                title = "Favorites",
+                shelf = HomeShelf.FAVORITES,
                 state = uiState.favorites,
+                rowState = favoritesState,
                 onRetry = presenter::retryFavorites,
                 onCardClick = { rom -> coordinator.openGameDetail(rom.id, Screen.HOME) },
+                onCardFocused = { rememberedCardIndices[HomeShelf.FAVORITES] = it },
             )
         }
     }
@@ -102,12 +171,15 @@ fun HomeScreen(
  */
 @Composable
 private fun RomShelf(
-    title: String,
+    shelf: HomeShelf,
     state: SectionState<List<LibraryRom>>,
+    rowState: LazyListState,
     onRetry: () -> Unit,
     onCardClick: (LibraryRom) -> Unit,
+    onCardFocused: (Int) -> Unit,
 ) {
     val colors = LocalRommulusColors.current
+    val title = shelf.title
 
     // Omit the shelf entirely once we know it's empty — never render an empty row.
     if (sectionDisplayState(state) == SectionDisplayState.EMPTY) return
@@ -137,16 +209,17 @@ private fun RomShelf(
                 val roms = (state as? SectionState.Loaded<List<LibraryRom>>)?.data ?: return
                 val navigator = LocalFocusNavigator.current
                 LazyRow(
+                    state = rowState,
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    items(roms, key = { it.id }) { rom ->
+                    itemsIndexed(roms, key = { _, rom -> rom.id }) { cardIndex, rom ->
                         GameCard(
                             rom = rom,
                             onClick = { onCardClick(rom) },
-                            modifier = Modifier.focusableItem("home:$title:${rom.id}", navigator) {
-                                onCardClick(rom)
-                            },
+                            modifier = Modifier
+                                .onFocusChanged { if (it.isFocused) onCardFocused(cardIndex) }
+                                .focusableItem(shelf.cardKey(rom.id), navigator) { onCardClick(rom) },
                         )
                     }
                 }
@@ -155,6 +228,60 @@ private fun RomShelf(
             SectionDisplayState.EMPTY -> Unit
         }
     }
+}
+
+internal enum class HomeShelf(
+    val title: String,
+    val listIndex: Int,
+) {
+    CONTINUE_PLAYING("Continue Playing", 0),
+    RECENTLY_ADDED("Recently Added", 1),
+    FAVORITES("Favorites", 2),
+    ;
+
+    fun cardKey(romId: Long): String = "home:$title:$romId"
+}
+
+internal data class HomeShelfNavigationSnapshot(
+    val shelf: HomeShelf,
+    val cardKeys: List<String>,
+    val rememberedCardIndex: Int,
+)
+
+internal data class HomeShelfNavigationTarget(
+    val shelf: HomeShelf,
+    val cardIndex: Int,
+    val cardKey: String,
+)
+
+internal fun homeShelfNavigationTarget(
+    focusedKey: Any?,
+    shelves: List<HomeShelfNavigationSnapshot>,
+    moveDown: Boolean,
+): HomeShelfNavigationTarget? {
+    val currentShelfIndex = shelves.indexOfFirst { focusedKey in it.cardKeys }
+    if (currentShelfIndex < 0) return null
+    val targetShelfIndex = currentShelfIndex + if (moveDown) 1 else -1
+    val targetShelf = shelves.getOrNull(targetShelfIndex) ?: return null
+    val cardIndex = targetShelf.rememberedCardIndex.coerceIn(targetShelf.cardKeys.indices)
+    return HomeShelfNavigationTarget(
+        shelf = targetShelf.shelf,
+        cardIndex = cardIndex,
+        cardKey = targetShelf.cardKeys[cardIndex],
+    )
+}
+
+private fun SectionState<List<LibraryRom>>.navigationSnapshot(
+    shelf: HomeShelf,
+    rememberedCardIndex: Int,
+): HomeShelfNavigationSnapshot? {
+    val roms = (this as? SectionState.Loaded<List<LibraryRom>>)?.data.orEmpty()
+    if (roms.isEmpty()) return null
+    return HomeShelfNavigationSnapshot(
+        shelf = shelf,
+        cardKeys = roms.map { shelf.cardKey(it.id) },
+        rememberedCardIndex = rememberedCardIndex,
+    )
 }
 
 /** Fixed-height placeholder area for a shelf's loading/error state. */

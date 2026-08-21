@@ -121,7 +121,14 @@ class ProcessBuilderPlayerLauncher(
     private val appPaths: AppPaths,
     /** Test seam: replaces `ProcessBuilder.start()` with full env-var capture. */
     private val starter: (List<String>, Map<String, String>) -> Process = { command, env ->
-        ProcessBuilder(command).apply { environment().putAll(env) }.redirectErrorStream(true).start()
+        ProcessBuilder(command).apply {
+            environment().putAll(env)
+            redirectErrorStream(true)
+            // Native cores can emit synchronous debug output indefinitely. No desktop feature
+            // consumes it, so leaving a pipe risks deadlocking the player when that pipe fills;
+            // retaining it in a file would instead permit unbounded per-session disk growth.
+            redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        }.start()
     },
 ) : PlayerProcessLauncher {
 

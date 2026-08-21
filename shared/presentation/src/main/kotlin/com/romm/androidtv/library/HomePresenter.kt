@@ -1,14 +1,16 @@
 package com.romm.androidtv.library
 
+import com.romm.androidtv.romm.RommApiError
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 
 /**
  * Drives the native Home screen (UI_REFACTOR.md). Each section is fetched
@@ -69,7 +71,7 @@ class HomePresenter(
         val capturedGeneration = generation
         _uiState.value = HomeUiState()
         refreshJob = scope.launch {
-            coroutineScope {
+            supervisorScope {
                 launch { loadContinuePlayingInternal(capturedGeneration) }
                 launch { loadRecentlyAddedInternal(capturedGeneration) }
                 launch { loadFavoritesInternal(capturedGeneration) }
@@ -94,10 +96,10 @@ class HomePresenter(
         val gen = generation
         scope.launch {
             _uiState.update { it.copy(continuePlaying = SectionState.Loading) }
-            val hideFlag = hideUnsupportedSystems()
-            val state = repository.fetchContinuePlaying().toSection(
+            val state = loadSection(
                 keySelector = LibraryRom::id,
-                transform = { it.filterUnsupportedIfHidden(hideFlag) },
+                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+                fetch = { repository.fetchContinuePlaying() },
             )
             if (generation == gen) {
                 _uiState.update { it.copy(continuePlaying = state) }
@@ -110,10 +112,10 @@ class HomePresenter(
         val gen = generation
         scope.launch {
             _uiState.update { it.copy(recentlyAdded = SectionState.Loading) }
-            val hideFlag = hideUnsupportedSystems()
-            val state = repository.fetchRecentlyAdded().toSection(
+            val state = loadSection(
                 keySelector = LibraryRom::id,
-                transform = { it.filterUnsupportedIfHidden(hideFlag) },
+                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+                fetch = { repository.fetchRecentlyAdded() },
             )
             if (generation == gen) {
                 _uiState.update { it.copy(recentlyAdded = state) }
@@ -126,10 +128,10 @@ class HomePresenter(
         val gen = generation
         scope.launch {
             _uiState.update { it.copy(favorites = SectionState.Loading) }
-            val hideFlag = hideUnsupportedSystems()
-            val state = repository.fetchFavorites().toSection(
+            val state = loadSection(
                 keySelector = LibraryRom::id,
-                transform = { it.filterUnsupportedIfHidden(hideFlag) },
+                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+                fetch = { repository.fetchFavorites() },
             )
             if (generation == gen) {
                 _uiState.update { it.copy(favorites = state) }
@@ -142,10 +144,10 @@ class HomePresenter(
         val gen = generation
         scope.launch {
             _uiState.update { it.copy(platforms = SectionState.Loading) }
-            val hideFlag = hideUnsupportedSystems()
-            val state = repository.fetchPlatforms().toSection(
+            val state = loadSection(
                 keySelector = PlatformSummary::id,
-                transform = { it.filterUnsupportedPlatformsIfHidden(hideFlag) },
+                transform = { it.filterUnsupportedPlatformsIfHidden(hideUnsupportedSystems()) },
+                fetch = { repository.fetchPlatforms() },
             )
             if (generation == gen) {
                 _uiState.update { it.copy(platforms = state) }
@@ -158,7 +160,7 @@ class HomePresenter(
         val gen = generation
         scope.launch {
             _uiState.update { it.copy(collections = SectionState.Loading) }
-            val state = repository.fetchCollections().toSection(CollectionSummary::id)
+            val state = loadSection(CollectionSummary::id) { repository.fetchCollections() }
             if (generation == gen) {
                 _uiState.update { it.copy(collections = state) }
                 if (state is SectionState.Loaded) onRetrySucceeded()
@@ -172,10 +174,10 @@ class HomePresenter(
 
     private suspend fun loadContinuePlayingInternal(gen: Int) {
         _uiState.update { it.copy(continuePlaying = SectionState.Loading) }
-        val hideFlag = hideUnsupportedSystems()
-        val state = repository.fetchContinuePlaying().toSection(
+        val state = loadSection(
             keySelector = LibraryRom::id,
-            transform = { it.filterUnsupportedIfHidden(hideFlag) },
+            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+            fetch = { repository.fetchContinuePlaying() },
         )
         if (generation == gen) {
             _uiState.update { it.copy(continuePlaying = state) }
@@ -184,10 +186,10 @@ class HomePresenter(
 
     private suspend fun loadRecentlyAddedInternal(gen: Int) {
         _uiState.update { it.copy(recentlyAdded = SectionState.Loading) }
-        val hideFlag = hideUnsupportedSystems()
-        val state = repository.fetchRecentlyAdded().toSection(
+        val state = loadSection(
             keySelector = LibraryRom::id,
-            transform = { it.filterUnsupportedIfHidden(hideFlag) },
+            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+            fetch = { repository.fetchRecentlyAdded() },
         )
         if (generation == gen) {
             _uiState.update { it.copy(recentlyAdded = state) }
@@ -196,10 +198,10 @@ class HomePresenter(
 
     private suspend fun loadFavoritesInternal(gen: Int) {
         _uiState.update { it.copy(favorites = SectionState.Loading) }
-        val hideFlag = hideUnsupportedSystems()
-        val state = repository.fetchFavorites().toSection(
+        val state = loadSection(
             keySelector = LibraryRom::id,
-            transform = { it.filterUnsupportedIfHidden(hideFlag) },
+            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+            fetch = { repository.fetchFavorites() },
         )
         if (generation == gen) {
             _uiState.update { it.copy(favorites = state) }
@@ -208,10 +210,10 @@ class HomePresenter(
 
     private suspend fun loadPlatformsInternal(gen: Int) {
         _uiState.update { it.copy(platforms = SectionState.Loading) }
-        val hideFlag = hideUnsupportedSystems()
-        val state = repository.fetchPlatforms().toSection(
+        val state = loadSection(
             keySelector = PlatformSummary::id,
-            transform = { it.filterUnsupportedPlatformsIfHidden(hideFlag) },
+            transform = { it.filterUnsupportedPlatformsIfHidden(hideUnsupportedSystems()) },
+            fetch = { repository.fetchPlatforms() },
         )
         if (generation == gen) {
             _uiState.update { it.copy(platforms = state) }
@@ -220,7 +222,7 @@ class HomePresenter(
 
     private suspend fun loadCollectionsInternal(gen: Int) {
         _uiState.update { it.copy(collections = SectionState.Loading) }
-        val state = repository.fetchCollections().toSection(CollectionSummary::id)
+        val state = loadSection(CollectionSummary::id) { repository.fetchCollections() }
         if (generation == gen) {
             _uiState.update { it.copy(collections = state) }
         }
@@ -236,6 +238,18 @@ class HomePresenter(
     ): SectionState<List<T>> = when (this) {
         is LibraryResult.Success -> SectionState.Loaded(transform(data).distinctBy(keySelector))
         is LibraryResult.Failure -> SectionState.Error(error)
+    }
+
+    private suspend fun <T, K> loadSection(
+        keySelector: (T) -> K,
+        transform: (List<T>) -> List<T> = { it },
+        fetch: suspend () -> LibraryResult<List<T>>,
+    ): SectionState<List<T>> = try {
+        fetch().toSection(keySelector, transform)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        SectionState.Error(RommApiError.SERVER_ERROR)
     }
 
     private inline fun MutableStateFlow<HomeUiState>.update(transform: (HomeUiState) -> HomeUiState) {
