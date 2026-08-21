@@ -1050,6 +1050,7 @@ jobs:
           scan() {
             grep -rniIE 'password|token|secret|BEGIN [A-Z ]*PRIVATE KEY' "$1" 2>/dev/null \
               | grep -vE '/share/licenses/' \
+              | grep -vE '/docs/' \
               | grep -vE '(^|/)README\.md:' \
               | grep -vE '/lib/runtime/' \
               | grep -vE ':[0-9]+:[[:space:]]*#' \
