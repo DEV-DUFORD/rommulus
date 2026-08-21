@@ -822,11 +822,16 @@ jobs:
           # fallback JVM available: the launcher must fail fast with exit 5 and
           # a clear message (launcher contract, §15).
           rm -rf "$SMOKE/lib/runtime"
-          if env -u JAVA_HOME PATH=/usr/bin:/bin sh -c 'command -v java' >/dev/null; then
-            echo "::error::java unexpectedly present on minimal PATH — smoke is not hermetic"
-            exit 1
-          fi
-          err="$(env -u JAVA_HOME PATH=/usr/bin:/bin "$SMOKE/bin/rommulus" 2>&1 >/dev/null)"
+          # GitHub's Ubuntu image now exposes Java from /usr/bin, so construct
+          # a command allowlist containing only what the launcher needs before
+          # JVM discovery. This proves the no-Java path independently of the
+          # runner image.
+          SMOKE_PATH="$SMOKE/path"
+          mkdir -p "$SMOKE_PATH"
+          for command_name in env bash readlink dirname awk sha256sum cut; do
+            ln -s "$(command -v "$command_name")" "$SMOKE_PATH/$command_name"
+          done
+          err="$(env -u JAVA_HOME PATH="$SMOKE_PATH" "$SMOKE/bin/rommulus" 2>&1 >/dev/null)"
           rc=$?
           echo "launcher exit code: ${rc}"
           printf '%s\n' "$err"
