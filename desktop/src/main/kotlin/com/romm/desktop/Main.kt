@@ -82,6 +82,7 @@ fun main() {
             title = "RomMulus",
             state = windowState,
             icon = windowIcon,
+            undecorated = displayPolicy.undecorated,
         ) {
             RommulusDesktopApp(
                 coordinator = coordinator,
