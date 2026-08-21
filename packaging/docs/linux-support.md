@@ -78,6 +78,7 @@ Per `plans/LINUX_X64.md` §9 (defaults shown where the `XDG_*` variable is unset
 | --- | --- |
 | `$XDG_STATE_HOME/rommulus/journals/` (default `~/.local/state/rommulus/journals/`) | launch journals — **first place to look on any problem** |
 | `$XDG_STATE_HOME/rommulus/logs/` (default `~/.local/state/rommulus/logs/`) | application logs |
+| `$XDG_STATE_HOME/rommulus/credentials/client-tokens.properties` | Owner-only (`0600`) client-token fallback used only when no Secret Service provider exists, including Steam Deck Gaming Mode |
 | `$XDG_DATA_HOME/rommulus/saves/` (default `~/.local/share/rommulus/saves/`) | save files |
 | `$XDG_DATA_HOME/rommulus/cores/` (default `~/.local/share/rommulus/cores/`) | installed cores (`lib<core>_core.so`); the launcher seeds bundled cores here on first run, additively only |
 

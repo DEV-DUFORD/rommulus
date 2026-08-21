@@ -10,6 +10,8 @@ import androidx.compose.ui.window.application
 import com.romm.desktop.log.DesktopLogger
 import com.romm.desktop.storage.FileLockAppInstanceLock
 import com.romm.desktop.storage.paths.XdgAppPaths
+import com.romm.desktop.storage.secret.FileSecretBackend
+import com.romm.desktop.storage.secret.UnavailableSecretServiceFallback
 import com.romm.desktop.storage.secret.dbus.SecretServiceDbusBackend
 import com.romm.desktop.ui.image.loadBundledImage
 import java.util.logging.Level
@@ -31,7 +33,12 @@ fun main() = application {
 
     val coordinator = DesktopAppCoordinator(
         paths = paths,
-        secretBackend = SecretServiceDbusBackend(),
+        secretBackend = UnavailableSecretServiceFallback(
+            primary = SecretServiceDbusBackend(),
+            fallback = FileSecretBackend(
+                paths.stateDir.resolve("credentials").resolve("client-tokens.properties"),
+            ),
+        ),
         appVersion = APP_VERSION,
         buildDefaultOrigin = BUILD_DEFAULT_ORIGIN,
     )
