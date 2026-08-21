@@ -24,6 +24,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +51,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -1033,6 +1040,7 @@ private fun GameDetailActionRail(
     downFocusRequester: FocusRequester?,
 ) {
     val navigator = LocalFocusNavigator.current
+    val favorite = remember(favoriteState) { favoriteRailUi(favoriteState) }
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1047,7 +1055,9 @@ private fun GameDetailActionRail(
                 )
                 .focusableItem("detail:favorite", navigator, onFavoriteClick),
         ) {
-            Text(favoriteLabel(favoriteState))
+            Icon(imageVector = favorite.icon, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(favorite.label)
         }
         TvOutlinedButton(
             onClick = onAddClick,
@@ -1057,6 +1067,8 @@ private fun GameDetailActionRail(
                 )
                 .focusableItem("detail:add-collection", navigator, onAddClick),
         ) {
+            Icon(imageVector = Icons.Filled.Add, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
             Text("Add to Collection")
         }
         TvOutlinedButton(
@@ -1067,16 +1079,34 @@ private fun GameDetailActionRail(
                 )
                 .focusableItem("detail:back", navigator, onBackClick),
         ) {
+            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
             Text("Back")
         }
     }
 }
 
-/** Maps the shared presenter's [FavoriteUiState] to the rail button label. */
-private fun favoriteLabel(state: FavoriteUiState): String = when (state) {
-    is FavoriteUiState.Loading -> "Favorite…"
-    is FavoriteUiState.Confirmed -> if (state.isFavorite) "★ Favorited" else "☆ Favorite"
-    is FavoriteUiState.Updating -> if (state.target) "Adding…" else "Removing…"
+/** The favorite rail button's display: icon + label (desktop port of Android's `FavoriteButtonConfig`). */
+data class FavoriteRailUi(
+    val icon: ImageVector,
+    val label: String,
+)
+
+/**
+ * Maps the shared presenter's [FavoriteUiState] to the favorite rail button's icon + label,
+ * mirroring Android's `GameDetailActionRail` state→config table: a filled [Icons.Filled.Star]
+ * while favorited or updating (Android always shows the filled star mid-update), and
+ * [Icons.Filled.StarBorder] otherwise.
+ */
+internal fun favoriteRailUi(state: FavoriteUiState): FavoriteRailUi = when (state) {
+    is FavoriteUiState.Loading -> FavoriteRailUi(Icons.Filled.StarBorder, "Favorite…")
+    is FavoriteUiState.Confirmed ->
+        if (state.isFavorite) FavoriteRailUi(Icons.Filled.Star, "Favorited")
+        else FavoriteRailUi(Icons.Filled.StarBorder, "Favorite")
+    // Android shows the filled star for both add- and remove-in-flight.
+    is FavoriteUiState.Updating ->
+        if (state.target) FavoriteRailUi(Icons.Filled.Star, "Adding…")
+        else FavoriteRailUi(Icons.Filled.Star, "Removing…")
 }
 
 /**

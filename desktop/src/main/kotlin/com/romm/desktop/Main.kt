@@ -1,5 +1,8 @@
 package com.romm.desktop
 
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowState
@@ -8,6 +11,7 @@ import com.romm.desktop.log.DesktopLogger
 import com.romm.desktop.storage.FileLockAppInstanceLock
 import com.romm.desktop.storage.paths.XdgAppPaths
 import com.romm.desktop.storage.secret.dbus.SecretServiceDbusBackend
+import com.romm.desktop.ui.image.loadBundledImage
 import java.util.logging.Level
 
 /**
@@ -44,10 +48,18 @@ fun main() = application {
     // flashes Home (mirrors MainActivity).
     coordinator.appMode = coordinator.computeStartupAppMode()
 
+    // Window icon: the bundled RomMulus mark (desktop port of Android's ic_launcher.xml),
+    // rasterized once from the classpath SVG. `null` keeps Compose's default icon if the
+    // asset is ever missing.
+    val windowIcon: Painter? = remember {
+        loadBundledImage("/icons/rommulus_icon.svg", size = 256)?.let(::BitmapPainter)
+    }
+
     Window(
         onCloseRequest = ::exitApplication,
         title = "RomMulus",
         state = WindowState(width = 1280.dp, height = 720.dp),
+        icon = windowIcon,
     ) {
         RommulusDesktopApp(
             coordinator = coordinator,

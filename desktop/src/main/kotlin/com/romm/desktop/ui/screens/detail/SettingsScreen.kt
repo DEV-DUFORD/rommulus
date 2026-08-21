@@ -13,7 +13,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +35,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -189,14 +194,20 @@ fun SettingsScreen(
                     },
             )
 
-            // Validation error
+            // Validation error (Android parity: Filled.Error icon + red text)
             uiState.validationError?.let { error ->
-                Text(
-                    text = error,
-                    color = ErrorRed,
-                    style = MaterialTheme.typography.bodySmall,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 4.dp, start = 16.dp),
-                )
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Error,
+                        contentDescription = null,
+                        tint = ErrorRed,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                    Text(text = error, color = ErrorRed, style = MaterialTheme.typography.bodySmall)
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -265,15 +276,20 @@ fun SettingsScreen(
                     SettingsFeedbackText(
                         message = if (check.version != null) "Connected — server ${check.version}" else "Connected",
                         color = SuccessGreen,
+                        icon = Icons.Filled.CheckCircle,
                     )
 
                 is ConnectionCheckState.Error ->
-                    SettingsFeedbackText(message = check.message, color = ErrorRed)
+                    SettingsFeedbackText(message = check.message, color = ErrorRed, icon = Icons.Filled.Error)
             }
 
             // Save feedback
-            uiState.saveSuccessMessage?.let { msg -> SettingsFeedbackText(msg, SuccessGreen) }
-            uiState.saveErrorMessage?.let { msg -> SettingsFeedbackText(msg, ErrorRed) }
+            uiState.saveSuccessMessage?.let { msg ->
+                SettingsFeedbackText(msg, SuccessGreen, Icons.Filled.CheckCircle)
+            }
+            uiState.saveErrorMessage?.let { msg ->
+                SettingsFeedbackText(msg, ErrorRed, Icons.Filled.Error)
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
 
@@ -336,8 +352,10 @@ fun SettingsScreen(
 
             // Login feedback
             when (val loginState = uiState.loginState) {
-                SettingsLoginState.Success -> SettingsFeedbackText("Logged in", SuccessGreen)
-                is SettingsLoginState.Error -> SettingsFeedbackText(loginState.message, ErrorRed)
+                SettingsLoginState.Success ->
+                    SettingsFeedbackText("Logged in", SuccessGreen, Icons.Filled.CheckCircle)
+                is SettingsLoginState.Error ->
+                    SettingsFeedbackText(loginState.message, ErrorRed, Icons.Filled.Error)
                 else -> Unit
             }
 
@@ -593,15 +611,25 @@ private fun SettingsSectionHeader(title: String, colors: RommDesktopPalette) {
     )
 }
 
-/** Inline success/error feedback line under an action (mirrors the Android feedback rows). */
+/**
+ * Inline success/error feedback line under an action (mirrors the Android feedback rows:
+ * a [Icons.Filled.CheckCircle] for success and a [Icons.Filled.Error] for failure, tinted
+ * with the row color).
+ */
 @Composable
-private fun SettingsFeedbackText(message: String, color: Color) {
-    Text(
-        text = message,
-        color = color,
-        style = MaterialTheme.typography.bodyMedium,
+private fun SettingsFeedbackText(message: String, color: Color, icon: ImageVector) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(top = 12.dp, start = 16.dp),
-    )
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.padding(end = 4.dp),
+        )
+        Text(text = message, color = color, style = MaterialTheme.typography.bodyMedium)
+    }
 }
 
 /** A read-only label/value row for informational settings. */

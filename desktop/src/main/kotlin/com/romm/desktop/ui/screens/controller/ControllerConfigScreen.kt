@@ -1,13 +1,16 @@
 package com.romm.desktop.ui.screens.controller
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,15 +34,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -65,6 +71,7 @@ import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.TvButton
 import com.romm.desktop.ui.components.TvOutlinedButton
 import com.romm.desktop.ui.components.tvFocusRing
+import com.romm.desktop.ui.controller.ControllerArtworkResolver
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
@@ -387,21 +394,34 @@ fun ControllerConfigScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // ---- Binding rows (single player tab) ----
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(bottom = 8.dp),
+        // ---- 40/60 artwork/binding split (mirrors Android's ControllerConfigScreen) ----
+        Row(
+            modifier = Modifier.fillMaxWidth().weight(1f),
         ) {
-            items(rows, key = { it.controlId.id }) { row ->
-                BindingRowItem(
-                    row = row,
-                    onClick = {
-                        profile.controls.firstOrNull { it.id == row.controlId }?.let(startCapture)
-                    },
-                )
+            ArtworkPanel(
+                consoleName = profile.consoleName,
+                artwork = remember(profile) {
+                    ControllerArtworkResolver.imageVectorFor(profile.artwork)
+                },
+                modifier = Modifier.weight(0.4f).padding(end = 20.dp),
+            )
+
+            // Binding rows (single player tab)
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .weight(0.6f)
+                    .fillMaxHeight()
+                    .padding(bottom = 8.dp),
+            ) {
+                items(rows, key = { it.controlId.id }) { row ->
+                    BindingRowItem(
+                        row = row,
+                        onClick = {
+                            profile.controls.firstOrNull { it.id == row.controlId }?.let(startCapture)
+                        },
+                    )
+                }
             }
         }
 
@@ -444,6 +464,47 @@ fun ControllerConfigScreen(
 /** The console-native label for a [CoreControlId] within [profile]. */
 fun controlLabel(profile: CoreControllerProfile, controlId: CoreControlId): String =
     profile.controls.firstOrNull { it.id == controlId }?.label ?: controlId.id
+
+// --------------------------------------------------------------------------- artwork panel
+
+/**
+ * Artwork panel — desktop mirror of Android's `ArtworkPlaceholder`: a themed card with the
+ * console name and the profile's controller silhouette. [ControllerArtworkResolver] maps the
+ * shared [com.romm.androidtv.controller.config.ControllerArtwork] resource-name string to an
+ * [ImageVector] converted 1:1 from the Android vector drawable.
+ */
+@Composable
+private fun ArtworkPanel(
+    consoleName: String,
+    artwork: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalRommulusColors.current
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.nightLo),
+    ) {
+        Text(
+            text = consoleName,
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.textPrimary,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(20.dp),
+        )
+        Image(
+            imageVector = artwork,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            alpha = 0.72f,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(36.dp),
+        )
+    }
+}
 
 // --------------------------------------------------------------------------- row
 

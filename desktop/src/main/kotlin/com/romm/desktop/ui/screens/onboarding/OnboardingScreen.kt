@@ -53,6 +53,7 @@ import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.LoadingIndicator
 import com.romm.desktop.ui.components.TvButton
 import com.romm.desktop.ui.components.TvOutlinedButton
+import com.romm.desktop.ui.image.loadBundledImage
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
@@ -165,19 +166,39 @@ private fun WelcomeStep(onContinue: () -> Unit) {
         continueFocus.requestFocus()
     }
 
+    // Bundled ROMM logo — the desktop copy of app/src/main/res/raw/romm_logo.svg, mirroring
+    // Android's AsyncImage(R.raw.romm_logo) in the welcome step.
+    val logoBitmap = remember { loadBundledImage("/icons/romm_logo.svg") }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // Desktop has no bundled logo asset yet — text branding stands in for R.raw.romm_logo.
-        Text(
-            text = "RomMulus",
-            style = MaterialTheme.typography.displayMedium,
-            color = LocalRommulusColors.current.romm300,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        if (logoBitmap != null) {
+            Image(
+                bitmap = logoBitmap,
+                contentDescription = "RomMulus",
+                modifier = Modifier.size(160.dp),
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Welcome to RomMulus",
+                style = MaterialTheme.typography.headlineLarge,
+                color = LocalRommulusColors.current.textPrimary,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        } else {
+            // Fallback if the bundled asset is missing — text branding stands in for the logo.
+            Text(
+                text = "RomMulus",
+                style = MaterialTheme.typography.displayMedium,
+                color = LocalRommulusColors.current.romm300,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
         Text(
             text = "Connect to your ROMM server to browse and manage your collection.",
             style = MaterialTheme.typography.bodyLarge,

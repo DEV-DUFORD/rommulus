@@ -1,0 +1,9 @@
+<!-- RomMulus app icon — desktop port of app/src/main/res/drawable/ic_launcher.xml
+     (dark background, red square, white diamond). The vector's degenerate
+     `M60,48v20` path is a zero-area fill that renders nothing in Android, so it
+     is omitted here to keep the rendered icon identical. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <rect width="108" height="108" fill="#1a1a2e"/>
+  <rect x="30" y="30" width="48" height="48" fill="#e94560"/>
+  <path d="M42,48 l18,-10 l18,10 l-18,10 z" fill="#ffffff"/>
+</svg>

@@ -74,22 +74,35 @@ class DesktopImageLoader(
     private fun decodeImage(
         bytes: ByteArray,
         url: String,
-    ): androidx.compose.ui.graphics.ImageBitmap {
-        val isSvg = url.substringBefore('?').endsWith(".svg", ignoreCase = true) ||
-            bytes.decodeToString(endIndex = minOf(bytes.size, 256)).trimStart().startsWith("<svg")
-        if (!isSvg) {
-            return Image.makeFromEncoded(bytes).toComposeImageBitmap()
-        }
+    ): androidx.compose.ui.graphics.ImageBitmap = decodeImageBytes(bytes, url)
+}
 
-        return Data.makeFromBytes(inlineSvgClassStyles(bytes)).use { data ->
-            SVGDOM(data).use { svg ->
-                val targetSize = 512f
-                svg.setContainerSize(targetSize, targetSize)
-                Surface.makeRasterN32Premul(targetSize.toInt(), targetSize.toInt()).use { surface ->
-                    surface.canvas.clear(0x00000000)
-                    svg.render(surface.canvas)
-                    surface.makeImageSnapshot().toComposeImageBitmap()
-                }
+/**
+ * Decodes image bytes (PNG/JPG via Skia, SVG via [SVGDOM]) into a Compose [ImageBitmap].
+ *
+ * Shared by the URL-based [DesktopImageLoader] and the classpath-based bundled-asset loader
+ * ([loadBundledImage]).
+ *
+ * @param targetSize square edge (px) used when rasterizing SVGs.
+ */
+internal fun decodeImageBytes(
+    bytes: ByteArray,
+    url: String,
+    targetSize: Int = 512,
+): androidx.compose.ui.graphics.ImageBitmap {
+    val isSvg = url.substringBefore('?').endsWith(".svg", ignoreCase = true) ||
+        bytes.decodeToString(endIndex = minOf(bytes.size, 256)).trimStart().startsWith("<svg")
+    if (!isSvg) {
+        return Image.makeFromEncoded(bytes).toComposeImageBitmap()
+    }
+
+    return Data.makeFromBytes(inlineSvgClassStyles(bytes)).use { data ->
+        SVGDOM(data).use { svg ->
+            svg.setContainerSize(targetSize.toFloat(), targetSize.toFloat())
+            Surface.makeRasterN32Premul(targetSize, targetSize).use { surface ->
+                surface.canvas.clear(0x00000000)
+                svg.render(surface.canvas)
+                surface.makeImageSnapshot().toComposeImageBitmap()
             }
         }
     }
@@ -99,6 +112,11 @@ class DesktopImageLoader(
  * Skia's SVG renderer does not apply CSS class rules from embedded `<style>` blocks.
  * RomM's bundled controller artwork uses those rules for every fill and stroke, so copy
  * the declarations onto each element as presentation attributes before rendering.
+ *
+ * A declaration replaces any same-named attribute already present on the element: per the
+ * SVG spec, class rules outrank presentation attributes, so the class value wins (the ROMM
+ * logo carries a redundant `fill="#000000"` on every classed shape). Appending blindly would
+ * emit duplicate attributes and Skia's parser rejects the document.
  */
 internal fun inlineSvgClassStyles(bytes: ByteArray): ByteArray {
     val svg = bytes.decodeToString()
@@ -124,17 +142,38 @@ internal fun inlineSvgClassStyles(bytes: ByteArray): ByteArray {
 
     if (declarationsByClass.isEmpty()) return bytes
 
-    return SVG_CLASS_ATTRIBUTE.replace(svg) { match ->
-        val attributes = match.groupValues[1]
-            .split(Regex("\\s+"))
-            .flatMap { declarationsByClass[it]?.entries.orEmpty() }
-            .associate { it.key to it.value }
-            .entries
-            .joinToString(separator = " ", prefix = " ") { (name, value) ->
-                """$name="${value.escapeXmlAttribute()}""""
+    val out = StringBuilder(svg.length + 64)
+    var cursor = 0
+    SVG_CLASS_ATTRIBUTE.findAll(svg).forEach { match ->
+        val tagStart = svg.lastIndexOf('<', match.range.first)
+        val tagEnd = svg.indexOf('>', match.range.last)
+        if (tagStart < 0 || tagEnd < 0) return@forEach
+        var tag = svg.substring(tagStart, tagEnd + 1)
+        match.groupValues[1].split(Regex("\\s+")).forEach { className ->
+            declarationsByClass[className]?.forEach { (name, value) ->
+                tag = upsertAttribute(tag, name, value)
             }
-        match.value + attributes
-    }.encodeToByteArray()
+        }
+        out.append(svg, cursor, tagStart)
+        out.append(tag)
+        cursor = tagEnd + 1
+    }
+    out.append(svg, cursor, svg.length)
+    return out.toString().encodeToByteArray()
+}
+
+/**
+ * Sets `name="value"` on a start tag: replaces an existing same-named attribute in place,
+ * or appends one before the tag end (keeping self-closing tags well-formed).
+ */
+private fun upsertAttribute(tag: String, name: String, value: String): String {
+    val escaped = value.escapeXmlAttribute()
+    val existing = Regex("""(?<![\w-])$name\s*=\s*"[^"]*"""")
+    return when {
+        existing.containsMatchIn(tag) -> existing.replaceFirst(tag, """$name="$escaped"""")
+        tag.endsWith("/>") -> tag.dropLast(2) + " $name=\"$escaped\"/>"
+        else -> tag.dropLast(1) + " $name=\"$escaped\">"
+    }
 }
 
 private fun String.escapeXmlAttribute(): String =

@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,12 +40,11 @@ fun ErrorBanner(
             .padding(top = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Error indicator: a simple "!" text character as fallback
-        // (no ErrorOutline icon available in Compose Desktop 1.6)
-        Text(
-            text = "!",
-            color = FeedbackErrorColor,
-            style = MaterialTheme.typography.titleMedium,
+        // Error indicator: the same Outlined.ErrorOutline icon Android's onboarding showError uses.
+        Icon(
+            imageVector = Icons.Outlined.ErrorOutline,
+            contentDescription = null,
+            tint = FeedbackErrorColor,
             modifier = Modifier.padding(end = 4.dp),
         )
         Text(
