@@ -54,6 +54,11 @@ struct DeviceBindings {
     BindingTable secondaryTable{false};
 };
 
+// Builds the controller-independent device entry used when a remapped global
+// table outlives the last connected SDL gamepad during player shutdown.
+DeviceBindings globalBindingDevice(const BindingTable& table,
+                                   const BindingTable& secondaryTable);
+
 // Builds the normalized identity descriptor for a canonicalized (lowercase,
 // 32-hex) SDL GUID: "vid:%04x-pid:%04x" — Android's DeviceSignature format —
 // or "guid:<hex>" when the vendor/product fields are absent. Pure function;

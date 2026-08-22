@@ -229,6 +229,23 @@ void testSidecarSerializeAndWrite() {
     CHECK(!romm::player::writeBindingSidecar("/tmp/does-not-exist-xyz/c.json", {device}));
 }
 
+void testGlobalBindingDevice() {
+    BindingTable table;
+    table.set(romm::player::kSlotA, BindingSource::ofButton(PadButton::kStart));
+    BindingTable secondary(false);
+    secondary.set(romm::player::kSlotB, BindingSource::ofButton(PadButton::kBack));
+
+    const romm::player::DeviceBindings device =
+        romm::player::globalBindingDevice(table, secondary);
+
+    CHECK(device.guid.empty());
+    CHECK(device.identity.empty());
+    for (int slot = 0; slot < romm::player::kRetroPadSlotCount; ++slot) {
+        CHECK(device.table.get(slot) == table.get(slot));
+        CHECK(device.secondaryTable.get(slot) == secondary.get(slot));
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -237,5 +254,6 @@ int main() {
     testDisplayLabels();
     testNormalizedIdentity();
     testSidecarSerializeAndWrite();
+    testGlobalBindingDevice();
     return rommtest::finish("test_binding_table");
 }

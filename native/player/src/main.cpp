@@ -809,6 +809,13 @@ int main(int argc, char* argv[]) {
             device.secondaryTable = input.secondaryBindings();
             devices.push_back(std::move(device));
         }
+        // Bindings are global, not device-specific. Steam can detach its virtual
+        // controller while the player is shutting down; retain the table rather
+        // than writing an empty sidecar that cannot restore the user's remap.
+        if (devices.empty()) {
+            devices.push_back(romm::player::globalBindingDevice(
+                input.bindings(), input.secondaryBindings()));
+        }
         if (!romm::player::writeBindingSidecar(
                 parentDirectory(request.resultPath) + "/controller-bindings.json", devices)) {
             std::fprintf(stderr, "warning: failed to write controller-bindings.json\n");

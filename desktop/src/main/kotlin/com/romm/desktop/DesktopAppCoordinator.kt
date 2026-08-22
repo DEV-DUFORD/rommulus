@@ -792,6 +792,10 @@ class DesktopAppCoordinator(
             log.warning("binding sidecar unusable at $sidecarPath: ${e.message}; preserved")
             return
         }
+        if (sidecar.devices.isEmpty()) {
+            log.warning("binding sidecar contains no binding table at $sidecarPath; preserved")
+            return
+        }
 
         // Every device entry carries the player's single global table; upsert per device (the
         // last device wins — identical tables in practice, so this is a no-op).

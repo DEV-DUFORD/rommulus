@@ -649,6 +649,26 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
+    fun `empty sidecar is preserved because it cannot restore a binding table`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher(onLaunch = { request ->
+            Files.writeString(
+                Path.of(request.resultPath).parent.resolve("controller-bindings.json"),
+                """{"protocolVersion": 1, "devices": []}""",
+            )
+        })
+        val (c, supervisor) = bindingWiredCoordinator(paths, "gb", launcher)
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        waitForReconciled(supervisor, started.sessionId)
+
+        assertThat(c.controllerBindingStore.loadForCore("gambatte")).isEmpty()
+        val sessionDir = supervisor.store.sessionDir(started.sessionId)
+        assertThat(Files.exists(sessionDir.resolve("controller-bindings.json"))).isTrue()
+    }
+
+    @Test
     fun `launchPlayer fails closed when ROM staging fails and never spawns the player`(@TempDir dir: Path) {
         val paths = dir.testRoot()
         installGambatte(paths)

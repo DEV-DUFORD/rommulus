@@ -63,6 +63,14 @@ json bindingSourceToJson(const BindingSource& source) {
 
 }  // namespace
 
+DeviceBindings globalBindingDevice(const BindingTable& table,
+                                   const BindingTable& secondaryTable) {
+    DeviceBindings device;
+    device.table = table;
+    device.secondaryTable = secondaryTable;
+    return device;
+}
+
 std::string normalizedDeviceIdentity(const std::string& guid) {
     const std::string canonical = toLower(guid);
     if (canonical.size() != 32) {
