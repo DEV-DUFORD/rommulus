@@ -252,23 +252,52 @@ class DesktopControllerRouterTest {
     }
 
     @Test
-    fun `held button does not repeat focus actions`() = runBlocking {
+    fun `held direction repeats after a delay at a steady interval`() = runBlocking {
         val source = FakeJInputSource()
-        val router = DesktopControllerRouter(source, this)
+        var now = 1_000L
+        val router = DesktopControllerRouter(source, this, clockMillis = { now })
         val actions = mutableListOf<FocusAction>()
         val collector = launch { router.focusActions.collect { actions += it } }
 
         yield() // let the collector subscribe before the first tick
 
-        val pad = source.addController(buttons = setOf(NeutralKey.DPAD_UP))
+        source.addController(buttons = setOf(NeutralKey.DPAD_UP))
         router.tick()
         yield()
+        now += DesktopControllerRouter.DIRECTION_REPEAT_DELAY_MILLIS - 1
         router.tick()
+        now += 1
+        router.tick()
+        yield()
+        now += DesktopControllerRouter.DIRECTION_REPEAT_INTERVAL_MILLIS
         router.tick()
         yield()
 
         collector.cancel()
-        assertThat(actions).containsExactly(FocusAction.Move(FocusAction.Direction.UP))
+        assertThat(actions).containsExactly(
+            FocusAction.Move(FocusAction.Direction.UP),
+            FocusAction.Move(FocusAction.Direction.UP),
+            FocusAction.Move(FocusAction.Direction.UP),
+        )
+    }
+
+    @Test
+    fun `held action buttons remain edge triggered`() = runBlocking {
+        val source = FakeJInputSource()
+        var now = 1_000L
+        val router = DesktopControllerRouter(source, this, clockMillis = { now })
+        val actions = mutableListOf<FocusAction>()
+        val collector = launch { router.focusActions.collect { actions += it } }
+        yield()
+
+        source.addController(buttons = setOf(NeutralKey.BUTTON_A))
+        router.tick()
+        now += DesktopControllerRouter.DIRECTION_REPEAT_DELAY_MILLIS * 2
+        router.tick()
+        yield()
+
+        collector.cancel()
+        assertThat(actions).containsExactly(FocusAction.Activate)
     }
 
     @Test

@@ -116,6 +116,7 @@ class DesktopControllerRouter(
     private val source: JInputSource,
     private val scope: CoroutineScope,
     private val pollIntervalMillis: Long = DEFAULT_POLL_INTERVAL_MILLIS,
+    private val clockMillis: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     /** The four browser-facing slots (W3C contract), exposed as a [StateFlow]. */
     private val _slots = MutableStateFlow(ControllerSlot.createAllSlots())
@@ -217,7 +218,7 @@ class DesktopControllerRouter(
 
             // Only the first active (lowest-index) slot drives focus.
             val isPrimary = t.slotIndex == _slots.value.indexOfFirst { it.isActive }
-            if (isPrimary) emitFocusActions(t.previousSnapshot, snapshot)
+            if (isPrimary) emitFocusActions(t, snapshot)
             t.previousSnapshot = snapshot
         }
     }
@@ -228,19 +229,30 @@ class DesktopControllerRouter(
      * Emit a [FocusAction] for every focus-relevant button that rose between
      * [previous] and [current] (rising-edge detection suppresses auto-repeat).
      */
-    private fun emitFocusActions(previous: GamepadSnapshot, current: GamepadSnapshot) {
-        for (i in current.buttons.indices) {
-            if (current.buttons[i] <= 0f || previous.buttons[i] > 0f) continue
-            val action = when (i) {
-                LogicalControl.DPAD_UP.index -> FocusAction.Move(FocusAction.Direction.UP)
-                LogicalControl.DPAD_DOWN.index -> FocusAction.Move(FocusAction.Direction.DOWN)
-                LogicalControl.DPAD_LEFT.index -> FocusAction.Move(FocusAction.Direction.LEFT)
-                LogicalControl.DPAD_RIGHT.index -> FocusAction.Move(FocusAction.Direction.RIGHT)
-                LogicalControl.BUTTON_A.index -> FocusAction.Activate
-                LogicalControl.BUTTON_B.index -> FocusAction.Back
-                else -> continue
+    private fun emitFocusActions(trackedController: TrackedController, current: GamepadSnapshot) {
+        val now = clockMillis()
+        for ((control, direction) in FOCUS_DIRECTIONS) {
+            val pressed = current.buttons[control.index] > 0f
+            val wasPressed = trackedController.previousSnapshot.buttons[control.index] > 0f
+            when {
+                !pressed -> trackedController.nextDirectionRepeatAt.remove(direction)
+                !wasPressed -> {
+                    _focusActions.tryEmit(FocusAction.Move(direction))
+                    trackedController.nextDirectionRepeatAt[direction] = now + DIRECTION_REPEAT_DELAY_MILLIS
+                }
+                now >= (trackedController.nextDirectionRepeatAt[direction] ?: Long.MAX_VALUE) -> {
+                    _focusActions.tryEmit(FocusAction.Move(direction))
+                    trackedController.nextDirectionRepeatAt[direction] = now + DIRECTION_REPEAT_INTERVAL_MILLIS
+                }
             }
-            _focusActions.tryEmit(action)
+        }
+
+        for ((control, action) in EDGE_FOCUS_ACTIONS) {
+            if (current.buttons[control.index] > 0f &&
+                trackedController.previousSnapshot.buttons[control.index] <= 0f
+            ) {
+                _focusActions.tryEmit(action)
+            }
         }
     }
 
@@ -285,13 +297,30 @@ class DesktopControllerRouter(
         val controller: JInputController,
         val slotIndex: Int,
         var previousSnapshot: GamepadSnapshot,
-    )
+    ) {
+        val nextDirectionRepeatAt = mutableMapOf<FocusAction.Direction, Long>()
+    }
 
     companion object {
         /** ~60 Hz poll rate. */
         const val DEFAULT_POLL_INTERVAL_MILLIS = 16L
 
+        const val DIRECTION_REPEAT_DELAY_MILLIS = 350L
+        const val DIRECTION_REPEAT_INTERVAL_MILLIS = 90L
+
         /** Minimum interval between poll-failure log lines (throttles a persistent failure). */
         private const val FAILURE_LOG_INTERVAL_MILLIS = 5_000L
+
+        private val FOCUS_DIRECTIONS = listOf(
+            LogicalControl.DPAD_UP to FocusAction.Direction.UP,
+            LogicalControl.DPAD_DOWN to FocusAction.Direction.DOWN,
+            LogicalControl.DPAD_LEFT to FocusAction.Direction.LEFT,
+            LogicalControl.DPAD_RIGHT to FocusAction.Direction.RIGHT,
+        )
+
+        private val EDGE_FOCUS_ACTIONS = listOf(
+            LogicalControl.BUTTON_A to FocusAction.Activate,
+            LogicalControl.BUTTON_B to FocusAction.Back,
+        )
     }
 }

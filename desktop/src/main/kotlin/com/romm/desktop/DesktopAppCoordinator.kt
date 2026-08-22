@@ -721,6 +721,9 @@ class DesktopAppCoordinator(
     fun onPlayerProcessExited(sessionId: String, exitCode: Int): PlayerExitReport {
         val report = playerSupervisor.onPlayerExitBySessionId(sessionId, exitCode)
         activePlayerSessionId.compareAndSet(sessionId, null)
+        // A play session is independent of SRAM. Refresh after every exit so an unchanged save
+        // (or a core with no SRAM at all) still moves the game to the front of Continue Playing.
+        refreshContinuePlayingIfInitialized()
         // Surface the reconciled outcome to the UI so the detail screen can clear its status.
         // Carry [sessionId] so the UI can ignore a stale Ended from an earlier session that is
         // still exiting when the user has already launched a new one.
