@@ -4,7 +4,8 @@
 // trusted roots taken from the ROMM_PLAYER_* environment contract, loads
 // the Libretro core through the platform-neutral engine, runs it with an
 // SDL3 window/audio/input stack, and atomically writes a result JSON.
-// Software-rendered cores only; no network, no tokens.
+// Supports software-rendered cores and the N64 core's GLES3 path; no network,
+// no tokens.
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -44,6 +45,7 @@
 #include "native/player/save_metadata.h"
 #include "native/player/sdl_audio_sink.h"
 #include "native/player/sdl_dynamic_library.h"
+#include "native/player/sdl_hardware_context.h"
 #include "native/player/sdl_input.h"
 #include "native/player/sdl_log_sink.h"
 #include "native/player/sdl_video_sink.h"
@@ -378,7 +380,17 @@ int main(int argc, char* argv[]) {
     ::sigaction(SIGINT, &sa, nullptr);
 
     // 7. Create the window and apply the requested video settings.
+    const bool useHardwareRendering = request.coreId == "mupen64plus_next";
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
+    if (useHardwareRendering) {
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
+        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+        windowFlags |= SDL_WINDOW_OPENGL;
+    }
     if (request.video.fullscreen) windowFlags |= SDL_WINDOW_FULLSCREEN;
     SDL_Window* window = SDL_CreateWindow("rommulus_player", 1280, 720, windowFlags);
     if (window == nullptr) {
@@ -392,6 +404,9 @@ int main(int argc, char* argv[]) {
     videoSink->setScanlines(request.video.scanlines);
     videoSink->setSharpFilter(request.video.sharpFilter);
     videoSink->setFullscreen(request.video.fullscreen);
+    if (useHardwareRendering) {
+        romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(window));
+    }
 
     // Give the window manager one chance to deliver an early close/quit
     // before committing to loading the core — a user who already asked to
@@ -407,12 +422,10 @@ int main(int argc, char* argv[]) {
 
     // 8. Load and start the core.
     romm::EmulationSession session;
-    // Linux currently presents software frames only. Select the vendored
-    // Angrylion renderer so Mupen64Plus-Next does not request EGL or Vulkan;
-    // other cores ignore this unknown option.
-    session.setCoreOptionOverride("mupen64plus-rdp-plugin", "angrylion");
-    session.setCoreOptionOverride("mupen64plus-rsp-plugin", "cxd4");
-    session.setCoreOptionOverride("mupen64plus-angrylion-multithread", "4");
+    // GLideN64 runs the N64 RDP on the GPU; HLE avoids the much heavier cxd4
+    // RSP path. Other cores ignore these Mupen64Plus-specific options.
+    session.setCoreOptionOverride("mupen64plus-rdp-plugin", "gliden64");
+    session.setCoreOptionOverride("mupen64plus-rsp-plugin", "hle");
     if (!session.acquireProcessSlot()) {
         const std::string error = "another emulation session is already active in this process";
         std::fprintf(stderr, "error: %s\n", error.c_str());

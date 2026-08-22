@@ -30,30 +30,24 @@ again, only Ubuntu 24.04 has been exercised so far.
 
 ## GPU and graphics expectations
 
-**The Linux player renders every core in software. No hardware acceleration is required or used.**
+**Nintendo 64 uses GPU-accelerated GLideN64; all other current cores use software rendering.**
 
-- The player (`bin/rommulus-player`) runs a separate SDL3 window. For the current cores it uses
+- The player (`bin/rommulus-player`) runs a separate SDL3 window. For software-rendered cores it uses
   the **software frame path** (`plans/LINUX_X64.md` §11.6): each frame produced by the core is
   converted and uploaded to a reusable SDL texture; there is no Vulkan for software presentation.
-- **No Linux hardware-rendering context exists.** There is no SDL3/EGL `HardwareContext` on
-  Linux, and §11.7 (hardware video) is explicitly a *later gate*. The dated amendment of
-  2026-08-18 records that Mupen64Plus-Next shipped **without** a hardware GL context — it uses
-  the software Angrylion RDP + cxd4 RSP path with the x86_64 new_dynarec, so the player remains
-  software-frames-only. We do not promise hardware acceleration for any current or near-term core.
-- All 14 enabled cores are software-rendered by the player (see `docs/linux-support-manifest.md`):
+- **N64 hardware rendering:** Mupen64Plus-Next uses GLideN64 through an SDL3-managed OpenGL ES 3
+  context, with the x86_64 new dynarec and HLE RSP. This is the same GPU renderer used by the
+  Android build and is the default on Linux, including Steam Deck.
+- The other enabled cores remain software-rendered by the player (see
+  `docs/linux-support-manifest.md`):
   - `pcsx_rearmed` — Lightrec x86_64 dynarec with a software renderer;
-  - `mupen64plus_next` — x86 dynarec + software Angrylion RDP;
   - the remaining real cores (gambatte, fceumm, prosystem, handy, mednafen_ngp, mednafen_wswan,
     stella, beetle_pce_fast, mgba, snes9x, genesis_plus_gx) plus the synthetic `test_core` used
     for end-to-end testing are natively software cores.
-- **GPU impact is limited to window compositing and 2D texture presentation.** A modest
-  integrated GPU (Intel/AMD Mesa) is sufficient; a discrete GPU buys nothing for emulation speed
-  today.
-- **CPU performance is what matters** for the dynarec- and software-RDP-heavy systems (PS1 via
-  `pcsx_rearmed`, N64 via `mupen64plus_next`). Expect those cores to scale with CPU, not GPU.
-- **NVIDIA proprietary-driver qualification is deferred.** §17.5 requires NVIDIA proprietary
-  drivers to be qualified *before any hardware-rendered core ships* — that is part of the later
-  hardware-rendering gate (§11.7), not the current software release.
+- **CPU performance still matters** for CPU emulation and software-rendered systems such as
+  PlayStation via `pcsx_rearmed`, but N64 RDP work now scales with GPU performance.
+- **NVIDIA proprietary-driver qualification is deferred.** This preview targets Steam Deck's AMD
+  Mesa stack; the new hardware path is not yet qualified on proprietary NVIDIA drivers.
 
 ## Diagnostics and troubleshooting
 
@@ -141,6 +135,5 @@ reconciled from the journal/candidate files (§8.3). When reporting a crash, att
 - **No Windows, macOS, ARM64 Linux, or musl Linux builds** (§4 non-goals).
 - **No save UI.** Saves are checkpointed on disk, but there is no Linux desktop saves screen yet;
   per-core criterion 9 round-trip verification is deferred (see above).
-- **No hardware acceleration / Vulkan negotiation** for any core (§11.7 later gate; §11.6 "do not
-  add Vulkan solely for software presentation").
+- **No Vulkan negotiation.** The N64 hardware path uses OpenGL ES 3.
 - **No save states, rewind, netplay, or shaders** — explicitly out of scope (§4 non-goals).

@@ -28,14 +28,14 @@ gate before its gate status below may move to PASSED.
 | `snes9x` | `native/cmake/cores/snes9x-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
 | `genesis_plus_gx` | `native/cmake/cores/genesis_plus_gx-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note) | yes |
 | `pcsx_rearmed` | `native/cmake/cores/pcsx_rearmed-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box; Lightrec x86_64 dynarec (criterion 9 deferred — see note) | yes |
-| `mupen64plus_next` | `native/cmake/cores/mupen64plus_next-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box; x86 dynarec + software Angrylion (criterion 9 deferred — see note) | yes |
+| `mupen64plus_next` | `native/cmake/cores/mupen64plus_next-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box; x86 dynarec. GLideN64 GLES3 acceleration is build-verified and pending physical Steam Deck validation (criterion 9 deferred — see note) | yes |
 
 ### Deferred verification: save round-trip (criterion 9)
 
 All 12 cores above passed the §13.2 per-core gate on the Ubuntu box for criteria
 1–8 and 10–13 (clean compile, no unresolved Android symbols, export check,
 `retro_init`/`retro_deinit` smoke, legal content boot, 10-min frame run,
-software-renderer checks, input mapping, clean unload + repeated launch,
+renderer checks, input mapping, clean unload + repeated launch,
 ASan/UBSan, notice/provenance/package check, manual runtime qualification).
 Criterion 9 (SRAM/file-save round trip) is **DEFERRED** for all 12 pending the
 Linux desktop saves UI, which does not yet exist for easy testing. Saves are

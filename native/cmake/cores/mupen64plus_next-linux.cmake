@@ -1,8 +1,7 @@
 # ---------------------------------------------------------------------------
-# Mupen64Plus-Next: Linux x86_64 software-rendering build of the vendored
-# libretro core. The source/define set follows upstream Makefile.common's
-# Unix, x86_64 dynarec, HAVE_THR_AL, and LLE paths, while deliberately
-# excluding GLideN64, paraLLEl-RDP, EGL/GLES, and Vulkan.
+# Mupen64Plus-Next: Linux x86_64 GLES3 build of the vendored libretro core.
+# GLideN64 is the default GPU renderer; Angrylion remains compiled as a
+# fallback. The CPU core continues to use the x86_64 new dynarec.
 # ---------------------------------------------------------------------------
 set(M64_CORE_DIR ${MUPEN64_DIR}/mupen64plus-core)
 set(M64_RSP_HLE_DIR ${MUPEN64_DIR}/mupen64plus-rsp-hle)
@@ -22,6 +21,10 @@ set(M64_LINUX_INCLUDE_DIRS
     ${MUPEN64_DIR}/custom/mupen64plus-core
     ${M64_GLIDEN64_DIR}/src
     ${M64_GLIDEN64_DIR}/src/osal
+    ${M64_GLIDEN64_DIR}/src/inc
+    ${M64_GLIDEN64_DIR}/src/GLideNHQ/inc
+    ${MUPEN64_DIR}/custom/android/include
+    ${MUPEN64_DIR}/custom/GLideN64
     ${M64_CORE_DIR}/src
     ${M64_CORE_DIR}/src/api
     ${M64_CORE_DIR}/include
@@ -56,7 +59,10 @@ set(M64_LINUX_DEFINES
     ARCH_MIN_SSE2
     NEW_DYNAREC=2
     DYNAREC
-    M64P_ANGRYLION_ONLY
+    EGL
+    HAVE_OPENGLES
+    HAVE_OPENGLES3
+    GLES3
     GIT_VERSION=" 98c1b0d"
 )
 
@@ -183,6 +189,9 @@ set(M64_SOURCES_C
     ${M64_COMM_DIR}/streams/file_stream.c
     ${M64_COMM_DIR}/compat/fopen_utf8.c
     ${MUPEN64_DIR}/custom/mupen64plus-core/api/vidext_libretro.c
+    ${M64_COMM_DIR}/glsm/glsm.c
+    ${M64_COMM_DIR}/glsym/glsym_es3.c
+    ${M64_COMM_DIR}/glsym/rglgen.c
     ${M64_ANGRYLION_DIR}/interface.c
     ${M64_ANGRYLION_DIR}/n64video.c
     ${M64_RSP_HLE_DIR}/src/alist.c
@@ -202,6 +211,64 @@ set(M64_SOURCES_C
     ${M64_CXD4_DIR}/rsp.c
     ${M64_COMM_DIR}/libco/libco.c
 )
+
+set(M64_GLIDEN64_SOURCES_CXX
+    ${M64_GLIDEN64_DIR}/src/Combiner.cpp
+    ${M64_GLIDEN64_DIR}/src/CombinerKey.cpp
+    ${M64_GLIDEN64_DIR}/src/CommonPluginAPI.cpp
+    ${M64_GLIDEN64_DIR}/src/Config.cpp
+    ${M64_GLIDEN64_DIR}/src/convert.cpp
+    ${M64_GLIDEN64_DIR}/src/DebugDump.cpp
+    ${M64_GLIDEN64_DIR}/src/Debugger.cpp
+    ${M64_GLIDEN64_DIR}/src/DepthBuffer.cpp
+    ${M64_GLIDEN64_DIR}/src/DisplayWindow.cpp
+    ${M64_GLIDEN64_DIR}/src/DisplayLoadProgress.cpp
+    ${M64_GLIDEN64_DIR}/src/FrameBuffer.cpp
+    ${M64_GLIDEN64_DIR}/src/FrameBufferInfo.cpp
+    ${M64_GLIDEN64_DIR}/src/GBI.cpp
+    ${M64_GLIDEN64_DIR}/src/gDP.cpp
+    ${M64_GLIDEN64_DIR}/src/GLideN64.cpp
+    ${M64_GLIDEN64_DIR}/src/gSP.cpp
+    ${M64_GLIDEN64_DIR}/src/N64.cpp
+    ${M64_GLIDEN64_DIR}/src/TextDrawer.cpp
+    ${M64_GLIDEN64_DIR}/src/PaletteTexture.cpp
+    ${M64_GLIDEN64_DIR}/src/Performance.cpp
+    ${M64_GLIDEN64_DIR}/src/PostProcessor.cpp
+    ${M64_GLIDEN64_DIR}/src/RDP.cpp
+    ${M64_GLIDEN64_DIR}/src/RSP.cpp
+    ${M64_GLIDEN64_DIR}/src/SoftwareRender.cpp
+    ${M64_GLIDEN64_DIR}/src/TexrectDrawer.cpp
+    ${M64_GLIDEN64_DIR}/src/TextureFilterHandler.cpp
+    ${M64_GLIDEN64_DIR}/src/Textures.cpp
+    ${M64_GLIDEN64_DIR}/src/VI.cpp
+    ${M64_GLIDEN64_DIR}/src/ZlutTexture.cpp
+    ${M64_GLIDEN64_DIR}/src/GraphicsDrawer.cpp
+    ${M64_GLIDEN64_DIR}/src/MupenPlusPluginAPI.cpp
+    ${M64_GLIDEN64_DIR}/src/Log.cpp
+    ${M64_GLIDEN64_DIR}/src/RSP_LoadMatrix.cpp
+    ${M64_GLIDEN64_DIR}/src/CRC_OPT.cpp
+    ${M64_GLIDEN64_DIR}/src/3DMath.cpp
+    ${M64_GLIDEN64_DIR}/src/common/CommonAPIImpl_common.cpp
+    ${M64_GLIDEN64_DIR}/src/Graphics/OpenGLContext/mupen64plus/mupen64plus_DisplayWindow.cpp
+    ${M64_GLIDEN64_DIR}/src/mupenplus/MemoryStatus_mupenplus.cpp
+    ${M64_GLIDEN64_DIR}/src/mupenplus/MupenPlusAPIImpl.cpp
+    ${MUPEN64_DIR}/custom/GLideN64/mupenplus/Config_mupenplus.cpp
+    ${MUPEN64_DIR}/custom/GLideN64/mupenplus/CommonAPIImpl_mupenplus.cpp
+)
+
+# These pinned vendored directories contain only the upstream source closure
+# listed by Makefile.common for GLideN64.
+file(GLOB M64_GLIDEN64_BUFFER_SOURCES CONFIGURE_DEPENDS
+    ${M64_GLIDEN64_DIR}/src/BufferCopy/*.cpp
+    ${M64_GLIDEN64_DIR}/src/DepthBufferRender/*.cpp
+    ${M64_GLIDEN64_DIR}/src/GLideNHQ/*.cpp
+    ${M64_GLIDEN64_DIR}/src/Graphics/*.cpp
+    ${M64_GLIDEN64_DIR}/src/Graphics/OpenGLContext/*.cpp
+    ${M64_GLIDEN64_DIR}/src/Graphics/OpenGLContext/GLSL/*.cpp
+    ${M64_GLIDEN64_DIR}/src/Graphics/OpenGLContext/ThreadedOpenGl/*.cpp
+    ${M64_GLIDEN64_DIR}/src/uCodes/*.cpp
+)
+list(APPEND M64_GLIDEN64_SOURCES_CXX ${M64_GLIDEN64_BUFFER_SOURCES})
 
 # Apple Silicon verification build: the x86_64 dynarec (nasm object + SSE2 C
 # code) cannot link into an arm64 library, so fall back to the pure
@@ -285,6 +352,7 @@ endif()
 
 add_library(mupen64plus_next_core SHARED
     ${M64_SOURCES_C}
+    ${M64_GLIDEN64_SOURCES_CXX}
     ${M64_ANGRYLION_DIR}/parallel_al.cpp
     $<TARGET_OBJECTS:mupen64plus_next_asm_defines>
     ${M64_DYNAREC_LINK_OBJECT}
@@ -349,6 +417,8 @@ target_link_options(mupen64plus_next_core PRIVATE
 endif()
 
 target_link_libraries(mupen64plus_next_core PRIVATE
+    EGL
+    GLESv2
     m
     dl
     pthread

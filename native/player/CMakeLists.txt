@@ -75,6 +75,7 @@ add_executable(rommulus_player
     ${ROMM_PLAYER_SRC}/sdl_log_sink.cpp
     ${ROMM_PLAYER_SRC}/sdl_dynamic_library.cpp
     ${ROMM_PLAYER_SRC}/sdl_audio_sink.cpp
+    ${ROMM_PLAYER_SRC}/sdl_hardware_context.cpp
     ${ROMM_PLAYER_SRC}/sdl_video_sink.cpp
     ${ROMM_PLAYER_SRC}/sdl_input.cpp
     ${ROMM_PLAYER_SRC}/binding_sidecar.cpp
