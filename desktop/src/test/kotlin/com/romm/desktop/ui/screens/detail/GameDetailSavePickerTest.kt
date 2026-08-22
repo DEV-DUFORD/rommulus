@@ -80,6 +80,20 @@ class GameDetailSavePickerTest {
         }
 
         @Test
+        fun `an existing user selection remains checked when the picker is reopened`() {
+            val entries = buildSavePickerEntries(
+                listOf(
+                    save(saveId = 1L, updatedAt = Instant.ofEpochMilli(NOW_MS - 60_000)),
+                    save(saveId = 2L, updatedAt = Instant.ofEpochMilli(NOW_MS - 3_600_000)),
+                ),
+                selectedSaveId = 2L,
+                nowEpochMs = NOW_MS,
+            )
+
+            assertThat(entries.map { it.isDefaultSelection }).containsExactly(false, true)
+        }
+
+        @Test
         fun `no saves - no entries and no default`() {
             val entries = buildSavePickerEntries(emptyList(), nowEpochMs = NOW_MS)
             assertThat(entries).isEmpty()

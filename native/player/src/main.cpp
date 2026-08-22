@@ -551,9 +551,10 @@ int main(int argc, char* argv[]) {
                 // Seed edge history from live levels so the opening button
                 // cannot become another action when capture finishes.
                 input.resetMenuEdges();
-                captureCoordinator.begin(pauseMenu.selection(), captureDevices.data(),
-                                         static_cast<int>(captureDevices.size()),
-                                         romm::player::CaptureTarget::kDigital);
+                captureCoordinator.begin(
+                    romm::player::coreBindingSlotAt(request.coreId, pauseMenu.selection()),
+                    captureDevices.data(), static_cast<int>(captureDevices.size()),
+                    romm::player::CaptureTarget::kDigital);
                 break;
             }
             case romm::player::PauseMenuEffect::kResetDefault:
@@ -695,7 +696,9 @@ int main(int argc, char* argv[]) {
                                               ? result->polarity
                                               : 1);
                             input.setBinding(
-                                pauseMenu.selection(), source, pauseMenu.bindingColumn()
+                                romm::player::coreBindingSlotAt(
+                                    request.coreId, pauseMenu.selection()),
+                                source, pauseMenu.bindingColumn()
                             );
                         }
                         pauseMenu.exitCapture();
@@ -705,7 +708,8 @@ int main(int argc, char* argv[]) {
                     case romm::player::CaptureState::kCleared:
                         // Held Back: clear the selected slot's binding.
                         input.setBinding(
-                            pauseMenu.selection(),
+                            romm::player::coreBindingSlotAt(
+                                request.coreId, pauseMenu.selection()),
                             romm::player::BindingSource::unbound(),
                             pauseMenu.bindingColumn()
                         );

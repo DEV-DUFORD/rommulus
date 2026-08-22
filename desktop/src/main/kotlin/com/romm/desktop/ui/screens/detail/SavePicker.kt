@@ -50,10 +50,12 @@ sealed interface SavePickerState {
  */
 fun buildSavePickerEntries(
     saves: List<ServerSaveInfo>,
+    selectedSaveId: Long? = null,
     nowEpochMs: Long = System.currentTimeMillis(),
 ): List<SavePickerEntryUiModel> {
     val sorted = saves.sortedByDescending { it.updatedAt?.toEpochMilli() ?: Long.MIN_VALUE }
-    val defaultId = sorted.firstOrNull()?.saveId
+    val defaultId = selectedSaveId?.takeIf { selected -> sorted.any { it.saveId == selected } }
+        ?: sorted.firstOrNull()?.saveId
     return sorted.map { save ->
         SavePickerEntryUiModel(
             saveId = save.saveId,

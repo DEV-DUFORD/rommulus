@@ -42,12 +42,37 @@ class JInputControllerSourceTest {
     }
 
     @Test
+    fun `Linux numeric gamepad buttons map to neutral controls`() {
+        val state = LiveJInputController(
+            controller(
+                arrayOf(
+                    component(Component.Identifier.Button._0) { 1f },
+                    component(Component.Identifier.Button._7) { 1f },
+                ),
+            ),
+        ).poll()
+
+        assertThat(state.buttons).containsExactlyInAnyOrder(
+            NeutralKey.BUTTON_A,
+            NeutralKey.BUTTON_START,
+        )
+    }
+
+    @Test
     fun `slider axes are not mistaken for dpad input`() {
         val slider = component(Component.Identifier.Axis.SLIDER) { 1f }
 
         val state = LiveJInputController(controller(arrayOf(slider))).poll()
 
         assertThat(state.buttons).isEmpty()
+    }
+
+    @Test
+    fun `only gamepads and sticks are eligible controller devices`() {
+        assertThat(controller(emptyArray(), type = Controller.Type.GAMEPAD).isGameController()).isTrue()
+        assertThat(controller(emptyArray(), type = Controller.Type.STICK).isGameController()).isTrue()
+        assertThat(controller(emptyArray(), type = Controller.Type.KEYBOARD).isGameController()).isFalse()
+        assertThat(controller(emptyArray(), type = Controller.Type.MOUSE).isGameController()).isFalse()
     }
 
     private fun component(
@@ -66,10 +91,12 @@ class JInputControllerSourceTest {
 
     private fun controller(
         components: Array<Component>,
+        type: Controller.Type = Controller.Type.GAMEPAD,
         poll: () -> Boolean = { true },
     ): Controller = proxy { method ->
         when (method.name) {
             "getName" -> "Test pad"
+            "getType" -> type
             "getComponents" -> components
             "poll" -> poll()
             else -> error("Unexpected Controller method: ${method.name}")

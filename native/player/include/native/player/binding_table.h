@@ -114,6 +114,79 @@ inline const char* retroPadSlotName(int slot) {
     }
 }
 
+// Core-facing display order, matching CoreControllerProfiles.controls in the
+// Settings UI for every console control represented by the 12 RetroPad slots.
+inline int coreBindingSlotAt(const std::string& coreId, int row) {
+    static constexpr std::array<int, kRetroPadSlotCount> kDefault = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotA, kSlotB, kSlotX, kSlotY, kSlotLeftShoulder,
+        kSlotRightShoulder, kSlotSelect, kSlotStart,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kGenesis = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotY, kSlotB, kSlotA, kSlotLeftShoulder, kSlotX,
+        kSlotRightShoulder, kSlotSelect, kSlotStart,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kPce = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotA, kSlotB, kSlotY, kSlotX, kSlotLeftShoulder,
+        kSlotRightShoulder, kSlotSelect, kSlotStart,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kN64 = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotB, kSlotY, kSlotX, kSlotA, kSlotLeftShoulder,
+        kSlotRightShoulder, kSlotSelect, kSlotStart,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kTwoButton = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotA, kSlotB, kSlotSelect, kSlotStart, kSlotX, kSlotY,
+        kSlotLeftShoulder, kSlotRightShoulder,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kGba = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotA, kSlotB, kSlotLeftShoulder, kSlotRightShoulder,
+        kSlotSelect, kSlotStart, kSlotX, kSlotY,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kStella = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotA, kSlotB, kSlotY, kSlotSelect, kSlotStart, kSlotX,
+        kSlotLeftShoulder, kSlotRightShoulder,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kNgp = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotB, kSlotA, kSlotStart, kSlotSelect, kSlotX, kSlotY,
+        kSlotLeftShoulder, kSlotRightShoulder,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kHandy = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotA, kSlotB, kSlotLeftShoulder, kSlotRightShoulder,
+        kSlotStart, kSlotSelect, kSlotX, kSlotY,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kProsystem = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotB, kSlotA, kSlotStart, kSlotSelect, kSlotX, kSlotY,
+        kSlotLeftShoulder, kSlotRightShoulder,
+    };
+    static constexpr std::array<int, kRetroPadSlotCount> kPsx = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotB, kSlotA, kSlotX, kSlotY, kSlotLeftShoulder,
+        kSlotRightShoulder, kSlotSelect, kSlotStart,
+    };
+    const auto& order = coreId == "genesis_plus_gx" ? kGenesis
+        : coreId == "beetle_pce_fast" ? kPce
+        : coreId == "mupen64plus_next" ? kN64
+        : coreId == "mgba" ? kGba
+        : coreId == "stella" ? kStella
+        : coreId == "mednafen_ngp" ? kNgp
+        : coreId == "handy" ? kHandy
+        : coreId == "prosystem" ? kProsystem
+        : coreId == "pcsx_rearmed" ? kPsx
+        : (coreId == "fceumm" || coreId == "gambatte" ||
+           coreId == "mednafen_wswan") ? kTwoButton
+        : kDefault;
+    return row >= 0 && row < kRetroPadSlotCount ? order[row] : row;
+}
+
 // Physical gamepad buttons, named in platform-neutral terms. The values are
 // stable identifiers (used by the sidecar JSON via padButtonName), NOT SDL
 // enum ordinals — SdlInput owns the translation to SDL_GamepadButton.

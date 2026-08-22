@@ -331,7 +331,10 @@ private fun GameDetailContent(
                 is SaveListResult.Success -> SavePickerState.Loaded(
                     SavePickerUiModel(
                         romTitle = loadedDetail?.title ?: "Game #$romId",
-                        entries = buildSavePickerEntries(result.saves),
+                        entries = buildSavePickerEntries(
+                            result.saves,
+                            selectedSaveId = coordinator.chosenSaveForLaunch(romId)?.saveId,
+                        ),
                     ),
                 )
                 is SaveListResult.Failure -> SavePickerState.Error("Couldn't load saves (${result.error})")

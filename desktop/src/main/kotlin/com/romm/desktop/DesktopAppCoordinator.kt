@@ -795,6 +795,7 @@ class DesktopAppCoordinator(
         val records = sidecar.devices.flatMap { device -> RetroPadControlMapping.toRecords(coreId, device) }
         controllerBindingStore.upsertAll(records)
             .onSuccess {
+                controllerConfigRepository.refreshFromStore(coreId)
                 runCatching { Files.deleteIfExists(sidecarPath) }.onFailure { e ->
                     log.warning("binding sidecar ingested but could not be deleted at $sidecarPath: $e")
                 }
@@ -811,7 +812,10 @@ class DesktopAppCoordinator(
      * omitted and the player keeps its built-in defaults.
      */
     private fun loadLaunchControllerBindings(coreId: String): ControllerBindings? = runCatching {
-        val records = controllerBindingStore.loadForPlayer(coreId, RetroPadControlMapping.PLAYER_INDEX)
+        val records = controllerConfigRepository.effectiveLaunchRecords(
+            coreId,
+            RetroPadControlMapping.PLAYER_INDEX,
+        )
         RetroPadControlMapping.toLaunchBindings(records)
     }.getOrElse { e ->
         log.warning("loading stored controller bindings for $coreId failed: $e; launching with defaults")

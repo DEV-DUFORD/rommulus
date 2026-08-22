@@ -12,6 +12,8 @@ import com.romm.androidtv.controller.config.PlayerControllerConfig
 import com.romm.androidtv.controller.config.isPauseMenuControl
 import com.romm.androidtv.storage.ports.ControllerBindingStore
 import com.romm.androidtv.storage.records.ControllerBindingRecord
+import com.romm.desktop.player.RETRO_PAD_SLOT_NAMES
+import com.romm.desktop.player.RetroPadControlMapping
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +37,10 @@ class DesktopControllerConfigRepository(
     private val profiles: CoreControllerProfiles = CoreControllerProfiles,
 ) : ControllerConfigRepository {
 
+    init {
+        migrateLegacyPlayerTables()
+    }
+
     /** Per-core observation flows, lazily created on first [observeCore]. */
     private val flows = mutableMapOf<String, MutableStateFlow<CoreControllerConfig>>()
 
@@ -46,6 +52,33 @@ class DesktopControllerConfigRepository(
 
     override suspend fun loadCore(coreId: String): CoreControllerConfig =
         resolve(coreId, store.loadForCore(coreId))
+
+    /**
+     * Complete effective RetroPad table for launch: profile defaults with stored overrides
+     * applied. Launch requests require all 12 slots, not only the persisted override rows.
+     */
+    fun effectiveLaunchRecords(coreId: String, playerIndex: Int): List<ControllerBindingRecord> {
+        val stored = store.loadForCore(coreId)
+        if (stored.isEmpty()) return emptyList()
+        val player = resolve(coreId, stored).players[playerIndex] ?: return emptyList()
+        val storedByAddress = stored
+            .filter { it.playerIndex == playerIndex }
+            .associateBy { it.controlId to it.bindingSlot }
+        return RETRO_PAD_SLOT_NAMES.flatMap { slotName ->
+            val controlId = RetroPadControlMapping.coreControlIdForSlot(coreId, slotName)
+            BindingSlot.entries.map { slot ->
+                storedByAddress[controlId.id to slot.index]?.let { return@map it }
+                val binding = player.get(controlId, slot)
+                binding?.let {
+                    DesktopControllerBindingCodec.encode(coreId, playerIndex, controlId, it, slot.index)
+                } ?: DesktopControllerBindingCodec.encodeUnmapped(
+                    coreId,
+                    playerIndex,
+                    BindingAddress(controlId, slot),
+                )
+            }
+        }
+    }
 
     override suspend fun setBinding(
         coreId: String,
@@ -145,6 +178,11 @@ class DesktopControllerConfigRepository(
         refresh(coreId)
     }
 
+    /** Refresh observers after the player ingests controller overrides directly into the store. */
+    fun refreshFromStore(coreId: String) {
+        refresh(coreId)
+    }
+
     @Synchronized
     private fun refresh(coreId: String) {
         flows[coreId]?.value = resolve(coreId, store.loadForCore(coreId))
@@ -190,4 +228,41 @@ class DesktopControllerConfigRepository(
     ): ControllerBindingRecord = binding?.let {
         DesktopControllerBindingCodec.encode(coreId, playerIndex, address.controlId, it, address.slot.index)
     } ?: DesktopControllerBindingCodec.encodeUnmapped(coreId, playerIndex, address)
+
+    /**
+     * Preview builds persisted in-game sidecars under raw RetroPad ids. Rewrite complete legacy
+     * tables to each profile's console-semantic ids so existing Steam Deck remaps survive upgrade.
+     */
+    private fun migrateLegacyPlayerTables() {
+        val legacyIds = RetroPadControlMapping.SLOT_TO_CONTROL_ID.values.toSet()
+        for (profile in profiles.all) {
+            val slotToControlId = RETRO_PAD_SLOT_NAMES.associateWith {
+                RetroPadControlMapping.coreControlIdForSlot(profile.coreId, it).id
+            }
+            if (slotToControlId.values.toSet() == legacyIds) continue
+
+            val records = store.loadForCore(profile.coreId)
+            if (records.isEmpty()) continue
+            var changed = false
+            val migrated = records.map { record ->
+                val slotName = RetroPadControlMapping.SLOT_TO_CONTROL_ID
+                    .entries
+                    .firstOrNull { it.value == record.controlId }
+                    ?.key
+                val replacement = slotName?.let(slotToControlId::get)
+                if (replacement != null && replacement != record.controlId) {
+                    changed = true
+                    record.copy(controlId = replacement)
+                } else {
+                    record
+                }
+            }
+            if (changed && records.map { it.controlId }.toSet().containsAll(legacyIds)) {
+                store.deleteCore(profile.coreId).getOrThrow()
+                store.upsertAll(migrated.distinctBy {
+                    Triple(it.playerIndex, it.controlId, it.bindingSlot)
+                }).getOrThrow()
+            }
+        }
+    }
 }

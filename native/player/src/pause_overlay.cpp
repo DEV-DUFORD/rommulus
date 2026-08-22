@@ -729,7 +729,9 @@ void PauseOverlay::draw(
         const float listX = marginX + artW + dp(20);
         const float listW = contentW - artW - dp(20);
         const char* focusedControl = menu.selection() < PauseMenu::kBindingSlotCount
-            ? controlLabelForCoreSlot(coreId, menu.selection())
+            ? controlLabelForCoreSlot(
+                  coreId,
+                  coreBindingSlotAt(coreId != nullptr ? coreId : "", menu.selection()))
             : "Controller mappings";
         drawControllerArtwork(*this, renderer, marginX, contentY, artW, contentH,
                               scale, consoleName, coreId, focusedControl);
@@ -755,13 +757,14 @@ void PauseOverlay::draw(
                 static_cast<float>(PauseMenu::kBindingSlotCount)
         );
         for (int i = 0; i < PauseMenu::kBindingSlotCount; ++i) {
+            const int slot = coreBindingSlotAt(coreId != nullptr ? coreId : "", i);
             const float rowY = contentY + headerH + static_cast<float>(i) * (rowH + gap);
             const bool selected = menu.selection() == i;
             drawText(renderer, listX + dp(16), rowY + (rowH - dp(15)) * 0.5f - dp(1),
-                     controlLabelForCoreSlot(coreId, i), dp(15), 255, 255, 255, 255);
+                     controlLabelForCoreSlot(coreId, slot), dp(15), 255, 255, 255, 255);
 
-            const std::string value = bindings.get(i).display();
-            const std::string secondaryValue = secondaryBindings.get(i).display();
+            const std::string value = bindings.get(slot).display();
+            const std::string secondaryValue = secondaryBindings.get(slot).display();
             const float cellY = rowY + dp(3);
             const float cellH = rowH - dp(6);
             const float primaryX = listX + labelW;
@@ -802,7 +805,9 @@ void PauseOverlay::draw(
         const float y = (H - dialogH) * 0.5f;
         fillRoundedRect(renderer, x, y, dialogW, dialogH, dp(28), kNightLo);
         const std::string title =
-            std::string("Map ") + controlLabelForCoreSlot(coreId, menu.selection());
+            std::string("Map ") + controlLabelForCoreSlot(
+                coreId,
+                coreBindingSlotAt(coreId != nullptr ? coreId : "", menu.selection()));
         drawText(renderer, x + dp(28), y + dp(28), title.c_str(), dp(24),
                  255, 255, 255, 255);
         drawText(renderer, x + dp(28), y + dp(82), "Press a button or move an axis.", dp(16),

@@ -3,6 +3,9 @@ package com.romm.desktop.player
 import com.romm.androidtv.controller.model.LogicalControl
 import com.romm.androidtv.controller.model.NEUTRAL_KEY_TO_CONTROL
 import com.romm.androidtv.controller.model.NeutralKey
+import com.romm.androidtv.controller.config.CoreControllerProfiles
+import com.romm.androidtv.controller.config.CoreControlId
+import com.romm.androidtv.controller.config.isPauseMenuControl
 import com.romm.androidtv.storage.records.BindingSlots
 import com.romm.androidtv.storage.records.ControllerBindingRecord
 
@@ -82,19 +85,19 @@ object RetroPadControlMapping {
     fun toRecords(coreId: String, device: ControllerBindingDevice): List<ControllerBindingRecord> =
         buildList {
             device.bindings.forEach { slot ->
-                add(toRecord(coreId, slot, BindingSlots.PRIMARY))
+                add(toRecord(coreId, coreControlIdForSlot(coreId, slot.slot).id, slot, BindingSlots.PRIMARY))
             }
             device.secondaryBindings?.forEach { slot ->
-                add(toRecord(coreId, slot, BindingSlots.SECONDARY))
+                add(toRecord(coreId, coreControlIdForSlot(coreId, slot.slot).id, slot, BindingSlots.SECONDARY))
             }
         }
 
     private fun toRecord(
         coreId: String,
+        controlId: String,
         slot: PlayerSlotBinding,
         bindingSlot: Int,
     ): ControllerBindingRecord {
-            val controlId = SLOT_TO_CONTROL_ID.getValue(slot.slot)
             return when (slot.type) {
                 PlayerBindingType.UNBOUND -> ControllerBindingRecord(
                     coreId = coreId,
@@ -134,11 +137,12 @@ object RetroPadControlMapping {
     fun toLaunchBindings(records: List<ControllerBindingRecord>): ControllerBindings? {
         if (records.isEmpty()) return null
         val byAddress = records.associateBy { it.controlId to it.bindingSlot }
+        val coreId = records.first().coreId
 
         fun slotsFor(bindingSlot: Int, required: Boolean): List<PlayerSlotBinding>? {
             val slots = mutableListOf<PlayerSlotBinding>()
             for (slotName in RETRO_PAD_SLOT_NAMES) {
-                val record = byAddress[SLOT_TO_CONTROL_ID.getValue(slotName) to bindingSlot]
+                val record = byAddress[coreControlIdForSlot(coreId, slotName).id to bindingSlot]
                     ?: if (required) return null else return null
             when (record.bindingType) {
                 TYPE_UNMAPPED -> slots += PlayerSlotBinding(slotName, PlayerBindingType.UNBOUND)
@@ -175,5 +179,14 @@ object RetroPadControlMapping {
             secondaryBindings = secondarySlots,
         )
         return ControllerBindings(listOf(device))
+    }
+
+    internal fun coreControlIdForSlot(coreId: String, slotName: String): CoreControlId {
+        val target = SLOT_TO_CONTROL.getValue(slotName)
+        return CoreControllerProfiles.byCoreId(coreId)
+            ?.controls
+            ?.firstOrNull { !it.id.isPauseMenuControl && it.target == target }
+            ?.id
+            ?: CoreControlId.entries.first { it.id == SLOT_TO_CONTROL_ID.getValue(slotName) }
     }
 }

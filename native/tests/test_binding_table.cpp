@@ -124,6 +124,14 @@ void testDisplayLabels() {
           "select");
     CHECK(std::string(romm::player::retroPadSlotName(romm::player::kSlotDpadUp)) ==
           "dpad_up");
+    CHECK_EQ(romm::player::coreBindingSlotAt("mupen64plus_next", 0),
+             romm::player::kSlotDpadUp);
+    CHECK_EQ(romm::player::coreBindingSlotAt("mupen64plus_next", 4),
+             romm::player::kSlotB);
+    CHECK_EQ(romm::player::coreBindingSlotAt("mupen64plus_next", 7),
+             romm::player::kSlotA);
+    CHECK_EQ(romm::player::coreBindingSlotAt("fceumm", 6),
+             romm::player::kSlotSelect);
 }
 
 void testNormalizedIdentity() {

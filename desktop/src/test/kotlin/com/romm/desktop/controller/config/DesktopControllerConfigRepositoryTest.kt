@@ -9,6 +9,7 @@ import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.storage.records.ControllerBindingRecord
 import com.romm.desktop.player.PAD_AXIS_NAMES
 import com.romm.desktop.player.PAD_BUTTON_NAMES
+import com.romm.desktop.player.RETRO_PAD_SLOT_NAMES
 import com.romm.desktop.player.RetroPadControlMapping
 import com.romm.desktop.storage.sqlite.SqliteControllerBindingStore
 import com.romm.desktop.storage.sqlite.SqliteDatabase
@@ -101,6 +102,56 @@ class DesktopControllerConfigRepositoryTest {
 
         assertThat(repo.loadCore(coreId).players[0]!!.get(CoreControlId.BUTTON_A, BindingSlot.PRIMARY))
             .isEqualTo(PhysicalBinding.Key(NeutralKey.DPAD_UP.platformCode))
+    }
+
+    @Test
+    fun `effective launch records include defaults plus a stored override`() = runTest {
+        repo.setBinding(
+            coreId,
+            0,
+            CoreControlId.BUTTON_A,
+            PhysicalBinding.Key(NeutralKey.DPAD_UP.platformCode),
+        )
+
+        val launch = RetroPadControlMapping.toLaunchBindings(repo.effectiveLaunchRecords(coreId, 0))
+
+        assertThat(launch).isNotNull()
+        val slots = launch!!.devices.single().bindings
+        assertThat(slots).hasSize(12)
+        assertThat(slots.single { it.slot == "a" }.button).isEqualTo("dpad_up")
+        assertThat(slots.single { it.slot == "b" }.button).isEqualTo("east")
+    }
+
+    @Test
+    fun `N64 RetroPad slots resolve to console control ids`() {
+        assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "b"))
+            .isEqualTo(CoreControlId.BUTTON_A)
+        assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "a"))
+            .isEqualTo(CoreControlId.N64_C_DOWN)
+        assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "select"))
+            .isEqualTo(CoreControlId.L1)
+    }
+
+    @Test
+    fun `legacy N64 sidecar rows migrate to console control ids`() {
+        val legacy = RETRO_PAD_SLOT_NAMES.map { slotName ->
+            ControllerBindingRecord(
+                coreId = "mupen64plus_next",
+                playerIndex = 0,
+                controlId = RetroPadControlMapping.SLOT_TO_CONTROL_ID.getValue(slotName),
+                bindingSlot = BindingSlot.PRIMARY.index,
+                bindingType = RetroPadControlMapping.TYPE_KEY,
+                inputCode = PAD_BUTTON_NAMES.indexOf("south"),
+                polarity = null,
+            )
+        }
+        store.upsertAll(legacy).getOrThrow()
+
+        DesktopControllerConfigRepository(store)
+
+        val migratedIds = store.loadForCore("mupen64plus_next").map { it.controlId }.toSet()
+        assertThat(migratedIds).contains(CoreControlId.N64_C_DOWN.id, CoreControlId.N64_C_LEFT.id)
+        assertThat(migratedIds).doesNotContain(CoreControlId.SELECT.id)
     }
 
     @Test

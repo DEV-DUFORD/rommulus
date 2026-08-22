@@ -32,6 +32,16 @@ import java.util.logging.Logger
  * LEFT/RIGHT_THUMB, LEFT/RIGHT_THUMB2, and LEFT/RIGHT_THUMB3 respectively.
  */
 private val BUTTON_TO_NEUTRAL: Map<Component.Identifier.Button, NeutralKey> = mapOf(
+    Component.Identifier.Button._0 to NeutralKey.BUTTON_A,
+    Component.Identifier.Button._1 to NeutralKey.BUTTON_B,
+    Component.Identifier.Button._2 to NeutralKey.BUTTON_X,
+    Component.Identifier.Button._3 to NeutralKey.BUTTON_Y,
+    Component.Identifier.Button._4 to NeutralKey.BUTTON_L1,
+    Component.Identifier.Button._5 to NeutralKey.BUTTON_R1,
+    Component.Identifier.Button._6 to NeutralKey.BUTTON_SELECT,
+    Component.Identifier.Button._7 to NeutralKey.BUTTON_START,
+    Component.Identifier.Button._8 to NeutralKey.BUTTON_THUMBL,
+    Component.Identifier.Button._9 to NeutralKey.BUTTON_THUMBR,
     Component.Identifier.Button.A to NeutralKey.BUTTON_A,
     Component.Identifier.Button.B to NeutralKey.BUTTON_B,
     Component.Identifier.Button.X to NeutralKey.BUTTON_X,
@@ -149,6 +159,7 @@ class JInputControllerSource : JInputSource {
             val result = ArrayList<JInputController>(controllers.size)
             val seen = HashSet<Controller>()
             for (controller in controllers) {
+                if (!controller.isGameController()) continue
                 seen.add(controller)
                 result.add(wrappers.getOrPut(controller) { LiveJInputController(controller) })
             }
@@ -274,6 +285,9 @@ class JInputControllerSource : JInputSource {
         }
     }
 }
+
+internal fun Controller.isGameController(): Boolean =
+    type == Controller.Type.GAMEPAD || type == Controller.Type.STICK
 
 /**
  * Wraps one JInput [Controller], translating its components into the neutral
