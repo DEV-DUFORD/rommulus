@@ -762,7 +762,7 @@ class DesktopAppCoordinator(
 
     /**
      * Ingests the player's controller-binding sidecar (LINUX_X64.md §11.9): parses
-     * `<sessionDir>/controller-bindings.json` and upserts each device's 12-slot table into
+     * `<sessionDir>/controller-bindings.json` and upserts each device's 16-slot table into
      * [controllerBindingStore] under the session's core — the sidecar carries no core identity,
      * so it is bound to the session's own request file (strictly re-parsed from disk). On success
      * the sidecar is DELETED (it is a session artifact); on any failure it is preserved for

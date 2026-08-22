@@ -50,7 +50,7 @@ PlayerRequest sampleRequest() {
 }
 
 // A v2 controllerBindings value with ONE device covering all three entry
-// shapes (button / axis_direction / unbound) across the 12 slots, plus one
+// shapes (button / axis_direction / unbound) across the legacy 12 slots, plus one
 // "apply to every controller" device with an empty guid/identity.
 ControllerBindings sampleControllerBindings() {
     ControllerBindings cb;

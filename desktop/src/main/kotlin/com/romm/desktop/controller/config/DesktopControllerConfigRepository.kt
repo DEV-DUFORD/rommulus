@@ -55,7 +55,7 @@ class DesktopControllerConfigRepository(
 
     /**
      * Complete effective RetroPad table for launch: profile defaults with stored overrides
-     * applied. Launch requests require all 12 slots, not only the persisted override rows.
+     * applied. Launch requests require all 16 slots, not only the persisted override rows.
      */
     fun effectiveLaunchRecords(coreId: String, playerIndex: Int): List<ControllerBindingRecord> {
         val stored = store.loadForCore(coreId)

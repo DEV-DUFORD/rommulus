@@ -37,8 +37,12 @@ enum RetroPadSlot : int {
     kSlotDpadDown,
     kSlotDpadLeft,
     kSlotDpadRight,
+    kSlotLeftTrigger,
+    kSlotRightTrigger,
+    kSlotLeftStick,
+    kSlotRightStick,
 };
-constexpr int kRetroPadSlotCount = 12;
+constexpr int kRetroPadSlotCount = 16;
 
 // RETRO_DEVICE_ID_JOYPAD_* bit positions (libretro ABI, stable). Kept here
 // as plain constants — rather than including <libretro.h> — so this header
@@ -56,6 +60,10 @@ constexpr int kJoypadBitA = 8;
 constexpr int kJoypadBitX = 9;
 constexpr int kJoypadBitL = 10;
 constexpr int kJoypadBitR = 11;
+constexpr int kJoypadBitL2 = 12;
+constexpr int kJoypadBitR2 = 13;
+constexpr int kJoypadBitL3 = 14;
+constexpr int kJoypadBitR3 = 15;
 
 // The RETRO_DEVICE_ID_JOYPAD_* bit for a slot, or -1 for an invalid slot.
 inline int retroPadSlotJoypadBit(int slot) {
@@ -72,6 +80,10 @@ inline int retroPadSlotJoypadBit(int slot) {
         case kSlotDpadDown: return kJoypadBitDown;
         case kSlotDpadLeft: return kJoypadBitLeft;
         case kSlotDpadRight: return kJoypadBitRight;
+        case kSlotLeftTrigger: return kJoypadBitL2;
+        case kSlotRightTrigger: return kJoypadBitR2;
+        case kSlotLeftStick: return kJoypadBitL3;
+        case kSlotRightStick: return kJoypadBitR3;
         default: return -1;
     }
 }
@@ -91,6 +103,10 @@ inline const char* retroPadSlotLabel(int slot) {
         case kSlotDpadDown: return "D-Pad Down";
         case kSlotDpadLeft: return "D-Pad Left";
         case kSlotDpadRight: return "D-Pad Right";
+        case kSlotLeftTrigger: return "L2";
+        case kSlotRightTrigger: return "R2";
+        case kSlotLeftStick: return "L3";
+        case kSlotRightStick: return "R3";
         default: return "";
     }
 }
@@ -110,67 +126,82 @@ inline const char* retroPadSlotName(int slot) {
         case kSlotDpadDown: return "dpad_down";
         case kSlotDpadLeft: return "dpad_left";
         case kSlotDpadRight: return "dpad_right";
+        case kSlotLeftTrigger: return "left_trigger";
+        case kSlotRightTrigger: return "right_trigger";
+        case kSlotLeftStick: return "left_stick";
+        case kSlotRightStick: return "right_stick";
         default: return "";
     }
 }
 
 // Core-facing display order, matching CoreControllerProfiles.controls in the
-// Settings UI for every console control represented by the 12 RetroPad slots.
+// Settings UI for every console control represented by the 16 RetroPad slots.
 inline int coreBindingSlotAt(const std::string& coreId, int row) {
     static constexpr std::array<int, kRetroPadSlotCount> kDefault = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotA, kSlotB, kSlotX, kSlotY, kSlotLeftShoulder,
-        kSlotRightShoulder, kSlotSelect, kSlotStart,
+        kSlotRightShoulder, kSlotSelect, kSlotStart, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kGenesis = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotY, kSlotB, kSlotA, kSlotLeftShoulder, kSlotX,
-        kSlotRightShoulder, kSlotSelect, kSlotStart,
+        kSlotRightShoulder, kSlotSelect, kSlotStart, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kPce = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotA, kSlotB, kSlotY, kSlotX, kSlotLeftShoulder,
-        kSlotRightShoulder, kSlotSelect, kSlotStart,
+        kSlotRightShoulder, kSlotSelect, kSlotStart, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kN64 = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotB, kSlotY, kSlotX, kSlotA, kSlotLeftShoulder,
-        kSlotRightShoulder, kSlotSelect, kSlotStart,
+        kSlotRightShoulder, kSlotLeftTrigger, kSlotSelect,
+        kSlotRightTrigger, kSlotStart, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kTwoButton = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotA, kSlotB, kSlotSelect, kSlotStart, kSlotX, kSlotY,
-        kSlotLeftShoulder, kSlotRightShoulder,
+        kSlotLeftShoulder, kSlotRightShoulder, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kGba = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotA, kSlotB, kSlotLeftShoulder, kSlotRightShoulder,
-        kSlotSelect, kSlotStart, kSlotX, kSlotY,
+        kSlotSelect, kSlotStart, kSlotX, kSlotY, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kStella = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotA, kSlotB, kSlotY, kSlotSelect, kSlotStart, kSlotX,
-        kSlotLeftShoulder, kSlotRightShoulder,
+        kSlotLeftShoulder, kSlotRightShoulder, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kNgp = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotB, kSlotA, kSlotStart, kSlotSelect, kSlotX, kSlotY,
-        kSlotLeftShoulder, kSlotRightShoulder,
+        kSlotLeftShoulder, kSlotRightShoulder, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kHandy = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotA, kSlotB, kSlotLeftShoulder, kSlotRightShoulder,
-        kSlotStart, kSlotSelect, kSlotX, kSlotY,
+        kSlotStart, kSlotSelect, kSlotX, kSlotY, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kProsystem = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotB, kSlotA, kSlotStart, kSlotSelect, kSlotX, kSlotY,
-        kSlotLeftShoulder, kSlotRightShoulder,
+        kSlotLeftShoulder, kSlotRightShoulder, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
     static constexpr std::array<int, kRetroPadSlotCount> kPsx = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotB, kSlotA, kSlotX, kSlotY, kSlotLeftShoulder,
-        kSlotRightShoulder, kSlotSelect, kSlotStart,
+        kSlotRightShoulder, kSlotLeftTrigger, kSlotRightTrigger,
+        kSlotLeftStick, kSlotRightStick, kSlotSelect, kSlotStart,
     };
     const auto& order = coreId == "genesis_plus_gx" ? kGenesis
         : coreId == "beetle_pce_fast" ? kPce
@@ -382,11 +413,17 @@ inline BindingSource defaultSourceForSlot(int slot) {
         case kSlotDpadDown: return BindingSource::ofButton(PadButton::kDpadDown);
         case kSlotDpadLeft: return BindingSource::ofButton(PadButton::kDpadLeft);
         case kSlotDpadRight: return BindingSource::ofButton(PadButton::kDpadRight);
+        case kSlotLeftTrigger:
+            return BindingSource::axisDirection(PadAxis::kLeftTrigger, 1);
+        case kSlotRightTrigger:
+            return BindingSource::axisDirection(PadAxis::kRightTrigger, 1);
+        case kSlotLeftStick: return BindingSource::ofButton(PadButton::kLeftStick);
+        case kSlotRightStick: return BindingSource::ofButton(PadButton::kRightStick);
         default: return BindingSource::unbound();  // unreachable for valid slots
     }
 }
 
-// The 12-slot table SdlInput::poll() consults. Defaults are the built-in
+// The 16-slot table SdlInput::poll() consults. Defaults are the built-in
 // mapping; the editor mutates it at runtime and reset() restores defaults.
 class BindingTable {
 public:

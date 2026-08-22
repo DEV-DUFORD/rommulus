@@ -252,6 +252,28 @@ class DesktopControllerRouterTest {
     }
 
     @Test
+    fun `focus actions are suppressed while controller capture owns input`() = runBlocking {
+        val source = FakeJInputSource()
+        val router = DesktopControllerRouter(source, this)
+        val actions = mutableListOf<FocusAction>()
+        val collector = launch { router.focusActions.collect { actions += it } }
+        yield()
+
+        val pad = source.addController()
+        router.setFocusActionsEnabled(false)
+        pad.buttons = setOf(NeutralKey.BUTTON_B)
+        router.tick()
+        yield()
+
+        router.setFocusActionsEnabled(true)
+        router.tick()
+        yield()
+
+        collector.cancel()
+        assertThat(actions).isEmpty()
+    }
+
+    @Test
     fun `held direction repeats after a delay at a steady interval`() = runBlocking {
         val source = FakeJInputSource()
         var now = 1_000L

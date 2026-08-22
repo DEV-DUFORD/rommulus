@@ -22,7 +22,7 @@ import com.romm.desktop.player.RetroPadControlMapping
  * - [RetroPadControlMapping.TYPE_AXIS_DIRECTION]→ the player's `PadAxis` ordinal
  *   ([PAD_AXIS_NAMES] index) + polarity
  * - [RetroPadControlMapping.TYPE_AXIS]          → the raw axis platform code (Android-origin
- *   full-analog rows; kept for cross-platform portability — the 12-slot RetroPad table cannot
+ *   full-analog rows; kept for cross-platform portability — the 16-slot RetroPad table cannot
  *   express them, so launch serialization omits such cores, exactly as documented upstream)
  *
  * Digital triggers reported as key presses (e.g. Xbox LT/RT on Linux arrive as
@@ -41,7 +41,7 @@ object DesktopControllerBindingCodec {
     private val TYPE_AXIS_DIRECTION = RetroPadControlMapping.TYPE_AXIS_DIRECTION
     private val TYPE_UNMAPPED = RetroPadControlMapping.TYPE_UNMAPPED
 
-    /** Neutral key → player pad-button wire name (14 entries; the 12 RetroPad slots plus stick clicks). */
+    /** Neutral key → player pad-button wire name for physical digital controls. */
     private val NEUTRAL_KEY_TO_PAD_BUTTON: Map<NeutralKey, String> = mapOf(
         NeutralKey.BUTTON_A to "south",
         NeutralKey.BUTTON_B to "east",

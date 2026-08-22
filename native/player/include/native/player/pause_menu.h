@@ -14,9 +14,9 @@
 // draw ON/OFF); handle() reports each change as a kToggle* effect and the
 // caller applies it to the video sink immediately. Controller Settings opens
 // the active core's editable configuration directly, matching Android. The
-// kPhysicalBindings list contains the 12 RetroPad slots (each showing its current
-// binding, read from SdlInput's BindingTable) plus Reset Controller and Clear
-// Mappings actions.
+// kPhysicalBindings list contains the core's digital RetroPad slots (each
+// showing its current binding, read from SdlInput's BindingTable) plus Reset
+// Controller and Clear Mappings actions.
 // Confirming a slot row enters kBindingCapture: the caller starts the
 // capture coordinator (binding_capture.h, ported Android semantics) for that
 // slot and feeds it raw gamepad levels each frame — while capturing, the
@@ -99,8 +99,8 @@ public:
     static constexpr int kScanlinesItem = 0;
     static constexpr int kIntegerScalingItem = 1;
     static constexpr int kSharpFilterItem = 2;
-    // Selection indices while in kPhysicalBindings: the 12 RetroPad slots
-    // followed by the Reset Controller and Clear Mappings header actions.
+    // Maximum selection indices while in kPhysicalBindings: the 16 RetroPad
+    // slots followed by the Reset Controller and Clear Mappings actions.
     static constexpr int kBindingSlotCount = kRetroPadSlotCount;
     static constexpr int kResetDefaultItem = kBindingSlotCount;
     static constexpr int kClearMappingsItem = kBindingSlotCount + 1;
@@ -113,8 +113,26 @@ public:
     // (0..12) in kPhysicalBindings. In kBindingCapture it is the
     // RetroPad slot being captured. Meaningless in kClosed.
     int selection() const { return selection_; }
+    int bindingSlotCount() const { return bindingSlotCount_; }
+    int resetDefaultItem() const { return bindingSlotCount_; }
+    int clearMappingsItem() const { return bindingSlotCount_ + 1; }
+    void setBindingSlotCount(int count) {
+        bindingSlotCount_ = count < 1 ? 1 : (count > kBindingSlotCount ? kBindingSlotCount : count);
+    }
     // 0 = Primary, 1 = Secondary while a binding row is selected.
     int bindingColumn() const { return bindingColumn_; }
+
+    // First binding row to draw for a viewport of `visibleRows`. The
+    // selection drives the viewport, so controller navigation always keeps
+    // the focused row visible without coupling this state machine to SDL.
+    int bindingViewportStart(int visibleRows) const {
+        if (visibleRows <= 0 || visibleRows >= bindingSlotCount_) return 0;
+        const int focusedRow =
+            selection_ < bindingSlotCount_ ? selection_ : bindingSlotCount_ - 1;
+        const int maxStart = bindingSlotCount_ - visibleRows;
+        const int desired = focusedRow - visibleRows + 1;
+        return desired < 0 ? 0 : (desired > maxStart ? maxStart : desired);
+    }
 
     // True while capturing a binding for the slot in selection(). While this
     // is true the caller must feed the capture coordinator raw gamepad
@@ -203,10 +221,11 @@ private:
         selection_ = (selection_ + delta + kVideoOptionCount) % kVideoOptionCount;
     }
 
-    // Moves the physical-binding list selection by +/-1, wrapping over its
-    // 12 slot rows plus the Reset to Default row.
+    // Moves the physical-binding list selection by +/-1, wrapping over the
+    // configured core rows plus the two header actions.
     void movePhysicalSelection(int delta) {
-        selection_ = (selection_ + delta + kPhysicalRowCount) % kPhysicalRowCount;
+        const int rowCount = bindingSlotCount_ + 2;
+        selection_ = (selection_ + delta + rowCount) % rowCount;
     }
 
     PauseMenuEffect handleOpen(const PauseMenuActions& a) {
@@ -281,7 +300,7 @@ private:
     PauseMenuEffect handlePhysicalBindings(const PauseMenuActions& a) {
         if (a.up) movePhysicalSelection(-1);
         if (a.down) movePhysicalSelection(+1);
-        if (selection_ < kBindingSlotCount) {
+        if (selection_ < bindingSlotCount_) {
             if (a.left) bindingColumn_ = 0;
             if (a.right) bindingColumn_ = 1;
         } else {
@@ -295,14 +314,14 @@ private:
             return PauseMenuEffect::kNone;
         }
         if (a.confirm) {
-            if (selection_ < kBindingSlotCount) {
+            if (selection_ < bindingSlotCount_) {
                 // Enter capture mode for the focused slot. The caller starts
                 // the capture coordinator (kBeginCapture) and feeds it raw
                 // gamepad levels each frame.
                 state_ = PauseMenuState::kBindingCapture;
                 return PauseMenuEffect::kBeginCapture;
             }
-            return selection_ == kResetDefaultItem
+            return selection_ == resetDefaultItem()
                 ? PauseMenuEffect::kResetDefault
                 : PauseMenuEffect::kClearMappings;
         }
@@ -346,6 +365,7 @@ private:
     PauseMenuState state_ = PauseMenuState::kClosed;
     int selection_ = 0;
     int bindingColumn_ = 0;
+    int bindingSlotCount_ = kBindingSlotCount;
     bool scanlinesEnabled_ = false;
     bool integerScalingEnabled_ = false;
     bool sharpFilterEnabled_ = false;

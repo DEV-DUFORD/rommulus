@@ -10,11 +10,11 @@ import com.romm.androidtv.storage.records.BindingSlots
 import com.romm.androidtv.storage.records.ControllerBindingRecord
 
 /**
- * Bridges the player's 12 RetroPad slots to the shared controller model (LINUX_X64.md §11.9).
+ * Bridges the player's 16 RetroPad slots to the shared controller model (LINUX_X64.md §11.9).
  *
  * The desktop player applies ONE global binding table to every port, so ingestion stores each
  * device's table under [PLAYER_INDEX] and launch serialization reads that same bucket back.
- * Every slot routes through the shared [NEUTRAL_KEY_TO_CONTROL] mapping (all 12 RetroPad slots
+ * Every slot routes through the shared [NEUTRAL_KEY_TO_CONTROL] mapping (all 16 RetroPad slots
  * have a neutral key), and the persisted [ControllerBindingRecord.controlId] values are
  * IDENTICAL to Android's `CoreControlId` persistence keys (`button_a`, `l1`, `d_pad_up`, ...)
  * so bindings stay portable between platforms.
@@ -34,7 +34,7 @@ object RetroPadControlMapping {
     const val TYPE_AXIS_DIRECTION = "AXIS_DIRECTION"
     const val TYPE_UNMAPPED = "UNMAPPED"
 
-    /** Player RetroPad slot wire name → neutral key (all 12 slots are covered). */
+    /** Player RetroPad slot wire name → neutral key (all 16 slots are covered). */
     private val SLOT_TO_NEUTRAL_KEY: Map<String, NeutralKey> = mapOf(
         "a" to NeutralKey.BUTTON_A,
         "b" to NeutralKey.BUTTON_B,
@@ -48,6 +48,10 @@ object RetroPadControlMapping {
         "dpad_down" to NeutralKey.DPAD_DOWN,
         "dpad_left" to NeutralKey.DPAD_LEFT,
         "dpad_right" to NeutralKey.DPAD_RIGHT,
+        "left_trigger" to NeutralKey.BUTTON_L2,
+        "right_trigger" to NeutralKey.BUTTON_R2,
+        "left_stick" to NeutralKey.BUTTON_THUMBL,
+        "right_stick" to NeutralKey.BUTTON_THUMBR,
     )
 
     /** Slot wire name → shared [LogicalControl], via the shared neutral-key mapping. */
@@ -71,6 +75,10 @@ object RetroPadControlMapping {
         LogicalControl.DPAD_DOWN to "d_pad_down",
         LogicalControl.DPAD_LEFT to "d_pad_left",
         LogicalControl.DPAD_RIGHT to "d_pad_right",
+        LogicalControl.BUTTON_LT to "l2",
+        LogicalControl.BUTTON_RT to "r2",
+        LogicalControl.BUTTON_L3 to "l3",
+        LogicalControl.BUTTON_R3 to "r3",
     )
 
     /** Slot wire name → persistence-stable controlId. */
@@ -78,7 +86,7 @@ object RetroPadControlMapping {
         SLOT_TO_CONTROL.mapValues { CONTROL_TO_ID.getValue(it.value) }
 
     /**
-     * One sidecar/request device (12-slot table) → shared binding records for [coreId].
+     * One sidecar/request device (16-slot table) → shared binding records for [coreId].
      * Every slot produces a row — including UNMAPPED rows for unbound slots, so the stored
      * table is complete and launch serialization can reconstruct it exactly.
      */
@@ -130,7 +138,7 @@ object RetroPadControlMapping {
         }
 
     /**
-     * Stored records → the 12-slot table for a v2 request [ControllerBindings], or null when
+     * Stored records → the 16-slot table for a v2 request [ControllerBindings], or null when
      * the stored table is incomplete/invalid (the caller then omits the field and the player
      * keeps its defaults — a request must never be written with a partial table).
      */

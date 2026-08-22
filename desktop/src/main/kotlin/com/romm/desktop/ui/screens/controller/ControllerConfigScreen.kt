@@ -84,9 +84,12 @@ private data class PendingConflict(
 )
 
 @Composable
-fun ControllerConfigScreen(coordinator: DesktopAppCoordinator) {
+fun ControllerConfigScreen(
+    coordinator: DesktopAppCoordinator,
+    onCaptureActiveChanged: (Boolean) -> Unit = {},
+) {
     val coreId = coordinator.selectedControllerCoreId ?: return
-    ControllerConfigScreen(coreId, coordinator, coordinator::onBack)
+    ControllerConfigScreen(coreId, coordinator, coordinator::onBack, onCaptureActiveChanged)
 }
 
 @Composable
@@ -94,6 +97,7 @@ fun ControllerConfigScreen(
     coreId: String,
     coordinator: DesktopAppCoordinator,
     onBack: () -> Unit,
+    onCaptureActiveChanged: (Boolean) -> Unit = {},
 ) {
     val profile = remember(coreId) {
         CoreControllerProfiles.byCoreId(coreId)
@@ -129,6 +133,7 @@ fun ControllerConfigScreen(
     DisposableEffect(capturePump) {
         capturePump.start()
         onDispose {
+            onCaptureActiveChanged(false)
             captureCoordinator.cancel()
             capturePump.stop()
         }
@@ -165,6 +170,7 @@ fun ControllerConfigScreen(
     fun finishCapture(message: String? = null) {
         val capture = pendingCapture
         pendingCapture = null
+        onCaptureActiveChanged(false)
         if (message != null) feedback = message
         if (capture != null) {
             restoreBindingFocus(
@@ -210,6 +216,7 @@ fun ControllerConfigScreen(
                         binding = state.binding,
                     )
                     pendingCapture = null
+                    onCaptureActiveChanged(false)
                 }
             }
             DesktopCaptureState.TimedOut -> finishCapture("Mapping timed out")
@@ -221,6 +228,7 @@ fun ControllerConfigScreen(
 
     val startCapture: (CoreControlDescriptor, BindingSlot) -> Unit = { descriptor, slot ->
         val selectedDevice = coordinator.controllerInputSource.enumerate().getOrNull(selectedPlayer)
+        onCaptureActiveChanged(true)
         captureCoordinator.beginCapture(
             slotIndex = selectedPlayer,
             deviceId = selectedDevice?.id,

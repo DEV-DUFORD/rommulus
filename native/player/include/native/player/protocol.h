@@ -35,7 +35,7 @@ struct VideoSettings {
 
 // One device entry of the v2 request's optional controllerBindings field.
 // The device-entry shape REUSES the sidecar schema (binding_sidecar.h):
-// guid + normalized identity + the full 12-slot RetroPad binding table, so
+// guid + normalized identity + the full 16-slot RetroPad binding table, so
 // the player can seed its BindingTable from a launch request exactly as it
 // would from a sidecar file. Unlike the sidecar (where guid is always a real
 // 32-hex SDL GUID), a launch request may carry an EMPTY guid + identity to
@@ -53,7 +53,7 @@ struct ControllerBindingIdentity {
 struct ControllerBindingDevice {
     std::string guid;      // canonical lowercase SDL GUID, or "" = all controllers
     ControllerBindingIdentity identity;
-    BindingTable table;    // the 12 RetroPad slot bindings, in slot order
+    BindingTable table;    // the 16 RetroPad slot bindings, in slot order
     BindingTable secondaryTable{false};  // optional on wire; unmapped when absent
 };
 

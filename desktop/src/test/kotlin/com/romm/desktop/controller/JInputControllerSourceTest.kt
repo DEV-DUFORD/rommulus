@@ -1,6 +1,7 @@
 package com.romm.desktop.controller
 
 import com.romm.androidtv.controller.model.NeutralKey
+import com.romm.androidtv.controller.model.NeutralAxis
 import net.java.games.input.Component
 import net.java.games.input.Controller
 import org.assertj.core.api.Assertions.assertThat
@@ -65,6 +66,21 @@ class JInputControllerSourceTest {
         val state = LiveJInputController(controller(arrayOf(slider))).poll()
 
         assertThat(state.buttons).isEmpty()
+    }
+
+    @Test
+    fun `Linux Z and RZ axes normalize as triggers with minus one at rest`() {
+        val state = LiveJInputController(
+            controller(
+                arrayOf(
+                    component(Component.Identifier.Axis.Z) { -1f },
+                    component(Component.Identifier.Axis.RZ) { 1f },
+                ),
+            ),
+        ).poll()
+
+        assertThat(state.axes[NeutralAxis.LTRIGGER]).isZero()
+        assertThat(state.axes[NeutralAxis.RTRIGGER]).isEqualTo(1f)
     }
 
     @Test

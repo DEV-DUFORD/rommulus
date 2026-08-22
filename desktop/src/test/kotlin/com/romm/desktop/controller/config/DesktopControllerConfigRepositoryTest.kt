@@ -117,7 +117,7 @@ class DesktopControllerConfigRepositoryTest {
 
         assertThat(launch).isNotNull()
         val slots = launch!!.devices.single().bindings
-        assertThat(slots).hasSize(12)
+        assertThat(slots).hasSize(16)
         assertThat(slots.single { it.slot == "a" }.button).isEqualTo("dpad_up")
         assertThat(slots.single { it.slot == "b" }.button).isEqualTo("east")
     }
@@ -130,6 +130,10 @@ class DesktopControllerConfigRepositoryTest {
             .isEqualTo(CoreControlId.N64_C_DOWN)
         assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "select"))
             .isEqualTo(CoreControlId.L1)
+        assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "left_trigger"))
+            .isEqualTo(CoreControlId.Z)
+        assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "right_trigger"))
+            .isEqualTo(CoreControlId.R1)
     }
 
     @Test

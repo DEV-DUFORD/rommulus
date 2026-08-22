@@ -514,6 +514,10 @@ int main(int argc, char* argv[]) {
         );
     }
     romm::player::PauseMenu pauseMenu;
+    pauseMenu.setBindingSlotCount(
+        request.coreId == "mupen64plus_next" ? 14 :
+        request.coreId == "pcsx_rearmed" ? 16 : 12
+    );
     romm::player::PauseOverlay pauseOverlay;
     // Seed the Video Options submenu with the launch request's settings so
     // its ON/OFF display matches what was applied to the sink at startup.

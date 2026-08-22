@@ -439,6 +439,8 @@ const char* controlLabelForCoreSlot(const char* coreId, int slot) {
             "L Shoulder", "Start", "C-Left", "C-Right",
         };
         if (slot >= 0 && slot < 8) return labels[slot];
+        if (slot == kSlotLeftTrigger) return "Z Trigger";
+        if (slot == kSlotRightTrigger) return "R Shoulder";
     } else if (id == "mgba") {
         if (slot == kSlotLeftShoulder) return "L";
         if (slot == kSlotRightShoulder) return "R";
@@ -711,9 +713,9 @@ void PauseOverlay::draw(
         const float clearX = W - marginX - clearW;
         const float resetX = clearX - dp(8) - resetW;
         drawButton(*this, renderer, resetX, headerY, resetW, dp(42), "Reset Controller",
-                   scale, menu.selection() == PauseMenu::kResetDefaultItem);
+                   scale, menu.selection() == menu.resetDefaultItem());
         drawButton(*this, renderer, clearX, headerY, clearW, dp(42), "Clear Mappings",
-                   scale, menu.selection() == PauseMenu::kClearMappingsItem);
+                   scale, menu.selection() == menu.clearMappingsItem());
 
         const float tabY = dp(76);
         fillRoundedRect(renderer, marginX, tabY, W - marginX * 2.0f, dp(38), dp(8), kNightLo);
@@ -728,7 +730,7 @@ void PauseOverlay::draw(
         const float artW = contentW * 0.4f - dp(10);
         const float listX = marginX + artW + dp(20);
         const float listW = contentW - artW - dp(20);
-        const char* focusedControl = menu.selection() < PauseMenu::kBindingSlotCount
+        const char* focusedControl = menu.selection() < menu.bindingSlotCount()
             ? controlLabelForCoreSlot(
                   coreId,
                   coreBindingSlotAt(coreId != nullptr ? coreId : "", menu.selection()))
@@ -750,15 +752,20 @@ void PauseOverlay::draw(
                  Color{56, 67, 69});
 
         const float gap = dp(5);
+        constexpr int kVisibleBindingRows = 8;
+        const int firstRow = menu.bindingViewportStart(kVisibleBindingRows);
+        const int lastRow =
+            std::min(firstRow + kVisibleBindingRows, menu.bindingSlotCount());
         const float rowH = std::min(
             dp(48),
             (contentH - headerH -
-             gap * static_cast<float>(PauseMenu::kBindingSlotCount - 1)) /
-                static_cast<float>(PauseMenu::kBindingSlotCount)
+             gap * static_cast<float>(kVisibleBindingRows - 1)) /
+                static_cast<float>(kVisibleBindingRows)
         );
-        for (int i = 0; i < PauseMenu::kBindingSlotCount; ++i) {
+        for (int i = firstRow; i < lastRow; ++i) {
             const int slot = coreBindingSlotAt(coreId != nullptr ? coreId : "", i);
-            const float rowY = contentY + headerH + static_cast<float>(i) * (rowH + gap);
+            const float rowY =
+                contentY + headerH + static_cast<float>(i - firstRow) * (rowH + gap);
             const bool selected = menu.selection() == i;
             drawText(renderer, listX + dp(16), rowY + (rowH - dp(15)) * 0.5f - dp(1),
                      controlLabelForCoreSlot(coreId, slot), dp(15), 255, 255, 255, 255);
@@ -789,6 +796,14 @@ void PauseOverlay::draw(
             drawText(renderer, secondaryX + dp(12), cellY + (cellH - dp(12)) * 0.5f - dp(1),
                      secondaryValue.c_str(), dp(12), kTextSecondary.r, kTextSecondary.g,
                      kTextSecondary.b, 255);
+        }
+        if (firstRow > 0) {
+            drawText(renderer, listX + listW - dp(20), contentY + dp(3), "^", dp(12),
+                     kRomm300.r, kRomm300.g, kRomm300.b, 255);
+        }
+        if (lastRow < menu.bindingSlotCount()) {
+            drawText(renderer, listX + listW - dp(20), contentY + contentH - dp(16), "v",
+                     dp(12), kRomm300.r, kRomm300.g, kRomm300.b, 255);
         }
         const char* footer = "Select a control to remap it  |  Back to return";
         drawText(renderer, (W - textWidth(footer, dp(12))) * 0.5f, H - dp(28),

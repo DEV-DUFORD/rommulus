@@ -240,7 +240,12 @@ fun RommulusDesktopApp(
                             Screen.BIOS_CONFIGURATION -> BiosConfigurationScreen(coordinator)
 
                             Screen.CONTROLLER_LIST -> ControllerConsoleListScreen(coordinator)
-                            Screen.CONTROLLER_CONFIG -> ControllerConfigScreen(coordinator)
+                            Screen.CONTROLLER_CONFIG -> ControllerConfigScreen(
+                                coordinator = coordinator,
+                                onCaptureActiveChanged = { active ->
+                                    router.setFocusActionsEnabled(!active)
+                                },
+                            )
 
                             // The licenses dialog is a separate desktop window (its own
                             // composition); rendering it as the screen content is acceptable —

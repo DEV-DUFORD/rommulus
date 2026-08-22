@@ -80,7 +80,7 @@ public:
     PauseMenuActions pollMenuActions();
 
     // --- Binding editor support (the pause menu's Physical Controller
-    // Settings). The table maps each of the 12 RetroPad slots to a physical
+    // Settings). The table maps each of the 16 RetroPad slots to a physical
     // control; poll() consults it instead of a hardcoded mapping. Defaults
     // are the built-in mapping; the editor mutates it at runtime.
     const BindingTable& bindings() const { return bindings_; }

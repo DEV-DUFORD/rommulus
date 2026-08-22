@@ -63,8 +63,21 @@ void testDefaultMapping() {
     CHECK_EQ(romm::player::retroPadSlotJoypadBit(romm::player::kSlotDpadDown), 5);
     CHECK_EQ(romm::player::retroPadSlotJoypadBit(romm::player::kSlotDpadLeft), 6);
     CHECK_EQ(romm::player::retroPadSlotJoypadBit(romm::player::kSlotDpadRight), 7);
+    CHECK_EQ(romm::player::retroPadSlotJoypadBit(romm::player::kSlotLeftTrigger), 12);
+    CHECK_EQ(romm::player::retroPadSlotJoypadBit(romm::player::kSlotRightTrigger), 13);
+    CHECK_EQ(romm::player::retroPadSlotJoypadBit(romm::player::kSlotLeftStick), 14);
+    CHECK_EQ(romm::player::retroPadSlotJoypadBit(romm::player::kSlotRightStick), 15);
     CHECK_EQ(romm::player::retroPadSlotJoypadBit(-1), -1);
-    CHECK_EQ(romm::player::retroPadSlotJoypadBit(12), -1);
+    CHECK_EQ(romm::player::retroPadSlotJoypadBit(16), -1);
+
+    CHECK(table.get(romm::player::kSlotLeftTrigger) ==
+          BindingSource::axisDirection(PadAxis::kLeftTrigger, 1));
+    CHECK(table.get(romm::player::kSlotRightTrigger) ==
+          BindingSource::axisDirection(PadAxis::kRightTrigger, 1));
+    CHECK(table.get(romm::player::kSlotLeftStick) ==
+          BindingSource::ofButton(PadButton::kLeftStick));
+    CHECK(table.get(romm::player::kSlotRightStick) ==
+          BindingSource::ofButton(PadButton::kRightStick));
 }
 
 void testSetGetReset() {
@@ -130,6 +143,10 @@ void testDisplayLabels() {
              romm::player::kSlotB);
     CHECK_EQ(romm::player::coreBindingSlotAt("mupen64plus_next", 7),
              romm::player::kSlotA);
+    CHECK_EQ(romm::player::coreBindingSlotAt("mupen64plus_next", 10),
+             romm::player::kSlotLeftTrigger);
+    CHECK_EQ(romm::player::coreBindingSlotAt("mupen64plus_next", 12),
+             romm::player::kSlotRightTrigger);
     CHECK_EQ(romm::player::coreBindingSlotAt("fceumm", 6),
              romm::player::kSlotSelect);
 }
@@ -178,7 +195,7 @@ void testSidecarSerializeAndWrite() {
     CHECK(entry["identity"]["descriptor"] == "vid:054c-pid:17a0");
     CHECK_EQ(entry["identity"]["vendorId"].get<int>(), 0x054c);
     CHECK_EQ(entry["identity"]["productId"].get<int>(), 0x17a0);
-    CHECK_EQ(entry["bindings"].size(), 12u);
+    CHECK_EQ(entry["bindings"].size(), 16u);
 
     // Slot rows: name + typed binding, in RetroPadSlot order.
     CHECK(entry["bindings"][0]["slot"] == "a");

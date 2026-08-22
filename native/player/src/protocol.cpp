@@ -144,7 +144,7 @@ bool parseBindingEntry(const ordered_json& j, int slot, BindingTable& table,
         return false;
     }
     // Entries must arrive in slot order (the canonical producers — the
-    // sidecar and the desktop serializer — both emit all 12 in order); a
+    // sidecar and the desktop serializer — both emit all entries in order); a
     // duplicate or gap is rejected here.
     if (parsedSlot != slot) {
         error = "binding slot out of order or duplicate: " + slotName;
@@ -209,7 +209,9 @@ bool parseBindingEntry(const ordered_json& j, int slot, BindingTable& table,
 }
 
 // Parses the v2 request's optional controllerBindings object. Devices carry
-// guid + identity + exactly the 12 RetroPad slot bindings in slot order.
+// guid + identity + all RetroPad slot bindings in slot order. Twelve-entry
+// tables from older desktop builds remain accepted; their new L2/R2/L3/R3
+// slots retain the BindingTable defaults.
 bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
                              std::string& error) {
     static const std::array<const char*, 1> kFields = {{"devices"}};
@@ -272,8 +274,9 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
             error = "controllerBindings bindings must be an array";
             return false;
         }
-        if (bindings.size() != static_cast<size_t>(kRetroPadSlotCount)) {
-            error = "controllerBindings bindings must carry exactly 12 entries";
+        if (bindings.size() != 12 &&
+            bindings.size() != static_cast<size_t>(kRetroPadSlotCount)) {
+            error = "controllerBindings bindings must carry exactly 12 or 16 entries";
             return false;
         }
         for (size_t i = 0; i < bindings.size(); ++i) {
@@ -284,8 +287,10 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         if (d.contains("secondaryBindings")) {
             const ordered_json& secondary = d["secondaryBindings"];
             if (!secondary.is_array() ||
-                secondary.size() != static_cast<size_t>(kRetroPadSlotCount)) {
-                error = "controllerBindings secondaryBindings must carry exactly 12 entries";
+                (secondary.size() != 12 &&
+                 secondary.size() != static_cast<size_t>(kRetroPadSlotCount))) {
+                error =
+                    "controllerBindings secondaryBindings must carry exactly 12 or 16 entries";
                 return false;
             }
             for (size_t i = 0; i < secondary.size(); ++i) {

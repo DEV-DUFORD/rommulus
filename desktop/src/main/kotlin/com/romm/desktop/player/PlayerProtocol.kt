@@ -27,12 +27,14 @@ import java.io.IOException
 
 /** The only protocol version this build understands (mirrors C++ `kProtocolVersion`). */
 const val PLAYER_PROTOCOL_VERSION: Int = 2
+private const val LEGACY_RETRO_PAD_SLOT_COUNT = 12
 
 /** Canonical RetroPad slot wire names, in slot order (mirrors C++ `retroPadSlotName`). */
 internal val RETRO_PAD_SLOT_NAMES: List<String> = listOf(
     "a", "b", "x", "y", "select", "start",
     "left_shoulder", "right_shoulder",
     "dpad_up", "dpad_down", "dpad_left", "dpad_right",
+    "left_trigger", "right_trigger", "left_stick", "right_stick",
 )
 
 /** Canonical pad-button wire names, in `PadButton` ordinal order (mirrors C++ `padButtonName`). */
@@ -80,7 +82,7 @@ data class ControllerBindingIdentity(
 
 /**
  * One device entry of the v2 request's optional [PlayerRequest.controllerBindings] field.
- * The shape REUSES the sidecar schema (guid + identity + the full 12-slot table). Unlike the
+ * The shape REUSES the sidecar schema (guid + identity + the full 16-slot table). Unlike the
  * sidecar (real 32-hex SDL GUIDs), a launch request may carry an EMPTY guid/identity to mean
  * "apply this table to every connected controller" — which is what the desktop supervisor
  * serializes, since its store keys bindings by core, not by device. The player keeps ONE
@@ -671,7 +673,7 @@ object PlayerProtocol {
     }
 
     /**
-     * Reads a `bindings` array: EXACTLY the 12 RetroPad slots, each once, in slot order, with
+     * Reads a `bindings` array: the legacy 12 or current 16 RetroPad slots, each once, in order.
      * the exact field set for its declared type (mirrors C++ `parseBindingEntry`). The union of
      * all entry fields is checked per token; the declared type then pins the subset.
      */
@@ -753,11 +755,16 @@ object PlayerProtocol {
         }
         reader.endArray()
 
-        if (bindings.size != RETRO_PAD_SLOT_NAMES.size) {
-            throw ProtocolException("bindings must carry exactly 12 entries")
+        if (bindings.size != LEGACY_RETRO_PAD_SLOT_COUNT &&
+            bindings.size != RETRO_PAD_SLOT_NAMES.size
+        ) {
+            throw ProtocolException(
+                "bindings must carry exactly $LEGACY_RETRO_PAD_SLOT_COUNT or " +
+                    "${RETRO_PAD_SLOT_NAMES.size} entries",
+            )
         }
         // Entries must arrive in slot order (the canonical producers — the sidecar and the
-        // desktop serializer — both emit all 12 in order); a gap is rejected here.
+        // desktop serializer — both emit all entries in order); a gap is rejected here.
         bindings.forEachIndexed { index, binding ->
             if (binding.slot != RETRO_PAD_SLOT_NAMES[index]) {
                 throw ProtocolException("binding slot out of order or duplicate: ${binding.slot}")

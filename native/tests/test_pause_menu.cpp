@@ -4,7 +4,7 @@
 // dialog (Yes/No/cancel), the Video Options submenu (enter/focus, toggle
 // rows via confirm or left/right, Return to menu), the Controller Settings
 // submenu (enter/focus, navigation, the Return item and Back to menu, the
-// editable physical binding list: 12 slots + Reset to Default, capture-mode
+// editable physical binding list: core-specific slots + reset/clear, capture-mode
 // entry/exit), and effect reporting.
 
 #include <string>
@@ -386,7 +386,7 @@ void testBindingListOpensDirectly() {
 void testBindingListNavigationWrapsOverFourteenRows() {
     PauseMenu menu;
     selectBindingList(menu);
-    // Down walks the 12 slot rows to Reset to Default.
+    // Down walks the binding rows to Reset to Default.
     for (int i = 0; i < PauseMenu::kBindingSlotCount; ++i) {
         CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     }
@@ -399,6 +399,31 @@ void testBindingListNavigationWrapsOverFourteenRows() {
     CHECK_EQ(menu.handle(upAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kClearMappingsItem);
     CHECK(menu.state() == PauseMenuState::kPhysicalBindings);  // never leaves
+}
+
+void testBindingListViewportTracksSelection() {
+    PauseMenu menu;
+    selectBindingList(menu);
+    CHECK_EQ(menu.bindingViewportStart(8), 0);
+    for (int i = 0; i < 8; ++i) menu.handle(downAction());
+    CHECK_EQ(menu.selection(), 8);
+    CHECK_EQ(menu.bindingViewportStart(8), 1);
+    for (int i = 8; i < PauseMenu::kBindingSlotCount; ++i) menu.handle(downAction());
+    CHECK_EQ(menu.selection(), PauseMenu::kResetDefaultItem);
+    CHECK_EQ(menu.bindingViewportStart(8), PauseMenu::kBindingSlotCount - 8);
+}
+
+void testN64BindingListUsesFourteenControls() {
+    PauseMenu menu;
+    menu.setBindingSlotCount(14);
+    selectBindingList(menu);
+    for (int i = 0; i < 10; ++i) menu.handle(downAction());
+    CHECK_EQ(menu.selection(), 10);
+    CHECK_EQ(romm::player::coreBindingSlotAt("mupen64plus_next", menu.selection()),
+             romm::player::kSlotLeftTrigger);
+    for (int i = 10; i < 14; ++i) menu.handle(downAction());
+    CHECK_EQ(menu.selection(), menu.resetDefaultItem());
+    CHECK_EQ(menu.bindingViewportStart(8), 6);
 }
 
 void testBindingListConfirmEntersCapture() {
@@ -517,6 +542,8 @@ int main() {
     testControllerSettingsCancelToMenuThenClose();
     testBindingListOpensDirectly();
     testBindingListNavigationWrapsOverFourteenRows();
+    testBindingListViewportTracksSelection();
+    testN64BindingListUsesFourteenControls();
     testBindingListConfirmEntersCapture();
     testBindingListNavigatesSecondaryColumn();
     testBindingCaptureCancelExitsToList();

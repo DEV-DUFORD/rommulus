@@ -496,7 +496,7 @@ class DesktopAppCoordinatorTest {
         }
     """.trimIndent()
 
-    /** The 12-slot table the fake sidecar above carries, in wire order. */
+    /** The legacy 12-slot table the fake sidecar above carries, in wire order. */
     private val expectedSidecarSlots = listOf(
         PlayerSlotBinding("a", PlayerBindingType.BUTTON, button = "south"),
         PlayerSlotBinding("b", PlayerBindingType.AXIS_DIRECTION, axis = "left_x", polarity = -1),
@@ -607,7 +607,7 @@ class DesktopAppCoordinatorTest {
 
         // Second launch: the ingested table is serialized into controllerBindings so the player
         // applies it from the first frame — one "all controllers" device (empty guid/identity)
-        // carrying the stored 12-slot table.
+        // carrying the stored table, expanded with the newer RetroPad slots.
         val second = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
         waitForReconciled(supervisor, second.sessionId)
 
@@ -616,7 +616,14 @@ class DesktopAppCoordinatorTest {
         assertThat(bindings.devices).hasSize(1)
         assertThat(bindings.devices[0].guid).isEmpty()
         assertThat(bindings.devices[0].identity).isEqualTo(ControllerBindingIdentity(null, null, ""))
-        assertThat(bindings.devices[0].bindings).containsExactlyElementsOf(expectedSidecarSlots)
+        assertThat(bindings.devices[0].bindings).containsExactlyElementsOf(
+            expectedSidecarSlots + listOf(
+                PlayerSlotBinding("left_trigger", PlayerBindingType.UNBOUND),
+                PlayerSlotBinding("right_trigger", PlayerBindingType.UNBOUND),
+                PlayerSlotBinding("left_stick", PlayerBindingType.UNBOUND),
+                PlayerSlotBinding("right_stick", PlayerBindingType.UNBOUND),
+            ),
+        )
     }
 
     @Test

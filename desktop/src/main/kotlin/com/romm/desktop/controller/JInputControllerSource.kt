@@ -72,10 +72,12 @@ private val BUTTON_TO_NEUTRAL: Map<Component.Identifier.Button, NeutralKey> = ma
 private val AXIS_TO_NEUTRAL: Map<Component.Identifier.Axis, NeutralAxis> = mapOf(
     Component.Identifier.Axis.X to NeutralAxis.X,
     Component.Identifier.Axis.Y to NeutralAxis.Y,
-    Component.Identifier.Axis.Z to NeutralAxis.Z,
     Component.Identifier.Axis.RX to NeutralAxis.RX,
     Component.Identifier.Axis.RY to NeutralAxis.RY,
-    Component.Identifier.Axis.RZ to NeutralAxis.RZ,
+    // Linux evdev exposes ABS_Z / ABS_RZ as the left/right triggers. Their
+    // resting value is -1, unlike the neutral 0 expected by the shared model.
+    Component.Identifier.Axis.Z to NeutralAxis.LTRIGGER,
+    Component.Identifier.Axis.RZ to NeutralAxis.RTRIGGER,
 )
 
 /** JInput reports polled analog axis data in this range (see [Component.getPollData]). */
@@ -341,12 +343,23 @@ internal class LiveJInputController(private val controller: Controller) : JInput
                             addPovButtons(component.pollData, buttons)
                         } else {
                             val neutral = AXIS_TO_NEUTRAL[identifier] ?: continue
-                            axes[neutral] = AxisNormalizer.normalize(
-                                rawValue = component.pollData,
-                                rangeMin = JINPUT_AXIS_MIN,
-                                rangeMax = JINPUT_AXIS_MAX,
-                                rangeFlat = component.deadZone,
-                            )
+                            axes[neutral] = if (neutral == NeutralAxis.LTRIGGER ||
+                                neutral == NeutralAxis.RTRIGGER
+                            ) {
+                                AxisNormalizer.normalizeTrigger(
+                                    rawValue = component.pollData,
+                                    rangeMin = JINPUT_AXIS_MIN,
+                                    rangeMax = JINPUT_AXIS_MAX,
+                                    rangeFlat = component.deadZone,
+                                )
+                            } else {
+                                AxisNormalizer.normalize(
+                                    rawValue = component.pollData,
+                                    rangeMin = JINPUT_AXIS_MIN,
+                                    rangeMax = JINPUT_AXIS_MAX,
+                                    rangeFlat = component.deadZone,
+                                )
+                            }
                         }
                     }
                 }

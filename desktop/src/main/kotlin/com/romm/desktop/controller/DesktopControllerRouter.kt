@@ -132,6 +132,16 @@ class DesktopControllerRouter(
     private val logger: Logger = DesktopLogger.get()
 
     private var pollJob: Job? = null
+    @Volatile
+    private var focusActionsEnabled = true
+
+    /**
+     * Enables or suppresses shell navigation actions without stopping controller polling.
+     * Capture dialogs use this to own A/B and directional input exclusively.
+     */
+    fun setFocusActionsEnabled(enabled: Boolean) {
+        focusActionsEnabled = enabled
+    }
 
     /**
      * Start the poll loop. Idempotent.
@@ -218,7 +228,7 @@ class DesktopControllerRouter(
 
             // Only the first active (lowest-index) slot drives focus.
             val isPrimary = t.slotIndex == _slots.value.indexOfFirst { it.isActive }
-            if (isPrimary) emitFocusActions(t, snapshot)
+            if (isPrimary && focusActionsEnabled) emitFocusActions(t, snapshot)
             t.previousSnapshot = snapshot
         }
     }

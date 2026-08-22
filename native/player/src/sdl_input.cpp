@@ -72,6 +72,10 @@ static_assert(kJoypadBitA == RETRO_DEVICE_ID_JOYPAD_A, "slot bits drifted from l
 static_assert(kJoypadBitX == RETRO_DEVICE_ID_JOYPAD_X, "slot bits drifted from libretro");
 static_assert(kJoypadBitL == RETRO_DEVICE_ID_JOYPAD_L, "slot bits drifted from libretro");
 static_assert(kJoypadBitR == RETRO_DEVICE_ID_JOYPAD_R, "slot bits drifted from libretro");
+static_assert(kJoypadBitL2 == RETRO_DEVICE_ID_JOYPAD_L2, "slot bits drifted from libretro");
+static_assert(kJoypadBitR2 == RETRO_DEVICE_ID_JOYPAD_R2, "slot bits drifted from libretro");
+static_assert(kJoypadBitL3 == RETRO_DEVICE_ID_JOYPAD_L3, "slot bits drifted from libretro");
+static_assert(kJoypadBitR3 == RETRO_DEVICE_ID_JOYPAD_R3, "slot bits drifted from libretro");
 
 }  // namespace
 
