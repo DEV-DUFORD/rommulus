@@ -284,7 +284,12 @@ class DesktopSaveSyncWiringTest {
 
             // (b) The scheduler's drain ran the executor: RUNNING → RETRYABLE_FAILURE → PENDING
             // with attempt 1, and the scheduler entered backoff (Waiting) via scheduleRetryAfter.
-            awaitUntil(5_000) { store.findById(opId)?.attemptCount == 1 }
+            awaitUntil(5_000) {
+                val current = store.findById(opId)
+                current?.attemptCount == 1 &&
+                    current.status == PendingOperationStatus.PENDING &&
+                    wired.coordinator.scheduler.currentState() is SchedulerState.Waiting
+            }
             assertThat(store.findById(opId)!!.status).isEqualTo(PendingOperationStatus.PENDING)
             assertThat(wired.coordinator.scheduler.currentState()).isInstanceOf(SchedulerState.Waiting::class.java)
             assertThat(syncGateway.negotiateCalls).hasSize(1)
