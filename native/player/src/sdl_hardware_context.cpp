@@ -292,9 +292,10 @@ bool SdlHardwareContext::createScanlineProgramLocked() {
     static constexpr const char* kFragmentShader = R"(
         #version 300 es
         precision mediump float;
+        uniform float rowHeight;
         out vec4 color;
         void main() {
-            if ((int(gl_FragCoord.y) & 1) == 0) discard;
+            if ((int(floor(gl_FragCoord.y / rowHeight)) & 1) == 0) discard;
             color = vec4(0.0, 0.0, 0.0, 0.375);
         }
     )";
@@ -386,6 +387,10 @@ void SdlHardwareContext::drawScanlinesLocked(int outputWidth, int outputHeight) 
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glBlendEquation(GL_FUNC_ADD);
     glUseProgram(scanlineProgram_);
+    const GLint rowHeight = glGetUniformLocation(scanlineProgram_, "rowHeight");
+    if (rowHeight >= 0) {
+        glUniform1f(rowHeight, std::max(1.0f, outputHeight / 240.0f));
+    }
     glBindVertexArray(0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
