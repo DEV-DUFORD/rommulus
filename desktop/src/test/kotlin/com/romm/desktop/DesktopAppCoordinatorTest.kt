@@ -589,6 +589,26 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
+    fun `sidecar sync imports an exited player's remap before asynchronous reconciliation`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher(onLaunch = { request ->
+            Files.writeString(
+                Path.of(request.resultPath).parent.resolve("controller-bindings.json"),
+                fakeBindingSidecar,
+            )
+        })
+        val (c, supervisor) = bindingWiredCoordinator(paths, "gb", launcher)
+
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+        supervisor.syncControllerBindingSidecars()
+
+        assertThat(c.controllerBindingStore.loadForCore("gambatte")).isNotEmpty()
+        val sessionDir = supervisor.store.sessionDir(started.sessionId)
+        assertThat(Files.exists(sessionDir.resolve("controller-bindings.json"))).isFalse()
+    }
+
+    @Test
     fun `stored bindings are serialized into the v2 request and omitted when none exist`(@TempDir dir: Path) {
         val paths = dir.testRoot()
         installGambatte(paths)

@@ -819,6 +819,9 @@ class DesktopAppCoordinator(
      * omitted and the player keeps its built-in defaults.
      */
     private fun loadLaunchControllerBindings(coreId: String): ControllerBindings? = runCatching {
+        // The exit watcher imports sidecars asynchronously. Reconcile this independent session
+        // artifact synchronously so a user who immediately relaunches gets their in-game remap.
+        playerSupervisor.syncControllerBindingSidecars()
         val records = controllerConfigRepository.effectiveLaunchRecords(
             coreId,
             RetroPadControlMapping.PLAYER_INDEX,
@@ -1511,11 +1514,13 @@ class DesktopAppCoordinator(
 
     /** Opens the controller console list (Settings → "Controller Settings", E2). */
     fun openControllerSettings() {
+        playerSupervisor.syncControllerBindingSidecars()
         currentScreen = Screen.CONTROLLER_LIST
     }
 
     /** Opens the per-core binding configuration screen for [coreId] (E2). */
     fun openControllerConfig(coreId: String) {
+        playerSupervisor.syncControllerBindingSidecars()
         selectedControllerCoreId = coreId
         currentScreen = Screen.CONTROLLER_CONFIG
     }

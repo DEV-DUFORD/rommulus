@@ -290,6 +290,17 @@ class LaunchJournalSupervisor(
         }
     }
 
+    /**
+     * Imports any sidecars already written by exited players without changing journal state.
+     *
+     * The normal exit watcher performs this import, but callers that need controller settings
+     * immediately (for example, a rapid relaunch) can reconcile just this independent artifact
+     * without treating a still-running player's journal as interrupted.
+     */
+    fun syncControllerBindingSidecars() {
+        store.listSessionIds().forEach(::ingestBindingSidecar)
+    }
+
     // ------------------------------------------------------------------ prepare
 
     /**
