@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test
 @DisplayName("Desktop ControllerArtworkResolver — resource-name → ImageVector mapping")
 class ControllerArtworkResolverTest {
 
-    /** The 15 controller drawables shipped in app/src/main/res/drawable/. */
+    /** Desktop controller vectors, including the Linux-only GameCube artwork. */
     private val allResourceNames = listOf(
         "controller_outline_genesis",
         "controller_outline_snes",
@@ -27,6 +27,7 @@ class ControllerArtworkResolverTest {
         "controller_outline_atari7800",
         "controller_outline_ps1",
         "controller_outline_n64",
+        "controller_outline_gamecube",
         "controller_outline_gba",
         "controller_outline_gb",
         "controller_outline_tg16",
@@ -99,12 +100,12 @@ class ControllerArtworkResolverTest {
         }
 
         @Test
-        fun `every profile artwork resource name is one of the 15 converted vectors`() {
+        fun `every profile artwork resource name is a converted desktop vector`() {
             val catalogNames = CoreControllerProfiles.all.map { it.artwork.resourceName }.toSet()
             // The catalog covers the 13 named consoles only; the generic placeholders exist as
             // fallbacks, not as declared profile artwork.
             assertThat(catalogNames).isSubsetOf(allResourceNames)
-            assertThat(catalogNames).hasSize(13)
+            assertThat(catalogNames).hasSize(14)
         }
     }
 

@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test
 @DisplayName("CoreControllerProfiles — artwork resource resolution")
 class CoreControllerProfilesArtworkTest {
 
-    private val profiles = CoreControllerProfiles.all
+    private val profiles = CoreControllerProfiles.forApprovedCores()
 
     @Test
     fun `every profile artwork resourceName resolves to a known drawable`() {

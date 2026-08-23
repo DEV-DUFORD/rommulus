@@ -28,8 +28,12 @@ class CoreControllerProfilesTest {
     }
 
     @Test
-    fun `forApprovedCores returns all profiles and byCoreId finds each one`() {
-        assertThat(CoreControllerProfiles.forApprovedCores()).hasSameSizeAs(profiles)
+    fun `forApprovedCores filters profiles by target ABI and byCoreId finds each one`() {
+        assertThat(CoreControllerProfiles.forApprovedCores().map { it.coreId })
+            .doesNotContain("dolphin")
+        assertThat(
+            CoreControllerProfiles.forApprovedCores(setOf("linux-x86_64")).map { it.coreId },
+        ).contains("dolphin")
         for (profile in profiles) {
             assertThat(CoreControllerProfiles.byCoreId(profile.coreId)).isSameAs(profile)
         }
@@ -150,7 +154,7 @@ class CoreControllerProfilesTest {
                     }
 
                     assertThat(analogProfiles.map { it.coreId })
-                        .containsExactlyInAnyOrder("pcsx_rearmed", "mupen64plus_next")
+                        .containsExactlyInAnyOrder("pcsx_rearmed", "mupen64plus_next", "dolphin")
                     for (profile in analogProfiles) {
                         for (player in profile.defaults.values) {
                             assertThat(player.get(CoreControlId.D_PAD_UP, BindingSlot.SECONDARY)).isNull()
@@ -269,6 +273,18 @@ class CoreControllerProfilesTest {
     }
 
     @Test
+    fun `dolphin maps GameCube controls to their RetroPad targets`() {
+        val p = CoreControllerProfiles.byCoreId("dolphin")!!
+        assertThat(targetFor(p, CoreControlId.BUTTON_A)).isEqualTo(LogicalControl.BUTTON_A)
+        assertThat(targetFor(p, CoreControlId.BUTTON_B)).isEqualTo(LogicalControl.BUTTON_B)
+        assertThat(targetFor(p, CoreControlId.L2)).isEqualTo(LogicalControl.BUTTON_LT)
+        assertThat(targetFor(p, CoreControlId.R2)).isEqualTo(LogicalControl.BUTTON_RT)
+        assertThat(targetFor(p, CoreControlId.Z)).isEqualTo(LogicalControl.BUTTON_RB)
+        assertThat(targetFor(p, CoreControlId.LEFT_STICK_X)).isEqualTo(LogicalControl.AXIS_LX)
+        assertThat(targetFor(p, CoreControlId.RIGHT_STICK_X)).isEqualTo(LogicalControl.AXIS_RX)
+    }
+
+    @Test
     fun `mednafen_ngp swaps A and B RetroPad targets`() {
         val p = CoreControllerProfiles.byCoreId("mednafen_ngp")!!
         assertThat(targetFor(p, CoreControlId.BUTTON_A)).isEqualTo(LogicalControl.BUTTON_B)
@@ -333,6 +349,7 @@ class CoreControllerProfilesTest {
             "prosystem" to 2,
             "pcsx_rearmed" to 2,
             "mupen64plus_next" to 4,
+            "dolphin" to 4,
         )
         for ((coreId, count) in expected) {
             val p = CoreControllerProfiles.byCoreId(coreId)
@@ -357,6 +374,7 @@ class CoreControllerProfilesTest {
             "prosystem" to "Atari 7800",
             "pcsx_rearmed" to "PlayStation",
             "mupen64plus_next" to "Nintendo 64",
+            "dolphin" to "Nintendo GameCube",
         )
         for ((coreId, name) in expected) {
             val p = CoreControllerProfiles.byCoreId(coreId)

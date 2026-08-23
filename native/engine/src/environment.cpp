@@ -451,6 +451,12 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
             return true;
         }
 
+        case RETRO_ENVIRONMENT_SET_HW_SHARED_CONTEXT: {
+            // SDL owns one context that remains current for the core's render
+            // thread, satisfying Dolphin's shared-context contract.
+            return hwRenderActive_;
+        }
+
         case RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE: {
             // GLideN64 does not use context negotiation; Vulkan cores may.
             // Log and reject so the core knows we don't support it.

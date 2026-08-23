@@ -10,6 +10,7 @@ import com.romm.androidtv.cache.ContentCache
 import com.romm.androidtv.cache.SevenZArchiveExtractor
 import com.romm.androidtv.cache.ZipArchiveExtractor
 import com.romm.androidtv.emulation.model.CoreManifest
+import com.romm.androidtv.emulation.model.ANDROID_CORE_ABIS
 import com.romm.androidtv.emulation.model.LaunchSpec
 import com.romm.androidtv.network.extractServerKey
 import kotlinx.coroutines.Dispatchers
@@ -109,7 +110,10 @@ class RomRepositoryImpl(
      * flag just to make a test reach further into the pipeline.
      */
     private val resolveApprovedCoreId: (platformSlug: String) -> String? = { platformSlug ->
-        CoreManifest.approvedEntries().find { it.supportedSystems.contains(platformSlug) }?.coreId
+        CoreManifest.approvedEntries().find {
+            it.supportedSystems.contains(platformSlug) &&
+                it.supportedAbis.any(ANDROID_CORE_ABIS::contains)
+        }?.coreId
     },
     /**
      * Advanced, opt-in setting (`SettingsRepository.verifySha1OnLaunch`, off by

@@ -1,6 +1,7 @@
 package com.romm.androidtv.library
 
 import com.romm.androidtv.romm.RommApiError
+import com.romm.androidtv.emulation.model.ANDROID_CORE_ABIS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -31,6 +32,7 @@ class HomePresenter(
     private val scope: CoroutineScope,
     private val repository: LibraryRepository,
     private val hideUnsupportedSystems: () -> Boolean = { true },
+    private val supportedCoreAbis: Set<String> = ANDROID_CORE_ABIS,
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
     private val onRetrySucceeded: () -> Unit = {},
@@ -98,7 +100,7 @@ class HomePresenter(
             _uiState.update { it.copy(continuePlaying = SectionState.Loading) }
             val state = loadSection(
                 keySelector = LibraryRom::id,
-                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems(), supportedCoreAbis) },
                 fetch = { repository.fetchContinuePlaying() },
             )
             if (generation == gen) {
@@ -114,7 +116,7 @@ class HomePresenter(
             _uiState.update { it.copy(recentlyAdded = SectionState.Loading) }
             val state = loadSection(
                 keySelector = LibraryRom::id,
-                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems(), supportedCoreAbis) },
                 fetch = { repository.fetchRecentlyAdded() },
             )
             if (generation == gen) {
@@ -130,7 +132,7 @@ class HomePresenter(
             _uiState.update { it.copy(favorites = SectionState.Loading) }
             val state = loadSection(
                 keySelector = LibraryRom::id,
-                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+                transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems(), supportedCoreAbis) },
                 fetch = { repository.fetchFavorites() },
             )
             if (generation == gen) {
@@ -146,7 +148,7 @@ class HomePresenter(
             _uiState.update { it.copy(platforms = SectionState.Loading) }
             val state = loadSection(
                 keySelector = PlatformSummary::id,
-                transform = { it.filterUnsupportedPlatformsIfHidden(hideUnsupportedSystems()) },
+                transform = { it.filterUnsupportedPlatformsIfHidden(hideUnsupportedSystems(), supportedCoreAbis) },
                 fetch = { repository.fetchPlatforms() },
             )
             if (generation == gen) {
@@ -176,7 +178,7 @@ class HomePresenter(
         _uiState.update { it.copy(continuePlaying = SectionState.Loading) }
         val state = loadSection(
             keySelector = LibraryRom::id,
-            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems(), supportedCoreAbis) },
             fetch = { repository.fetchContinuePlaying() },
         )
         if (generation == gen) {
@@ -188,7 +190,7 @@ class HomePresenter(
         _uiState.update { it.copy(recentlyAdded = SectionState.Loading) }
         val state = loadSection(
             keySelector = LibraryRom::id,
-            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems(), supportedCoreAbis) },
             fetch = { repository.fetchRecentlyAdded() },
         )
         if (generation == gen) {
@@ -200,7 +202,7 @@ class HomePresenter(
         _uiState.update { it.copy(favorites = SectionState.Loading) }
         val state = loadSection(
             keySelector = LibraryRom::id,
-            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems()) },
+            transform = { it.filterUnsupportedIfHidden(hideUnsupportedSystems(), supportedCoreAbis) },
             fetch = { repository.fetchFavorites() },
         )
         if (generation == gen) {
@@ -212,7 +214,7 @@ class HomePresenter(
         _uiState.update { it.copy(platforms = SectionState.Loading) }
         val state = loadSection(
             keySelector = PlatformSummary::id,
-            transform = { it.filterUnsupportedPlatformsIfHidden(hideUnsupportedSystems()) },
+            transform = { it.filterUnsupportedPlatformsIfHidden(hideUnsupportedSystems(), supportedCoreAbis) },
             fetch = { repository.fetchPlatforms() },
         )
         if (generation == gen) {

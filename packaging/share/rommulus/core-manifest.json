@@ -540,6 +540,39 @@
         "linux-x86_64": null
       },
       "notes": "The Linux player provides GLideN64 with an SDL3 OpenGL ES 3 context. paraLLEl-RDP/Vulkan and Android hardware-buffer code are not compiled. No BIOS required — PIF HLE; IPL3 is read from the ROM at offset 0x40."
+    },
+    {
+      "coreId": "dolphin",
+      "coreName": "Dolphin",
+      "enabled": true,
+      "linuxGateStatus": "BUILD-INTEGRATED — physical Ubuntu and Steam Deck gameplay validation pending",
+      "gateNotes": "Linux-only core. Android ABIs are intentionally absent. Dolphin file-based memory cards persist under the per-game save directory; the core does not expose them as Libretro SAVE_RAM.",
+      "coreLibraryFile": "libdolphin_core.so",
+      "upstreamRepository": "https://github.com/libretro/dolphin",
+      "commitSha": "841bacadb5d5c3f9acba0dc652d306ecd77a7bbf",
+      "releaseTag": "",
+      "vendorSourceSubset": ["third_party/cores/dolphin (recursive git submodule)"],
+      "vendoringDoc": "third_party/cores/dolphin/COPYING",
+      "localPatches": [],
+      "compilerBuild": "Linux GCC C++23 Release build in an isolated ExternalProject; LIBRETRO=ON; OpenGL ES hardware rendering; Vulkan, X11, EGL, standalone UI, analytics, updater, RetroAchievements, and platform audio/input backends disabled",
+      "buildCommand": "git submodule update --init --recursive && cmake -S native/player -B build/player && cmake --build build/player (target dolphin_core via native/cmake/cores/dolphin-linux.cmake)",
+      "license": {
+        "summary": "Dolphin original source is GPL-2.0-or-later. Upstream declares the aggregate repository, including its pinned dependencies, GPLv3-compatible; per-file SPDX licenses are retained in third_party/cores/dolphin/LICENSES/.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": true,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-08-23"
+      },
+      "supportedSystems": ["gc"],
+      "supportedExtensions": [".elf", ".dol", ".gcm", ".iso", ".tgc", ".wbfs", ".ciso", ".gcz", ".wia", ".rvz", ".m3u"],
+      "requiredFirmware": [],
+      "supportedAbis": ["linux-x86_64"],
+      "renderer": "GPU-accelerated Dolphin OpenGL backend through the player's SDL3 OpenGL ES 3 context; x86_64 JIT64 CPU core",
+      "binaryChecksums": {
+        "linux-x86_64": null
+      },
+      "notes": "Dolphin's Data/Sys runtime files ship under share/rommulus/dolphin-emu/Sys. Ubuntu uses the offscreen compositor path; Steam Deck uses the isolated direct-framebuffer player path."
     }
   ]
 }

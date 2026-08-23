@@ -51,9 +51,12 @@ void testTargetsAndCoreRows() {
     CHECK_EQ(coreKeyboardRowCount("gambatte"), 12);
     CHECK_EQ(coreKeyboardRowCount("mupen64plus_next"), 18);
     CHECK_EQ(coreKeyboardRowCount("pcsx_rearmed"), 24);
+    CHECK_EQ(coreKeyboardRowCount("dolphin"), 20);
     CHECK_EQ(coreKeyboardTargetAt("mupen64plus_next", 14), kKeyboardLeftXNegative);
     CHECK_EQ(coreKeyboardTargetAt("mupen64plus_next", 17), kKeyboardLeftYPositive);
     CHECK_EQ(coreKeyboardTargetAt("pcsx_rearmed", 23), kKeyboardRightYPositive);
+    CHECK_EQ(coreKeyboardTargetAt("dolphin", 12), kKeyboardLeftXNegative);
+    CHECK_EQ(coreKeyboardTargetAt("dolphin", 19), kKeyboardRightYPositive);
     CHECK(std::string(keyboardTargetLabel(kKeyboardLeftXNegative)) == "Left Stick Left");
     CHECK(std::string(keyboardTargetLabel(kKeyboardRightYPositive)) == "Right Stick Down");
 }

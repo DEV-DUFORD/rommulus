@@ -149,6 +149,14 @@ void testDisplayLabels() {
              romm::player::kSlotRightTrigger);
     CHECK_EQ(romm::player::coreBindingSlotAt("fceumm", 6),
              romm::player::kSlotSelect);
+    CHECK_EQ(romm::player::coreBindingSlotAt("dolphin", 4),
+             romm::player::kSlotA);
+    CHECK_EQ(romm::player::coreBindingSlotAt("dolphin", 8),
+             romm::player::kSlotLeftTrigger);
+    CHECK_EQ(romm::player::coreBindingSlotAt("dolphin", 10),
+             romm::player::kSlotRightShoulder);
+    CHECK_EQ(romm::player::coreBindingSlotAt("dolphin", 11),
+             romm::player::kSlotStart);
 }
 
 void testNormalizedIdentity() {

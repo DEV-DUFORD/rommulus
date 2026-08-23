@@ -1,5 +1,6 @@
 package com.romm.androidtv.library
 
+import com.romm.androidtv.emulation.model.ANDROID_CORE_ABIS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,6 +28,7 @@ class SearchPresenter(
     private val scope: CoroutineScope,
     private val repository: LibraryRepository,
     private val hideUnsupportedSystems: () -> Boolean = { true },
+    private val supportedCoreAbis: Set<String> = ANDROID_CORE_ABIS,
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
 ) {
@@ -122,7 +124,13 @@ class SearchPresenter(
                         // consecutive pages. Undeduped, SearchScreen's `items(..., key = { it.id })`
                         // would crash with a duplicate-key exception as soon as that page renders.
                         _uiState.value = _uiState.value.copy(
-                            roms = (current.roms + result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported))
+                            roms = (
+                                current.roms +
+                                    result.data.roms.filterUnsupportedIfHidden(
+                                        isHidingUnsupported,
+                                        supportedCoreAbis,
+                                    )
+                                )
                                 .distinctBy { it.id },
                             rawFetchedCount = current.rawFetchedCount + result.data.roms.size,
                             total = result.data.total,
@@ -181,7 +189,10 @@ class SearchPresenter(
                     // Guard against non-cooperative repos that return after cancellation.
                     if (generation == capturedGeneration) {
                         _uiState.value = _uiState.value.copy(
-                            roms = result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported),
+                            roms = result.data.roms.filterUnsupportedIfHidden(
+                                isHidingUnsupported,
+                                supportedCoreAbis,
+                            ),
                             rawFetchedCount = result.data.roms.size,
                             total = result.data.total,
                             isLoading = false,

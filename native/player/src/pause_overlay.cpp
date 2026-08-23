@@ -396,6 +396,7 @@ const char* consoleNameForCore(const char* coreId) {
     if (id == "prosystem") return "Atari 7800";
     if (id == "pcsx_rearmed") return "PlayStation";
     if (id == "mupen64plus_next") return "Nintendo 64";
+    if (id == "dolphin") return "Nintendo GameCube";
     return "Controller Settings";
 }
 
@@ -441,6 +442,10 @@ const char* controlLabelForCoreSlot(const char* coreId, int slot) {
         if (slot >= 0 && slot < 8) return labels[slot];
         if (slot == kSlotLeftTrigger) return "Z Trigger";
         if (slot == kSlotRightTrigger) return "R Shoulder";
+    } else if (id == "dolphin") {
+        if (slot == kSlotLeftTrigger) return "L";
+        if (slot == kSlotRightTrigger) return "R";
+        if (slot == kSlotRightShoulder) return "Z";
     } else if (id == "mgba") {
         if (slot == kSlotLeftShoulder) return "L";
         if (slot == kSlotRightShoulder) return "R";
@@ -477,6 +482,7 @@ const char* artworkNameForCore(const char* coreId) {
     if (id == "prosystem") return "controller_outline_atari7800.png";
     if (id == "pcsx_rearmed") return "controller_outline_ps1.png";
     if (id == "mupen64plus_next") return "controller_outline_n64.png";
+    if (id == "dolphin") return "controller_outline_gamecube.png";
     return "controller_outline_generic_gamepad.png";
 }
 

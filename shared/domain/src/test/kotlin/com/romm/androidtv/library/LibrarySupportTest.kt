@@ -78,6 +78,12 @@ class LibrarySupportTest {
     }
 
     @Test
+    fun `GameCube support is Linux-only`() {
+        assertThat(isPlatformNativelySupported("gc")).isFalse()
+        assertThat(isPlatformNativelySupported("gc", setOf("linux-x86_64"))).isTrue()
+    }
+
+    @Test
     fun `isPlatformNativelySupported returns false for blank and empty slugs`() {
         assertThat(isPlatformNativelySupported("")).isFalse()
         assertThat(isPlatformNativelySupported("  ")).isFalse()

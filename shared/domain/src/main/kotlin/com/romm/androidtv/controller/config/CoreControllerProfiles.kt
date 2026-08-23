@@ -6,6 +6,7 @@ import com.romm.androidtv.controller.model.LogicalControl
 import com.romm.androidtv.controller.model.NeutralAxis
 import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.emulation.model.CoreManifest
+import com.romm.androidtv.emulation.model.ANDROID_CORE_ABIS
 
 /**
  * Static catalog of per-core controller profiles for every approved emulator core.
@@ -33,8 +34,10 @@ import com.romm.androidtv.emulation.model.CoreManifest
  * - **mupen64plus_next** — D-Pad -> DPAD; A Button->B, B Button->Y, C-Up->X, C-Down->A, C-Left->L,
  *   C-Right->R; Z Trigger->L2(trigger), L Shoulder->Select, R Shoulder->R2; Start->Start;
  *   Control Stick -> AXIS_LX/LY.
+ * - **dolphin** — D-Pad -> DPAD; A/B/X/Y -> A/B/X/Y; L/R -> L2/R2 triggers; Z -> R;
+ *   Start->Start; Control Stick -> AXIS_LX/LY; C-Stick -> AXIS_RX/RY.
  *
- * Three profiles use authoritative Controllercons 2.1 vectors. The other ten use
+ * Three profiles use authoritative Controllercons 2.1 vectors. The other eleven use
  * artist-provided "1 Color Controllers and Handhelds" silhouettes.
  */
 object CoreControllerProfiles {
@@ -54,6 +57,7 @@ object CoreControllerProfiles {
         prosystem(),
         pcsxRearmed(),
         mupen64PlusNext(),
+        dolphin(),
     )
 
     /** Look up a profile by its core id. */
@@ -61,8 +65,11 @@ object CoreControllerProfiles {
         all.find { it.coreId == coreId }
 
     /** Profiles whose core id is in [CoreManifest.approvedEntries]. */
-    fun forApprovedCores(): List<CoreControllerProfile> {
-        val approvedIds = CoreManifest.approvedEntries().map { it.coreId }.toSet()
+    fun forApprovedCores(supportedAbis: Set<String> = ANDROID_CORE_ABIS): List<CoreControllerProfile> {
+        val approvedIds = CoreManifest.approvedEntries()
+            .filter { it.supportedAbis.any(supportedAbis::contains) }
+            .map { it.coreId }
+            .toSet()
         return all.filter { it.coreId in approvedIds }
     }
 
@@ -283,6 +290,28 @@ object CoreControllerProfiles {
             desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, circle("start", 0.472f, 0.386f, 0.054f)),
             desc(CoreControlId.LEFT_STICK_X, "Control Stick X", LogicalControl.AXIS_LX, InputKind.ANALOG_STICK, oval("left_stick_x", 0.440f, 0.474f, 0.119f, 0.119f)),
             desc(CoreControlId.LEFT_STICK_Y, "Control Stick Y", LogicalControl.AXIS_LY, InputKind.ANALOG_STICK, oval("left_stick_y", 0.440f, 0.474f, 0.119f, 0.119f)),
+        ),
+    )
+
+    private fun dolphin() = profile(
+        coreId = "dolphin",
+        consoleName = "Nintendo GameCube",
+        consoleSubtitle = null,
+        playerCount = 4,
+        artwork = artistProvidedArt("controller_outline_gamecube"),
+        controls = dpad(0.386f, 0.572f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_A, "A", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.714f, 0.417f, 0.086f)),
+            desc(CoreControlId.BUTTON_B, "B", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.616f, 0.458f, 0.043f)),
+            desc(CoreControlId.BUTTON_X, "X", LogicalControl.BUTTON_X, InputKind.BUTTON, oval("button_x", 0.755f, 0.357f, 0.060f, 0.034f)),
+            desc(CoreControlId.BUTTON_Y, "Y", LogicalControl.BUTTON_Y, InputKind.BUTTON, oval("button_y", 0.638f, 0.357f, 0.060f, 0.034f)),
+            desc(CoreControlId.L2, "L", LogicalControl.BUTTON_LT, InputKind.TRIGGER, rect("l2", 0.235f, 0.270f, 0.145f, 0.050f)),
+            desc(CoreControlId.R2, "R", LogicalControl.BUTTON_RT, InputKind.TRIGGER, rect("r2", 0.620f, 0.270f, 0.145f, 0.050f)),
+            desc(CoreControlId.Z, "Z", LogicalControl.BUTTON_RB, InputKind.BUTTON, rect("z", 0.690f, 0.300f, 0.100f, 0.040f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, circle("start", 0.500f, 0.434f, 0.035f)),
+            desc(CoreControlId.LEFT_STICK_X, "Control Stick X", LogicalControl.AXIS_LX, InputKind.ANALOG_STICK, circle("left_stick_x", 0.283f, 0.413f, 0.086f)),
+            desc(CoreControlId.LEFT_STICK_Y, "Control Stick Y", LogicalControl.AXIS_LY, InputKind.ANALOG_STICK, circle("left_stick_y", 0.283f, 0.413f, 0.086f)),
+            desc(CoreControlId.RIGHT_STICK_X, "C-Stick X", LogicalControl.AXIS_RX, InputKind.ANALOG_STICK, circle("right_stick_x", 0.616f, 0.573f, 0.058f)),
+            desc(CoreControlId.RIGHT_STICK_Y, "C-Stick Y", LogicalControl.AXIS_RY, InputKind.ANALOG_STICK, circle("right_stick_y", 0.616f, 0.573f, 0.058f)),
         ),
     )
 

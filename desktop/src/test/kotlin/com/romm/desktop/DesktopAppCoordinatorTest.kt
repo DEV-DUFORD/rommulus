@@ -1034,6 +1034,26 @@ class DesktopAppCoordinatorTest {
         waitForReconciled(supervisor, started.sessionId)
     }
 
+    @Test
+    fun `launchPlayer selects Dolphin for GameCube on Linux`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        val coresDir = paths.dataDir.resolve("cores")
+        Files.createDirectories(coresDir)
+        Files.write(coresDir.resolve("libdolphin_core.so"), byteArrayOf(0))
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(
+            journalsRoot = paths.stateDir.resolve("journals"),
+            launcher = launcher,
+        )
+        val c = launchCoordinator(paths, platformSlug = "gc", supervisor = supervisor)
+
+        assertThat(c.isPlatformPlayable("gc")).isTrue()
+        val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
+
+        assertThat(launcher.launches.single().coreId).isEqualTo("dolphin")
+        waitForReconciled(supervisor, started.sessionId)
+    }
+
     // ---------------------------------------------------------------- BIOS launch failures (Phase 11 work item 6)
 
     @Test

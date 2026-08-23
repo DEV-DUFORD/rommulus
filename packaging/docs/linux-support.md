@@ -30,7 +30,7 @@ again, only Ubuntu 24.04 has been exercised so far.
 
 ## GPU and graphics expectations
 
-**Nintendo 64 uses GPU-accelerated GLideN64; all other current cores use software rendering.**
+**Nintendo 64 and GameCube use GPU-accelerated OpenGL ES rendering; the other current cores use software rendering.**
 
 - The player (`bin/rommulus-player`) runs a separate SDL3 window. For software-rendered cores it uses
   the **software frame path** (`plans/LINUX_X64.md` §11.6): each frame produced by the core is
@@ -40,6 +40,9 @@ again, only Ubuntu 24.04 has been exercised so far.
   Android build and is the default on Linux, including Steam Deck. The package intentionally uses
   the host's OpenGL ES/EGL dispatch libraries so they remain compatible with the installed GPU
   driver rather than bundling the Ubuntu build machine's graphics stack.
+- **GameCube hardware rendering:** Dolphin uses the same SDL3-managed OpenGL ES 3 frontend.
+  Ubuntu uses the offscreen compositor path; Steam Deck uses the isolated direct-framebuffer
+  player, matching the N64 platform split. Dolphin remains Linux-only.
 - The other enabled cores remain software-rendered by the player (see
   `docs/linux-support-manifest.md`):
   - `pcsx_rearmed` — Lightrec x86_64 dynarec with a software renderer;
@@ -47,7 +50,7 @@ again, only Ubuntu 24.04 has been exercised so far.
     stella, beetle_pce_fast, mgba, snes9x, genesis_plus_gx) plus the synthetic `test_core` used
     for end-to-end testing are natively software cores.
 - **CPU performance still matters** for CPU emulation and software-rendered systems such as
-  PlayStation via `pcsx_rearmed`, but N64 RDP work now scales with GPU performance.
+  PlayStation via `pcsx_rearmed`, while N64 and GameCube graphics scale with GPU performance.
 - **NVIDIA proprietary-driver qualification is deferred.** This preview targets Steam Deck's AMD
   Mesa stack; the new hardware path is not yet qualified on proprietary NVIDIA drivers.
 
@@ -122,7 +125,7 @@ reconciled from the journal/candidate files (§8.3). When reporting a crash, att
 
 - Ubuntu 24.04 x86_64, self-contained tarball (bundled jlink JVM runtime, player, cores,
   manifests, desktop entry).
-- All 14 enabled cores, all software-rendered (see the GPU section and
+- All 15 enabled cores; N64 and GameCube are hardware-rendered (see the GPU section and
   `docs/linux-support-manifest.md`).
 - Controller input via SDL3 in the native player; the desktop client uses JInput for controller
   input (`plans/LINUX_X64.md` §11.9 amendment). Keyboard and mouse work everywhere.
@@ -137,5 +140,5 @@ reconciled from the journal/candidate files (§8.3). When reporting a crash, att
 - **No Windows, macOS, ARM64 Linux, or musl Linux builds** (§4 non-goals).
 - **No save UI.** Saves are checkpointed on disk, but there is no Linux desktop saves screen yet;
   per-core criterion 9 round-trip verification is deferred (see above).
-- **No Vulkan negotiation.** The N64 hardware path uses OpenGL ES 3.
+- **No Vulkan negotiation.** The N64 and GameCube hardware paths use OpenGL ES 3.
 - **No save states, rewind, netplay, or shaders** — explicitly out of scope (§4 non-goals).

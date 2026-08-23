@@ -4,7 +4,7 @@
 # Mirrors native/tests/CMakeLists.txt: a standalone host project that
 # compiles the platform-neutral engine sources directly into the player
 # executable plus the SDL3 platform adapters. It also builds the synthetic
-# test_core and all 13 vendored cores (via the cmake/cores/*-linux.cmake
+# test_core and all Linux cores (via the cmake/cores/*-linux.cmake
 # fragments) so the player can load them, but nothing Android.
 #
 # SDL3 is found via its installed CMake package (brew on macOS, vendored
@@ -154,3 +154,4 @@ include(${ROMM_NATIVE_ROOT}/cmake/cores/beetle_pce_fast-linux.cmake)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/genesis_plus_gx-linux.cmake)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/pcsx_rearmed-linux.cmake)
 include(${ROMM_NATIVE_ROOT}/cmake/cores/mupen64plus_next-linux.cmake)
+include(${ROMM_NATIVE_ROOT}/cmake/cores/dolphin-linux.cmake)

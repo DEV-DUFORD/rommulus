@@ -1,5 +1,6 @@
 package com.romm.androidtv.library
 
+import com.romm.androidtv.emulation.model.ANDROID_CORE_ABIS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -34,6 +35,7 @@ class RomGridPresenter(
     private val repository: LibraryRepository,
     private val query: RomQuery,
     private val hideUnsupportedSystems: () -> Boolean = { true },
+    private val supportedCoreAbis: Set<String> = ANDROID_CORE_ABIS,
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
 ) {
@@ -78,7 +80,9 @@ class RomGridPresenter(
             val hideFlag = hideUnsupportedSystems()
             val state = when (val result = repository.fetchRomsPage(query, PAGE_SIZE, offset = 0)) {
                 is LibraryResult.Success -> RomGridUiState(
-                    section = SectionState.Loaded(result.data.roms.filterUnsupportedIfHidden(hideFlag)),
+                    section = SectionState.Loaded(
+                        result.data.roms.filterUnsupportedIfHidden(hideFlag, supportedCoreAbis),
+                    ),
                     total = result.data.total,
                     rawFetchedCount = result.data.roms.size,
                 )
@@ -119,7 +123,10 @@ class RomGridPresenter(
                 is LibraryResult.Success -> {
                     // Only append if no newer refresh has begun since we started.
                     if (generation == capturedGeneration) {
-                        val merged = (loadedRoms + result.data.roms.filterUnsupportedIfHidden(hideFlag))
+                        val merged = (
+                            loadedRoms +
+                                result.data.roms.filterUnsupportedIfHidden(hideFlag, supportedCoreAbis)
+                            )
                             .distinctBy { it.id }
                         _uiState.value = _uiState.value.copy(
                             section = SectionState.Loaded(merged),

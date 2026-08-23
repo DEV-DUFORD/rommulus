@@ -12,7 +12,7 @@ class CoreManifestTest {
         // (LIBRETRO_REFACTOR.md section 4.1) — approving this core must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem", "pcsx_rearmed", "mupen64plus_next", "test_core")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem", "pcsx_rearmed", "mupen64plus_next", "dolphin", "test_core")
     }
 
     @Test
@@ -305,6 +305,20 @@ class CoreManifestTest {
         assertThat(mupen64.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(mupen64.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
+        }
+
+        @Test
+        fun `dolphin is approved only for Linux GameCube`() {
+            val dolphin = CoreManifest.findById("dolphin")
+
+            assertThat(dolphin).isNotNull
+            assertThat(dolphin!!.approved).isTrue()
+            assertThat(dolphin.commercialUseFinding)
+                .isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+            assertThat(dolphin.supportedSystems).containsExactly("gc")
+            assertThat(dolphin.supportedExtensions).contains(".iso", ".gcm", ".rvz")
+            assertThat(dolphin.requiredFirmware).isEmpty()
+            assertThat(dolphin.supportedAbis).containsExactly("linux-x86_64")
         }
     }
 

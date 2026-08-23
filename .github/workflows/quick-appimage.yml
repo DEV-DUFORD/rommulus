@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
 
       - name: Resolve version
         id: version
@@ -61,7 +63,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang-18 cmake ninja-build nasm pkg-config wget zstd \
+            clang-18 g++ cmake ninja-build nasm pkg-config wget zstd \
             libasound2-dev libaudio-dev libdbus-1-dev libdecor-0-dev \
             libdrm-dev libegl1-mesa-dev libfribidi-dev libgbm-dev \
             libgl1-mesa-dev libgles2-mesa-dev libibus-1.0-dev \

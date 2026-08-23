@@ -4,8 +4,8 @@
 // trusted roots taken from the ROMM_PLAYER_* environment contract, loads
 // the Libretro core through the platform-neutral engine, runs it with an
 // SDL3 window/audio/input stack, and atomically writes a result JSON.
-// Supports software-rendered cores and the N64 core's GLES3 path; no network,
-// no tokens.
+// Supports software-rendered cores plus N64 and GameCube GLES3 paths; no
+// network, no tokens.
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -122,6 +122,26 @@ std::string parentDirectory(const std::string& path) {
     if (pos == std::string::npos) return ".";
     if (pos == 0) return "/";
     return path.substr(0, pos);
+}
+
+std::optional<std::string> dolphinSystemDirectory() {
+    std::error_code pathError;
+    const std::filesystem::path executable =
+        std::filesystem::read_symlink("/proc/self/exe", pathError);
+    if (pathError) return std::nullopt;
+
+    const std::array<std::filesystem::path, 2> roots = {
+        executable.parent_path() / "share/rommulus",
+        executable.parent_path() / "../share/rommulus",
+    };
+    for (const auto& root : roots) {
+        if (std::filesystem::is_directory(root / "dolphin-emu/Sys")) {
+            std::error_code canonicalError;
+            const auto canonical = std::filesystem::weakly_canonical(root, canonicalError);
+            if (!canonicalError) return canonical.string();
+        }
+    }
+    return std::nullopt;
 }
 
 // Builds the TrustedRoots from the ROMM_PLAYER_* environment contract.
@@ -335,7 +355,7 @@ int main(int argc, char* argv[]) {
 
 #ifndef ROMM_STEAM_DECK_PLAYER
     if (parsed.has_value() &&
-        parsed->coreId == "mupen64plus_next" &&
+        (parsed->coreId == "mupen64plus_next" || parsed->coreId == "dolphin") &&
         romm::player::shouldUseSteamDeckPlayer()) {
         std::error_code pathError;
         const std::filesystem::path executable =
@@ -409,11 +429,12 @@ int main(int argc, char* argv[]) {
     ::sigaction(SIGINT, &sa, nullptr);
 
     // 7. Create the window and apply the requested video settings.
-    const bool useHardwareRendering = request.coreId == "mupen64plus_next";
+    const bool useHardwareRendering =
+        request.coreId == "mupen64plus_next" || request.coreId == "dolphin";
 #ifdef ROMM_STEAM_DECK_PLAYER
-    const bool useSteamDeckN64Path = useHardwareRendering;
+    const bool useSteamDeckHardwarePath = useHardwareRendering;
 #else
-    const bool useSteamDeckN64Path =
+    const bool useSteamDeckHardwarePath =
         useHardwareRendering && romm::player::shouldUseSteamDeckPlayer();
 #endif
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
@@ -441,15 +462,17 @@ int main(int argc, char* argv[]) {
     videoSink->setFullscreen(request.video.fullscreen);
     std::string hardwareRenderSize;
     if (useHardwareRendering) {
-        const bool useOffscreenPresentation = !useSteamDeckN64Path;
+        const bool useOffscreenPresentation = !useSteamDeckHardwarePath;
         if (useOffscreenPresentation) {
             int outputWidth = 0;
             int outputHeight = 0;
             SDL_GetWindowSizeInPixels(window, &outputWidth, &outputHeight);
-            const auto renderSize =
-                romm::player::n64RenderSizeForOutput(outputWidth, outputHeight);
-            hardwareRenderSize =
-                std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
+            if (request.coreId == "mupen64plus_next") {
+                const auto renderSize =
+                    romm::player::n64RenderSizeForOutput(outputWidth, outputHeight);
+                hardwareRenderSize =
+                    std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
+            }
             videoSink->attachWindow(
                 reinterpret_cast<romm::video::NativeWindowHandle>(window));
         }
@@ -457,13 +480,13 @@ int main(int argc, char* argv[]) {
         romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(
             window, useOffscreenPresentation));
         romm::gl::context().setScanlines(
-            !useSteamDeckN64Path && request.video.scanlines);
+            !useSteamDeckHardwarePath && request.video.scanlines);
         romm::gl::context().setIntegerScaling(request.video.integerScaling);
         romm::gl::context().setSharpFilter(request.video.sharpFilter);
         std::fprintf(
-            stderr, "info: N64 presentation path: %s\n",
-            useSteamDeckN64Path ? "Steam Deck direct framebuffer"
-                                : "Linux offscreen compositor");
+            stderr, "info: hardware presentation path: %s\n",
+            useSteamDeckHardwarePath ? "Steam Deck direct framebuffer"
+                                     : "Linux offscreen compositor");
     }
 
     // Give the window manager one chance to deliver an early close/quit
@@ -481,7 +504,7 @@ int main(int argc, char* argv[]) {
     // 8. Load and start the core.
     romm::EmulationSession session;
 #ifndef ROMM_STEAM_DECK_PLAYER
-    session.setReleaseHardwareContextWhenPaused(useSteamDeckN64Path);
+    session.setReleaseHardwareContextWhenPaused(useSteamDeckHardwarePath);
 #endif
     // GLideN64 runs the N64 RDP on the GPU; HLE avoids the much heavier cxd4
     // RSP path. Other cores ignore these Mupen64Plus-specific options.
@@ -502,7 +525,20 @@ int main(int argc, char* argv[]) {
     // the system directory when no save path was requested.
     const std::string saveDir =
             request.savePath.empty() ? request.systemDir : parentDirectory(request.savePath);
-    if (!session.start(request.corePath, request.systemDir, saveDir, request.contentPath)) {
+    std::string systemDir = request.systemDir;
+    if (request.coreId == "dolphin") {
+        const auto dolphinSystem = dolphinSystemDirectory();
+        if (!dolphinSystem.has_value()) {
+            const std::string error = "Dolphin system data is missing";
+            std::fprintf(stderr, "error: %s\n", error.c_str());
+            writeResult(request, romm::player::ExitKind::LaunchFailed, false, 0, 0, 0, &error);
+            session.releaseProcessSlot();
+            SDL_Quit();
+            return 1;
+        }
+        systemDir = *dolphinSystem;
+    }
+    if (!session.start(request.corePath, systemDir, saveDir, request.contentPath)) {
         const std::string error = session.lastError().empty()
                                     ? "session start failed"
                                     : session.lastError();
@@ -645,7 +681,7 @@ int main(int argc, char* argv[]) {
             case romm::player::PauseMenuEffect::kResume:
                 // The menu closed via Resume (or cancel): unfreeze the core.
 #ifndef ROMM_STEAM_DECK_PLAYER
-                if (useSteamDeckN64Path) videoSink->detachWindow();
+                if (useSteamDeckHardwarePath) videoSink->detachWindow();
 #endif
                 session.setPaused(false);
                 break;
@@ -653,7 +689,7 @@ int main(int argc, char* argv[]) {
                 // Quit was confirmed: leave through the normal shutdown path,
                 // which checkpoints and reports exitKind=completed.
 #ifndef ROMM_STEAM_DECK_PLAYER
-                if (useSteamDeckN64Path) videoSink->detachWindow();
+                if (useSteamDeckHardwarePath) videoSink->detachWindow();
 #endif
                 running = false;
                 break;
@@ -663,7 +699,7 @@ int main(int argc, char* argv[]) {
                 videoSink->setScanlines(pauseMenu.scanlinesEnabled());
                 if (useHardwareRendering) {
                     romm::gl::context().setScanlines(
-                        !useSteamDeckN64Path && pauseMenu.scanlinesEnabled());
+                        !useSteamDeckHardwarePath && pauseMenu.scanlinesEnabled());
                 }
                 break;
             case romm::player::PauseMenuEffect::kToggleIntegerScaling:
@@ -742,7 +778,7 @@ int main(int argc, char* argv[]) {
         videoSink->requestRepaint();
         takeCheckpoint(session, request);
 #ifndef ROMM_STEAM_DECK_PLAYER
-        if (useSteamDeckN64Path) {
+        if (useSteamDeckHardwarePath) {
             const auto deadline =
                 std::chrono::steady_clock::now() + std::chrono::seconds(1);
             while (!session.hardwareContextReleasedForPause() &&

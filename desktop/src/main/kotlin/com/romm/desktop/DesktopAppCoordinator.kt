@@ -1583,6 +1583,7 @@ class DesktopAppCoordinator(
             scope = scope,
             repository = network.libraryRepository,
             hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
+            supportedCoreAbis = setOf(LINUX_X86_64_ABI),
         )
     }
 
@@ -1598,6 +1599,7 @@ class DesktopAppCoordinator(
         scope = scope,
         repository = network.libraryRepository,
         hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
+        supportedCoreAbis = setOf(LINUX_X86_64_ABI),
     )
 
     fun romGridPresenter(query: RomQuery): RomGridPresenter = RomGridPresenter(
@@ -1605,6 +1607,7 @@ class DesktopAppCoordinator(
         repository = network.libraryRepository,
         query = query,
         hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
+        supportedCoreAbis = setOf(LINUX_X86_64_ABI),
     )
 
     fun romDetailPresenter(romId: Long): RomDetailPresenter =

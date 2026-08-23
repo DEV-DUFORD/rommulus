@@ -166,12 +166,16 @@ inline int coreKeyboardTargetAt(const std::string& coreId, int row) {
     if (coreId == "pcsx_rearmed" && analogRow >= 0 && analogRow < 8) {
         return kKeyboardLeftXNegative + analogRow;
     }
+    if (coreId == "dolphin" && analogRow >= 0 && analogRow < 8) {
+        return kKeyboardLeftXNegative + analogRow;
+    }
     return -1;
 }
 
 inline int coreKeyboardRowCount(const std::string& coreId) {
     if (coreId == "mupen64plus_next") return 18;
     if (coreId == "pcsx_rearmed") return 24;
+    if (coreId == "dolphin") return 20;
     return 12;
 }
 

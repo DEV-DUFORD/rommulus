@@ -19,6 +19,9 @@ enum class CommercialUseFinding {
     UNREVIEWED,
 }
 
+/** Android ABIs shipped by the mobile/TV application. */
+val ANDROID_CORE_ABIS: Set<String> = setOf("armeabi-v7a", "arm64-v8a")
+
 /**
  * Review and approval state for one core. See LIBRETRO_REFACTOR.md section 4.1.
  *
@@ -624,6 +627,36 @@ object CoreManifest {
             ),
             reviewedBy = "DEV-DUFORD",
             reviewedOn = "2026-08-02",
+            approved = true,
+        ),
+        CoreLicenseFinding(
+            coreName = "Dolphin",
+            coreId = "dolphin",
+            upstreamRepository = "https://github.com/libretro/dolphin",
+            commitSha = "841bacadb5d5c3f9acba0dc652d306ecd77a7bbf",
+            releaseTag = "",
+            licenseSummary = "GPL-2.0-or-later for Dolphin's original source, with the complete " +
+                "repository declaring its aggregate dependency closure GPLv3-compatible. The " +
+                "Linux-only Libretro build disables the standalone UI, analytics, online " +
+                "updater, RetroAchievements, Vulkan, and platform input/audio backends. Exact " +
+                "source and dependency pins are retained through the recursive Dolphin git " +
+                "submodule; see third_party/cores/dolphin/COPYING and LICENSES/.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = true,
+            supportedSystems = listOf("gc"),
+            supportedExtensions = listOf(
+                ".elf", ".dol", ".gcm", ".iso", ".tgc", ".wbfs",
+                ".ciso", ".gcz", ".wia", ".rvz", ".m3u",
+            ),
+            requiredFirmware = emptyList(),
+            supportedAbis = listOf("linux-x86_64"),
+            buildCommand = "git submodule update --init --recursive && " +
+                "cmake -S native/player -B build/player && cmake --build build/player " +
+                "(target dolphin_core via native/cmake/cores/dolphin-linux.cmake; GCC C++23 " +
+                "Dolphin LIBRETRO=ON, OpenGL ES hardware rendering, Vulkan disabled)",
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-08-23",
             approved = true,
         ),
         CoreLicenseFinding(

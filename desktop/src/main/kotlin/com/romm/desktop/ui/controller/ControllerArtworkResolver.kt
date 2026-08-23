@@ -12,7 +12,7 @@ import com.romm.androidtv.controller.config.ControllerArtwork
  *
  * Mapping policy (mirrors the Android resolver):
  * - The two generic placeholders resolve to themselves.
- * - The thirteen per-console silhouettes resolve to their converted vectors.
+ * - The fourteen per-console silhouettes resolve to their converted vectors.
  * - Any unknown/blank resource name falls back to the generic gamepad so a future profile
  *   with a yet-to-be-imported asset still renders an illustration instead of nothing.
  */
@@ -36,6 +36,7 @@ object ControllerArtworkResolver {
         "controller_outline_atari7800" -> ControllerOutlineAtari7800
         "controller_outline_ps1" -> ControllerOutlinePs1
         "controller_outline_n64" -> ControllerOutlineN64
+        "controller_outline_gamecube" -> ControllerOutlineGamecube
         "controller_outline_gba" -> ControllerOutlineGba
         "controller_outline_gb" -> ControllerOutlineGb
         "controller_outline_tg16" -> ControllerOutlineTg16

@@ -203,6 +203,12 @@ inline int coreBindingSlotAt(const std::string& coreId, int row) {
         kSlotRightShoulder, kSlotLeftTrigger, kSlotRightTrigger,
         kSlotLeftStick, kSlotRightStick, kSlotSelect, kSlotStart,
     };
+    static constexpr std::array<int, kRetroPadSlotCount> kGameCube = {
+        kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
+        kSlotA, kSlotB, kSlotX, kSlotY, kSlotLeftTrigger,
+        kSlotRightTrigger, kSlotRightShoulder, kSlotStart,
+        kSlotSelect, kSlotLeftShoulder, kSlotLeftStick, kSlotRightStick,
+    };
     const auto& order = coreId == "genesis_plus_gx" ? kGenesis
         : coreId == "beetle_pce_fast" ? kPce
         : coreId == "mupen64plus_next" ? kN64
@@ -212,6 +218,7 @@ inline int coreBindingSlotAt(const std::string& coreId, int row) {
         : coreId == "handy" ? kHandy
         : coreId == "prosystem" ? kProsystem
         : coreId == "pcsx_rearmed" ? kPsx
+        : coreId == "dolphin" ? kGameCube
         : (coreId == "fceumm" || coreId == "gambatte" ||
            coreId == "mednafen_wswan") ? kTwoButton
         : kDefault;
