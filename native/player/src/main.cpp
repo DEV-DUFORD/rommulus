@@ -336,7 +336,7 @@ int main(int argc, char* argv[]) {
 #ifndef ROMM_STEAM_DECK_PLAYER
     if (parsed.has_value() &&
         parsed->coreId == "mupen64plus_next" &&
-        romm::player::isSteamDeck()) {
+        romm::player::shouldUseSteamDeckPlayer()) {
         std::error_code pathError;
         const std::filesystem::path executable =
             std::filesystem::read_symlink("/proc/self/exe", pathError);
@@ -414,7 +414,7 @@ int main(int argc, char* argv[]) {
     const bool useSteamDeckN64Path = useHardwareRendering;
 #else
     const bool useSteamDeckN64Path =
-        useHardwareRendering && romm::player::isSteamDeck();
+        useHardwareRendering && romm::player::shouldUseSteamDeckPlayer();
 #endif
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (useHardwareRendering) {
@@ -458,6 +458,8 @@ int main(int argc, char* argv[]) {
             window, useOffscreenPresentation));
         romm::gl::context().setScanlines(
             !useSteamDeckN64Path && request.video.scanlines);
+        romm::gl::context().setIntegerScaling(request.video.integerScaling);
+        romm::gl::context().setSharpFilter(request.video.sharpFilter);
         std::fprintf(
             stderr, "info: N64 presentation path: %s\n",
             useSteamDeckN64Path ? "Steam Deck direct framebuffer"
@@ -666,9 +668,17 @@ int main(int argc, char* argv[]) {
                 break;
             case romm::player::PauseMenuEffect::kToggleIntegerScaling:
                 videoSink->setIntegerScaling(pauseMenu.integerScalingEnabled());
+                if (useHardwareRendering) {
+                    romm::gl::context().setIntegerScaling(
+                        pauseMenu.integerScalingEnabled());
+                }
                 break;
             case romm::player::PauseMenuEffect::kToggleSharpFilter:
                 videoSink->setSharpFilter(pauseMenu.sharpFilterEnabled());
+                if (useHardwareRendering) {
+                    romm::gl::context().setSharpFilter(
+                        pauseMenu.sharpFilterEnabled());
+                }
                 break;
             case romm::player::PauseMenuEffect::kBeginCapture: {
                 // A slot row was confirmed: start capturing a digital binding

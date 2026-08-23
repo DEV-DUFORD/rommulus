@@ -174,9 +174,9 @@ built runtime with the real app (run the desktop app against
 5. **exec** — replaces itself with `java -cp 'lib/rommulus/app.jar:lib/rommulus/lib/*'
    com.romm.desktop.MainKt [args]`.
 6. **XDG preservation** — `XDG_DATA_HOME` (and friends) are read with spec
-   defaults but never modified. On first run the launcher seeds bundled cores
-   into `$XDG_DATA_HOME/rommulus/cores/` ADDITIVELY only (existing user files
-   are never overwritten), because the desktop derives
+   defaults but never modified. The launcher installs bundled cores into
+   `$XDG_DATA_HOME/rommulus/cores/` and atomically updates older packaged
+   copies with the same canonical filename, because the desktop derives
    `ROMM_PLAYER_ALLOWED_CORES` from that directory at launch. Disable with
    `ROMMULUS_NO_CORE_SEED=1`.
 7. **Fail-fast integrity** — required files (`bin/rommulus-player`,

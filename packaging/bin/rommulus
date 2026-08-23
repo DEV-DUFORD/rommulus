@@ -35,9 +35,8 @@
 #                     app jar, core-manifest.json, bundled JVM runtime natives).
 #
 # Environment:
-#   ROMMULUS_NO_CORE_SEED=1  disable first-run seeding of bundled cores into
-#                            $XDG_DATA_HOME/rommulus/cores (additive only —
-#                            existing user files are never overwritten).
+#   ROMMULUS_NO_CORE_SEED=1  disable installation/update of bundled cores in
+#                            $XDG_DATA_HOME/rommulus/cores.
 #
 # Exit codes:
 #   0  success
@@ -185,12 +184,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Seed bundled cores into the user's XDG data directory (additive only).
+# 5. Install bundled cores into the user's XDG data directory.
 #    The desktop app derives ROMM_PLAYER_ALLOWED_CORES by scanning
 #    $XDG_DATA_HOME/rommulus/cores for lib*.so at launch time; without the
-#    bundled cores installed there, no core would be available. Existing
-#    user files are NEVER overwritten (cp -p only when the destination is
-#    absent), so install/update preserves XDG user data (§16.1 item 6).
+#    bundled cores installed there, no core would be available. A packaged
+#    core replaces an older packaged copy with the same canonical filename.
+#    Saves and custom cores with other filenames remain untouched.
 #    XDG_DATA_HOME is read with the spec default; it is never modified.
 # ---------------------------------------------------------------------------
 if [ "${ROMMULUS_NO_CORE_SEED:-0}" != "1" ]; then
@@ -204,6 +203,15 @@ if [ "${ROMMULUS_NO_CORE_SEED:-0}" != "1" ]; then
       cp -p -- "$src" "$dest" \
         || die 3 "failed to install bundled core $(basename -- "$src") into $CORES_DEST"
       printf '%s: installed bundled core %s -> %s\n' "$PROG" "$(basename -- "$src")" "$CORES_DEST" >&2
+    elif [ -L "$dest" ] || [ ! -f "$dest" ]; then
+      die 3 "cannot update bundled core at non-regular path: $dest"
+    elif ! cmp -s -- "$src" "$dest"; then
+      tmp="$CORES_DEST/.$(basename -- "$src").tmp.$$"
+      cp -p -- "$src" "$tmp" \
+        || die 3 "failed to stage bundled core update for $(basename -- "$src")"
+      mv -f -- "$tmp" "$dest" \
+        || die 3 "failed to activate bundled core update for $(basename -- "$src")"
+      printf '%s: updated bundled core %s -> %s\n' "$PROG" "$(basename -- "$src")" "$CORES_DEST" >&2
     fi
   done
 fi
@@ -224,11 +232,13 @@ else
 fi
 export PATH="$APP_ROOT/bin${PATH:+:$PATH}"
 
-# Steam launches are an explicit platform signal, not a hardware-detection
-# heuristic. The native player uses this to select the preview-19-compatible
-# N64 executable before creating any SDL or OpenGL state.
-if [ -n "${SteamAppId:-}" ] || [ -n "${SteamGameId:-}" ] \
-  || [[ "${XDG_CURRENT_DESKTOP:-}" == *gamescope* ]]; then
+# The preview-19 direct framebuffer is correct under Gamescope, but not under
+# the Deck's rotated KDE/X11 desktop. Steam app IDs do not identify a
+# compositor, so only explicit Gamescope session markers force that player.
+if [[ "${XDG_CURRENT_DESKTOP:-}" == *gamescope* ]] \
+  || [[ "${XDG_SESSION_DESKTOP:-}" == *gamescope* ]] \
+  || [[ "${WAYLAND_DISPLAY:-}" == *gamescope* ]] \
+  || [ -n "${GAMESCOPE_WAYLAND_DISPLAY:-}" ]; then
   export ROMM_FORCE_STEAM_DECK_PLAYER=1
 fi
 

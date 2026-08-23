@@ -105,9 +105,7 @@ void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
         return;
     }
 
-    const char* rendererName =
-        (SDL_GetWindowFlags(window_) & SDL_WINDOW_OPENGL) != 0 ? "opengles2" : nullptr;
-    renderer_ = SDL_CreateRenderer(window_, rendererName);
+    renderer_ = SDL_CreateRenderer(window_, nullptr);
     if (renderer_ == nullptr) {
         romm::log::sink().log(romm::log::Severity::Warn, kTag,
                               std::string("SDL_CreateRenderer failed: ") +

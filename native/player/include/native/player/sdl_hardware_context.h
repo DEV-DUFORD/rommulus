@@ -24,6 +24,8 @@ public:
     void unmakeCurrent() override;
     bool makeCurrent() override;
     void setScanlines(bool enabled) override;
+    void setIntegerScaling(bool enabled) override;
+    void setSharpFilter(bool enabled) override;
     bool swapBuffers() override;
     void destroyContext() override;
     void* currentContext() const override;
@@ -46,6 +48,8 @@ private:
     unsigned scanlineProgram_ = 0;
     bool useOffscreenPresentation_ = false;
     std::atomic<bool> scanlinesEnabled_{false};
+    std::atomic<bool> integerScalingEnabled_{false};
+    std::atomic<bool> sharpFilterEnabled_{false};
 
     bool createFramebufferLocked();
     void destroyFramebufferLocked();

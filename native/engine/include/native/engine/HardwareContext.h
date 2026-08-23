@@ -81,6 +81,8 @@ public:
     virtual bool makeCurrent() = 0;
 
     virtual void setScanlines(bool enabled) = 0;
+    virtual void setIntegerScaling(bool) {}
+    virtual void setSharpFilter(bool) {}
 
     // Swaps the front/back buffers. Returns false on failure (e.g. context
     // lost). The caller should treat a false return as a signal to
