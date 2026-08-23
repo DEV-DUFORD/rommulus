@@ -109,10 +109,13 @@ class GameLaunchRecorderTest {
     }
 
     @Test
-    fun `skips the report when the device identity cannot be resolved`() {
+    fun `reports without a device ID when device identity cannot be resolved`() {
         val gateway = FakeRommSyncGateway()
         recorder(gateway, SaveSyncSession(ORIGIN, USERNAME), identity = null).recordLaunch(1L)
-        assertThat(gateway.ingestPlaySessionsCalls).isEmpty()
+
+        val (_, request) = gateway.ingestPlaySessionsCalls.single()
+        assertThat(request.deviceId).isNull()
+        assertThat(request.sessions.single().romId).isEqualTo(1L)
     }
 
     @Test

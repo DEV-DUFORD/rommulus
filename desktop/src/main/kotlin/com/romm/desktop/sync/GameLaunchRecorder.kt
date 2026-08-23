@@ -20,8 +20,8 @@ import java.util.logging.Logger
  *
  * Best-effort by design: the report runs on a background thread and EVERY failure is logged and
  * swallowed — a play-session report must never block or break the launch/exit flow. Kiosk
- * (anonymous) sessions and unresolvable device identities are skipped silently, matching
- * Android's `SaveSyncCoordinatorImpl.recordPlaySession` guards.
+ * (anonymous) sessions are skipped, while an unavailable device identity is omitted from the
+ * request because the play-session endpoint accepts it as optional.
  */
 class GameLaunchRecorder(
     private val gateway: RommSyncGateway,
@@ -46,12 +46,15 @@ class GameLaunchRecorder(
                     // non-blank username) — Android skips play-session telemetry in both cases.
                     val session = sessionReader.current() ?: return@execute
                     val username = session.username ?: return@execute
-                    val identity = deviceIdentityLoader.load(session.origin, username) ?: return@execute
+                    // A device identity enriches the report but is not required by RomM's
+                    // play-session endpoint. Do not lose the user's recently-played update
+                    // when device registration is unavailable.
+                    val deviceId = deviceIdentityLoader.load(session.origin, username)?.rommDeviceId
 
                     val result = gateway.ingestPlaySessions(
                         session.origin,
                         PlaySessionIngestRequest(
-                            deviceId = identity.rommDeviceId,
+                            deviceId = deviceId,
                             sessions = listOf(
                                 PlaySessionEntry(
                                     romId = romId,
