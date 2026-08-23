@@ -1045,9 +1045,9 @@ class DesktopAppCoordinatorTest {
             journalsRoot = paths.stateDir.resolve("journals"),
             launcher = launcher,
         )
-        val c = launchCoordinator(paths, platformSlug = "gc", supervisor = supervisor)
+        val c = launchCoordinator(paths, platformSlug = "ngc", supervisor = supervisor)
 
-        assertThat(c.isPlatformPlayable("gc")).isTrue()
+        assertThat(c.isPlatformPlayable("ngc")).isTrue()
         val started = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
 
         assertThat(launcher.launches.single().coreId).isEqualTo("dolphin")

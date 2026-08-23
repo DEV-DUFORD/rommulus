@@ -644,7 +644,7 @@ object CoreManifest {
             commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
             sourceOfferSatisfied = true,
             attributionSatisfied = true,
-            supportedSystems = listOf("gc"),
+            supportedSystems = listOf("ngc", "gc"),
             supportedExtensions = listOf(
                 ".elf", ".dol", ".gcm", ".iso", ".tgc", ".wbfs",
                 ".ciso", ".gcz", ".wia", ".rvz", ".m3u",

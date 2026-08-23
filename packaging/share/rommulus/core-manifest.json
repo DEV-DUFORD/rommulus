@@ -564,7 +564,7 @@
         "reviewedBy": "DEV-DUFORD",
         "reviewedOn": "2026-08-23"
       },
-      "supportedSystems": ["gc"],
+      "supportedSystems": ["ngc", "gc"],
       "supportedExtensions": [".elf", ".dol", ".gcm", ".iso", ".tgc", ".wbfs", ".ciso", ".gcz", ".wia", ".rvz", ".m3u"],
       "requiredFirmware": [],
       "supportedAbis": ["linux-x86_64"],

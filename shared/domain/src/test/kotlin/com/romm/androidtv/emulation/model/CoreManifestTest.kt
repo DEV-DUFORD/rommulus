@@ -315,7 +315,7 @@ class CoreManifestTest {
             assertThat(dolphin!!.approved).isTrue()
             assertThat(dolphin.commercialUseFinding)
                 .isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
-            assertThat(dolphin.supportedSystems).containsExactly("gc")
+            assertThat(dolphin.supportedSystems).containsExactly("ngc", "gc")
             assertThat(dolphin.supportedExtensions).contains(".iso", ".gcm", ".rvz")
             assertThat(dolphin.requiredFirmware).isEmpty()
             assertThat(dolphin.supportedAbis).containsExactly("linux-x86_64")
