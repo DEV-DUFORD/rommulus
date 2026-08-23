@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "native/player/binding_table.h"
+#include "native/player/keyboard_binding_table.h"
 
 namespace romm::player {
 
@@ -64,8 +65,14 @@ struct ControllerBindings {
     std::vector<ControllerBindingDevice> devices;
 };
 
+// Optional launch-time keyboard table. The wire object contains one required
+// `bindings` array with all 24 targets exactly once in canonical order.
+struct KeyboardBindings {
+    KeyboardBindingTable table;
+};
+
 // Launch request version 2 (LINUX_X64.md section 12.2). Every field except
-// controllerBindings is required; contentHash may be the empty string (hash
+// controllerBindings and keyboardBindings is required; contentHash may be the empty string (hash
 // verification is then skipped), expectedSaveSize may be null, and
 // controllerBindings may be absent (the player then uses its built-in
 // default binding table).
@@ -89,6 +96,9 @@ struct PlayerRequest {
     // v2: stored controller bindings to apply from the first frame (see
     // ControllerBindings below). Absent = the player keeps its defaults.
     std::optional<ControllerBindings> controllerBindings;
+    // Optional and backward-compatible; absent keeps the built-in keyboard
+    // defaults.
+    std::optional<KeyboardBindings> keyboardBindings;
 };
 
 // Result exit kinds (LINUX_X64.md section 12.3). Signals, a missing

@@ -123,6 +123,7 @@ fun SettingsScreen(
     val segaCdFocus = remember { FocusRequester() }
     val playStationFocus = remember { FocusRequester() }
     val controllerSettingsFocus = remember { FocusRequester() }
+    val keyboardSettingsFocus = remember { FocusRequester() }
     val verifySha1Focus = remember { FocusRequester() }
     val autocleanFocus = remember { FocusRequester() }
     val licensesFocus = remember { FocusRequester() }
@@ -481,13 +482,28 @@ fun SettingsScreen(
                     .focusRequester(controllerSettingsFocus)
                     .focusProperties {
                         up = playStationFocus
-                        down = verifySha1Focus
+                        down = keyboardSettingsFocus
                     }
                     .focusableItem("settings:controller-settings", navigator) {
                         coordinator.openControllerSettings()
                     },
             ) {
                 Text("Controller Settings")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            TvOutlinedButton(
+                onClick = { coordinator.openKeyboardSettings() },
+                modifier = Modifier
+                    .focusRequester(keyboardSettingsFocus)
+                    .focusProperties {
+                        up = controllerSettingsFocus
+                        down = verifySha1Focus
+                    }
+                    .focusableItem("settings:keyboard-settings", navigator) {
+                        coordinator.openKeyboardSettings()
+                    },
+            ) {
+                Text("Keyboard Control Settings")
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -501,7 +517,7 @@ fun SettingsScreen(
                 checked = uiState.verifySha1OnLaunch,
                 onCheckedChange = presenter::onVerifySha1OnLaunchChanged,
                 focusRequester = verifySha1Focus,
-                upFocus = controllerSettingsFocus,
+                upFocus = keyboardSettingsFocus,
                 downFocus = autocleanFocus,
                 colors = colors,
                 navigator = navigator,

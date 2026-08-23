@@ -7,6 +7,7 @@
 #pragma once
 
 #include "native/player/binding_table.h"
+#include "native/player/keyboard_binding_table.h"
 
 struct SDL_Renderer;
 
@@ -23,7 +24,9 @@ public:
     // list; `captureSecondsLeft` is the remaining capture timeout while the
     // menu is in its binding-capture state (-1 otherwise).
     void draw(SDL_Renderer* renderer, const PauseMenu& menu, const BindingTable& bindings,
-              const BindingTable& secondaryBindings, int captureSecondsLeft,
+              const BindingTable& secondaryBindings,
+              const KeyboardBindingTable& keyboardBindings,
+              int captureSecondsLeft,
               const char* coreId) const;
 
     // Public only so the translation unit's shared Material-control helpers

@@ -39,6 +39,7 @@
 
 #include "native/player/binding_capture.h"
 #include "native/player/binding_sidecar.h"
+#include "native/player/keyboard_binding_sidecar.h"
 #include "native/player/pause_menu.h"
 #include "native/player/pause_overlay.h"
 #include "native/player/protocol.h"
@@ -513,6 +514,9 @@ int main(int argc, char* argv[]) {
             request.controllerBindings->devices.front().secondaryTable
         );
     }
+    if (request.keyboardBindings.has_value()) {
+        input.setKeyboardBindings(request.keyboardBindings->table);
+    }
     bool controllerBindingsDirty = false;
     const auto persistControllerBindings = [&]() {
         if (request.resultPath.empty()) return;
@@ -537,11 +541,25 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "warning: failed to write controller-bindings.json\n");
         }
     };
+    bool keyboardBindingsDirty = false;
+    const auto persistKeyboardBindings = [&]() {
+        if (request.resultPath.empty()) return;
+        if (!romm::player::writeKeyboardBindingSidecar(
+                parentDirectory(request.resultPath) + "/keyboard-bindings.json",
+                input.keyboardBindings())) {
+            keyboardBindingsDirty = true;
+            std::fprintf(stderr, "warning: failed to write keyboard-bindings.json\n");
+        } else {
+            keyboardBindingsDirty = false;
+        }
+    };
     romm::player::PauseMenu pauseMenu;
     pauseMenu.setBindingSlotCount(
         request.coreId == "mupen64plus_next" ? 14 :
         request.coreId == "pcsx_rearmed" ? 16 : 12
     );
+    pauseMenu.setKeyboardRowCount(
+        romm::player::coreKeyboardRowCount(request.coreId));
     romm::player::PauseOverlay pauseOverlay;
     // Seed the Video Options submenu with the launch request's settings so
     // its ON/OFF display matches what was applied to the sink at startup.
@@ -609,6 +627,21 @@ int main(int argc, char* argv[]) {
                 controllerBindingsDirty = true;
                 persistControllerBindings();
                 break;
+            case romm::player::PauseMenuEffect::kBeginKeyboardCapture:
+                // The event loop owns keyboard capture; controller input is
+                // ignored until a key is accepted or Escape cancels.
+                input.resetMenuEdges();
+                break;
+            case romm::player::PauseMenuEffect::kResetKeyboardDefault:
+                input.resetKeyboardBindings();
+                keyboardBindingsDirty = true;
+                persistKeyboardBindings();
+                break;
+            case romm::player::PauseMenuEffect::kClearKeyboardMappings:
+                input.clearKeyboardBindings();
+                keyboardBindingsDirty = true;
+                persistKeyboardBindings();
+                break;
             default:
                 break;
         }
@@ -659,6 +692,20 @@ int main(int argc, char* argv[]) {
                             if (wasCapturing) captureCoordinator.cancel();
                         } else {
                             openPause();
+                        }
+                    } else if (pauseMenu.isCapturingKeyboard()) {
+                        const std::optional<int> scancode =
+                            romm::player::SdlInput::captureKeyboardScancode(event);
+                        if (scancode.has_value()) {
+                            const int target = romm::player::coreKeyboardTargetAt(
+                                request.coreId, pauseMenu.selection());
+                            input.setKeyboardBinding(
+                                target, pauseMenu.bindingColumn(), scancode);
+                            keyboardBindingsDirty = true;
+                            persistKeyboardBindings();
+                            pauseMenu.exitKeyboardCapture();
+                            input.resetMenuEdges();
+                            videoSink->requestRepaint();
                         }
                     } else if (pauseMenu.isOpen()) {
                         // The overlay owns keyboard input: arrows navigate,
@@ -781,7 +828,7 @@ int main(int argc, char* argv[]) {
                     // still be held and must not navigate out of the editor.
                     input.resetMenuEdges();
                 }
-            } else {
+            } else if (!pauseMenu.isCapturingKeyboard()) {
                 // The overlay owns controller input too (the core is paused,
                 // so nothing reaches the session while it is open).
                 const auto actions = input.pollMenuActions();
@@ -801,6 +848,7 @@ int main(int argc, char* argv[]) {
         videoSink->present([&](SDL_Renderer* renderer) {
             pauseOverlay.draw(
                 renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
+                input.keyboardBindings(),
                 captureSecondsLeft,
                 request.coreId.c_str());
         });
@@ -825,6 +873,7 @@ int main(int argc, char* argv[]) {
     // Every edit is checkpointed immediately. Retry at clean shutdown in case
     // an earlier atomic write failed transiently.
     if (controllerBindingsDirty) persistControllerBindings();
+    if (keyboardBindingsDirty) persistKeyboardBindings();
 
     const romm::player::ExitKind exitKind = session.diagnostics().coreRequestedShutdown.load()
                                                ? romm::player::ExitKind::CoreRequestedShutdown

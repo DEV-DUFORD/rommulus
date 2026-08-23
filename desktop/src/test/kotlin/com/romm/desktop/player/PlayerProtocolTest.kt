@@ -146,6 +146,39 @@ class PlayerProtocolTest {
     }
 
     @Test
+    fun `keyboardBindings round-trip with nullable primary and secondary keys`() {
+        val keyboard = KeyboardBindings(
+            com.romm.desktop.controller.keyboard.KEYBOARD_TARGETS.mapIndexed { index, target ->
+                KeyboardBindingEntry(
+                    target = target,
+                    primaryScancode = index.takeIf { index % 2 == 0 },
+                    secondaryScancode = (100 + index).takeIf { index % 3 == 0 },
+                )
+            },
+        )
+        val original = sampleRequest().copy(keyboardBindings = keyboard)
+
+        assertThat(
+            PlayerProtocol.parseRequest(PlayerProtocol.serializeRequest(original)).getOrNull(),
+        ).isEqualTo(original)
+    }
+
+    @Test
+    fun `keyboardBindings rejects missing or reordered targets`() {
+        val keyboard = KeyboardBindings(
+            com.romm.desktop.controller.keyboard.KEYBOARD_TARGETS.drop(1).map {
+                KeyboardBindingEntry(it, null, null)
+            },
+        )
+
+        val parsed = PlayerProtocol.parseRequest(
+            PlayerProtocol.serializeRequest(sampleRequest().copy(keyboardBindings = keyboard)),
+        )
+
+        assertThat(parsed.isFailure).isTrue()
+    }
+
+    @Test
     fun `request with empty devices array round-trips`() {
         val original = sampleRequest().copy(controllerBindings = ControllerBindings(devices = emptyList()))
         val parsed = PlayerProtocol.parseRequest(PlayerProtocol.serializeRequest(original))

@@ -98,6 +98,14 @@ data class ControllerBindingDevice(
 /** The v2 request's optional controllerBindings field (absent = player keeps its defaults). */
 data class ControllerBindings(val devices: List<ControllerBindingDevice>)
 
+data class KeyboardBindingEntry(
+    val target: String,
+    val primaryScancode: Int?,
+    val secondaryScancode: Int?,
+)
+
+data class KeyboardBindings(val bindings: List<KeyboardBindingEntry>)
+
 /** Video settings block of a v1 launch request (§12.2). All four fields are required on the wire. */
 data class VideoSettings(
     val fullscreen: Boolean = false,
@@ -149,6 +157,8 @@ data class PlayerRequest(
     val video: VideoSettings = VideoSettings(),
     /** v2 optional: stored controller bindings to apply from the first frame; null = defaults. */
     val controllerBindings: ControllerBindings? = null,
+    /** Optional Linux keyboard bindings; null keeps the player's built-in defaults. */
+    val keyboardBindings: KeyboardBindings? = null,
 )
 
 /** Result v1 (§12.3). [saveHash], [saveSize], [errorCode], and [errorMessage] may be null. */
@@ -234,6 +244,7 @@ object PlayerProtocol {
             var expectedSaveSize: Long? = null
             var video: VideoSettings? = null
             var controllerBindings: ControllerBindings? = null
+            var keyboardBindings: KeyboardBindings? = null
 
             while (reader.peek() != JsonReader.Token.END_OBJECT) {
                 val name = reader.nextName()
@@ -260,6 +271,7 @@ object PlayerProtocol {
                     "video" -> video = readVideo(reader)
                     // v2 optional field (not in REQUIRED_REQUEST_FIELDS): absent = defaults.
                     "controllerBindings" -> controllerBindings = readControllerBindings(reader)
+                    "keyboardBindings" -> keyboardBindings = readKeyboardBindings(reader)
                     else -> throw ProtocolException("unknown field: $name")
                 }
             }
@@ -286,6 +298,7 @@ object PlayerProtocol {
                 expectedSaveSize = expectedSaveSize,
                 video = video!!,
                 controllerBindings = controllerBindings,
+                keyboardBindings = keyboardBindings,
             )
         }
 
@@ -324,8 +337,89 @@ object PlayerProtocol {
                 writeControllerBindingDevices(writer, request.controllerBindings.devices)
                 writer.endObject()
             }
+            request.keyboardBindings?.let { keyboard ->
+                writer.name("keyboardBindings").beginObject()
+                writer.name("bindings").beginArray()
+                keyboard.bindings.forEach { binding ->
+                    writer.beginObject()
+                    writer.name("target").value(binding.target)
+                    if (binding.primaryScancode == null) {
+                        writer.name("primaryScancode").nullValue()
+                    } else {
+                        writer.name("primaryScancode").value(binding.primaryScancode.toLong())
+                    }
+                    if (binding.secondaryScancode == null) {
+                        writer.name("secondaryScancode").nullValue()
+                    } else {
+                        writer.name("secondaryScancode").value(binding.secondaryScancode.toLong())
+                    }
+                    writer.endObject()
+                }
+                writer.endArray()
+                writer.endObject()
+            }
             writer.endObject()
         }
+
+        private fun readKeyboardBindings(reader: JsonReader): KeyboardBindings {
+            reader.beginObject()
+            var bindings: List<KeyboardBindingEntry>? = null
+            while (reader.peek() != JsonReader.Token.END_OBJECT) {
+                when (val name = reader.nextName()) {
+                    "bindings" -> {
+                        reader.beginArray()
+                        val entries = mutableListOf<KeyboardBindingEntry>()
+                        while (reader.hasNext()) {
+                            reader.beginObject()
+                            var target: String? = null
+                            var primarySeen = false
+                            var secondarySeen = false
+                            var primary: Int? = null
+                            var secondary: Int? = null
+                            while (reader.peek() != JsonReader.Token.END_OBJECT) {
+                                when (val field = reader.nextName()) {
+                                    "target" -> target = readString(reader, field)
+                                    "primaryScancode" -> {
+                                        primarySeen = true
+                                        primary = readNullableScancode(reader, field)
+                                    }
+                                    "secondaryScancode" -> {
+                                        secondarySeen = true
+                                        secondary = readNullableScancode(reader, field)
+                                    }
+                                    else -> throw ProtocolException("unknown keyboard binding field: $field")
+                                }
+                            }
+                            reader.endObject()
+                            if (target == null || !primarySeen || !secondarySeen) {
+                                throw ProtocolException("incomplete keyboard binding")
+                            }
+                            entries += KeyboardBindingEntry(target, primary, secondary)
+                        }
+                        reader.endArray()
+                        bindings = entries
+                    }
+                    else -> throw ProtocolException("unknown keyboardBindings field: $name")
+                }
+            }
+            reader.endObject()
+            val result = bindings ?: throw ProtocolException("missing keyboardBindings field: bindings")
+            val expectedTargets = com.romm.desktop.controller.keyboard.KEYBOARD_TARGETS
+            if (result.map(KeyboardBindingEntry::target) != expectedTargets) {
+                throw ProtocolException("keyboard bindings must contain every target exactly once in order")
+            }
+            return KeyboardBindings(result)
+        }
+
+        private fun readNullableScancode(reader: JsonReader, name: String): Int? =
+            if (reader.peek() == JsonReader.Token.NULL) {
+                reader.nextNull<Unit>()
+                null
+            } else {
+                readInt64(reader, name).also {
+                    if (it !in 0..511) throw ProtocolException("$name must be in 0..511")
+                }.toInt()
+            }
 
         private fun writeControllerBindingDevices(writer: JsonWriter, devices: List<ControllerBindingDevice>) {
             writer.name("devices").beginArray()

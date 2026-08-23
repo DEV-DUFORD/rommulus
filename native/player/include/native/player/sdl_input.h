@@ -10,22 +10,25 @@
 // port 0 (it never steals a port from a connected gamepad — it overlays
 // on top of whatever that gamepad produces each frame).
 //
-// Keyboard mapping (physical scancodes, so layout-independent):
+// Default keyboard mapping (physical scancodes, so layout-independent):
 //   W / Up arrow       = d-pad up        S / Down arrow     = d-pad down
 //   A / Left arrow     = d-pad left      D / Right arrow    = d-pad right
 //   Enter / Space      = A (south)       LShift / RShift    = B (east)
 //   X                  = X (west)        Z                  = Y (north)
 //   LCtrl              = select          RCtrl              = start
-// Escape is deliberately NOT handled here — main() owns quit/pause.
+// The mapping is configurable through KeyboardBindingTable. Escape is
+// deliberately reserved for main()'s pause/capture-cancel handling.
 #pragma once
 
 #include <SDL3/SDL.h>
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "native/player/binding_table.h"
+#include "native/player/keyboard_binding_table.h"
 #include "native/player/pause_menu.h"
 
 namespace romm {
@@ -108,6 +111,25 @@ public:
         secondaryBindings_.clear();
     }
 
+    const KeyboardBindingTable& keyboardBindings() const {
+        return keyboardBindings_;
+    }
+    const KeyboardBinding& keyboardBindingForTarget(int target) const {
+        return keyboardBindings_.get(target);
+    }
+    void setKeyboardBinding(int target, int column, std::optional<int> scancode) {
+        keyboardBindings_.setScancode(target, column, scancode);
+    }
+    void setKeyboardBindings(const KeyboardBindingTable& table) {
+        keyboardBindings_ = table;
+    }
+    void resetKeyboardBindings() { keyboardBindings_.reset(); }
+    void clearKeyboardBindings() { keyboardBindings_.clear(); }
+
+    // Returns the next bindable key-down scancode. Escape is reserved for
+    // cancel and is never returned.
+    static std::optional<int> captureKeyboardScancode(const SDL_Event& event);
+
     // True when a gamepad occupies the port.
     bool hasGamepad(int port) const {
         return port >= 0 && port < kPorts && gamepads_[port].gamepad != nullptr;
@@ -166,9 +188,6 @@ private:
     void openGamepad(int port, SDL_JoystickID instanceId);
     void closeGamepad(int port);
 
-    // The RETRO_DEVICE_ID_JOYPAD_* value for a physical key scancode, or
-    // -1 when the key is not part of the mapping.
-    static int keyboardButtonBit(SDL_Scancode scancode);
     static int16_t applyDeadzone(Sint16 value);
 
     std::array<PortState, kPorts> ports_{};
@@ -179,12 +198,11 @@ private:
     // mapping. See binding_table.h.
     BindingTable bindings_{};
     BindingTable secondaryBindings_{false};
+    KeyboardBindingTable keyboardBindings_{};
 
-    // Port 0 bit flags accumulated from KEY_DOWN/KEY_UP events (see
-    // keyboardButtonBit). Merged into port 0's snapshot by poll() each
-    // frame and cleared by reset(). Kept separate from ports_[0] so the
-    // gamepad half of port 0 can be re-polled fresh without latching.
-    int32_t keyboardMask_ = 0;
+    // Held physical scancodes. poll() resolves them through the live table,
+    // allowing multiple simultaneous keys and runtime remapping.
+    std::array<bool, kKeyboardScancodeCount> heldScancodes_{};
 
     // Per-port previous-frame levels for the buttons consumed by
     // pollPauseTrigger()/pollMenuActions(). Shared between the two so edge

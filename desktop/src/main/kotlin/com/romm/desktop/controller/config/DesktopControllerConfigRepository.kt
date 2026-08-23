@@ -176,7 +176,10 @@ class DesktopControllerConfigRepository(
     }
 
     override suspend fun resetCore(coreId: String) {
-        store.deleteCore(coreId).getOrThrow()
+        val playerCount = profiles.byCoreId(coreId)?.playerCount ?: return
+        repeat(playerCount) { playerIndex ->
+            store.deletePlayer(coreId, playerIndex).getOrThrow()
+        }
         refresh(coreId)
     }
 

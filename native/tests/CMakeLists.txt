@@ -63,6 +63,7 @@ add_library(romm_player_under_test STATIC
     # RetroPad BindingTable. It links against romm_engine_under_test for
     # romm::atomicWriteFile (write-temp, fsync, rename).
     ${ROMM_PLAYER_SRC}/binding_sidecar.cpp
+    ${ROMM_PLAYER_SRC}/keyboard_binding_sidecar.cpp
 )
 target_include_directories(romm_player_under_test PUBLIC
     ${ROMM_ENGINE_SRC}  # atomic_file_store.h (used by binding_sidecar.cpp)
@@ -105,5 +106,6 @@ romm_add_player_test(test_pause_menu)
 # the include paths above — no SDL involved.
 romm_add_player_test(test_controller_capture)
 romm_add_player_test(test_binding_table)
+romm_add_player_test(test_keyboard_binding_table)
 romm_add_player_test(test_pause_chord)
 romm_add_player_test(test_presentation_dirty_state)

@@ -128,40 +128,6 @@ void SdlInput::closeGamepad(int port) {
     ports_[port] = PortState{};
 }
 
-int SdlInput::keyboardButtonBit(SDL_Scancode scancode) {
-    switch (scancode) {
-        case SDL_SCANCODE_W:
-        case SDL_SCANCODE_UP:
-            return RETRO_DEVICE_ID_JOYPAD_UP;
-        case SDL_SCANCODE_S:
-        case SDL_SCANCODE_DOWN:
-            return RETRO_DEVICE_ID_JOYPAD_DOWN;
-        case SDL_SCANCODE_A:
-        case SDL_SCANCODE_LEFT:
-            return RETRO_DEVICE_ID_JOYPAD_LEFT;
-        case SDL_SCANCODE_D:
-        case SDL_SCANCODE_RIGHT:
-            return RETRO_DEVICE_ID_JOYPAD_RIGHT;
-        case SDL_SCANCODE_RETURN:
-        case SDL_SCANCODE_KP_ENTER:
-        case SDL_SCANCODE_SPACE:
-            return RETRO_DEVICE_ID_JOYPAD_A;  // south
-        case SDL_SCANCODE_LSHIFT:
-        case SDL_SCANCODE_RSHIFT:
-            return RETRO_DEVICE_ID_JOYPAD_B;  // east
-        case SDL_SCANCODE_X:
-            return RETRO_DEVICE_ID_JOYPAD_X;  // west
-        case SDL_SCANCODE_Z:
-            return RETRO_DEVICE_ID_JOYPAD_Y;  // north
-        case SDL_SCANCODE_LCTRL:
-            return RETRO_DEVICE_ID_JOYPAD_SELECT;
-        case SDL_SCANCODE_RCTRL:
-            return RETRO_DEVICE_ID_JOYPAD_START;
-        default:
-            return -1;  // Escape and everything else is main()'s business
-    }
-}
-
 int16_t SdlInput::applyDeadzone(Sint16 value) {
     if (value > -kAxisDeadzone && value < kAxisDeadzone) return 0;
     return value;
@@ -186,12 +152,10 @@ void SdlInput::handleEvent(const SDL_Event& event) {
         }
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP: {
-            const int bit = keyboardButtonBit(event.key.scancode);
-            if (bit < 0) break;
-            if (event.type == SDL_EVENT_KEY_DOWN) {
-                keyboardMask_ |= (1 << bit);
-            } else {
-                keyboardMask_ &= ~(1 << bit);
+            const int scancode = static_cast<int>(event.key.scancode);
+            if (validKeyboardScancode(scancode)) {
+                heldScancodes_[static_cast<size_t>(scancode)] =
+                    event.type == SDL_EVENT_KEY_DOWN;
             }
             break;
         }
@@ -201,6 +165,8 @@ void SdlInput::handleEvent(const SDL_Event& event) {
 }
 
 void SdlInput::poll() {
+    const KeyboardRuntimeState keyboard =
+        synthesizeKeyboardState(keyboardBindings_, heldScancodes_);
     for (int port = 0; port < kPorts; ++port) {
         SDL_Gamepad* gamepad = gamepads_[port].gamepad;
         PortState& p = ports_[port];
@@ -245,7 +211,7 @@ void SdlInput::poll() {
         // is re-polled fresh each frame and keyboard bits persist only
         // until their KEY_UP event — so a released button clears on the
         // very next poll instead of latching into the accumulator.
-        p.buttonsMask = mask | (port == 0 ? keyboardMask_ : 0);
+        p.buttonsMask = mask | (port == 0 ? keyboard.buttonsMask : 0);
 
         if (gamepad != nullptr) {
             p.leftX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
@@ -257,7 +223,23 @@ void SdlInput::poll() {
             // already resets the port when a device is removed).
             p.leftX = p.leftY = p.rightX = p.rightY = 0;
         }
+        if (port == 0) {
+            if (keyboard.leftX != 0) p.leftX = keyboard.leftX;
+            if (keyboard.leftY != 0) p.leftY = keyboard.leftY;
+            if (keyboard.rightX != 0) p.rightX = keyboard.rightX;
+            if (keyboard.rightY != 0) p.rightY = keyboard.rightY;
+        }
     }
+}
+
+std::optional<int> SdlInput::captureKeyboardScancode(const SDL_Event& event) {
+    if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat ||
+        event.key.scancode == SDL_SCANCODE_ESCAPE) {
+        return std::nullopt;
+    }
+    const int scancode = static_cast<int>(event.key.scancode);
+    return validKeyboardScancode(scancode) ? std::optional<int>(scancode)
+                                           : std::nullopt;
 }
 
 void SdlInput::updateSession(romm::EmulationSession& session) {
@@ -393,7 +375,7 @@ std::string SdlInput::joystickGuidString(int port) const {
 }
 
 void SdlInput::reset() {
-    keyboardMask_ = 0;
+    heldScancodes_.fill(false);
     for (auto& port : ports_) {
         port = PortState{};
     }

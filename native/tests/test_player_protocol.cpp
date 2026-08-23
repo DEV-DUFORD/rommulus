@@ -15,6 +15,7 @@
 using romm::player::BindingSource;
 using romm::player::ControllerBindings;
 using romm::player::ExitKind;
+using romm::player::KeyboardBindings;
 using romm::player::kRetroPadSlotCount;
 using romm::player::PadAxis;
 using romm::player::PadButton;
@@ -85,6 +86,14 @@ ControllerBindings sampleControllerBindings() {
     return cb;
 }
 
+KeyboardBindings sampleKeyboardBindings() {
+    KeyboardBindings bindings;
+    bindings.table.setScancode(romm::player::kKeyboardA, 0, 30);
+    bindings.table.setScancode(romm::player::kKeyboardA, 1, std::nullopt);
+    bindings.table.setScancode(romm::player::kKeyboardLeftXNegative, 0, 100);
+    return bindings;
+}
+
 PlayerResult sampleResult() {
     PlayerResult r;
     r.sessionId = "11111111-2222-3333-4444-555555555555";
@@ -143,6 +152,13 @@ void checkRoundTripRequest(const PlayerRequest& in) {
             for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
                 CHECK(a[d].table.get(slot) == b[d].table.get(slot));
                 CHECK(a[d].secondaryTable.get(slot) == b[d].secondaryTable.get(slot));
+            }
+        }
+        CHECK(out->keyboardBindings.has_value() == in.keyboardBindings.has_value());
+        if (in.keyboardBindings.has_value() && out->keyboardBindings.has_value()) {
+            for (int target = 0; target < romm::player::kKeyboardTargetCount; ++target) {
+                CHECK(in.keyboardBindings->table.get(target) ==
+                      out->keyboardBindings->table.get(target));
             }
         }
     }
@@ -227,6 +243,45 @@ int main() {
         CHECK(json.find("\"controllerBindings\"") != std::string::npos);
     }
 
+    // Optional keyboardBindings uses all 24 ordered targets and round-trips.
+    {
+        PlayerRequest withKeyboard = sampleRequest();
+        withKeyboard.keyboardBindings = sampleKeyboardBindings();
+        checkRoundTripRequest(withKeyboard);
+        const std::string text = serializeRequest(withKeyboard);
+        CHECK(text.find("\"keyboardBindings\"") != std::string::npos);
+
+        json baseKeyboard = json::parse(text);
+        json mutated = baseKeyboard;
+        std::swap(mutated["keyboardBindings"]["bindings"][0],
+                  mutated["keyboardBindings"]["bindings"][1]);
+        expectRequestRejected(mutated.dump(), "keyboard targets out of order");
+        mutated = baseKeyboard;
+        mutated["keyboardBindings"]["bindings"].erase(0);
+        expectRequestRejected(mutated.dump(), "only 23 keyboard bindings");
+        mutated = baseKeyboard;
+        mutated["keyboardBindings"]["bindings"][0]["target"] = "unknown";
+        expectRequestRejected(mutated.dump(), "unknown keyboard target");
+        mutated = baseKeyboard;
+        mutated["keyboardBindings"]["bindings"][0]["primaryScancode"] = -1;
+        expectRequestRejected(mutated.dump(), "negative keyboard scancode");
+        mutated = baseKeyboard;
+        mutated["keyboardBindings"]["bindings"][0]["secondaryScancode"] = 512;
+        expectRequestRejected(mutated.dump(), "keyboard scancode above 511");
+        mutated = baseKeyboard;
+        mutated["keyboardBindings"]["bindings"][0]["primaryScancode"] = "40";
+        expectRequestRejected(mutated.dump(), "keyboard scancode wrong type");
+        mutated = baseKeyboard;
+        mutated["keyboardBindings"]["bindings"][0].erase("secondaryScancode");
+        expectRequestRejected(mutated.dump(), "missing keyboard scancode field");
+        mutated = baseKeyboard;
+        mutated["keyboardBindings"]["bindings"][0]["extra"] = true;
+        expectRequestRejected(mutated.dump(), "unknown keyboard binding field");
+        mutated = baseKeyboard;
+        mutated["keyboardBindings"]["extra"] = true;
+        expectRequestRejected(mutated.dump(), "unknown keyboardBindings field");
+    }
+
     // Optional-field default: absent on the wire -> nullopt, and a request
     // without stored bindings must NOT emit the field at all (the player
     // then keeps its built-in defaults).
@@ -237,6 +292,7 @@ int main() {
         auto r = parseRequest(json, &err);
         CHECK(r.has_value());
         if (r) CHECK(!r->controllerBindings.has_value());
+        if (r) CHECK(!r->keyboardBindings.has_value());
     }
 
     // A present-but-empty devices array is legal and round-trips.

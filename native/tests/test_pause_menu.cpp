@@ -56,10 +56,10 @@ PauseMenuActions rightAction() {
     return a;
 }
 
-// Opens the menu and navigates to Quit (three Downs: Resume -> Video Options
-// -> Controller Settings -> Quit).
+// Opens the menu and navigates to Quit.
 void selectQuit(PauseMenu& menu) {
     menu.open();
+    menu.handle(downAction());
     menu.handle(downAction());
     menu.handle(downAction());
     menu.handle(downAction());
@@ -98,12 +98,13 @@ void testOpenFocusesResume() {
 void testNavigationWalksAllItemsAndWraps() {
     PauseMenu menu;
     menu.open();
-    // All four items are enabled: Down walks Resume -> Video Options ->
-    // Controller Settings -> Quit, then wraps back to Resume.
+    // Down walks every item and wraps.
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kVideoOptionsItem);
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kControllerSettingsItem);
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.selection(), PauseMenu::kKeyboardSettingsItem);
     CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
     CHECK_EQ(menu.selection(), PauseMenu::kQuitItem);
     // Wrap: Down from Quit returns to Resume.
@@ -201,10 +202,13 @@ void testLabels() {
     CHECK(std::string(PauseMenu::itemLabel(PauseMenu::kVideoOptionsItem)) == "Video Options");
     CHECK(std::string(PauseMenu::itemLabel(PauseMenu::kControllerSettingsItem)) ==
           "Controller Settings");
+    CHECK(std::string(PauseMenu::itemLabel(PauseMenu::kKeyboardSettingsItem)) ==
+          "Keyboard Control Settings");
     CHECK(std::string(PauseMenu::itemLabel(PauseMenu::kQuitItem)) == "Quit");
     CHECK(PauseMenu::itemEnabled(PauseMenu::kResumeItem));
     CHECK(PauseMenu::itemEnabled(PauseMenu::kVideoOptionsItem));  // live submenu
     CHECK(PauseMenu::itemEnabled(PauseMenu::kControllerSettingsItem));  // live submenu now
+    CHECK(PauseMenu::itemEnabled(PauseMenu::kKeyboardSettingsItem));
     CHECK(PauseMenu::itemEnabled(PauseMenu::kQuitItem));
     CHECK(std::string(PauseMenu::confirmOptionLabel(PauseMenu::kConfirmYes)) == "Yes");
     CHECK(std::string(PauseMenu::confirmOptionLabel(PauseMenu::kConfirmNo)) == "No");
@@ -513,6 +517,40 @@ void testCloseFromControllerSettingsResetsFocus() {
     CHECK_EQ(menu.selection(), PauseMenu::kResumeItem);  // fresh open focuses Resume
 }
 
+void testKeyboardSettingsFlow() {
+    PauseMenu menu;
+    menu.setKeyboardRowCount(18);
+    menu.open();
+    menu.handle(downAction());
+    menu.handle(downAction());
+    menu.handle(downAction());
+    CHECK_EQ(menu.selection(), PauseMenu::kKeyboardSettingsItem);
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kKeyboardBindings);
+    CHECK_EQ(menu.selection(), 0);
+    CHECK_EQ(menu.keyboardRowCount(), 18);
+
+    CHECK_EQ(menu.handle(rightAction()), PauseMenuEffect::kNone);
+    CHECK_EQ(menu.bindingColumn(), 1);
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kBeginKeyboardCapture);
+    CHECK(menu.state() == PauseMenuState::kKeyboardCapture);
+    CHECK(menu.isCapturingKeyboard());
+    CHECK_EQ(menu.handle(downAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kKeyboardCapture);
+    CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kKeyboardBindings);
+
+    for (int i = 0; i < 18; ++i) menu.handle(downAction());
+    CHECK_EQ(menu.selection(), menu.resetDefaultItem());
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kResetKeyboardDefault);
+    menu.handle(downAction());
+    CHECK_EQ(menu.selection(), menu.clearMappingsItem());
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kClearKeyboardMappings);
+    CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kOpen);
+    CHECK_EQ(menu.selection(), PauseMenu::kKeyboardSettingsItem);
+}
+
 }  // namespace
 
 int main() {
@@ -551,5 +589,6 @@ int main() {
     testBindingListClearMappingsAction();
     testBindingListCancelReturnsToMenu();
     testCloseFromControllerSettingsResetsFocus();
+    testKeyboardSettingsFlow();
     return rommtest::finish("test_pause_menu");
 }

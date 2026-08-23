@@ -58,6 +58,9 @@ import com.romm.androidtv.storage.settingsFile
 import com.romm.desktop.controller.JInputControllerSource
 import com.romm.desktop.controller.JInputSource
 import com.romm.desktop.controller.config.DesktopControllerConfigRepository
+import com.romm.desktop.controller.keyboard.KEYBOARD_BINDINGS_SIDECAR_FILE_NAME
+import com.romm.desktop.controller.keyboard.KeyboardBindingSidecarCodec
+import com.romm.desktop.controller.keyboard.KeyboardMappingRepository
 import com.romm.desktop.library.DesktopBiosConfigurationProvider
 import com.romm.desktop.network.DesktopNetworkModule
 import com.romm.desktop.player.AdoptionSummary
@@ -384,6 +387,9 @@ class DesktopAppCoordinator(
     val controllerConfigRepository: DesktopControllerConfigRepository by lazy {
         DesktopControllerConfigRepository(controllerBindingStore)
     }
+    val keyboardMappingRepository: KeyboardMappingRepository by lazy {
+        KeyboardMappingRepository(controllerBindingStore)
+    }
 
     /**
      * The single shared JInput enumeration seam (E2): consumed both by the desktop focus
@@ -465,6 +471,8 @@ class DesktopAppCoordinator(
 
     /** Which core's controller-configuration screen is active (CONTROLLER_CONFIG). */
     var selectedControllerCoreId by mutableStateOf<String?>(null)
+        private set
+    var selectedKeyboardCoreId by mutableStateOf<String?>(null)
 
     /**
      * Memoized [RomDetailPresenter] instances keyed by ROM id so the detail screen's
@@ -772,6 +780,7 @@ class DesktopAppCoordinator(
      * already-ingested files are no-ops.
      */
     internal fun ingestControllerBindingSidecar(sessionDir: Path) {
+        ingestKeyboardBindingSidecar(sessionDir)
         val sidecarPath = sessionDir.resolve(CONTROLLER_BINDINGS_SIDECAR_FILE_NAME)
         if (!Files.isRegularFile(sidecarPath)) return
 
@@ -809,6 +818,34 @@ class DesktopAppCoordinator(
             }
             .onFailure { e ->
                 log.warning("binding sidecar ingestion failed for core $coreId: $e; sidecar preserved")
+            }
+    }
+
+    private fun ingestKeyboardBindingSidecar(sessionDir: Path) {
+        val sidecarPath = sessionDir.resolve(KEYBOARD_BINDINGS_SIDECAR_FILE_NAME)
+        if (!Files.isRegularFile(sidecarPath)) return
+        val coreId = runCatching {
+            Files.readString(sessionDir.resolve("request.json"))
+                .let { PlayerProtocol.parseRequest(it).getOrNull()?.coreId }
+        }.getOrNull()
+        if (coreId.isNullOrBlank()) {
+            log.warning("keyboard sidecar ingestion skipped for $sessionDir: request file missing or unparseable")
+            return
+        }
+        val bindings = runCatching { Files.readString(sidecarPath) }
+            .mapCatching { KeyboardBindingSidecarCodec.parse(it).getOrThrow() }
+            .getOrElse { e ->
+                log.warning("keyboard sidecar unusable at $sidecarPath: ${e.message}; preserved")
+                return
+            }
+        runCatching { keyboardMappingRepository.replaceAll(coreId, bindings) }
+            .onSuccess {
+                runCatching { Files.deleteIfExists(sidecarPath) }.onFailure { e ->
+                    log.warning("keyboard sidecar ingested but could not be deleted at $sidecarPath: $e")
+                }
+            }
+            .onFailure { e ->
+                log.warning("keyboard sidecar ingestion failed for core $coreId: $e; preserved")
             }
     }
 
@@ -1279,6 +1316,7 @@ class DesktopAppCoordinator(
             // Stored controller overrides (ingested from the previous session's sidecar, §11.9):
             // null when nothing is stored — the player then keeps its built-in defaults.
             controllerBindings = loadLaunchControllerBindings(core.coreId),
+            keyboardBindings = keyboardMappingRepository.launchBindings(core.coreId),
         )
 
         return when (val result = playerSupervisor.prepareLaunch(params, sessionId)) {
@@ -1523,6 +1561,17 @@ class DesktopAppCoordinator(
         playerSupervisor.syncControllerBindingSidecars()
         selectedControllerCoreId = coreId
         currentScreen = Screen.CONTROLLER_CONFIG
+    }
+
+    fun openKeyboardSettings() {
+        playerSupervisor.syncControllerBindingSidecars()
+        currentScreen = Screen.KEYBOARD_LIST
+    }
+
+    fun openKeyboardConfig(coreId: String) {
+        playerSupervisor.syncControllerBindingSidecars()
+        selectedKeyboardCoreId = coreId
+        currentScreen = Screen.KEYBOARD_CONFIG
     }
 
     // ------------------------------------------------------------------ presenters (lazy per screen)
@@ -1904,7 +1953,7 @@ class DesktopAppCoordinator(
 enum class Screen {
     ONBOARDING, HOME, PLATFORMS, COLLECTIONS, SEARCH, SETTINGS,
     PLATFORM_DETAIL, COLLECTION_DETAIL, GAME_DETAIL, BIOS_CONFIGURATION, LICENSE,
-    CONTROLLER_LIST, CONTROLLER_CONFIG;
+    CONTROLLER_LIST, CONTROLLER_CONFIG, KEYBOARD_LIST, KEYBOARD_CONFIG;
 
     /** The screen Back returns to (root returns nothing; GAME_DETAIL uses its remembered parent). */
     fun parent(): Screen = when (this) {
@@ -1915,6 +1964,8 @@ enum class Screen {
         BIOS_CONFIGURATION -> SETTINGS
         CONTROLLER_CONFIG -> CONTROLLER_LIST
         CONTROLLER_LIST -> SETTINGS
+        KEYBOARD_CONFIG -> KEYBOARD_LIST
+        KEYBOARD_LIST -> SETTINGS
         GAME_DETAIL, ONBOARDING -> HOME
     }
 }

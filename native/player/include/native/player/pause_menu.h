@@ -2,7 +2,8 @@
 //
 // Mirrors the Android host's pause behavior (EmulationActivity.kt,
 // LIBRETRO_REFACTOR.md section 13): a single menu with Resume / Video
-// Options / Controller Settings / Quit items, opened by a quick Back tap or
+// Options / Controller Settings / Keyboard Control Settings / Quit items,
+// opened by a quick Back tap or
 // the controller's pause combination, plus a "Quit game?" Yes/No confirm
 // dialog on top. While the state machine is in any open state the caller
 // must keep the EmulationSession paused (setPaused(true)); the kResume
@@ -37,13 +38,15 @@ namespace romm::player {
 
 enum class PauseMenuState {
     kClosed,             // No overlay; gameplay input is routed normally.
-    kOpen,               // The pause menu (Resume / Video Options / Controller Settings / Quit) is visible.
+    kOpen,               // The main pause menu is visible.
     kQuitConfirm,        // The "Quit game?" Yes/No dialog is visible on top of the menu.
     kVideoOptions,       // The Video Options submenu (Scanlines / Integer Scaling / Sharp Filter) is visible.
     kPhysicalBindings,   // The editable binding list plus reset/clear header actions.
     kBindingCapture,     // Capturing a new binding for the slot in selection() —
                          // gamepad input is owned by the capture coordinator;
                          // handle() only serves cancel (keyboard Escape).
+    kKeyboardBindings,   // Editable keyboard targets plus reset/clear actions.
+    kKeyboardCapture,    // Waiting for the next non-Escape keyboard keydown.
 };
 
 // One frame of edge-detected input for the overlay. Each field is true only
@@ -80,16 +83,20 @@ enum class PauseMenuEffect {
     kResetDefault,
     // Clear Mappings was confirmed in kPhysicalBindings: explicitly unmap all slots.
     kClearMappings,
+    kBeginKeyboardCapture,
+    kResetKeyboardDefault,
+    kClearKeyboardMappings,
 };
 
 class PauseMenu {
 public:
-    static constexpr int kItemCount = 4;
+    static constexpr int kItemCount = 5;
     // Item indices, in the same order as Android's PauseMenuOverlay.
     static constexpr int kResumeItem = 0;
     static constexpr int kVideoOptionsItem = 1;
     static constexpr int kControllerSettingsItem = 2;
-    static constexpr int kQuitItem = 3;
+    static constexpr int kKeyboardSettingsItem = 3;
+    static constexpr int kQuitItem = 4;
     // Selection indices while in kQuitConfirm.
     static constexpr int kConfirmYes = 0;
     static constexpr int kConfirmNo = 1;
@@ -114,10 +121,19 @@ public:
     // RetroPad slot being captured. Meaningless in kClosed.
     int selection() const { return selection_; }
     int bindingSlotCount() const { return bindingSlotCount_; }
-    int resetDefaultItem() const { return bindingSlotCount_; }
-    int clearMappingsItem() const { return bindingSlotCount_ + 1; }
+    int keyboardRowCount() const { return keyboardRowCount_; }
+    int activeBindingRowCount() const {
+        return state_ == PauseMenuState::kKeyboardBindings ||
+                       state_ == PauseMenuState::kKeyboardCapture
+            ? keyboardRowCount_ : bindingSlotCount_;
+    }
+    int resetDefaultItem() const { return activeBindingRowCount(); }
+    int clearMappingsItem() const { return activeBindingRowCount() + 1; }
     void setBindingSlotCount(int count) {
         bindingSlotCount_ = count < 1 ? 1 : (count > kBindingSlotCount ? kBindingSlotCount : count);
+    }
+    void setKeyboardRowCount(int count) {
+        keyboardRowCount_ = count < 1 ? 1 : (count > 24 ? 24 : count);
     }
     // 0 = Primary, 1 = Secondary while a binding row is selected.
     int bindingColumn() const { return bindingColumn_; }
@@ -126,10 +142,11 @@ public:
     // selection drives the viewport, so controller navigation always keeps
     // the focused row visible without coupling this state machine to SDL.
     int bindingViewportStart(int visibleRows) const {
-        if (visibleRows <= 0 || visibleRows >= bindingSlotCount_) return 0;
+        const int rowCount = activeBindingRowCount();
+        if (visibleRows <= 0 || visibleRows >= rowCount) return 0;
         const int focusedRow =
-            selection_ < bindingSlotCount_ ? selection_ : bindingSlotCount_ - 1;
-        const int maxStart = bindingSlotCount_ - visibleRows;
+            selection_ < rowCount ? selection_ : rowCount - 1;
+        const int maxStart = rowCount - visibleRows;
         const int desired = focusedRow - visibleRows + 1;
         return desired < 0 ? 0 : (desired > maxStart ? maxStart : desired);
     }
@@ -138,6 +155,7 @@ public:
     // is true the caller must feed the capture coordinator raw gamepad
     // levels (NOT pollMenuActions) and act on its terminal states.
     bool isCapturingBinding() const { return state_ == PauseMenuState::kBindingCapture; }
+    bool isCapturingKeyboard() const { return state_ == PauseMenuState::kKeyboardCapture; }
 
     // Returns from kBindingCapture to the slot list, keeping focus on the
     // captured slot. No-op in any other state. Called by the caller when the
@@ -145,6 +163,11 @@ public:
     void exitCapture() {
         if (state_ == PauseMenuState::kBindingCapture) {
             state_ = PauseMenuState::kPhysicalBindings;
+        }
+    }
+    void exitKeyboardCapture() {
+        if (state_ == PauseMenuState::kKeyboardCapture) {
+            state_ = PauseMenuState::kKeyboardBindings;
         }
     }
 
@@ -161,7 +184,7 @@ public:
     }
 
     static const char* itemLabel(int index);
-    static bool itemEnabled(int index);  // all four items are live now
+    static bool itemEnabled(int index);
     static const char* confirmOptionLabel(int index);  // "Yes" / "No"
     // Toggle-row labels while in kVideoOptions ("Scanlines" / ...).
     static const char* videoOptionLabel(int index);
@@ -200,6 +223,10 @@ public:
                 return handlePhysicalBindings(a);
             case PauseMenuState::kBindingCapture:
                 return handleBindingCapture(a);
+            case PauseMenuState::kKeyboardBindings:
+                return handleKeyboardBindings(a);
+            case PauseMenuState::kKeyboardCapture:
+                return handleKeyboardCapture(a);
         }
         return PauseMenuEffect::kNone;
     }
@@ -228,6 +255,11 @@ private:
         selection_ = (selection_ + delta + rowCount) % rowCount;
     }
 
+    void moveKeyboardSelection(int delta) {
+        const int rowCount = keyboardRowCount_ + 2;
+        selection_ = (selection_ + delta + rowCount) % rowCount;
+    }
+
     PauseMenuEffect handleOpen(const PauseMenuActions& a) {
         if (a.up) moveSelection(-1);
         if (a.down) moveSelection(+1);
@@ -253,6 +285,11 @@ private:
                     // configuration directly; desktop does the same.
                     state_ = PauseMenuState::kPhysicalBindings;
                     selection_ = kSlotA;
+                    bindingColumn_ = 0;
+                    return PauseMenuEffect::kNone;
+                case kKeyboardSettingsItem:
+                    state_ = PauseMenuState::kKeyboardBindings;
+                    selection_ = 0;
                     bindingColumn_ = 0;
                     return PauseMenuEffect::kNone;
                 case kQuitItem:
@@ -339,6 +376,37 @@ private:
         return PauseMenuEffect::kNone;
     }
 
+    PauseMenuEffect handleKeyboardBindings(const PauseMenuActions& a) {
+        if (a.up) moveKeyboardSelection(-1);
+        if (a.down) moveKeyboardSelection(+1);
+        if (selection_ < keyboardRowCount_) {
+            if (a.left) bindingColumn_ = 0;
+            if (a.right) bindingColumn_ = 1;
+        } else {
+            bindingColumn_ = 0;
+        }
+        if (a.cancel) {
+            state_ = PauseMenuState::kOpen;
+            selection_ = kKeyboardSettingsItem;
+            return PauseMenuEffect::kNone;
+        }
+        if (a.confirm) {
+            if (selection_ < keyboardRowCount_) {
+                state_ = PauseMenuState::kKeyboardCapture;
+                return PauseMenuEffect::kBeginKeyboardCapture;
+            }
+            return selection_ == resetDefaultItem()
+                ? PauseMenuEffect::kResetKeyboardDefault
+                : PauseMenuEffect::kClearKeyboardMappings;
+        }
+        return PauseMenuEffect::kNone;
+    }
+
+    PauseMenuEffect handleKeyboardCapture(const PauseMenuActions& a) {
+        if (a.cancel) exitKeyboardCapture();
+        return PauseMenuEffect::kNone;
+    }
+
     PauseMenuEffect handleQuitConfirm(const PauseMenuActions& a) {
         if (a.up || a.down || a.left || a.right) {
             selection_ = 1 - selection_;  // toggle Yes/No
@@ -366,6 +434,7 @@ private:
     int selection_ = 0;
     int bindingColumn_ = 0;
     int bindingSlotCount_ = kBindingSlotCount;
+    int keyboardRowCount_ = 12;
     bool scanlinesEnabled_ = false;
     bool integerScalingEnabled_ = false;
     bool sharpFilterEnabled_ = false;
@@ -376,15 +445,17 @@ inline const char* PauseMenu::itemLabel(int index) {
         case kResumeItem: return "Resume";
         case kVideoOptionsItem: return "Video Options";
         case kControllerSettingsItem: return "Controller Settings";
+        case kKeyboardSettingsItem: return "Keyboard Control Settings";
         case kQuitItem: return "Quit";
         default: return "";
     }
 }
 
 inline bool PauseMenu::itemEnabled(int index) {
-    // All four items are live.
+    // All items are live.
     return index == kResumeItem || index == kVideoOptionsItem ||
-           index == kControllerSettingsItem || index == kQuitItem;
+           index == kControllerSettingsItem ||
+           index == kKeyboardSettingsItem || index == kQuitItem;
 }
 
 inline const char* PauseMenu::confirmOptionLabel(int index) {

@@ -306,6 +306,85 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
     return true;
 }
 
+bool getNullableScancode(const ordered_json& j, const char* key,
+                         std::optional<int>& out, std::string& error) {
+    if (j[key].is_null()) {
+        out = std::nullopt;
+        return true;
+    }
+    if (!j[key].is_number_integer()) {
+        error = std::string(key) + " must be null or an integer";
+        return false;
+    }
+    const int64_t value = j[key].get<int64_t>();
+    if (value < 0 || value > kKeyboardScancodeMax) {
+        error = std::string(key) + " must be null or an integer from 0 to 511";
+        return false;
+    }
+    out = static_cast<int>(value);
+    return true;
+}
+
+bool parseKeyboardBindings(const ordered_json& j, KeyboardBindings& out,
+                           std::string& error) {
+    static const std::array<const char*, 1> kFields = {{"bindings"}};
+    if (!j.is_object()) {
+        error = "keyboardBindings must be an object";
+        return false;
+    }
+    if (!j.contains("bindings")) {
+        error = "missing keyboardBindings field: bindings";
+        return false;
+    }
+    checkUnknownFields(j, kFields, error);
+    if (!error.empty()) return false;
+
+    const ordered_json& bindings = j["bindings"];
+    if (!bindings.is_array() ||
+        bindings.size() != static_cast<size_t>(kKeyboardTargetCount)) {
+        error = "keyboardBindings.bindings must carry exactly 24 entries";
+        return false;
+    }
+    static const std::array<const char*, 3> kEntryFields = {{
+        "target", "primaryScancode", "secondaryScancode",
+    }};
+    for (int target = 0; target < kKeyboardTargetCount; ++target) {
+        const ordered_json& entry = bindings[static_cast<size_t>(target)];
+        if (!entry.is_object()) {
+            error = "keyboard binding entry must be an object";
+            return false;
+        }
+        for (const char* key : kEntryFields) {
+            if (!entry.contains(key)) {
+                error = std::string("missing keyboard binding field: ") + key;
+                return false;
+            }
+        }
+        checkUnknownFields(entry, kEntryFields, error);
+        if (!error.empty()) return false;
+        std::string targetName;
+        if (!getString(entry, "target", targetName, error)) return false;
+        const int parsedTarget = keyboardTargetFromName(targetName);
+        if (parsedTarget < 0) {
+            error = "unknown keyboard binding target: " + targetName;
+            return false;
+        }
+        if (parsedTarget != target) {
+            error = "keyboard binding target out of order or duplicate: " + targetName;
+            return false;
+        }
+        KeyboardBinding binding;
+        if (!getNullableScancode(entry, "primaryScancode",
+                                 binding.primaryScancode, error) ||
+            !getNullableScancode(entry, "secondaryScancode",
+                                 binding.secondaryScancode, error)) {
+            return false;
+        }
+        out.table.set(target, binding);
+    }
+    return true;
+}
+
 }  // namespace
 
 const char* toString(ExitKind kind) {
@@ -346,11 +425,11 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
 
     // controllerBindings is v2's OPTIONAL field: it passes the unknown-field
     // check below but is not part of the required set (absent = defaults).
-    static const std::array<const char*, 14> kFields = {{
+    static const std::array<const char*, 15> kFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
         "corePath",        "contentPath", "contentHash", "systemDir",
         "savePath",        "candidateSavePath", "resultPath",
-        "expectedSaveSize", "video", "controllerBindings",
+        "expectedSaveSize", "video", "controllerBindings", "keyboardBindings",
     }};
     static const std::array<const char*, 13> kRequiredFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
@@ -438,6 +517,12 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
         if (!parseControllerBindings(j["controllerBindings"], bindings, err))
             return reject<PlayerRequest>(error, err);
         r.controllerBindings = std::move(bindings);
+    }
+    if (j.contains("keyboardBindings")) {
+        KeyboardBindings bindings;
+        if (!parseKeyboardBindings(j["keyboardBindings"], bindings, err))
+            return reject<PlayerRequest>(error, err);
+        r.keyboardBindings = std::move(bindings);
     }
 
     return r;
@@ -639,6 +724,22 @@ std::string serializeRequest(const PlayerRequest& r) {
         ordered_json controllerBindings;
         controllerBindings["devices"] = std::move(devices);
         j["controllerBindings"] = std::move(controllerBindings);
+    }
+    if (r.keyboardBindings.has_value()) {
+        ordered_json entries = ordered_json::array();
+        for (int target = 0; target < kKeyboardTargetCount; ++target) {
+            const KeyboardBinding& binding = r.keyboardBindings->table.get(target);
+            ordered_json entry;
+            entry["target"] = keyboardTargetName(target);
+            entry["primaryScancode"] = binding.primaryScancode.has_value()
+                ? ordered_json(*binding.primaryScancode) : ordered_json(nullptr);
+            entry["secondaryScancode"] = binding.secondaryScancode.has_value()
+                ? ordered_json(*binding.secondaryScancode) : ordered_json(nullptr);
+            entries.push_back(std::move(entry));
+        }
+        ordered_json keyboardBindings;
+        keyboardBindings["bindings"] = std::move(entries);
+        j["keyboardBindings"] = std::move(keyboardBindings);
     }
     return j.dump(2);
 }

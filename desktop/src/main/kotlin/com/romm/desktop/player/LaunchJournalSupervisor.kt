@@ -27,6 +27,8 @@ data class PlayerLaunchParams(
     val video: VideoSettings = VideoSettings(),
     /** v2 optional: stored controller bindings to apply from the first frame; null = player defaults. */
     val controllerBindings: ControllerBindings? = null,
+    /** Optional Linux keyboard bindings to apply from the first frame. */
+    val keyboardBindings: KeyboardBindings? = null,
 )
 
 /** A prepared (or recovered) player session and its on-disk artifacts. */
@@ -341,6 +343,7 @@ class LaunchJournalSupervisor(
             expectedSaveSize = params.expectedSaveSize,
             video = params.video,
             controllerBindings = params.controllerBindings,
+            keyboardBindings = params.keyboardBindings,
         )
 
         // Step 2: request first — an orphan request (no journal) is inert.

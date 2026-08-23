@@ -41,6 +41,8 @@ import com.romm.desktop.ui.screens.detail.GameDetailScreen
 import com.romm.desktop.ui.screens.detail.LicensesDialog
 import com.romm.desktop.ui.screens.controller.ControllerConfigScreen
 import com.romm.desktop.ui.screens.controller.ControllerConsoleListScreen
+import com.romm.desktop.ui.screens.controller.KeyboardConfigScreen
+import com.romm.desktop.ui.screens.controller.KeyboardConsoleListScreen
 import com.romm.desktop.ui.screens.detail.SettingsScreen
 import com.romm.desktop.ui.screens.library.HomeScreen
 import com.romm.desktop.ui.screens.library.CollectionsScreen
@@ -123,6 +125,7 @@ fun RommulusDesktopApp(
     // landing on its Favorite button), focus falls back to this Box when that item leaves
     // composition, so the guarantee holds across navigation.
     val shellFocusRequester = remember { FocusRequester() }
+    var keyboardCaptureActive by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         runCatching { shellFocusRequester.requestFocus() }
     }
@@ -173,6 +176,7 @@ fun RommulusDesktopApp(
                     .focusRequester(shellFocusRequester)
                     .focusable()
                     .onPreviewKeyEvent { event ->
+                        if (keyboardCaptureActive) return@onPreviewKeyEvent false
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when {
                             event.key == Key.Escape -> {
@@ -245,6 +249,11 @@ fun RommulusDesktopApp(
                                 onCaptureActiveChanged = { active ->
                                     router.setFocusActionsEnabled(!active)
                                 },
+                            )
+                            Screen.KEYBOARD_LIST -> KeyboardConsoleListScreen(coordinator)
+                            Screen.KEYBOARD_CONFIG -> KeyboardConfigScreen(
+                                coordinator = coordinator,
+                                onCaptureActiveChanged = { keyboardCaptureActive = it },
                             )
 
                             // The licenses dialog is a separate desktop window (its own

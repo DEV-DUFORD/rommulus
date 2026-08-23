@@ -448,6 +448,20 @@ const char* controlLabelForCoreSlot(const char* coreId, int slot) {
     return retroPadSlotLabel(slot);
 }
 
+const char* keyboardControlLabel(const char* coreId, int target) {
+    if (target >= 0 && target < kKeyboardDigitalTargetCount) {
+        return controlLabelForCoreSlot(coreId, target);
+    }
+    return keyboardTargetLabel(target);
+}
+
+std::string keyboardScancodeDisplay(const std::optional<int>& scancode) {
+    if (!scancode.has_value()) return "Unmapped";
+    const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(*scancode));
+    if (name != nullptr && *name != '\0') return name;
+    return "Scancode " + std::to_string(*scancode);
+}
+
 const char* artworkNameForCore(const char* coreId) {
     const std::string id = coreId != nullptr ? coreId : "";
     if (id == "genesis_plus_gx") return "controller_outline_genesis.png";
@@ -634,6 +648,7 @@ void PauseOverlay::draw(
     const PauseMenu& menu,
     const BindingTable& bindings,
     const BindingTable& secondaryBindings,
+    const KeyboardBindingTable& keyboardBindings,
     int captureSecondsLeft,
     const char* coreId
 ) const {
@@ -812,6 +827,95 @@ void PauseOverlay::draw(
         return;
     }
 
+    if (menu.state() == PauseMenuState::kKeyboardBindings) {
+        fillRect(renderer, 0, 0, W, H, Color{10, 23, 25});
+        const float marginX = dp(48);
+        const float headerY = dp(24);
+        drawButton(*this, renderer, marginX, headerY, dp(84), dp(42), "Back",
+                   scale, false);
+        const char* title = "Keyboard Control Settings";
+        drawText(renderer, (W - textWidth(title, dp(24))) * 0.5f, headerY + dp(5),
+                 title, dp(24), 255, 255, 255, 255);
+        const float clearW = dp(142);
+        const float resetW = dp(154);
+        const float clearX = W - marginX - clearW;
+        const float resetX = clearX - dp(8) - resetW;
+        drawButton(*this, renderer, resetX, headerY, resetW, dp(42), "Reset to Default",
+                   scale, menu.selection() == menu.resetDefaultItem());
+        drawButton(*this, renderer, clearX, headerY, clearW, dp(42), "Clear Mappings",
+                   scale, menu.selection() == menu.clearMappingsItem());
+
+        const float listX = marginX;
+        const float listY = dp(92);
+        const float listW = W - marginX * 2.0f;
+        const float listH = H - listY - dp(48);
+        const float headerH = dp(28);
+        const float labelW = listW * 0.42f;
+        const float primaryW = listW * 0.29f;
+        drawText(renderer, listX + dp(12), listY + dp(4), "Control", dp(12),
+                 kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
+        drawText(renderer, listX + labelW + dp(12), listY + dp(4), "Primary", dp(12),
+                 kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
+        drawText(renderer, listX + labelW + primaryW + dp(12), listY + dp(4),
+                 "Secondary", dp(12), kTextSecondary.r, kTextSecondary.g,
+                 kTextSecondary.b, 255);
+        fillRect(renderer, listX, listY + headerH - dp(2), listW, dp(1),
+                 Color{56, 67, 69});
+
+        constexpr int kVisibleRows = 10;
+        const int firstRow = menu.bindingViewportStart(kVisibleRows);
+        const int lastRow = std::min(firstRow + kVisibleRows, menu.keyboardRowCount());
+        const float gap = dp(5);
+        const float rowH = std::min(
+            dp(48),
+            (listH - headerH - gap * static_cast<float>(kVisibleRows - 1)) /
+                static_cast<float>(kVisibleRows));
+        for (int row = firstRow; row < lastRow; ++row) {
+            const int target =
+                coreKeyboardTargetAt(coreId != nullptr ? coreId : "", row);
+            const KeyboardBinding& binding = keyboardBindings.get(target);
+            const std::string primary =
+                keyboardScancodeDisplay(binding.primaryScancode);
+            const std::string secondary =
+                keyboardScancodeDisplay(binding.secondaryScancode);
+            const float rowY =
+                listY + headerH + static_cast<float>(row - firstRow) * (rowH + gap);
+            const float cellY = rowY + dp(3);
+            const float cellH = rowH - dp(6);
+            const float primaryX = listX + labelW;
+            const float secondaryX = primaryX + primaryW + dp(6);
+            const float secondaryW = listW - labelW - primaryW - dp(6);
+            drawText(renderer, listX + dp(16), rowY + (rowH - dp(15)) * 0.5f - dp(1),
+                     keyboardControlLabel(coreId, target), dp(15), 255, 255, 255, 255);
+            strokeRoundedRect(
+                renderer, primaryX, cellY, primaryW - dp(6), cellH, dp(8),
+                menu.selection() == row && menu.bindingColumn() == 0 ? dp(2) : dp(1),
+                menu.selection() == row && menu.bindingColumn() == 0
+                    ? kRomm300 : Color{56, 67, 69},
+                menu.selection() == row && menu.bindingColumn() == 0
+                    ? Color{20, 45, 49} : kNightLo);
+            strokeRoundedRect(
+                renderer, secondaryX, cellY, secondaryW, cellH, dp(8),
+                menu.selection() == row && menu.bindingColumn() == 1 ? dp(2) : dp(1),
+                menu.selection() == row && menu.bindingColumn() == 1
+                    ? kRomm300 : Color{56, 67, 69},
+                menu.selection() == row && menu.bindingColumn() == 1
+                    ? Color{20, 45, 49} : kNightLo);
+            drawText(renderer, primaryX + dp(12), cellY + (cellH - dp(12)) * 0.5f - dp(1),
+                     primary.c_str(), dp(12), 255, 255, 255, 255);
+            drawText(renderer, secondaryX + dp(12),
+                     cellY + (cellH - dp(12)) * 0.5f - dp(1),
+                     secondary.c_str(), dp(12), kTextSecondary.r, kTextSecondary.g,
+                     kTextSecondary.b, 255);
+        }
+        const char* footer =
+            "Select a control, then press a keyboard key  |  Back to return";
+        drawText(renderer, (W - textWidth(footer, dp(12))) * 0.5f, H - dp(28),
+                 footer, dp(12), kTextSecondary.r, kTextSecondary.g,
+                 kTextSecondary.b, 255);
+        return;
+    }
+
     if (menu.state() == PauseMenuState::kBindingCapture) {
         fillRect(renderer, 0, 0, W, H, kDialogScrim);
         const float dialogW = std::min(dp(480), W - dp(32));
@@ -839,8 +943,30 @@ void PauseOverlay::draw(
         return;
     }
 
+    if (menu.state() == PauseMenuState::kKeyboardCapture) {
+        fillRect(renderer, 0, 0, W, H, kDialogScrim);
+        const float dialogW = std::min(dp(480), W - dp(32));
+        const float dialogH = dp(190);
+        const float x = (W - dialogW) * 0.5f;
+        const float y = (H - dialogH) * 0.5f;
+        fillRoundedRect(renderer, x, y, dialogW, dialogH, dp(28), kNightLo);
+        const int target = coreKeyboardTargetAt(
+            coreId != nullptr ? coreId : "", menu.selection());
+        const std::string title =
+            std::string("Map ") + keyboardControlLabel(coreId, target);
+        drawText(renderer, x + dp(28), y + dp(28), title.c_str(), dp(24),
+                 255, 255, 255, 255);
+        drawText(renderer, x + dp(28), y + dp(82),
+                 "Press a keyboard key.", dp(16),
+                 kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
+        drawText(renderer, x + dp(28), y + dp(136),
+                 "Escape cancels", dp(13),
+                 kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
+        return;
+    }
+
     const float columnW = std::min(dp(420), W - dp(64));
-    const float columnH = dp(320);
+    const float columnH = dp(376);
     const float x = (W - columnW) * 0.5f;
     const float y = (H - columnH) * 0.5f;
     drawText(renderer, x, y, "Paused", dp(24), 255, 255, 255, 255);
