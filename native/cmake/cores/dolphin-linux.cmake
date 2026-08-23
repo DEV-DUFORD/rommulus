@@ -43,8 +43,12 @@ ExternalProject_Add(dolphin_core
         -DENABLE_EGL=OFF
         -DENABLE_X11=OFF
         -DUSE_SYSTEM_LIBS=AUTO
+    # Capped at 2 parallel jobs: Dolphin's VideoCommon/DolphinLibretro
+    # translation units are memory-heavy in Release builds (heavy shader-gen
+    # templates), and unbounded --parallel on a standard 4-core/16GB CI
+    # runner reliably OOM-kills cc1plus once several of them compile at once.
     BUILD_COMMAND
-        ${CMAKE_COMMAND} --build <BINARY_DIR> --target dolphin_libretro --parallel
+        ${CMAKE_COMMAND} --build <BINARY_DIR> --target dolphin_libretro --parallel 2
     INSTALL_COMMAND
         ${CMAKE_COMMAND} -E copy_if_different
         <BINARY_DIR>/dolphin_libretro.so
