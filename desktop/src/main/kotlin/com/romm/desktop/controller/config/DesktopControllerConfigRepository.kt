@@ -70,7 +70,9 @@ class DesktopControllerConfigRepository(
                 storedByAddress[controlId.id to slot.index]?.let { return@map it }
                 val binding = player.get(controlId, slot)
                 binding?.let {
-                    DesktopControllerBindingCodec.encode(coreId, playerIndex, controlId, it, slot.index)
+                    DesktopControllerBindingCodec.encodeForLaunch(
+                        coreId, playerIndex, controlId, it, slot.index,
+                    )
                 } ?: DesktopControllerBindingCodec.encodeUnmapped(
                     coreId,
                     playerIndex,

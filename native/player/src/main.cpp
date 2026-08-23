@@ -513,6 +513,30 @@ int main(int argc, char* argv[]) {
             request.controllerBindings->devices.front().secondaryTable
         );
     }
+    bool controllerBindingsDirty = false;
+    const auto persistControllerBindings = [&]() {
+        if (request.resultPath.empty()) return;
+        std::vector<romm::player::DeviceBindings> devices;
+        for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
+            if (!input.hasGamepad(port)) continue;
+            romm::player::DeviceBindings device;
+            device.guid = input.joystickGuidString(port);
+            device.identity = romm::player::normalizedDeviceIdentity(device.guid);
+            device.table = input.bindings();
+            device.secondaryTable = input.secondaryBindings();
+            devices.push_back(std::move(device));
+        }
+        // The table is global. Keep a controller-independent entry if Steam
+        // detaches its virtual gamepad before or during the write.
+        if (devices.empty()) {
+            devices.push_back(romm::player::globalBindingDevice(
+                input.bindings(), input.secondaryBindings()));
+        }
+        if (!romm::player::writeBindingSidecar(
+                parentDirectory(request.resultPath) + "/controller-bindings.json", devices)) {
+            std::fprintf(stderr, "warning: failed to write controller-bindings.json\n");
+        }
+    };
     romm::player::PauseMenu pauseMenu;
     pauseMenu.setBindingSlotCount(
         request.coreId == "mupen64plus_next" ? 14 :
@@ -577,9 +601,13 @@ int main(int argc, char* argv[]) {
             case romm::player::PauseMenuEffect::kResetDefault:
                 // Reset to Default: restore the built-in mapping.
                 input.resetBindings();
+                controllerBindingsDirty = true;
+                persistControllerBindings();
                 break;
             case romm::player::PauseMenuEffect::kClearMappings:
                 input.clearBindings();
+                controllerBindingsDirty = true;
+                persistControllerBindings();
                 break;
             default:
                 break;
@@ -717,6 +745,8 @@ int main(int argc, char* argv[]) {
                                     request.coreId, pauseMenu.selection()),
                                 source, pauseMenu.bindingColumn()
                             );
+                            controllerBindingsDirty = true;
+                            persistControllerBindings();
                         }
                         pauseMenu.exitCapture();
                         videoSink->requestRepaint();
@@ -730,6 +760,8 @@ int main(int argc, char* argv[]) {
                             romm::player::BindingSource::unbound(),
                             pauseMenu.bindingColumn()
                         );
+                        controllerBindingsDirty = true;
+                        persistControllerBindings();
                         pauseMenu.exitCapture();
                         videoSink->requestRepaint();
                         break;
@@ -790,37 +822,9 @@ int main(int argc, char* argv[]) {
     // open, the session is already paused and this simply re-checkpoints.
     const bool checkpointWritten = takeCheckpoint(session, request);
 
-    // Persist controller bindings (LINUX_X64.md section 11.9): when the user
-    // remapped anything in the pause menu's Physical Controller Settings,
-    // atomically write a versioned sidecar into the session dir (next to the
-    // result file), keyed by each connected pad's stable SDL GUID plus a
-    // normalized identity. The desktop ingestion of this file is a follow-up
-    // sub-unit — writing it correctly is all this sub-unit owes. A default
-    // table writes nothing (the built-in mapping needs no persistence).
-    if ((!input.bindings().isDefault() || !input.secondaryBindings().isUnmapped()) &&
-        !request.resultPath.empty()) {
-        std::vector<romm::player::DeviceBindings> devices;
-        for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
-            if (!input.hasGamepad(port)) continue;
-            romm::player::DeviceBindings device;
-            device.guid = input.joystickGuidString(port);
-            device.identity = romm::player::normalizedDeviceIdentity(device.guid);
-            device.table = input.bindings();
-            device.secondaryTable = input.secondaryBindings();
-            devices.push_back(std::move(device));
-        }
-        // Bindings are global, not device-specific. Steam can detach its virtual
-        // controller while the player is shutting down; retain the table rather
-        // than writing an empty sidecar that cannot restore the user's remap.
-        if (devices.empty()) {
-            devices.push_back(romm::player::globalBindingDevice(
-                input.bindings(), input.secondaryBindings()));
-        }
-        if (!romm::player::writeBindingSidecar(
-                parentDirectory(request.resultPath) + "/controller-bindings.json", devices)) {
-            std::fprintf(stderr, "warning: failed to write controller-bindings.json\n");
-        }
-    }
+    // Every edit is checkpointed immediately. Retry at clean shutdown in case
+    // an earlier atomic write failed transiently.
+    if (controllerBindingsDirty) persistControllerBindings();
 
     const romm::player::ExitKind exitKind = session.diagnostics().coreRequestedShutdown.load()
                                                ? romm::player::ExitKind::CoreRequestedShutdown

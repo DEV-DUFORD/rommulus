@@ -12,9 +12,9 @@ const val CONTROLLER_BINDINGS_SIDECAR_FILE_NAME = "controller-bindings.json"
 const val BINDING_SIDECAR_VERSION: Int = 1
 
 /**
- * The player's `<sessionDir>/controller-bindings.json` (LINUX_X64.md §11.9): written atomically
- * when the player exits with a non-default binding table, keyed by each connected pad's stable
- * SDL GUID plus normalized identity. Schema v1:
+ * The player's `<sessionDir>/controller-bindings.json` (LINUX_X64.md §11.9): checkpointed
+ * atomically after every in-game edit and retried at shutdown, keyed by each connected pad's
+ * stable SDL GUID plus normalized identity. Schema v1:
  *
  * ```
  * { "protocolVersion": 1, "devices": [ <sidecar device entries> ] }

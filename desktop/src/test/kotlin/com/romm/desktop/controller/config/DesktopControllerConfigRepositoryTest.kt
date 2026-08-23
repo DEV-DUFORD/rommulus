@@ -10,6 +10,10 @@ import com.romm.androidtv.storage.records.ControllerBindingRecord
 import com.romm.desktop.player.PAD_AXIS_NAMES
 import com.romm.desktop.player.PAD_BUTTON_NAMES
 import com.romm.desktop.player.RETRO_PAD_SLOT_NAMES
+import com.romm.desktop.player.ControllerBindingDevice
+import com.romm.desktop.player.ControllerBindingIdentity
+import com.romm.desktop.player.PlayerBindingType
+import com.romm.desktop.player.PlayerSlotBinding
 import com.romm.desktop.player.RetroPadControlMapping
 import com.romm.desktop.storage.sqlite.SqliteControllerBindingStore
 import com.romm.desktop.storage.sqlite.SqliteDatabase
@@ -134,6 +138,63 @@ class DesktopControllerConfigRepositoryTest {
             .isEqualTo(CoreControlId.Z)
         assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "right_trigger"))
             .isEqualTo(CoreControlId.R1)
+    }
+
+    @Test
+    fun `N64 in-game remaps survive sidecar ingestion and launch serialization`() = runTest {
+        val n64CoreId = "mupen64plus_next"
+        val defaults = mapOf(
+            "a" to "south",
+            "b" to "east",
+            "x" to "west",
+            "y" to "north",
+            "select" to "back",
+            "start" to "start",
+            "left_shoulder" to "left_shoulder",
+            "right_shoulder" to "right_shoulder",
+            "dpad_up" to "dpad_up",
+            "dpad_down" to "dpad_down",
+            "dpad_left" to "dpad_left",
+            "dpad_right" to "dpad_right",
+            "left_stick" to "left_stick",
+            "right_stick" to "right_stick",
+        )
+        val remappedButtons = defaults + mapOf(
+            "b" to "north", // N64 A Button
+            "y" to "south", // N64 B Button
+            "x" to "east",  // N64 C-Up
+        )
+        val device = ControllerBindingDevice(
+            guid = "",
+            identity = ControllerBindingIdentity(null, null, ""),
+            bindings = RETRO_PAD_SLOT_NAMES.map { slot ->
+                when (slot) {
+                    "left_trigger" ->
+                        PlayerSlotBinding(slot, PlayerBindingType.AXIS_DIRECTION, axis = "left_trigger", polarity = 1)
+                    "right_trigger" ->
+                        PlayerSlotBinding(slot, PlayerBindingType.AXIS_DIRECTION, axis = "right_trigger", polarity = 1)
+                    else ->
+                        PlayerSlotBinding(slot, PlayerBindingType.BUTTON, button = remappedButtons.getValue(slot))
+                }
+            },
+        )
+        store.upsertAll(RetroPadControlMapping.toRecords(n64CoreId, device)).getOrThrow()
+
+        val config = repo.loadCore(n64CoreId).players.getValue(0)
+        assertThat(config.get(CoreControlId.BUTTON_A, BindingSlot.PRIMARY))
+            .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_Y.platformCode))
+        assertThat(config.get(CoreControlId.BUTTON_B, BindingSlot.PRIMARY))
+            .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_A.platformCode))
+        assertThat(config.get(CoreControlId.N64_C_UP, BindingSlot.PRIMARY))
+            .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_B.platformCode))
+
+        val launch = RetroPadControlMapping.toLaunchBindings(
+            repo.effectiveLaunchRecords(n64CoreId, 0),
+        )!!
+        val bindings = launch.devices.single().bindings.associateBy { it.slot }
+        assertThat(bindings.getValue("b").button).isEqualTo("north")
+        assertThat(bindings.getValue("y").button).isEqualTo("south")
+        assertThat(bindings.getValue("x").button).isEqualTo("east")
     }
 
     @Test
@@ -326,5 +387,20 @@ class DesktopControllerConfigRepositoryTest {
         )
         assertThat(DesktopControllerBindingCodec.decodeOverride(unmapped))
             .isEqualTo(DesktopControllerBindingCodec.DecodedOverride.Unmapped)
+    }
+
+    @Test
+    fun `launch codec converts full trigger axes to positive axis directions`() {
+        val record = DesktopControllerBindingCodec.encodeForLaunch(
+            "mupen64plus_next",
+            0,
+            CoreControlId.Z,
+            PhysicalBinding.Axis(NeutralAxis.LTRIGGER.platformCode),
+            BindingSlot.SECONDARY.index,
+        )
+
+        assertThat(record.bindingType).isEqualTo(RetroPadControlMapping.TYPE_AXIS_DIRECTION)
+        assertThat(record.inputCode).isEqualTo(PAD_AXIS_NAMES.indexOf("left_trigger"))
+        assertThat(record.polarity).isEqualTo(1)
     }
 }

@@ -114,6 +114,36 @@ object DesktopControllerBindingCodec {
         }
     }
 
+    /**
+     * Encodes an effective binding for the player's digital RetroPad table.
+     *
+     * Shared N64/PlayStation profiles use full trigger axes as secondary aliases for digital
+     * trigger controls. The player represents those inputs as their positive axis direction;
+     * preserving them as Android-only `AXIS` rows would make serialization reject the entire
+     * controller table, including unrelated A/B/C-button remaps.
+     */
+    fun encodeForLaunch(
+        coreId: String,
+        playerIndex: Int,
+        controlId: CoreControlId,
+        binding: PhysicalBinding,
+        bindingSlot: Int,
+    ): ControllerBindingRecord {
+        val launchBinding = if (binding is PhysicalBinding.Axis) {
+            when (NeutralAxis.fromPlatform(binding.axis)) {
+                NeutralAxis.LTRIGGER,
+                NeutralAxis.BRAKE,
+                NeutralAxis.RTRIGGER,
+                NeutralAxis.GAS,
+                -> PhysicalBinding.AxisDirection(binding.axis, 1)
+                else -> binding
+            }
+        } else {
+            binding
+        }
+        return encode(coreId, playerIndex, controlId, launchBinding, bindingSlot)
+    }
+
     /** Encode an explicit unmapped override (mirrors Android's `ControllerBindingCodec.encodeUnmapped`). */
     fun encodeUnmapped(
         coreId: String,
