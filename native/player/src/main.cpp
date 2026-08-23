@@ -452,11 +452,6 @@ int main(int argc, char* argv[]) {
                 std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
             videoSink->attachWindow(
                 reinterpret_cast<romm::video::NativeWindowHandle>(window));
-        } else {
-            // Preview 19's proven Deck path included this engine-level
-            // GLideN64 size override; direct framebuffer rendering alone is
-            // not equivalent without it.
-            hardwareRenderSize = "320x240";
         }
 
         romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(
@@ -483,7 +478,9 @@ int main(int argc, char* argv[]) {
 
     // 8. Load and start the core.
     romm::EmulationSession session;
+#ifndef ROMM_STEAM_DECK_PLAYER
     session.setReleaseHardwareContextWhenPaused(useSteamDeckN64Path);
+#endif
     // GLideN64 runs the N64 RDP on the GPU; HLE avoids the much heavier cxd4
     // RSP path. Other cores ignore these Mupen64Plus-specific options.
     session.setCoreOptionOverride("mupen64plus-rdp-plugin", "gliden64");
@@ -645,13 +642,17 @@ int main(int argc, char* argv[]) {
         switch (effect) {
             case romm::player::PauseMenuEffect::kResume:
                 // The menu closed via Resume (or cancel): unfreeze the core.
+#ifndef ROMM_STEAM_DECK_PLAYER
                 if (useSteamDeckN64Path) videoSink->detachWindow();
+#endif
                 session.setPaused(false);
                 break;
             case romm::player::PauseMenuEffect::kQuit:
                 // Quit was confirmed: leave through the normal shutdown path,
                 // which checkpoints and reports exitKind=completed.
+#ifndef ROMM_STEAM_DECK_PLAYER
                 if (useSteamDeckN64Path) videoSink->detachWindow();
+#endif
                 running = false;
                 break;
             // Video Options toggles: apply the menu's NEW state to the sink
@@ -730,6 +731,7 @@ int main(int argc, char* argv[]) {
         pauseMenu.open();
         videoSink->requestRepaint();
         takeCheckpoint(session, request);
+#ifndef ROMM_STEAM_DECK_PLAYER
         if (useSteamDeckN64Path) {
             const auto deadline =
                 std::chrono::steady_clock::now() + std::chrono::seconds(1);
@@ -746,6 +748,7 @@ int main(int argc, char* argv[]) {
                     "error: timed out waiting for the N64 render context to pause\n");
             }
         }
+#endif
     };
 
     while (running) {

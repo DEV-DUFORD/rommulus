@@ -224,6 +224,14 @@ else
 fi
 export PATH="$APP_ROOT/bin${PATH:+:$PATH}"
 
+# Steam launches are an explicit platform signal, not a hardware-detection
+# heuristic. The native player uses this to select the preview-19-compatible
+# N64 executable before creating any SDL or OpenGL state.
+if [ -n "${SteamAppId:-}" ] || [ -n "${SteamGameId:-}" ] \
+  || [[ "${XDG_CURRENT_DESKTOP:-}" == *gamescope* ]]; then
+  export ROMM_FORCE_STEAM_DECK_PLAYER=1
+fi
+
 ARGS=("$@")
 if [ "${1:-}" = "--verify-full" ]; then
   ARGS=("${@:2}")

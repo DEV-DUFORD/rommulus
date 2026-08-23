@@ -95,6 +95,12 @@ inline std::string readDmiIdentity(const char* name) {
 }
 
 inline bool isSteamDeck() {
+    const char* forceDeckPlayer = std::getenv("ROMM_FORCE_STEAM_DECK_PLAYER");
+    if (forceDeckPlayer != nullptr &&
+        (normalizeSteamDeckIdentity(forceDeckPlayer) == "1" ||
+         normalizeSteamDeckIdentity(forceDeckPlayer) == "true")) {
+        return true;
+    }
     const char* environment = std::getenv("SteamDeck");
     if (environment == nullptr) environment = std::getenv("STEAM_DECK");
     return isSteamDeckIdentity(
