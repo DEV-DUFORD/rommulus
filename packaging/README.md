@@ -53,7 +53,8 @@ Notes:
 ## Assembling the tarball (Linux only)
 
 Prereqs on the Ubuntu 24.04 box: `zstd`, GNU tar, coreutils, clang-18/cmake/
-ninja/nasm + SDL3 (statically linked into the player), JDK 17 (Gradle + jlink).
+ninja/nasm + SDL3 (statically linked into the player), JDK 17 (Gradle + jlink),
+and the system OpenGL ES/EGL runtime used by the installed graphics driver.
 
 ```sh
 # 1. Build the player and cores (Release):

@@ -37,7 +37,9 @@ again, only Ubuntu 24.04 has been exercised so far.
   converted and uploaded to a reusable SDL texture; there is no Vulkan for software presentation.
 - **N64 hardware rendering:** Mupen64Plus-Next uses GLideN64 through an SDL3-managed OpenGL ES 3
   context, with the x86_64 new dynarec and HLE RSP. This is the same GPU renderer used by the
-  Android build and is the default on Linux, including Steam Deck.
+  Android build and is the default on Linux, including Steam Deck. The package intentionally uses
+  the host's OpenGL ES/EGL dispatch libraries so they remain compatible with the installed GPU
+  driver rather than bundling the Ubuntu build machine's graphics stack.
 - The other enabled cores remain software-rendered by the player (see
   `docs/linux-support-manifest.md`):
   - `pcsx_rearmed` — Lightrec x86_64 dynarec with a software renderer;

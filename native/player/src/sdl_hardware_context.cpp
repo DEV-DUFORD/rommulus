@@ -121,6 +121,16 @@ void SdlHardwareContext::unmakeCurrent() {
     if (window_ != nullptr) SDL_GL_MakeCurrent(window_, nullptr);
 }
 
+bool SdlHardwareContext::makeCurrent() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (context_ == nullptr || window_ == nullptr) return false;
+    if (!SDL_GL_MakeCurrent(window_, context_)) {
+        logSdlError("SDL_GL_MakeCurrent");
+        return false;
+    }
+    return true;
+}
+
 bool SdlHardwareContext::swapBuffers() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!surfaceAttached_ || window_ == nullptr) return false;
@@ -129,6 +139,20 @@ bool SdlHardwareContext::swapBuffers() {
         int outputHeight = 0;
         SDL_GetWindowSizeInPixels(window_, &outputWidth, &outputHeight);
         if (outputWidth > 0 && outputHeight > 0) {
+            GLint previousDrawFramebuffer = 0;
+            GLint previousReadFramebuffer = 0;
+            GLint previousViewport[4] = {};
+            GLint previousScissorBox[4] = {};
+            GLboolean previousColorMask[4] = {};
+            GLfloat previousClearColor[4] = {};
+            const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previousDrawFramebuffer);
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousReadFramebuffer);
+            glGetIntegerv(GL_VIEWPORT, previousViewport);
+            glGetIntegerv(GL_SCISSOR_BOX, previousScissorBox);
+            glGetBooleanv(GL_COLOR_WRITEMASK, previousColorMask);
+            glGetFloatv(GL_COLOR_CLEAR_VALUE, previousClearColor);
+
             const double scale = std::min(
                 static_cast<double>(outputWidth) / bufferWidth_,
                 static_cast<double>(outputHeight) / bufferHeight_);
@@ -137,6 +161,8 @@ bool SdlHardwareContext::swapBuffers() {
             const int x = (outputWidth - width) / 2;
             const int y = (outputHeight - height) / 2;
 
+            glDisable(GL_SCISSOR_TEST);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
             glViewport(0, 0, outputWidth, outputHeight);
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -145,14 +171,31 @@ bool SdlHardwareContext::swapBuffers() {
             glBlitFramebuffer(
                 0, 0, static_cast<GLint>(bufferWidth_), static_cast<GLint>(bufferHeight_),
                 x, y, x + width, y + height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previousDrawFramebuffer);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, previousReadFramebuffer);
+            glViewport(
+                previousViewport[0], previousViewport[1],
+                previousViewport[2], previousViewport[3]);
+            glScissor(
+                previousScissorBox[0], previousScissorBox[1],
+                previousScissorBox[2], previousScissorBox[3]);
+            if (scissorEnabled) {
+                glEnable(GL_SCISSOR_TEST);
+            } else {
+                glDisable(GL_SCISSOR_TEST);
+            }
+            glColorMask(
+                previousColorMask[0], previousColorMask[1],
+                previousColorMask[2], previousColorMask[3]);
+            glClearColor(
+                previousClearColor[0], previousClearColor[1],
+                previousClearColor[2], previousClearColor[3]);
         }
     }
     if (!SDL_GL_SwapWindow(window_)) {
         logSdlError("SDL_GL_SwapWindow");
         return false;
-    }
-    if (framebuffer_ != 0) {
-        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
     }
     return true;
 }

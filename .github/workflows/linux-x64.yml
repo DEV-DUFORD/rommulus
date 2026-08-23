@@ -953,11 +953,11 @@ jobs:
           name: rommulus-linux-x86_64-tarball
           path: dist
 
-      - name: Install zstd (tarball extraction)
+      - name: Install audit runtime dependencies
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y zstd
+          sudo apt-get install -y libegl1 libgles2 zstd
 
       - name: Extract tarball for inspection
         run: |
@@ -996,7 +996,7 @@ jobs:
       - name: Assert — package has every required license
         run: |
           set -euo pipefail
-          for f in libretro.txt libglvnd.txt NOTICE third_party_license_metadata third_party_licenses; do
+          for f in libretro.txt NOTICE third_party_license_metadata third_party_licenses; do
             p="audit/extract/share/licenses/rommulus/$f"
             if [ ! -s "$p" ]; then
               echo "::error::required license missing or empty in package: $p"
@@ -1088,8 +1088,7 @@ jobs:
       - name: Assert — player has no direct JVM/Android dependency
         run: |
           set -euo pipefail
-          LD_LIBRARY_PATH="$PWD/audit/extract/lib/rommulus" \
-            ldd audit/extract/bin/rommulus-player > /tmp/player-ldd.txt
+          ldd audit/extract/bin/rommulus-player > /tmp/player-ldd.txt
           [ -s /tmp/player-ldd.txt ] || { echo "::error::ldd produced no output"; exit 1; }
           cat /tmp/player-ldd.txt
           if grep -q 'not found' /tmp/player-ldd.txt; then
@@ -1100,11 +1099,16 @@ jobs:
             echo "::error::rommulus-player links against JVM/Android libraries"
             exit 1
           fi
-          grep -F "$PWD/audit/extract/lib/rommulus/libGLESv2.so.2" /tmp/player-ldd.txt \
-            || { echo "::error::rommulus-player did not resolve the bundled libGLESv2.so.2"; exit 1; }
-          grep -F "$PWD/audit/extract/lib/rommulus/libGLdispatch.so.0" /tmp/player-ldd.txt \
-            || { echo "::error::rommulus-player did not resolve the bundled libGLdispatch.so.0"; exit 1; }
           echo "✓ rommulus-player has no unresolved or direct JVM/Android library dependency"
+
+          ldd audit/extract/lib/rommulus/cores/libmupen64plus_next_core.so \
+            > /tmp/n64-core-ldd.txt
+          cat /tmp/n64-core-ldd.txt
+          if grep -q 'not found' /tmp/n64-core-ldd.txt; then
+            echo "::error::N64 core has unresolved runtime dependencies"
+            exit 1
+          fi
+          echo "✓ N64 core has no unresolved runtime dependencies"
 
       - name: Note — §15 assertions deferred to follow-up sub-units
         run: |

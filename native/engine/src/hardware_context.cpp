@@ -25,6 +25,7 @@ public:
     bool hasPendingWindowUpdate() override { return false; }
     bool hasSurface() override { return false; }
     void unmakeCurrent() override {}
+    bool makeCurrent() override { return false; }
     bool swapBuffers() override { return false; }
     void destroyContext() override {}
     void* currentContext() const override { return nullptr; }

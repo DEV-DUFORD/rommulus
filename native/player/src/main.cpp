@@ -419,11 +419,6 @@ int main(int argc, char* argv[]) {
         hardwareRenderSize =
             std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
 
-        // Hardware frames bypass SdlVideoSink, but its renderer owns the
-        // pause overlay. Attach it explicitly; main only presents it while
-        // paused, avoiding contention with the core's GL context.
-        videoSink->attachWindow(
-            reinterpret_cast<romm::video::NativeWindowHandle>(window));
         romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(window));
     }
 
@@ -441,6 +436,7 @@ int main(int argc, char* argv[]) {
 
     // 8. Load and start the core.
     romm::EmulationSession session;
+    session.setReleaseHardwareContextWhenPaused(useHardwareRendering);
     // GLideN64 runs the N64 RDP on the GPU; HLE avoids the much heavier cxd4
     // RSP path. Other cores ignore these Mupen64Plus-specific options.
     session.setCoreOptionOverride("mupen64plus-rdp-plugin", "gliden64");
@@ -602,11 +598,13 @@ int main(int argc, char* argv[]) {
         switch (effect) {
             case romm::player::PauseMenuEffect::kResume:
                 // The menu closed via Resume (or cancel): unfreeze the core.
+                if (useHardwareRendering) videoSink->detachWindow();
                 session.setPaused(false);
                 break;
             case romm::player::PauseMenuEffect::kQuit:
                 // Quit was confirmed: leave through the normal shutdown path,
                 // which checkpoints and reports exitKind=completed.
+                if (useHardwareRendering) videoSink->detachWindow();
                 running = false;
                 break;
             // Video Options toggles: apply the menu's NEW state to the sink
@@ -681,6 +679,22 @@ int main(int argc, char* argv[]) {
         pauseMenu.open();
         videoSink->requestRepaint();
         takeCheckpoint(session, request);
+        if (useHardwareRendering) {
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(1);
+            while (!session.hardwareContextReleasedForPause() &&
+                   std::chrono::steady_clock::now() < deadline) {
+                SDL_Delay(1);
+            }
+            if (session.hardwareContextReleasedForPause()) {
+                videoSink->attachWindow(
+                    reinterpret_cast<romm::video::NativeWindowHandle>(window));
+            } else {
+                std::fprintf(
+                    stderr,
+                    "error: timed out waiting for the N64 render context to pause\n");
+            }
+        }
     };
 
     while (running) {
@@ -918,6 +932,7 @@ int main(int argc, char* argv[]) {
     sigemptyset(&teardownTimeout.sa_mask);
     ::sigaction(SIGALRM, &teardownTimeout, nullptr);
     ::alarm(5);
+    if (useHardwareRendering) videoSink->detachWindow();
     session.stop();
     ::alarm(0);
 

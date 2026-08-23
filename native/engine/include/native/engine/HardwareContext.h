@@ -76,6 +76,10 @@ public:
     // Releases the context from the calling thread.
     virtual void unmakeCurrent() = 0;
 
+    // Makes the existing context and surface current on the calling thread.
+    // Used after temporarily yielding the window surface to another renderer.
+    virtual bool makeCurrent() = 0;
+
     // Swaps the front/back buffers. Returns false on failure (e.g. context
     // lost). The caller should treat a false return as a signal to
     // re-attach the window and reset GL state.

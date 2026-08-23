@@ -19,11 +19,7 @@ compiler/flags, checksums) is recorded in share/rommulus/core-manifest.json.
 3. SDL3 (Simple DirectMedia Layer) 3.4.14 — used by rommulus-player
    License: zlib license. https://github.com/libsdl-org/SDL
 
-4. libglvnd 1.7.0 (libGLESv2.so.2 and libGLdispatch.so.0) — OpenGL ES
-   dispatch libraries used by rommulus-player
-   License: MIT. See libglvnd.txt.
-
-5. Libretro cores (lib/rommulus/cores/), each a separately-licensed,
+4. Libretro cores (lib/rommulus/cores/), each a separately-licensed,
    dynamically-loaded shared object. Effective licenses:
    - gambatte (libgambatte_core.so) — GPL-2.0-only; blipper.c MIT
    - fceumm (libfceumm_core.so) — GPL-2.0-or-later; Blargg NTSC filter LGPL-2.1-or-later
@@ -52,10 +48,10 @@ compiler/flags, checksums) is recorded in share/rommulus/core-manifest.json.
      rsp-cxd4 CC0 1.0, paraLLEl RSP built under its MIT option, xxHash CC0
    - test_core (libtest_core.so) — synthetic project-owned core (GPLv3, this project)
 
-6. libretro-common (vendored helper sources inside the cores above)
+5. libretro-common (vendored helper sources inside the cores above)
    License: MIT (per file header). See libretro.txt for the Libretro API notice.
 
-7. Java libraries inside lib/rommulus/app.jar (Compose Multiplatform, OkHttp,
+6. Java libraries inside lib/rommulus/app.jar (Compose Multiplatform, OkHttp,
    SQLite JDBC, JInput, zxing, commons-compress, XZ for Java, and others)
    Licenses: see third_party_license_metadata / third_party_licenses in this
    directory (Apache-2.0 bundle list).

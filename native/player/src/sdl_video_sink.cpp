@@ -105,7 +105,9 @@ void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
         return;
     }
 
-    renderer_ = SDL_CreateRenderer(window_, nullptr);
+    const char* rendererName =
+        (SDL_GetWindowFlags(window_) & SDL_WINDOW_OPENGL) != 0 ? "opengles2" : nullptr;
+    renderer_ = SDL_CreateRenderer(window_, rendererName);
     if (renderer_ == nullptr) {
         romm::log::sink().log(romm::log::Severity::Warn, kTag,
                               std::string("SDL_CreateRenderer failed: ") +
@@ -121,7 +123,7 @@ void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
     }
     // Hardware-rendered cores never submit a software frame, but the pause
     // overlay still needs a drawable coordinate space.
-    if (width_ == 0 || height_ == 0) {
+    if (staging_.empty()) {
         int outputWidth = 0;
         int outputHeight = 0;
         if (SDL_GetRenderOutputSize(renderer_, &outputWidth, &outputHeight) &&

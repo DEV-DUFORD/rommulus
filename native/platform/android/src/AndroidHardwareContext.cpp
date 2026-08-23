@@ -226,6 +226,19 @@ void AndroidHardwareContext::unmakeCurrent() {
     eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
 
+bool AndroidHardwareContext::makeCurrent() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (display_ == EGL_NO_DISPLAY || surface_ == EGL_NO_SURFACE ||
+        context_ == EGL_NO_CONTEXT) {
+        return false;
+    }
+    if (!eglMakeCurrent(display_, surface_, surface_, context_)) {
+        eglError("eglMakeCurrent (resume)");
+        return false;
+    }
+    return true;
+}
+
 bool AndroidHardwareContext::swapBuffers() {
     if (!eglSwapBuffers(display_, surface_)) {
         EGLint err = eglGetError();

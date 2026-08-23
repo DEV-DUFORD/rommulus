@@ -256,6 +256,8 @@ void EmulationSession::runLoop() {
         }
     }
 
+    bool contextReleasedForPause = false;
+    hardwareContextReleasedForPause_.store(false);
     while (threadShouldRun_.load()) {
         if (hwRender) {
             const auto update = romm::gl::context().applyPendingWindowUpdate();
@@ -274,6 +276,12 @@ void EmulationSession::runLoop() {
         }
 
         if (paused_.load()) {
+            if (hwRender && releaseHardwareContextWhenPaused_.load() &&
+                !contextReleasedForPause) {
+                romm::gl::context().unmakeCurrent();
+                contextReleasedForPause = true;
+                hardwareContextReleasedForPause_.store(true);
+            }
             // Skip retro_run() entirely: the core never advances, so the last
             // presented video frame stays on screen and no new audio samples
             // reach the audio sink's ring buffer (which mutes via its
@@ -283,6 +291,17 @@ void EmulationSession::runLoop() {
             // doesn't have to fight a saturated CPU core.
             scheduler.waitForNextFrame();
             continue;
+        }
+
+        if (contextReleasedForPause) {
+            if (!romm::gl::context().makeCurrent()) {
+                LOGE("HW render: failed to reacquire context after pause");
+                diagnostics_.coreRequestedShutdown = true;
+                threadShouldRun_ = false;
+                break;
+            }
+            contextReleasedForPause = false;
+            hardwareContextReleasedForPause_.store(false);
         }
 
         const bool videoEnabled =
@@ -313,6 +332,10 @@ void EmulationSession::runLoop() {
     }
 
     if (hwRender) {
+        if (contextReleasedForPause && !romm::gl::context().makeCurrent()) {
+            LOGE("HW render: failed to reacquire context for teardown");
+        }
+        hardwareContextReleasedForPause_.store(false);
         auto& cb = environment_.hwRenderCallbackMutable();
         if (cb.context_destroy) {
             cb.context_destroy();

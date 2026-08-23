@@ -174,6 +174,12 @@ public:
     // call from any thread; does not touch the core or any callback state.
     void setPaused(bool paused) { paused_.store(paused); }
     bool isPaused() const { return paused_.load(); }
+    void setReleaseHardwareContextWhenPaused(bool enabled) {
+        releaseHardwareContextWhenPaused_.store(enabled);
+    }
+    bool hardwareContextReleasedForPause() const {
+        return hardwareContextReleasedForPause_.load();
+    }
 
 private:
     void runLoop();
@@ -208,6 +214,8 @@ private:
     std::thread thread_;
     std::atomic<bool> threadShouldRun_{false};
     std::atomic<bool> paused_{false};
+    std::atomic<bool> releaseHardwareContextWhenPaused_{false};
+    std::atomic<bool> hardwareContextReleasedForPause_{false};
 };
 
 }  // namespace romm
