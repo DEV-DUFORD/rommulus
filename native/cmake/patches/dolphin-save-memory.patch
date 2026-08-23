@@ -105,10 +105,18 @@ index 4ad04c728e..e57f9043f4 100644
      }
    }
 diff --git a/Source/Core/DolphinLibretro/Main.cpp b/Source/Core/DolphinLibretro/Main.cpp
-index f7ba162441..92388a6f35 100644
+index f7ba162441..7693968d05 100644
 --- a/Source/Core/DolphinLibretro/Main.cpp
 +++ b/Source/Core/DolphinLibretro/Main.cpp
-@@ -26,6 +26,8 @@
+@@ -1,6 +1,7 @@
+ 
+ #include <cstdint>
+ #include <libretro.h>
++#include <mutex>
+ #include <string>
+ #include <thread>
+ 
+@@ -26,6 +27,8 @@
  #include "Core/Core.h"
  #include "Core/GeckoCode.h"
  #include "Core/GeckoCodeConfig.h"
@@ -117,7 +125,7 @@ index f7ba162441..92388a6f35 100644
  #include "Core/HW/CPU.h"
  #include "Core/HW/Memmap.h"
  #include "Core/HW/ProcessorInterface.h"
-@@ -83,6 +85,91 @@ extern void reload_cheats_from_ini();
+@@ -83,6 +86,103 @@ extern void reload_cheats_from_ini();
  
  extern "C" {
  
@@ -137,8 +145,20 @@ index f7ba162441..92388a6f35 100644
 +// happened, so it must force this boot step itself or it dereferences a
 +// null CEXIChannel and crashes (only observable when a save actually exists
 +// on the server, since that's the only time the restore path runs).
++//
++// The frontend's own emulation thread starts calling retro_run() as soon as
++// retro_load_game() returns (it doesn't wait for the caller to finish doing
++// other post-load setup), so this can now race with romm_restore_save_memory
++// running on a different thread. Both would otherwise race past the
++// g_emuthread_launched check, and the loser's move-assignment onto the
++// already-joinable Core::s_emu_thread calls std::terminate(). Serialize with
++// a mutex and re-check the flag once inside it so only one thread ever boots
++// and the other simply falls through once boot has completed.
 +static void EnsureEmuThreadLaunched()
 +{
++  static std::mutex boot_mutex;
++  std::lock_guard<std::mutex> lock(boot_mutex);
++
 +  Core::System& system = Core::System::GetInstance();
 +  if (Core::GetState(system) != Core::State::Starting || Libretro::g_emuthread_launched)
 +    return;
@@ -209,7 +229,7 @@ index f7ba162441..92388a6f35 100644
  void retro_set_environment(retro_environment_t cb)
  {
    Libretro::environ_cb = cb;
-@@ -237,70 +324,7 @@ void retro_run(void)
+@@ -237,70 +337,7 @@ void retro_run(void)
  
    Core::System& system = Core::System::GetInstance();
  
@@ -281,7 +301,7 @@ index f7ba162441..92388a6f35 100644
  
    if(!Libretro::g_emuthread_launched)
    {
-@@ -591,6 +615,46 @@ unsigned retro_api_version()
+@@ -591,6 +628,46 @@ unsigned retro_api_version()
    return RETRO_API_VERSION;
  }
  
