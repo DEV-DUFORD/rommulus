@@ -5,14 +5,25 @@
 
 int main() {
     CHECK(romm::player::isSteamDeckIdentity("1", "", "", "", ""));
+    CHECK(romm::player::isSteamDeckIdentity(" TRUE\n", "", "", "", ""));
     CHECK(romm::player::isSteamDeckIdentity(
         nullptr, "", "", "Jupiter", ""));
     CHECK(romm::player::isSteamDeckIdentity(
         nullptr, "", "Valve", "Galileo", ""));
     CHECK(romm::player::isSteamDeckIdentity(
         nullptr, "", "", "", "Galileo"));
+    CHECK(romm::player::isSteamDeckIdentity(
+        nullptr, "", "", "", "",
+        "ID=steamos\nVARIANT_ID=steamdeck\n"));
+    CHECK(romm::player::isSteamDeckIdentity(
+        nullptr, "", "", "", "",
+        "ID=steamos\nVARIANT_ID = \"steamdeck\"\n"));
     CHECK(!romm::player::isSteamDeckIdentity(
         nullptr, "Apple Inc.", "", "MacBookPro11,4", ""));
+    CHECK(!romm::player::isSteamDeckIdentity(
+        nullptr, "Micro-Star International", "Micro-Star International",
+        "MS-7C35", "MEG X570 ACE",
+        "ID=ubuntu\nVARIANT_ID=desktop\n"));
 
     using romm::player::n64RenderSizeForOutput;
 
