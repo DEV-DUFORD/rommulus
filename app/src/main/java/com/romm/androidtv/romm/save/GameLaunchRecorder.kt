@@ -5,8 +5,8 @@ import android.util.Log
 /**
  * Marks a ROM as played when its emulator session begins.
  *
- * RomM's play-session endpoint requires a positive duration. A one-millisecond interval ending
- * at launch preserves that contract while making `last_played` reflect the launch immediately.
+ * RomM normalizes timestamps to whole seconds before validating them. A one-second interval
+ * ending at launch remains valid after normalization and updates `last_played` immediately.
  */
 internal class GameLaunchRecorder(
     private val recordPlaySession: suspend (PlaySessionRecordRequest) -> PlaySessionRecordResult,
@@ -20,7 +20,7 @@ internal class GameLaunchRecorder(
                 PlaySessionRecordRequest(
                     romId = romId,
                     slot = com.romm.androidtv.emulation.model.SavePathPolicy.AUTOSAVE_SLOT,
-                    startEpochMs = launchedAtEpochMs - 1L,
+                    startEpochMs = launchedAtEpochMs - LAUNCH_SESSION_DURATION_MS,
                     endEpochMs = launchedAtEpochMs,
                 )
             )
@@ -30,5 +30,9 @@ internal class GameLaunchRecorder(
         } catch (e: Exception) {
             Log.w(logTag, "recordLaunch: threw for ROM $romId", e)
         }
+    }
+
+    private companion object {
+        const val LAUNCH_SESSION_DURATION_MS = 1_000L
     }
 }

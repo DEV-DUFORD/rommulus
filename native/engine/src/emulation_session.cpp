@@ -506,8 +506,10 @@ void EmulationSession::detachVideoWindow() {
 }
 
 void EmulationSession::updateInputState(int port, int32_t buttonsMask, int16_t leftX,
-                                         int16_t leftY, int16_t rightX, int16_t rightY) {
-    inputState_.set(port, buttonsMask, leftX, leftY, rightX, rightY);
+                                         int16_t leftY, int16_t rightX, int16_t rightY,
+                                         int16_t leftTrigger, int16_t rightTrigger) {
+    inputState_.set(
+        port, buttonsMask, leftX, leftY, rightX, rightY, leftTrigger, rightTrigger);
 }
 
 int32_t EmulationSession::debugInputButtonMask(int port) const {

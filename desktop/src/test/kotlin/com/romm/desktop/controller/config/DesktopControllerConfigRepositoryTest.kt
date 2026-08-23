@@ -172,6 +172,11 @@ class DesktopControllerConfigRepositoryTest {
             .isEqualTo(PlayerSlotBinding("left_stick", PlayerBindingType.AXIS, axis = "right_x"))
         assertThat(slots.single { it.slot == "right_stick" })
             .isEqualTo(PlayerSlotBinding("right_stick", PlayerBindingType.AXIS, axis = "right_y"))
+        val secondary = launch.devices.single().secondaryBindings.orEmpty()
+        assertThat(secondary.single { it.slot == "left_trigger" })
+            .isEqualTo(PlayerSlotBinding("left_trigger", PlayerBindingType.AXIS, axis = "left_trigger"))
+        assertThat(secondary.single { it.slot == "right_trigger" })
+            .isEqualTo(PlayerSlotBinding("right_trigger", PlayerBindingType.AXIS, axis = "right_trigger"))
     }
 
     @Test
@@ -468,5 +473,21 @@ class DesktopControllerConfigRepositoryTest {
         assertThat(record.bindingType).isEqualTo(RetroPadControlMapping.TYPE_AXIS_DIRECTION)
         assertThat(record.inputCode).isEqualTo(PAD_AXIS_NAMES.indexOf("left_trigger"))
         assertThat(record.polarity).isEqualTo(1)
+    }
+
+    @Test
+    fun `launch codec preserves GameCube full trigger axes`() {
+        val record = DesktopControllerBindingCodec.encodeForLaunch(
+            "dolphin",
+            0,
+            CoreControlId.L2,
+            PhysicalBinding.Axis(NeutralAxis.LTRIGGER.platformCode),
+            BindingSlot.SECONDARY.index,
+            preserveFullAxis = true,
+        )
+
+        assertThat(record.bindingType).isEqualTo(RetroPadControlMapping.TYPE_AXIS)
+        assertThat(record.inputCode).isEqualTo(NeutralAxis.LTRIGGER.platformCode)
+        assertThat(record.polarity).isNull()
     }
 }

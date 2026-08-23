@@ -71,7 +71,13 @@ class DesktopControllerConfigRepository(
                 val binding = player.get(controlId, slot)
                 binding?.let {
                     DesktopControllerBindingCodec.encodeForLaunch(
-                        coreId, playerIndex, controlId, it, slot.index,
+                        coreId,
+                        playerIndex,
+                        controlId,
+                        it,
+                        slot.index,
+                        preserveFullAxis = coreId == "dolphin" &&
+                            controlId in GAMECUBE_ANALOG_TRIGGER_IDS,
                     )
                 } ?: DesktopControllerBindingCodec.encodeUnmapped(
                     coreId,
@@ -299,5 +305,6 @@ class DesktopControllerConfigRepository(
             "left_stick" to "right_x",
             "right_stick" to "right_y",
         )
+        val GAMECUBE_ANALOG_TRIGGER_IDS = setOf(CoreControlId.L2, CoreControlId.R2)
     }
 }

@@ -14,9 +14,9 @@ import java.util.logging.Logger
  * Marks a ROM as played when its player session begins (desktop mirror of Android's
  * `com.romm.androidtv.romm.save.GameLaunchRecorder`).
  *
- * RomM's play-session endpoint requires a positive duration. A one-millisecond interval ending
- * at launch preserves that contract while making `last_played` reflect the launch immediately —
- * this is what makes a title appear in the RomM Home screen's "Continue Playing" row.
+ * RomM normalizes timestamps to whole seconds before validating them. A one-second interval
+ * ending at launch remains valid after that normalization and makes `last_played` reflect the
+ * launch immediately — this is what makes a title appear in "Continue Playing".
  *
  * Best-effort by design: the report runs on a background thread and EVERY failure is logged and
  * swallowed — a play-session report must never block or break the launch/exit flow. Kiosk
@@ -33,7 +33,7 @@ class GameLaunchRecorder(
     private val onRecorded: (Long) -> Unit = {},
 ) {
     /**
-     * Records a 1ms play session for [romId] ending at the launch instant. Non-blocking: the
+     * Records a one-second play session for [romId] ending at the launch instant. Non-blocking: the
      * gateway call (a blocking HTTP round trip) happens on [executor], never on the caller's
      * thread.
      */
@@ -59,9 +59,9 @@ class GameLaunchRecorder(
                                 PlaySessionEntry(
                                     romId = romId,
                                     saveSlot = SavePathPolicy.AUTOSAVE_SLOT,
-                                    startTime = Instant.ofEpochMilli(launchedAtEpochMs - 1L),
+                                    startTime = Instant.ofEpochMilli(launchedAtEpochMs - LAUNCH_SESSION_DURATION_MS),
                                     endTime = Instant.ofEpochMilli(launchedAtEpochMs),
-                                    durationMs = 1L,
+                                    durationMs = LAUNCH_SESSION_DURATION_MS,
                                 ),
                             ),
                         ),
@@ -82,6 +82,8 @@ class GameLaunchRecorder(
     }
 
     private companion object {
+        const val LAUNCH_SESSION_DURATION_MS = 1_000L
+
         /** One shared daemon thread; launches are rare and the report is best-effort. */
         val DEFAULT_EXECUTOR: Executor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "play-session-recorder").apply { isDaemon = true }

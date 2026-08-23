@@ -179,6 +179,8 @@ private:
         int16_t leftY = 0;
         int16_t rightX = 0;
         int16_t rightY = 0;
+        int16_t leftTrigger = 0;
+        int16_t rightTrigger = 0;
     };
 
     struct GamepadSlot {

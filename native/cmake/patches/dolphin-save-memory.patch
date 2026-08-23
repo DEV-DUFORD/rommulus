@@ -1,0 +1,164 @@
+diff --git a/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.cpp b/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.cpp
+index 8f87313..95642ae 100644
+--- a/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.cpp
++++ b/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.cpp
+@@ -5,5 +5,6 @@
+ 
+ #include <array>
++#include <cstring>
+ #include <functional>
+ #include <memory>
+ #include <string>
+@@ -241,6 +242,41 @@ CEXIMemoryCard::~CEXIMemoryCard()
+   core_timing.RemoveEvent(s_et_transfer_complete[m_card_slot]);
+ }
+ 
++size_t CEXIMemoryCard::GetSaveMemorySize()
++{
++  if (!m_memory_card)
++    return 0;
++  return static_cast<size_t>(m_memory_card->GetCardId()) * 1024 * 8 * 16;
++}
++
++bool CEXIMemoryCard::CopySaveMemory(u8* destination, size_t size)
++{
++  if (!destination || size != GetSaveMemorySize())
++    return false;
++  for (size_t offset = 0; offset < size; offset += Memcard::BLOCK_SIZE)
++  {
++    std::memset(destination + offset, 0xFF, Memcard::BLOCK_SIZE);
++    const s32 read = m_memory_card->Read(static_cast<u32>(offset), Memcard::BLOCK_SIZE,
++                                         destination + offset);
++    if (read != 0 && read != Memcard::BLOCK_SIZE)
++      return false;
++  }
++  return true;
++}
++
++bool CEXIMemoryCard::RestoreSaveMemory(const u8* source, size_t size)
++{
++  if (!source || size != GetSaveMemorySize())
++    return false;
++  for (size_t offset = 0; offset < size; offset += Memcard::BLOCK_SIZE)
++  {
++    if (m_memory_card->Write(static_cast<u32>(offset), Memcard::BLOCK_SIZE,
++                             source + offset) != Memcard::BLOCK_SIZE)
++      return false;
++  }
++  return true;
++}
++
+ bool CEXIMemoryCard::UseDelayedTransferCompletion() const
+ {
+   return true;
+diff --git a/Source/Core/Core/HW/GCMemcard/GCMemcardDirectory.cpp b/Source/Core/Core/HW/GCMemcard/GCMemcardDirectory.cpp
+index dcf836a..ecbd5c4 100644
+--- a/Source/Core/Core/HW/GCMemcard/GCMemcardDirectory.cpp
++++ b/Source/Core/Core/HW/GCMemcard/GCMemcardDirectory.cpp
+@@ -413,8 +413,13 @@ s32 GCMemcardDirectory::Write(u32 dest_address, s32 length, const u8* src_address
+       m_last_block = SaveAreaRW(block, true);
+       if (m_last_block == -1)
+       {
++        if (std::all_of(src_address, src_address + length,
++                        [](u8 value) { return value == 0xFF; }))
++        {
++          return length;
++        }
+         PanicAlertFmtT("Report: GCIFolder Writing to unallocated block {0:#x}", block);
+-        exit(0);
++        return -1;
+       }
+     }
+   }
+diff --git a/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.h b/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.h
+index 4254c84..e5e757b 100644
+--- a/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.h
++++ b/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.h
+@@ -3,6 +3,7 @@
+ 
+ #pragma once
+ 
++#include <cstddef>
+ #include <array>
+ #include <functional>
+ #include <memory>
+@@ -49,6 +50,10 @@ public:
+   void DMARead(u32 addr, u32 size) override;
+   void DMAWrite(u32 addr, u32 size) override;
+ 
++  size_t GetSaveMemorySize();
++  bool CopySaveMemory(u8* destination, size_t size);
++  bool RestoreSaveMemory(const u8* source, size_t size);
++
+   // CoreTiming events need to be registered during boot since CoreTiming is DoState()-ed
+   // before ExpansionInterface so we'll lose the save stated events if the callbacks are
+   // not already registered first.
+diff --git a/Source/Core/DolphinLibretro/Main.cpp b/Source/Core/DolphinLibretro/Main.cpp
+index a8f8173..09341f1 100644
+--- a/Source/Core/DolphinLibretro/Main.cpp
++++ b/Source/Core/DolphinLibretro/Main.cpp
+@@ -25,6 +25,8 @@
+ #include "Core/Core.h"
+ #include "Core/GeckoCode.h"
+ #include "Core/GeckoCodeConfig.h"
++#include "Core/HW/EXI/EXI.h"
++#include "Core/HW/EXI/EXI_DeviceMemoryCard.h"
+ #include "Core/HW/CPU.h"
+ #include "Core/HW/Memmap.h"
+ #include "Core/HW/ProcessorInterface.h"
+@@ -84,6 +86,10 @@ extern void reload_cheats_from_ini();
+ 
+ extern "C" {
+ 
++RETRO_API size_t romm_get_save_memory_size();
++RETRO_API void* romm_get_save_memory_data();
++RETRO_API bool romm_restore_save_memory(const void* data, size_t size);
++
+ void retro_set_environment(retro_environment_t cb)
+ {
+   Libretro::environ_cb = cb;
+@@ -590,6 +596,44 @@ unsigned retro_api_version()
+   return RETRO_API_VERSION;
+ }
+ 
++static ExpansionInterface::CEXIMemoryCard* get_slot_a_memory_card()
++{
++  auto* device = Core::System::GetInstance().GetExpansionInterface().GetDevice(
++      ExpansionInterface::Slot::A);
++  return dynamic_cast<ExpansionInterface::CEXIMemoryCard*>(device);
++}
++
++RETRO_API size_t romm_get_save_memory_size()
++{
++  auto* card = get_slot_a_memory_card();
++  return card ? card->GetSaveMemorySize() : 0;
++}
++
++RETRO_API void* romm_get_save_memory_data()
++{
++  static std::vector<u8> snapshot;
++  auto* card = get_slot_a_memory_card();
++  if (!card)
++    return nullptr;
++
++  const size_t size = card->GetSaveMemorySize();
++  if (size == 0)
++    return nullptr;
++  snapshot.resize(size);
++  if (!card->CopySaveMemory(snapshot.data(), snapshot.size()))
++  {
++    snapshot.clear();
++    return nullptr;
++  }
++  return snapshot.data();
++}
++
++RETRO_API bool romm_restore_save_memory(const void* data, size_t size)
++{
++  auto* card = get_slot_a_memory_card();
++  return card && data && card->RestoreSaveMemory(static_cast<const u8*>(data), size);
++}
++
+ size_t retro_get_memory_size(unsigned id)
+ {
+   auto& memory = Core::System::GetInstance().GetMemory();

@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Coordinator-level tests for play-session recording (Android parity — `GameLaunchRecorder`):
- * [DesktopAppCoordinator.launchPlayer] must report a 1ms play session for the launched ROM as
+ * [DesktopAppCoordinator.launchPlayer] must report a one-second play session for the launched ROM as
  * soon as the session STARTS (not on exit), through the [com.romm.desktop.sync.RommSyncGateway]
  * seam, off the launch thread, without breaking the launch flow.
  *
@@ -154,7 +154,7 @@ class DesktopPlaySessionWiringTest {
     }
 
     @Test
-    fun `launchPlayer records a 1ms play session for the ROM at launch start, before any exit`(@TempDir dir: Path) {
+    fun `launchPlayer records a play session for the ROM at launch start, before any exit`(@TempDir dir: Path) {
         val paths = dir.testRoot()
         installGambatte(paths)
         val gateway = FakeRommSyncGateway()
@@ -172,9 +172,9 @@ class DesktopPlaySessionWiringTest {
             val session = request.sessions.single()
             assertThat(session.romId).isEqualTo(ROM_ID)
             assertThat(session.saveSlot).isEqualTo(SavePathPolicy.AUTOSAVE_SLOT)
-            assertThat(session.durationMs).isEqualTo(1L)
-            assertThat(session.endTime.toEpochMilli() - session.startTime.toEpochMilli()).isEqualTo(1L)
-            // The 1ms window ends at the launch instant (wall clock, small tolerance).
+            assertThat(session.durationMs).isEqualTo(1_000L)
+            assertThat(session.endTime.toEpochMilli() - session.startTime.toEpochMilli()).isEqualTo(1_000L)
+            // The one-second window ends at the launch instant (wall clock, small tolerance).
             assertThat(session.endTime.toEpochMilli()).isBetween(launchedAt, System.currentTimeMillis() + 5_000)
         } finally {
             wired.close()

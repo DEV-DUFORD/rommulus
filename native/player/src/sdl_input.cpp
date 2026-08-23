@@ -9,7 +9,9 @@
 
 #include <libretro.h>
 
+#include <algorithm>
 #include <cstdlib>
+#include <limits>
 
 #include "emulation_session.h"
 #include "native/player/pause_chord.h"
@@ -229,10 +231,13 @@ void SdlInput::poll() {
                 p.rightX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
                 p.rightY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
             }
+            p.leftTrigger = analogValue(gamepad, kSlotLeftTrigger);
+            p.rightTrigger = analogValue(gamepad, kSlotRightTrigger);
         } else {
             // No pad on this port: keep the snapshot neutral (closeGamepad
             // already resets the port when a device is removed).
             p.leftX = p.leftY = p.rightX = p.rightY = 0;
+            p.leftTrigger = p.rightTrigger = 0;
         }
 
         if (port == 0) {
@@ -258,8 +263,21 @@ void SdlInput::applyCoreBindingDefaults() {
 
 int16_t SdlInput::analogValue(SDL_Gamepad* gamepad, int slot) const {
     const auto read = [gamepad](const BindingSource& source) -> int16_t {
-        if (source.kind != BindingSource::Kind::kAxis) return 0;
-        return applyDeadzone(SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis)));
+        if (source.kind == BindingSource::Kind::kButton) {
+            return SDL_GetGamepadButton(gamepad, toSdlButton(source.button))
+                ? std::numeric_limits<int16_t>::max() : 0;
+        }
+        if (source.kind != BindingSource::Kind::kAxis &&
+            source.kind != BindingSource::Kind::kAxisDirection) {
+            return 0;
+        }
+        const int16_t value = applyDeadzone(SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis)));
+        if (source.kind == BindingSource::Kind::kAxis) return value;
+        const int directed = static_cast<int>(value) * source.polarity;
+        return directed > 0
+            ? static_cast<int16_t>(std::min(directed, static_cast<int>(
+                  std::numeric_limits<int16_t>::max())))
+            : 0;
     };
     const int16_t primary = read(bindings_.get(slot));
     const int16_t secondary = read(secondaryBindings_.get(slot));
@@ -280,7 +298,9 @@ std::optional<int> SdlInput::captureKeyboardScancode(const SDL_Event& event) {
 void SdlInput::updateSession(romm::EmulationSession& session) {
     for (int port = 0; port < kPorts; ++port) {
         const PortState& p = ports_[port];
-        session.updateInputState(port, p.buttonsMask, p.leftX, p.leftY, p.rightX, p.rightY);
+        session.updateInputState(
+            port, p.buttonsMask, p.leftX, p.leftY, p.rightX, p.rightY,
+            p.leftTrigger, p.rightTrigger);
     }
 }
 

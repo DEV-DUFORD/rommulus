@@ -21,10 +21,17 @@ set(DOLPHIN_ASSET_OUTPUT
     ${CMAKE_CURRENT_BINARY_DIR}/share/rommulus/dolphin-emu/Sys)
 find_program(DOLPHIN_C_COMPILER gcc REQUIRED)
 find_program(DOLPHIN_CXX_COMPILER g++ REQUIRED)
+find_program(DOLPHIN_GIT git REQUIRED)
 
 ExternalProject_Add(dolphin_core
     SOURCE_DIR ${DOLPHIN_DIR}
     BINARY_DIR ${DOLPHIN_BUILD_DIR}
+    PATCH_COMMAND
+        ${CMAKE_COMMAND}
+        -DGIT_EXECUTABLE=${DOLPHIN_GIT}
+        -DSOURCE_DIR=${DOLPHIN_DIR}
+        -DPATCH_FILE=${ROMM_REPO_ROOT}/native/cmake/patches/dolphin-save-memory.patch
+        -P ${ROMM_REPO_ROOT}/native/cmake/apply-git-patch.cmake
     CMAKE_ARGS
         -DCMAKE_BUILD_TYPE=Release
         # GCC supplies the C++23 std::expected implementation used by current

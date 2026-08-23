@@ -23,7 +23,7 @@ int main() {
     // Set a full snapshot on port 1 and read it back.
     const int32_t mask = (1 << RETRO_DEVICE_ID_JOYPAD_B) | (1 << RETRO_DEVICE_ID_JOYPAD_A) |
                          (1 << RETRO_DEVICE_ID_JOYPAD_START);
-    state.set(1, mask, 1234, -5678, 0, 32000);
+    state.set(1, mask, 1234, -5678, 0, 32000, 8192, 24576);
     CHECK_EQ(state.query(1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK), mask);
     CHECK_EQ(state.query(1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B), 1);
     CHECK_EQ(state.query(1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A), 1);
@@ -37,6 +37,10 @@ int main() {
                          RETRO_DEVICE_ID_ANALOG_X), 0);
     CHECK_EQ(state.query(1, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT,
                          RETRO_DEVICE_ID_ANALOG_Y), 32000);
+    CHECK_EQ(state.query(1, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_BUTTON,
+                         RETRO_DEVICE_ID_JOYPAD_L2), 8192);
+    CHECK_EQ(state.query(1, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_BUTTON,
+                         RETRO_DEVICE_ID_JOYPAD_R2), 24576);
 
     // Other ports are untouched by the port-1 update.
     CHECK_EQ(state.query(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK), 0);

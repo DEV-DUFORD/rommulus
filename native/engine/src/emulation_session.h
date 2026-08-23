@@ -148,7 +148,8 @@ public:
     // than the emulation thread itself; see InputState's thread-safety
     // contract.
     void updateInputState(int port, int32_t buttonsMask, int16_t leftX, int16_t leftY,
-                           int16_t rightX, int16_t rightY);
+                           int16_t rightX, int16_t rightY, int16_t leftTrigger = 0,
+                           int16_t rightTrigger = 0);
 
     // Debug/diagnostics-only read of a port's current button mask — lets
     // the debug UI show live per-port state so a physical controller can be

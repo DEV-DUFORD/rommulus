@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Unit tests for the desktop [GameLaunchRecorder] (mirror of Android's
- * `com.romm.androidtv.romm.save.GameLaunchRecorder`): a 1ms autosave session ending at the
+ * `com.romm.androidtv.romm.save.GameLaunchRecorder`): a one-second autosave session ending at the
  * launch instant, reported through the [RommSyncGateway] seam, off the caller's thread, and
  * best-effort (every failure swallowed).
  */
@@ -39,7 +39,7 @@ class GameLaunchRecorderTest {
     )
 
     @Test
-    fun `records a 1ms autosave session ending at the launch instant`() {
+    fun `records an autosave session ending at the launch instant`() {
         val gateway = FakeRommSyncGateway()
         recorder(
             gateway,
@@ -53,8 +53,8 @@ class GameLaunchRecorderTest {
         val session = request.sessions.single()
         assertThat(session.romId).isEqualTo(42L)
         assertThat(session.saveSlot).isEqualTo(SavePathPolicy.AUTOSAVE_SLOT)
-        assertThat(session.durationMs).isEqualTo(1L)
-        assertThat(session.startTime.toEpochMilli()).isEqualTo(FIXED_NOW_MS - 1L)
+        assertThat(session.durationMs).isEqualTo(1_000L)
+        assertThat(session.startTime.toEpochMilli()).isEqualTo(FIXED_NOW_MS - 1_000L)
         assertThat(session.endTime.toEpochMilli()).isEqualTo(FIXED_NOW_MS)
     }
 

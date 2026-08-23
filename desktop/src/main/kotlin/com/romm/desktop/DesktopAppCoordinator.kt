@@ -600,7 +600,7 @@ class DesktopAppCoordinator(
 
     /**
      * Play-session recorder (parity with Android's `GameLaunchRecorder`): marks a ROM as played
-     * when its player session STARTS — a 1ms session ending at the launch instant, reported
+     * when its player session STARTS — a one-second session ending at launch, reported
      * off-thread so `last_played`/`now_playing` (the Home screen's "Continue Playing" row)
      * reflect the launch immediately. Shares the drain's session/identity seams and reports
      * through [RommSyncApiGateway] on the authenticated client.

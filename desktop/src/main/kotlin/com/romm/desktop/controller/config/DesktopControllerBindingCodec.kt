@@ -117,10 +117,9 @@ object DesktopControllerBindingCodec {
     /**
      * Encodes an effective binding for the player's digital RetroPad table.
      *
-     * Shared N64/PlayStation profiles use full trigger axes as secondary aliases for digital
-     * trigger controls. The player represents those inputs as their positive axis direction;
-     * preserving them as Android-only `AXIS` rows would make serialization reject the entire
-     * controller table, including unrelated A/B/C-button remaps.
+     * N64/PlayStation expose trigger targets as digital RetroPad slots, so their full-axis
+     * aliases become positive axis directions. GameCube sets [preserveFullAxis] because Dolphin
+     * consumes the trigger magnitude through `RETRO_DEVICE_INDEX_ANALOG_BUTTON`.
      */
     fun encodeForLaunch(
         coreId: String,
@@ -128,8 +127,9 @@ object DesktopControllerBindingCodec {
         controlId: CoreControlId,
         binding: PhysicalBinding,
         bindingSlot: Int,
+        preserveFullAxis: Boolean = false,
     ): ControllerBindingRecord {
-        val launchBinding = if (binding is PhysicalBinding.Axis) {
+        val launchBinding = if (binding is PhysicalBinding.Axis && !preserveFullAxis) {
             when (NeutralAxis.fromPlatform(binding.axis)) {
                 NeutralAxis.LTRIGGER,
                 NeutralAxis.BRAKE,
