@@ -9,7 +9,7 @@ index 8f87313..95642ae 100644
  #include <functional>
  #include <memory>
  #include <string>
-@@ -241,6 +242,41 @@ CEXIMemoryCard::~CEXIMemoryCard()
+@@ -241,6 +242,51 @@ CEXIMemoryCard::~CEXIMemoryCard()
    core_timing.RemoveEvent(s_et_transfer_complete[m_card_slot]);
  }
  
@@ -39,12 +39,22 @@ index 8f87313..95642ae 100644
 +{
 +  if (!source || size != GetSaveMemorySize())
 +    return false;
-+  for (size_t offset = 0; offset < size; offset += Memcard::BLOCK_SIZE)
-+  {
-+    if (m_memory_card->Write(static_cast<u32>(offset), Memcard::BLOCK_SIZE,
-+                             source + offset) != Memcard::BLOCK_SIZE)
++  const auto write_block = [&](u32 block) {
++    const size_t offset = static_cast<size_t>(block) * Memcard::BLOCK_SIZE;
++    return m_memory_card->Write(offset, Memcard::BLOCK_SIZE, source + offset) ==
++           Memcard::BLOCK_SIZE;
++  };
++
++  // GCI-folder cards validate directory entries against the BAT as soon as
++  // a directory block lands. Restore both BAT copies before either directory.
++  for (const u32 block : std::array<u32, 5>{3, 4, 0, 1, 2})
++    if (!write_block(block))
 +      return false;
-+  }
++
++  const u32 block_count = static_cast<u32>(size / Memcard::BLOCK_SIZE);
++  for (u32 block = 5; block < block_count; ++block)
++    if (!write_block(block))
++      return false;
 +  return true;
 +}
 +
