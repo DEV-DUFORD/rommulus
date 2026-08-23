@@ -4,13 +4,15 @@
 #include "native/player/steam_deck.h"
 
 int main() {
-    CHECK(romm::player::isSteamDeckIdentity("1", "", "", ""));
+    CHECK(romm::player::isSteamDeckIdentity("1", "", "", "", ""));
     CHECK(romm::player::isSteamDeckIdentity(
-        nullptr, "Valve", "Jupiter", ""));
+        nullptr, "", "", "Jupiter", ""));
     CHECK(romm::player::isSteamDeckIdentity(
-        nullptr, "Valve Corporation", "", "Galileo"));
+        nullptr, "", "Valve", "Galileo", ""));
+    CHECK(romm::player::isSteamDeckIdentity(
+        nullptr, "", "", "", "Galileo"));
     CHECK(!romm::player::isSteamDeckIdentity(
-        nullptr, "Apple Inc.", "MacBookPro11,4", ""));
+        nullptr, "Apple Inc.", "", "MacBookPro11,4", ""));
 
     using romm::player::n64RenderSizeForOutput;
 

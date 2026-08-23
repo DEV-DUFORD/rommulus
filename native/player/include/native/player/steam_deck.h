@@ -12,6 +12,7 @@ namespace romm::player {
 inline bool isSteamDeckIdentity(
     const char* steamDeckEnvironment,
     std::string systemVendor,
+    std::string boardVendor,
     std::string productName,
     std::string boardName
 ) {
@@ -32,13 +33,16 @@ inline bool isSteamDeckIdentity(
         return value;
     };
     systemVendor = normalize(std::move(systemVendor));
+    boardVendor = normalize(std::move(boardVendor));
     productName = normalize(std::move(productName));
     boardName = normalize(std::move(boardName));
-    const bool valveHardware = systemVendor.find("valve") != std::string::npos;
+    const bool valveHardware =
+        systemVendor.find("valve") != std::string::npos ||
+        boardVendor.find("valve") != std::string::npos;
     const bool deckBoard =
         productName == "jupiter" || productName == "galileo" ||
         boardName == "jupiter" || boardName == "galileo";
-    return valveHardware && deckBoard;
+    return deckBoard || (valveHardware && productName == "steamdeck");
 }
 
 inline std::string readDmiIdentity(const char* name) {
@@ -54,6 +58,7 @@ inline bool isSteamDeck() {
     return isSteamDeckIdentity(
         environment,
         readDmiIdentity("sys_vendor"),
+        readDmiIdentity("board_vendor"),
         readDmiIdentity("product_name"),
         readDmiIdentity("board_name"));
 }
