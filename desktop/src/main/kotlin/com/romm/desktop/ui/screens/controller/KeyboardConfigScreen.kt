@@ -9,10 +9,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +32,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.window.DialogWindow
+import androidx.compose.ui.window.rememberDialogState
 import com.romm.androidtv.controller.config.BindingSlot
 import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.desktop.DesktopAppCoordinator
@@ -129,14 +132,36 @@ fun KeyboardConfigScreen(
     }
 
     capture?.let { pending ->
-        AlertDialog(
-            onDismissRequest = { capture = null },
-            modifier = Modifier.onPreviewKeyEvent(captureKeyEvent),
-            title = { Text("Map ${pending.label}") },
-            text = { Text("Press a keyboard key. Escape cancels.") },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { capture = null }) { Text("Cancel") } },
-        )
+        DialogWindow(
+            onCloseRequest = { capture = null },
+            state = rememberDialogState(size = DpSize(480.dp, 220.dp)),
+            title = "Map ${pending.label}",
+            resizable = false,
+            onPreviewKeyEvent = captureKeyEvent,
+        ) {
+            Surface(color = colors.nightLo, modifier = Modifier.fillMaxSize()) {
+                Column(
+                    Modifier.padding(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(22.dp),
+                ) {
+                    Text(
+                        "Map ${pending.label}",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = colors.textPrimary,
+                    )
+                    Text(
+                        "Press a keyboard key. Escape cancels.",
+                        color = colors.textSecondary,
+                    )
+                    TextButton(
+                        onClick = { capture = null },
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
     }
 }
 

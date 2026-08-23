@@ -24,6 +24,7 @@ public:
     bool swapBuffers() override;
     void destroyContext() override;
     void* currentContext() const override;
+    uintptr_t currentFramebuffer() const override;
     retro_proc_address_t getProcAddress(const char* name) override;
     bool isValid() const override;
 
@@ -34,6 +35,14 @@ private:
     SDL_GLContext context_ = nullptr;
     bool windowUpdatePending_ = false;
     bool surfaceAttached_ = false;
+    unsigned bufferWidth_ = 0;
+    unsigned bufferHeight_ = 0;
+    unsigned framebuffer_ = 0;
+    unsigned colorTexture_ = 0;
+    unsigned depthStencil_ = 0;
+
+    bool createFramebufferLocked();
+    void destroyFramebufferLocked();
 };
 
 }  // namespace romm::player

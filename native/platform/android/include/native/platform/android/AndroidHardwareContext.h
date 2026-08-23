@@ -42,6 +42,7 @@ public:
     bool swapBuffers() override;
     void destroyContext() override;
     void* currentContext() const override;
+    uintptr_t currentFramebuffer() const override;
     retro_proc_address_t getProcAddress(const char* name) override;
     bool isValid() const override;
 

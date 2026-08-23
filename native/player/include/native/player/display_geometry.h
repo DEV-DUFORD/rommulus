@@ -13,7 +13,10 @@ inline std::pair<int, int> n64RenderSizeForOutput(int outputWidth, int outputHei
     }};
     std::pair<int, int> selected = kSizes.front();
     for (const auto& size : kSizes) {
-        if (size.first > outputWidth || size.second > outputHeight) break;
+        if (size.first > outputWidth || size.second > outputHeight ||
+            size.first > 960 || size.second > 720) {
+            break;
+        }
         selected = size;
     }
     return selected;

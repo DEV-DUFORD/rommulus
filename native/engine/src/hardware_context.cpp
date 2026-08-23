@@ -28,6 +28,7 @@ public:
     bool swapBuffers() override { return false; }
     void destroyContext() override {}
     void* currentContext() const override { return nullptr; }
+    uintptr_t currentFramebuffer() const override { return 0; }
     retro_proc_address_t getProcAddress(const char* /*name*/) override { return nullptr; }
     bool isValid() const override { return false; }
 };

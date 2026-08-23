@@ -29,8 +29,7 @@ void logPrint(romm::log::Severity severity, const char* tag, const char* fmt, ..
 // plain functions with the correct signature.
 
 uintptr_t hwGetCurrentFramebuffer(void) {
-    // Default framebuffer (0) is what libretro-droid returns.
-    return 0;
+    return romm::gl::context().currentFramebuffer();
 }
 
 retro_proc_address_t hwGetProcAddress(const char* sym) {

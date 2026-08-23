@@ -20,6 +20,7 @@
 #include <native/engine/VideoSink.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
 namespace romm::gl {
@@ -87,6 +88,11 @@ public:
     // RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE, or nullptr while no
     // context exists.
     virtual void* currentContext() const = 0;
+
+    // Framebuffer the core should render into. Platforms that render
+    // directly to the window return 0; compositing frontends may return an
+    // offscreen FBO and present it from swapBuffers().
+    virtual uintptr_t currentFramebuffer() const = 0;
 
     // Resolves a GL procedure address for the core's
     // retro_hw_render_callback::get_proc_address. Returns nullptr when the

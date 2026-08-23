@@ -1,9 +1,11 @@
 #include "native/player/sdl_hardware_context.h"
 
 #include <SDL3/SDL.h>
+#include <GLES3/gl3.h>
 
 #include <native/engine/LogSink.h>
 
+#include <algorithm>
 #include <string>
 
 namespace romm::player {
@@ -45,6 +47,9 @@ bool SdlHardwareContext::createContext() {
         logSdlError("SDL_GL_MakeCurrent");
         return false;
     }
+    if (!createFramebufferLocked()) {
+        return false;
+    }
     if (!SDL_GL_SetSwapInterval(1)) {
         romm::log::sink().log(
                 romm::log::Severity::Warn, kTag,
@@ -53,7 +58,11 @@ bool SdlHardwareContext::createContext() {
     return true;
 }
 
-void SdlHardwareContext::setBufferGeometry(unsigned, unsigned) {}
+void SdlHardwareContext::setBufferGeometry(unsigned width, unsigned height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    bufferWidth_ = width;
+    bufferHeight_ = height;
+}
 
 void SdlHardwareContext::attachWindow(romm::video::NativeWindowHandle window) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -115,9 +124,35 @@ void SdlHardwareContext::unmakeCurrent() {
 bool SdlHardwareContext::swapBuffers() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!surfaceAttached_ || window_ == nullptr) return false;
+    if (framebuffer_ != 0 && bufferWidth_ > 0 && bufferHeight_ > 0) {
+        int outputWidth = 0;
+        int outputHeight = 0;
+        SDL_GetWindowSizeInPixels(window_, &outputWidth, &outputHeight);
+        if (outputWidth > 0 && outputHeight > 0) {
+            const double scale = std::min(
+                static_cast<double>(outputWidth) / bufferWidth_,
+                static_cast<double>(outputHeight) / bufferHeight_);
+            const int width = static_cast<int>(bufferWidth_ * scale);
+            const int height = static_cast<int>(bufferHeight_ * scale);
+            const int x = (outputWidth - width) / 2;
+            const int y = (outputHeight - height) / 2;
+
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glViewport(0, 0, outputWidth, outputHeight);
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_);
+            glBlitFramebuffer(
+                0, 0, static_cast<GLint>(bufferWidth_), static_cast<GLint>(bufferHeight_),
+                x, y, x + width, y + height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        }
+    }
     if (!SDL_GL_SwapWindow(window_)) {
         logSdlError("SDL_GL_SwapWindow");
         return false;
+    }
+    if (framebuffer_ != 0) {
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
     }
     return true;
 }
@@ -125,6 +160,7 @@ bool SdlHardwareContext::swapBuffers() {
 void SdlHardwareContext::destroyContext() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (context_ != nullptr) {
+        destroyFramebufferLocked();
         if (window_ != nullptr) SDL_GL_MakeCurrent(window_, nullptr);
         SDL_GL_DestroyContext(context_);
         context_ = nullptr;
@@ -139,6 +175,11 @@ void* SdlHardwareContext::currentContext() const {
     return context_;
 }
 
+uintptr_t SdlHardwareContext::currentFramebuffer() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return framebuffer_;
+}
+
 retro_proc_address_t SdlHardwareContext::getProcAddress(const char* name) {
     return reinterpret_cast<retro_proc_address_t>(SDL_GL_GetProcAddress(name));
 }
@@ -146,6 +187,53 @@ retro_proc_address_t SdlHardwareContext::getProcAddress(const char* name) {
 bool SdlHardwareContext::isValid() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return context_ != nullptr;
+}
+
+bool SdlHardwareContext::createFramebufferLocked() {
+    destroyFramebufferLocked();
+    if (bufferWidth_ == 0 || bufferHeight_ == 0) {
+        logSdlError("invalid hardware framebuffer geometry");
+        return false;
+    }
+
+    glGenTextures(1, &colorTexture_);
+    glBindTexture(GL_TEXTURE_2D, colorTexture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(bufferWidth_),
+        static_cast<GLsizei>(bufferHeight_), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    glGenRenderbuffers(1, &depthStencil_);
+    glBindRenderbuffer(GL_RENDERBUFFER, depthStencil_);
+    glRenderbufferStorage(
+        GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, static_cast<GLsizei>(bufferWidth_),
+        static_cast<GLsizei>(bufferHeight_));
+
+    glGenFramebuffers(1, &framebuffer_);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTexture_, 0);
+    glFramebufferRenderbuffer(
+        GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthStencil_);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        romm::log::sink().log(
+            romm::log::Severity::Error, kTag, "hardware framebuffer is incomplete");
+        destroyFramebufferLocked();
+        return false;
+    }
+    return true;
+}
+
+void SdlHardwareContext::destroyFramebufferLocked() {
+    if (framebuffer_ != 0) glDeleteFramebuffers(1, &framebuffer_);
+    if (depthStencil_ != 0) glDeleteRenderbuffers(1, &depthStencil_);
+    if (colorTexture_ != 0) glDeleteTextures(1, &colorTexture_);
+    framebuffer_ = 0;
+    depthStencil_ = 0;
+    colorTexture_ = 0;
 }
 
 }  // namespace romm::player

@@ -52,6 +52,7 @@ set(PCSX_REARMED_DIR ${ROMM_REPO_ROOT}/third_party/cores/pcsx_rearmed)
 set(MUPEN64_DIR ${ROMM_REPO_ROOT}/third_party/cores/mupen64plus_next)
 
 find_package(SDL3 REQUIRED CONFIG)
+find_library(GLESV2_LIBRARY GLESv2 REQUIRED)
 
 add_executable(rommulus_player
     # Platform-neutral engine (compiled in; the engine tree carries no
@@ -96,7 +97,7 @@ target_compile_definitions(rommulus_player PRIVATE
     ROMM_PAUSE_FONT_PATH="${MUPEN64_DIR}/mupen64plus-core/data/font.ttf"
     ROMM_CONTROLLER_ART_PATH="${ROMM_REPO_ROOT}/assets/controllers"
 )
-target_link_libraries(rommulus_player PRIVATE SDL3::SDL3 m dl pthread)
+target_link_libraries(rommulus_player PRIVATE SDL3::SDL3 ${GLESV2_LIBRARY} m dl pthread)
 target_compile_options(rommulus_player PRIVATE -Wall -Wextra)
 
 # Synthetic core the player loads (Phase 8): a minimal software-rendering

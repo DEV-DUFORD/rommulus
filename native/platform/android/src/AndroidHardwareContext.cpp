@@ -270,6 +270,10 @@ void* AndroidHardwareContext::currentContext() const {
     return context_;
 }
 
+uintptr_t AndroidHardwareContext::currentFramebuffer() const {
+    return 0;
+}
+
 retro_proc_address_t AndroidHardwareContext::getProcAddress(const char* name) {
     // eglGetProcAddress returns __eglMustCastToProperFunctionPointerType
     // (aka void(*)()), which is the same as retro_proc_address_t.
