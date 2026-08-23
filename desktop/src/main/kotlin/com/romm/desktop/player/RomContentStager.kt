@@ -56,6 +56,29 @@ class RomContentStagingException(
     val failure: RomContentStagingFailure,
 ) : IOException(message, cause)
 
+internal data class ArchiveExtractionLimits(
+    val maxBytes: Long,
+    val maxCompressionRatio: Long,
+)
+
+/**
+ * Optical-disc images are routinely larger than the conservative cartridge-ROM cap. They remain
+ * bounded independently so an archive cannot expand without limit, while normal GameCube,
+ * PlayStation, and Sega CD images can be staged.
+ */
+internal fun archiveExtractionLimitsFor(extension: String): ArchiveExtractionLimits =
+    if (extension.lowercase(Locale.ROOT) in DISC_IMAGE_EXTENSIONS) {
+        ArchiveExtractionLimits(
+            maxBytes = MAX_EXTRACTED_DISC_IMAGE_BYTES,
+            maxCompressionRatio = MAX_DISC_IMAGE_COMPRESSION_RATIO,
+        )
+    } else {
+        ArchiveExtractionLimits(
+            maxBytes = MAX_EXTRACTED_CARTRIDGE_ROM_BYTES,
+            maxCompressionRatio = MAX_CARTRIDGE_ROM_COMPRESSION_RATIO,
+        )
+    }
+
 /**
  * Seam for staging a ROM's content before player launch (Phase 8 real-content increment).
  *
@@ -300,17 +323,25 @@ class OkHttpRomContentStager(
             "archived file '${selected.name}' is not supported by the selected core",
             failure = RomContentStagingFailure.CorruptContent,
         )
-        if (selected.size < 0 || selected.size > MAX_EXTRACTED_ROM_BYTES) {
+        if (selected.size < 0) {
             throw RomContentStagingException(
-                "archived ROM '${selected.name}' has an invalid or unsupported size: ${selected.size} bytes",
+                "archived ROM '${selected.name}' has an invalid size: ${selected.size} bytes",
                 failure = RomContentStagingFailure.CorruptContent,
+            )
+        }
+        val extractionLimits = archiveExtractionLimitsFor(extension)
+        if (selected.size > extractionLimits.maxBytes) {
+            throw RomContentStagingException(
+                "archived ROM '${selected.name}' exceeds the extraction size limit of " +
+                    "${extractionLimits.maxBytes} bytes",
+                failure = RomContentStagingFailure.UnsafeContent,
             )
         }
         val extracted = contentDir.resolve("$safeName$extension")
         val part = contentDir.resolve("$safeName$extension.extract.part")
 
         try {
-            extractArchiveEntry(downloadedFile, archiveFormat, selected, part)
+            extractArchiveEntry(downloadedFile, archiveFormat, selected, part, extractionLimits)
             Files.move(part, extracted, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         } catch (e: RomContentStagingException) {
             dropPart(part)
@@ -473,6 +504,7 @@ class OkHttpRomContentStager(
         format: ArchiveFormat,
         selected: ArchiveEntry,
         destination: Path,
+        limits: ArchiveExtractionLimits,
     ) {
         when (format) {
             ArchiveFormat.SEVEN_ZIP -> SevenZFile(archivePath.toFile()).use { archive ->
@@ -487,7 +519,15 @@ class OkHttpRomContentStager(
                     )
                 }
                 Files.newOutputStream(destination, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
-                    .use { output -> copyArchiveBytes(archive::read, output::write, selected, Files.size(archivePath)) }
+                    .use { output ->
+                        copyArchiveBytes(
+                            archive::read,
+                            output::write,
+                            selected,
+                            Files.size(archivePath),
+                            limits,
+                        )
+                    }
             }
             ArchiveFormat.ZIP -> ZipFile(archivePath.toFile()).use { archive ->
                 val entry = archive.getEntry(selected.name)
@@ -499,7 +539,13 @@ class OkHttpRomContentStager(
                     .use { output ->
                         archive.getInputStream(entry).use { input ->
                             val compressedSize = entry.compressedSize.takeIf { it > 0 } ?: Files.size(archivePath)
-                            copyArchiveBytes(input::read, output::write, selected, compressedSize)
+                            copyArchiveBytes(
+                                input::read,
+                                output::write,
+                                selected,
+                                compressedSize,
+                                limits,
+                            )
                         }
                     }
             }
@@ -511,6 +557,7 @@ class OkHttpRomContentStager(
         write: (ByteArray, Int, Int) -> Unit,
         selected: ArchiveEntry,
         compressedSize: Long,
+        limits: ArchiveExtractionLimits,
     ) {
         val buffer = ByteArray(COPY_BUFFER_BYTES)
         var copied = 0L
@@ -518,17 +565,16 @@ class OkHttpRomContentStager(
             val count = read(buffer)
             if (count < 0) break
             copied += count
-            if (copied > MAX_EXTRACTED_ROM_BYTES) {
+            if (copied > limits.maxBytes) {
                 throw RomContentStagingException(
                     "archived ROM '${selected.name}' exceeds the extraction size limit",
                     failure = RomContentStagingFailure.UnsafeContent,
                 )
             }
             // Multiplicative comparison: integer division (`copied / compressedSize`) truncates, so a
-            // ratio marginally above MAX_COMPRESSION_RATIO (e.g. copied=601, compressed=3 → 200) would
-            // slip through. `compressedSize * MAX_COMPRESSION_RATIO` cannot overflow for any realistic
-            // archive size (the 512 MiB extracted-size cap above remains the dominant guard).
-            if (copied > compressedSize.coerceAtLeast(1L) * MAX_COMPRESSION_RATIO) {
+            // ratio marginally above the limit would slip through. Multiplication is safe because
+            // realistic archives are far below Long.MAX_VALUE / 1000 and extraction has a 4 GiB cap.
+            if (copied > compressedSize.coerceAtLeast(1L) * limits.maxCompressionRatio) {
                 throw RomContentStagingException(
                     "archived ROM '${selected.name}' exceeds the compression ratio limit",
                     failure = RomContentStagingFailure.UnsafeContent,
@@ -565,8 +611,15 @@ class OkHttpRomContentStager(
         val CHD_SIGNATURE = "MComprHD".toByteArray(Charsets.US_ASCII)
         const val CHD_EXTENSION = ".chd"
         const val MAX_ARCHIVE_ENTRIES = 4096
-        const val MAX_EXTRACTED_ROM_BYTES = 512L * 1024 * 1024
-        const val MAX_COMPRESSION_RATIO = 200L
         const val COPY_BUFFER_BYTES = 64 * 1024
     }
 }
+
+private val DISC_IMAGE_EXTENSIONS = setOf(
+    ".bin", ".iso", ".img", ".mdf", ".pbp", ".chd",
+    ".gcm", ".tgc", ".wbfs", ".ciso", ".gcz", ".wia", ".rvz",
+)
+private const val MAX_EXTRACTED_CARTRIDGE_ROM_BYTES = 512L * 1024 * 1024
+private const val MAX_CARTRIDGE_ROM_COMPRESSION_RATIO = 200L
+private const val MAX_EXTRACTED_DISC_IMAGE_BYTES = 4L * 1024 * 1024 * 1024
+private const val MAX_DISC_IMAGE_COMPRESSION_RATIO = 1000L

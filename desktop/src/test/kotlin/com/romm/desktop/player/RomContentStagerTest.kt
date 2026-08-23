@@ -197,6 +197,20 @@ class RomContentStagerTest {
     }
 
     @Test
+    fun `archive limits allow optical disc images larger than the cartridge cap`() {
+        val cartridge = archiveExtractionLimitsFor(".gb")
+        val gameCube = archiveExtractionLimitsFor(".iso")
+        val playStation = archiveExtractionLimitsFor(".bin")
+        val compressedDisc = archiveExtractionLimitsFor(".rvz")
+
+        assertThat(cartridge.maxBytes).isEqualTo(512L * 1024 * 1024)
+        assertThat(gameCube.maxBytes).isGreaterThan(1_459_978_240L)
+        assertThat(playStation.maxBytes).isEqualTo(gameCube.maxBytes)
+        assertThat(compressedDisc.maxBytes).isEqualTo(gameCube.maxBytes)
+        assertThat(gameCube.maxCompressionRatio).isGreaterThan(cartridge.maxCompressionRatio)
+    }
+
+    @Test
     fun `stage rejects a ZIP entry with a CHD name without the MComprHD signature and leaves no staged CHD behind`(@TempDir dir: Path) {
         val notChd = "definitely-not-a-chd".toByteArray()
         val archivePath = dir.resolve("fixture.zip")
