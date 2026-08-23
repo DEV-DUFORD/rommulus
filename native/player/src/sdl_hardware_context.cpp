@@ -389,7 +389,9 @@ void SdlHardwareContext::drawScanlinesLocked(int outputWidth, int outputHeight) 
     glUseProgram(scanlineProgram_);
     const GLint rowHeight = glGetUniformLocation(scanlineProgram_, "rowHeight");
     if (rowHeight >= 0) {
-        glUniform1f(rowHeight, std::max(1.0f, outputHeight / 240.0f));
+        glUniform1f(
+            rowHeight,
+            std::max(1.0f, std::floor(outputHeight / 240.0f)));
     }
     glBindVertexArray(0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
