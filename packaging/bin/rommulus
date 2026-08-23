@@ -232,15 +232,9 @@ else
 fi
 export PATH="$APP_ROOT/bin${PATH:+:$PATH}"
 
-# The preview-19 direct framebuffer is correct under Gamescope, but not under
-# the Deck's rotated KDE/X11 desktop. Steam app IDs do not identify a
-# compositor, so only explicit Gamescope session markers force that player.
-if [[ "${XDG_CURRENT_DESKTOP:-}" == *gamescope* ]] \
-  || [[ "${XDG_SESSION_DESKTOP:-}" == *gamescope* ]] \
-  || [[ "${WAYLAND_DISPLAY:-}" == *gamescope* ]] \
-  || [ -n "${GAMESCOPE_WAYLAND_DISPLAY:-}" ]; then
-  export ROMM_FORCE_STEAM_DECK_PLAYER=1
-fi
+# All supported Linux compositors use the offscreen presenter. The isolated
+# direct-framebuffer player remains available only through an explicit
+# ROMM_FORCE_STEAM_DECK_PLAYER=1 diagnostic override.
 
 ARGS=("$@")
 if [ "${1:-}" = "--verify-full" ]; then

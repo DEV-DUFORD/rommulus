@@ -34,23 +34,6 @@ inline bool isSteamDeckOsRelease(const std::string& osRelease) {
     return false;
 }
 
-inline bool isGamescopeSession(
-    std::string currentDesktop,
-    std::string sessionDesktop,
-    std::string waylandDisplay,
-    std::string gamescopeWaylandDisplay
-) {
-    currentDesktop = normalizeSteamDeckIdentity(std::move(currentDesktop));
-    sessionDesktop = normalizeSteamDeckIdentity(std::move(sessionDesktop));
-    waylandDisplay = normalizeSteamDeckIdentity(std::move(waylandDisplay));
-    gamescopeWaylandDisplay =
-        normalizeSteamDeckIdentity(std::move(gamescopeWaylandDisplay));
-    return currentDesktop.find("gamescope") != std::string::npos ||
-           sessionDesktop.find("gamescope") != std::string::npos ||
-           waylandDisplay.find("gamescope") != std::string::npos ||
-           !gamescopeWaylandDisplay.empty();
-}
-
 inline bool isSteamDeckIdentity(
     const char* steamDeckEnvironment,
     std::string systemVendor,
@@ -125,19 +108,9 @@ inline bool isSteamDeck() {
 
 inline bool shouldUseSteamDeckPlayer() {
     const char* forceDeckPlayer = std::getenv("ROMM_FORCE_STEAM_DECK_PLAYER");
-    if (forceDeckPlayer != nullptr) {
-        const std::string value = normalizeSteamDeckIdentity(forceDeckPlayer);
-        if (value == "1" || value == "true") return true;
-    }
-    const auto environmentValue = [](const char* name) {
-        const char* value = std::getenv(name);
-        return value != nullptr ? std::string(value) : std::string();
-    };
-    return isSteamDeck() && isGamescopeSession(
-        environmentValue("XDG_CURRENT_DESKTOP"),
-        environmentValue("XDG_SESSION_DESKTOP"),
-        environmentValue("WAYLAND_DISPLAY"),
-        environmentValue("GAMESCOPE_WAYLAND_DISPLAY"));
+    if (forceDeckPlayer == nullptr) return false;
+    const std::string value = normalizeSteamDeckIdentity(forceDeckPlayer);
+    return value == "1" || value == "true";
 }
 
 }  // namespace romm::player

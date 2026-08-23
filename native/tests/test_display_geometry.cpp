@@ -24,14 +24,6 @@ int main() {
         nullptr, "Micro-Star International", "Micro-Star International",
         "MS-7C35", "MEG X570 ACE",
         "ID=ubuntu\nVARIANT_ID=desktop\n"));
-    CHECK(romm::player::isGamescopeSession("gamescope", "", "", ""));
-    CHECK(romm::player::isGamescopeSession(
-        "KDE", "", "gamescope-0", ""));
-    CHECK(romm::player::isGamescopeSession(
-        "KDE", "", "wayland-0", "gamescope-0"));
-    CHECK(!romm::player::isGamescopeSession(
-        "KDE", "plasma", "", ""));
-
     using romm::player::n64RenderSizeForOutput;
 
     CHECK_EQ(n64RenderSizeForOutput(1280, 720), std::make_pair(960, 720));
