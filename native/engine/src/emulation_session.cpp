@@ -128,6 +128,11 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // toggle, so user mappings would fire the wrong control.
         environment_.setCoreOptionOverride("mupen64plus-alt-map", "True");
         environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "True");
+#ifdef ROMM_STEAM_DECK_PLAYER
+        // Preview 19's Deck path configured GLideN64 at its native size.
+        // The Ubuntu compositor path sizes rendering from the desktop output.
+        environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
+#endif
         environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");
         environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");
         environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Off");
