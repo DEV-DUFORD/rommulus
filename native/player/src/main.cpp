@@ -422,6 +422,11 @@ int main(int argc, char* argv[]) {
                 std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
             videoSink->attachWindow(
                 reinterpret_cast<romm::video::NativeWindowHandle>(window));
+        } else {
+            // Preview 19's proven Deck path included this engine-level
+            // GLideN64 size override; direct framebuffer rendering alone is
+            // not equivalent without it.
+            hardwareRenderSize = "320x240";
         }
 
         romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(
