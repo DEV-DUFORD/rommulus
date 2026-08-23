@@ -29,7 +29,11 @@ void logPrint(romm::log::Severity severity, const char* tag, const char* fmt, ..
 // plain functions with the correct signature.
 
 uintptr_t hwGetCurrentFramebuffer(void) {
+#ifdef ROMM_FORCE_DEFAULT_FRAMEBUFFER
+    return 0;
+#else
     return romm::gl::context().currentFramebuffer();
+#endif
 }
 
 retro_proc_address_t hwGetProcAddress(const char* sym) {

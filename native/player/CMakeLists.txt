@@ -54,7 +54,7 @@ set(MUPEN64_DIR ${ROMM_REPO_ROOT}/third_party/cores/mupen64plus_next)
 find_package(SDL3 REQUIRED CONFIG)
 find_library(GLESV2_LIBRARY GLESv2 REQUIRED)
 
-add_executable(rommulus_player
+set(ROMM_PLAYER_COMMON_SOURCES
     # Platform-neutral engine (compiled in; the engine tree carries no
     # platform headers of its own).
     ${ROMM_ENGINE_SRC}/core_library.cpp
@@ -76,13 +76,23 @@ add_executable(rommulus_player
     ${ROMM_PLAYER_SRC}/sdl_log_sink.cpp
     ${ROMM_PLAYER_SRC}/sdl_dynamic_library.cpp
     ${ROMM_PLAYER_SRC}/sdl_audio_sink.cpp
-    ${ROMM_PLAYER_SRC}/sdl_hardware_context.cpp
     ${ROMM_PLAYER_SRC}/sdl_video_sink.cpp
     ${ROMM_PLAYER_SRC}/sdl_input.cpp
     ${ROMM_PLAYER_SRC}/binding_sidecar.cpp
     ${ROMM_PLAYER_SRC}/keyboard_binding_sidecar.cpp
     ${ROMM_PLAYER_SRC}/pause_overlay.cpp
     ${ROMM_PLAYER_SRC}/main.cpp
+)
+add_executable(rommulus_player
+    ${ROMM_PLAYER_COMMON_SOURCES}
+    ${ROMM_PLAYER_SRC}/sdl_hardware_context.cpp
+)
+add_executable(rommulus_player_deck
+    ${ROMM_PLAYER_COMMON_SOURCES}
+    ${ROMM_PLAYER_SRC}/sdl_hardware_context_legacy.cpp
+)
+set_target_properties(rommulus_player_deck PROPERTIES
+    OUTPUT_NAME "rommulus-player-deck"
 )
 # ${ROMM_REPO_ROOT}/third_party is required by protocol.cpp/validation.cpp
 # (vendored header-only nlohmann/json, included as <nlohmann/json.hpp>).
@@ -93,12 +103,27 @@ target_include_directories(rommulus_player PRIVATE
     ${ROMM_LIBRETRO_INCLUDE}
     ${ROMM_REPO_ROOT}/third_party
 )
+target_include_directories(rommulus_player_deck PRIVATE
+    ${ROMM_ENGINE_INCLUDE}
+    ${ROMM_ENGINE_SRC}
+    ${ROMM_PLAYER_INCLUDE}
+    ${ROMM_LIBRETRO_INCLUDE}
+    ${ROMM_REPO_ROOT}/third_party
+)
 target_compile_definitions(rommulus_player PRIVATE
     ROMM_PAUSE_FONT_PATH="${MUPEN64_DIR}/mupen64plus-core/data/font.ttf"
     ROMM_CONTROLLER_ART_PATH="${ROMM_REPO_ROOT}/assets/controllers"
 )
+target_compile_definitions(rommulus_player_deck PRIVATE
+    ROMM_PAUSE_FONT_PATH="${MUPEN64_DIR}/mupen64plus-core/data/font.ttf"
+    ROMM_CONTROLLER_ART_PATH="${ROMM_REPO_ROOT}/assets/controllers"
+    ROMM_STEAM_DECK_PLAYER=1
+    ROMM_FORCE_DEFAULT_FRAMEBUFFER=1
+)
 target_link_libraries(rommulus_player PRIVATE SDL3::SDL3 ${GLESV2_LIBRARY} m dl pthread)
+target_link_libraries(rommulus_player_deck PRIVATE SDL3::SDL3 m dl pthread)
 target_compile_options(rommulus_player PRIVATE -Wall -Wextra)
+target_compile_options(rommulus_player_deck PRIVATE -Wall -Wextra)
 
 # Synthetic core the player loads (Phase 8): a minimal software-rendering
 # Libretro core used for end-to-end player verification.

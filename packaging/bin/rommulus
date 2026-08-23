@@ -76,6 +76,7 @@ APP_ROOT="$(cd -- "$BIN_DIR/.." && pwd -P)" \
 # ---------------------------------------------------------------------------
 REQUIRED_FILES=(
   "bin/rommulus-player"
+  "bin/rommulus-player-deck"
   "lib/rommulus/app.jar"
   "share/rommulus/core-manifest.json"
   "share/rommulus/PACKAGE.sha256"
@@ -125,6 +126,7 @@ verify_rel() { # verify_rel <relpath>
 
 CRITICAL=(
   "bin/rommulus-player"
+  "bin/rommulus-player-deck"
   "lib/rommulus/app.jar"
   "share/rommulus/core-manifest.json"
 )

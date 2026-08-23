@@ -17,12 +17,14 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -312,6 +314,9 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "usage: %s --request <file>\n", argc > 0 ? argv[0] : "rommulus_player");
         return 2;
     }
+#ifdef ROMM_STEAM_DECK_PLAYER
+    std::fprintf(stderr, "info: isolated Steam Deck legacy player selected\n");
+#endif
     const std::string requestPath = argv[2];
 
     // 2. Read the request file.
@@ -327,6 +332,27 @@ int main(int argc, char* argv[]) {
     std::string parseError;
     const std::optional<romm::player::PlayerRequest> parsed =
             romm::player::parseRequest(requestText, &parseError);
+
+#ifndef ROMM_STEAM_DECK_PLAYER
+    if (parsed.has_value() &&
+        parsed->coreId == "mupen64plus_next" &&
+        romm::player::isSteamDeck()) {
+        std::error_code pathError;
+        const std::filesystem::path executable =
+            std::filesystem::read_symlink("/proc/self/exe", pathError);
+        const std::filesystem::path deckPlayer =
+            executable.parent_path() / "rommulus-player-deck";
+        if (!pathError && std::filesystem::exists(deckPlayer)) {
+            ::execv(deckPlayer.c_str(), argv);
+            std::fprintf(
+                stderr, "error: failed to start Steam Deck player: %s\n",
+                std::strerror(errno));
+            return 1;
+        }
+        std::fprintf(stderr, "error: Steam Deck player binary is missing\n");
+        return 1;
+    }
+#endif
 
     // 3. Trusted roots from the environment contract.
     romm::player::PlayerConfig config;
@@ -384,8 +410,12 @@ int main(int argc, char* argv[]) {
 
     // 7. Create the window and apply the requested video settings.
     const bool useHardwareRendering = request.coreId == "mupen64plus_next";
+#ifdef ROMM_STEAM_DECK_PLAYER
+    const bool useSteamDeckN64Path = useHardwareRendering;
+#else
     const bool useSteamDeckN64Path =
         useHardwareRendering && romm::player::isSteamDeck();
+#endif
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (useHardwareRendering) {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);

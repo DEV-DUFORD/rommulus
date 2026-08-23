@@ -68,6 +68,8 @@ OUT_DIR="${OUT_DIR:-$REPO_ROOT/dist}"
 command -v zstd >/dev/null 2>&1 || die "zstd is required (apt-get install zstd)"
 [ -x "$PLAYER_BUILD_DIR/rommulus_player" ] \
   || die "player binary not found: $PLAYER_BUILD_DIR/rommulus_player — run 'cmake -S native/player -B build/player && cmake --build build/player' first"
+[ -x "$PLAYER_BUILD_DIR/rommulus-player-deck" ] \
+  || die "Steam Deck player binary not found: $PLAYER_BUILD_DIR/rommulus-player-deck"
 [ -f "$APP_JAR" ] \
   || die "desktop app jar not found: $APP_JAR — run './gradlew :desktop:jar' first (override with APP_JAR=...)"
 [ -d "$APP_LIB_DIR" ] \
@@ -92,6 +94,8 @@ install -m 0755 "$SCRIPT_DIR/bin/rommulus" "$STAGE/bin/rommulus"
 # Steam's Non-Steam Game picker recognizes shell launchers by extension.
 ln -s rommulus "$STAGE/bin/rommulus.sh"
 install -m 0755 "$PLAYER_BUILD_DIR/rommulus_player" "$STAGE/bin/rommulus-player"
+install -m 0755 "$PLAYER_BUILD_DIR/rommulus-player-deck" \
+  "$STAGE/bin/rommulus-player-deck"
 # Compatibility shim: the desktop app resolves the player as "rommulus_player"
 # (underscore) via PATH; the canonical tarball name is "rommulus-player".
 ln -s rommulus-player "$STAGE/bin/rommulus_player"

@@ -529,6 +529,8 @@ jobs:
             ls -la build/player/ 2>/dev/null || echo "(build/player/ directory does not exist)"
             exit 1
           fi
+          [ -x build/player/rommulus-player-deck ] \
+            || { echo "::error::Steam Deck player binary is missing"; exit 1; }
 
   # =================================================================
   # 8. core-smoke-tier-1  — STUBBED (Phase 8+)
@@ -845,6 +847,7 @@ jobs:
           )
           [ -L "$extract/squashfs-root/AppRun" ]
           [ -x "$extract/squashfs-root/bin/rommulus-player" ]
+          [ -x "$extract/squashfs-root/bin/rommulus-player-deck" ]
           [ -x "$extract/squashfs-root/lib/runtime/bin/java" ]
           [ -f "$extract/squashfs-root/lib/rommulus/app.jar" ]
           find "$extract/squashfs-root/lib/rommulus/lib" -name 'kotlin-stdlib-*.jar' \
@@ -1016,7 +1019,7 @@ jobs:
           # regular file; *.so shared libraries legitimately carry the exec bit
           # and are excluded.)
           actual="$(find audit/extract -type f -perm -u+x ! -name '*.so' | sed 's|^audit/extract/||' | LC_ALL=C sort)"
-          expected="$(printf '%s\n' bin/rommulus bin/rommulus-player lib/runtime/bin/java lib/runtime/bin/keytool lib/runtime/lib/jexec lib/runtime/lib/jspawnhelper | LC_ALL=C sort)"
+          expected="$(printf '%s\n' bin/rommulus bin/rommulus-player bin/rommulus-player-deck lib/runtime/bin/java lib/runtime/bin/keytool lib/runtime/lib/jexec lib/runtime/lib/jspawnhelper | LC_ALL=C sort)"
           if [ "$actual" != "$expected" ]; then
             echo "::error::executable inventory differs from the declared set:"
             diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
@@ -1100,6 +1103,14 @@ jobs:
             exit 1
           fi
           echo "✓ rommulus-player has no unresolved or direct JVM/Android library dependency"
+
+          ldd audit/extract/bin/rommulus-player-deck > /tmp/deck-player-ldd.txt
+          cat /tmp/deck-player-ldd.txt
+          if grep -qE 'not found|libGLES|libGLdispatch' /tmp/deck-player-ldd.txt; then
+            echo "::error::Steam Deck player has unresolved or compositor GLES dependencies"
+            exit 1
+          fi
+          echo "✓ Steam Deck player preserves the legacy runtime dependency set"
 
           ldd audit/extract/lib/rommulus/cores/libmupen64plus_next_core.so \
             > /tmp/n64-core-ldd.txt
