@@ -40,6 +40,7 @@ public:
     bool hasSurface() override;
     void unmakeCurrent() override;
     bool makeCurrent() override;
+    void setScanlines(bool enabled) override;
     bool swapBuffers() override;
     void destroyContext() override;
     void* currentContext() const override;

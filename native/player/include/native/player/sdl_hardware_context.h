@@ -4,13 +4,14 @@
 
 #include <native/engine/HardwareContext.h>
 
+#include <atomic>
 #include <mutex>
 
 namespace romm::player {
 
 class SdlHardwareContext final : public romm::gl::HardwareContext {
 public:
-    explicit SdlHardwareContext(SDL_Window* window);
+    SdlHardwareContext(SDL_Window* window, bool useOffscreenPresentation);
     ~SdlHardwareContext() override;
 
     bool createContext() override;
@@ -22,6 +23,7 @@ public:
     bool hasSurface() override;
     void unmakeCurrent() override;
     bool makeCurrent() override;
+    void setScanlines(bool enabled) override;
     bool swapBuffers() override;
     void destroyContext() override;
     void* currentContext() const override;
@@ -41,9 +43,14 @@ private:
     unsigned framebuffer_ = 0;
     unsigned colorTexture_ = 0;
     unsigned depthStencil_ = 0;
+    unsigned scanlineProgram_ = 0;
+    bool useOffscreenPresentation_ = false;
+    std::atomic<bool> scanlinesEnabled_{false};
 
     bool createFramebufferLocked();
     void destroyFramebufferLocked();
+    bool createScanlineProgramLocked();
+    void drawScanlinesLocked(int outputWidth, int outputHeight);
 };
 
 }  // namespace romm::player

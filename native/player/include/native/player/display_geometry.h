@@ -5,6 +5,17 @@
 
 namespace romm::player {
 
+inline bool needsOffscreenPresentation(
+    int logicalWidth,
+    int logicalHeight,
+    int pixelWidth,
+    int pixelHeight
+) {
+    return logicalWidth > 0 && logicalHeight > 0 &&
+           pixelWidth > 0 && pixelHeight > 0 &&
+           (logicalWidth != pixelWidth || logicalHeight != pixelHeight);
+}
+
 inline std::pair<int, int> n64RenderSizeForOutput(int outputWidth, int outputHeight) {
     static constexpr std::array<std::pair<int, int>, 13> kSizes = {{
         {320, 240}, {640, 480}, {960, 720}, {1280, 960}, {1440, 1080},

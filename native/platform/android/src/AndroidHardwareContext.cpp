@@ -239,6 +239,8 @@ bool AndroidHardwareContext::makeCurrent() {
     return true;
 }
 
+void AndroidHardwareContext::setScanlines(bool /*enabled*/) {}
+
 bool AndroidHardwareContext::swapBuffers() {
     if (!eglSwapBuffers(display_, surface_)) {
         EGLint err = eglGetError();

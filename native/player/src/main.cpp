@@ -391,7 +391,7 @@ int main(int argc, char* argv[]) {
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-        windowFlags |= SDL_WINDOW_OPENGL;
+        windowFlags |= SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     }
     if (request.video.fullscreen) windowFlags |= SDL_WINDOW_FULLSCREEN;
     SDL_Window* window = SDL_CreateWindow("rommulus_player", 1280, 720, windowFlags);
@@ -408,18 +408,25 @@ int main(int argc, char* argv[]) {
     videoSink->setFullscreen(request.video.fullscreen);
     std::string hardwareRenderSize;
     if (useHardwareRendering) {
-        // The HW core renders directly into the window framebuffer. Size its
-        // viewport from physical pixels, not logical window points, so HiDPI
-        // desktops do not leave a tiny 320x240 image in one corner.
+        SDL_SyncWindow(window);
+        int logicalWidth = 0;
+        int logicalHeight = 0;
         int outputWidth = 0;
         int outputHeight = 0;
+        SDL_GetWindowSize(window, &logicalWidth, &logicalHeight);
         SDL_GetWindowSizeInPixels(window, &outputWidth, &outputHeight);
-        const auto renderSize =
-            romm::player::n64RenderSizeForOutput(outputWidth, outputHeight);
-        hardwareRenderSize =
-            std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
+        const bool useOffscreenPresentation = romm::player::needsOffscreenPresentation(
+            logicalWidth, logicalHeight, outputWidth, outputHeight);
+        if (useOffscreenPresentation) {
+            const auto renderSize =
+                romm::player::n64RenderSizeForOutput(outputWidth, outputHeight);
+            hardwareRenderSize =
+                std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
+        }
 
-        romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(window));
+        romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(
+            window, useOffscreenPresentation));
+        romm::gl::context().setScanlines(request.video.scanlines);
     }
 
     // Give the window manager one chance to deliver an early close/quit
@@ -611,6 +618,9 @@ int main(int argc, char* argv[]) {
             // immediately (runtime toggle — no relaunch needed).
             case romm::player::PauseMenuEffect::kToggleScanlines:
                 videoSink->setScanlines(pauseMenu.scanlinesEnabled());
+                if (useHardwareRendering) {
+                    romm::gl::context().setScanlines(pauseMenu.scanlinesEnabled());
+                }
                 break;
             case romm::player::PauseMenuEffect::kToggleIntegerScaling:
                 videoSink->setIntegerScaling(pauseMenu.integerScalingEnabled());

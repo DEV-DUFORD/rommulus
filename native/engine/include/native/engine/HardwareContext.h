@@ -80,6 +80,8 @@ public:
     // Used after temporarily yielding the window surface to another renderer.
     virtual bool makeCurrent() = 0;
 
+    virtual void setScanlines(bool enabled) = 0;
+
     // Swaps the front/back buffers. Returns false on failure (e.g. context
     // lost). The caller should treat a false return as a signal to
     // re-attach the window and reset GL state.

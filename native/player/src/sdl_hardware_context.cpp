@@ -22,8 +22,14 @@ void logSdlError(const char* operation) {
 
 }  // namespace
 
-SdlHardwareContext::SdlHardwareContext(SDL_Window* window)
-    : window_(window), pendingWindow_(window), windowUpdatePending_(true) {
+SdlHardwareContext::SdlHardwareContext(
+    SDL_Window* window,
+    bool useOffscreenPresentation
+)
+    : window_(window),
+      pendingWindow_(window),
+      windowUpdatePending_(true),
+      useOffscreenPresentation_(useOffscreenPresentation) {
     // SDL requires context creation on the main thread. The emulation thread
     // takes ownership with SDL_GL_MakeCurrent() in createContext().
     context_ = SDL_GL_CreateContext(window_);
@@ -47,7 +53,7 @@ bool SdlHardwareContext::createContext() {
         logSdlError("SDL_GL_MakeCurrent");
         return false;
     }
-    if (!createFramebufferLocked()) {
+    if (useOffscreenPresentation_ && !createFramebufferLocked()) {
         return false;
     }
     if (!SDL_GL_SetSwapInterval(1)) {
@@ -131,15 +137,19 @@ bool SdlHardwareContext::makeCurrent() {
     return true;
 }
 
+void SdlHardwareContext::setScanlines(bool enabled) {
+    scanlinesEnabled_.store(enabled);
+}
+
 bool SdlHardwareContext::swapBuffers() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!surfaceAttached_ || window_ == nullptr) return false;
-    if (framebuffer_ != 0 && bufferWidth_ > 0 && bufferHeight_ > 0) {
-        int outputWidth = 0;
-        int outputHeight = 0;
-        SDL_GetWindowSizeInPixels(window_, &outputWidth, &outputHeight);
-        if (outputWidth > 0 && outputHeight > 0) {
-            GLint previousDrawFramebuffer = 0;
+    int outputWidth = 0;
+    int outputHeight = 0;
+    SDL_GetWindowSizeInPixels(window_, &outputWidth, &outputHeight);
+    if (framebuffer_ != 0 && bufferWidth_ > 0 && bufferHeight_ > 0 &&
+        outputWidth > 0 && outputHeight > 0) {
+        GLint previousDrawFramebuffer = 0;
             GLint previousReadFramebuffer = 0;
             GLint previousViewport[4] = {};
             GLint previousScissorBox[4] = {};
@@ -188,10 +198,12 @@ bool SdlHardwareContext::swapBuffers() {
             glColorMask(
                 previousColorMask[0], previousColorMask[1],
                 previousColorMask[2], previousColorMask[3]);
-            glClearColor(
-                previousClearColor[0], previousClearColor[1],
-                previousClearColor[2], previousClearColor[3]);
-        }
+        glClearColor(
+            previousClearColor[0], previousClearColor[1],
+            previousClearColor[2], previousClearColor[3]);
+    }
+    if (scanlinesEnabled_.load() && outputWidth > 0 && outputHeight > 0) {
+        drawScanlinesLocked(outputWidth, outputHeight);
     }
     if (!SDL_GL_SwapWindow(window_)) {
         logSdlError("SDL_GL_SwapWindow");
@@ -203,7 +215,13 @@ bool SdlHardwareContext::swapBuffers() {
 void SdlHardwareContext::destroyContext() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (context_ != nullptr) {
-        destroyFramebufferLocked();
+        if (window_ != nullptr && SDL_GL_MakeCurrent(window_, context_)) {
+            destroyFramebufferLocked();
+            if (scanlineProgram_ != 0) {
+                glDeleteProgram(scanlineProgram_);
+                scanlineProgram_ = 0;
+            }
+        }
         if (window_ != nullptr) SDL_GL_MakeCurrent(window_, nullptr);
         SDL_GL_DestroyContext(context_);
         context_ = nullptr;
@@ -220,7 +238,7 @@ void* SdlHardwareContext::currentContext() const {
 
 uintptr_t SdlHardwareContext::currentFramebuffer() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return framebuffer_;
+    return useOffscreenPresentation_ ? framebuffer_ : 0;
 }
 
 retro_proc_address_t SdlHardwareContext::getProcAddress(const char* name) {
@@ -277,6 +295,140 @@ void SdlHardwareContext::destroyFramebufferLocked() {
     framebuffer_ = 0;
     depthStencil_ = 0;
     colorTexture_ = 0;
+}
+
+bool SdlHardwareContext::createScanlineProgramLocked() {
+    static constexpr const char* kVertexShader = R"(
+        #version 300 es
+        const vec2 positions[3] = vec2[3](
+            vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
+        );
+        void main() {
+            gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+        }
+    )";
+    static constexpr const char* kFragmentShader = R"(
+        #version 300 es
+        precision mediump float;
+        out vec4 color;
+        void main() {
+            if ((int(gl_FragCoord.y) & 1) == 0) discard;
+            color = vec4(0.0, 0.0, 0.0, 0.375);
+        }
+    )";
+
+    const auto compile = [](GLenum type, const char* source) {
+        const GLuint shader = glCreateShader(type);
+        glShaderSource(shader, 1, &source, nullptr);
+        glCompileShader(shader);
+        GLint compiled = GL_FALSE;
+        glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+        if (compiled != GL_TRUE) {
+            glDeleteShader(shader);
+            return GLuint{0};
+        }
+        return shader;
+    };
+
+    const GLuint vertexShader = compile(GL_VERTEX_SHADER, kVertexShader);
+    const GLuint fragmentShader = compile(GL_FRAGMENT_SHADER, kFragmentShader);
+    if (vertexShader == 0 || fragmentShader == 0) {
+        if (vertexShader != 0) glDeleteShader(vertexShader);
+        if (fragmentShader != 0) glDeleteShader(fragmentShader);
+        romm::log::sink().log(
+            romm::log::Severity::Warn, kTag, "failed to compile scanline shader");
+        return false;
+    }
+
+    scanlineProgram_ = glCreateProgram();
+    glAttachShader(scanlineProgram_, vertexShader);
+    glAttachShader(scanlineProgram_, fragmentShader);
+    glLinkProgram(scanlineProgram_);
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    GLint linked = GL_FALSE;
+    glGetProgramiv(scanlineProgram_, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        glDeleteProgram(scanlineProgram_);
+        scanlineProgram_ = 0;
+        romm::log::sink().log(
+            romm::log::Severity::Warn, kTag, "failed to link scanline shader");
+        return false;
+    }
+    return true;
+}
+
+void SdlHardwareContext::drawScanlinesLocked(int outputWidth, int outputHeight) {
+    if (scanlineProgram_ == 0 && !createScanlineProgramLocked()) return;
+
+    GLint previousFramebuffer = 0;
+    GLint previousProgram = 0;
+    GLint previousVertexArray = 0;
+    GLint previousViewport[4] = {};
+    GLint previousBlendSrcRgb = 0;
+    GLint previousBlendDstRgb = 0;
+    GLint previousBlendSrcAlpha = 0;
+    GLint previousBlendDstAlpha = 0;
+    GLint previousBlendEquationRgb = 0;
+    GLint previousBlendEquationAlpha = 0;
+    GLint previousScissorBox[4] = {};
+    GLboolean previousColorMask[4] = {};
+    const GLboolean blendEnabled = glIsEnabled(GL_BLEND);
+    const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean stencilEnabled = glIsEnabled(GL_STENCIL_TEST);
+    const GLboolean cullEnabled = glIsEnabled(GL_CULL_FACE);
+    const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+    const GLboolean rasterizerDiscardEnabled = glIsEnabled(GL_RASTERIZER_DISCARD);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previousFramebuffer);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVertexArray);
+    glGetIntegerv(GL_VIEWPORT, previousViewport);
+    glGetIntegerv(GL_BLEND_SRC_RGB, &previousBlendSrcRgb);
+    glGetIntegerv(GL_BLEND_DST_RGB, &previousBlendDstRgb);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA, &previousBlendSrcAlpha);
+    glGetIntegerv(GL_BLEND_DST_ALPHA, &previousBlendDstAlpha);
+    glGetIntegerv(GL_BLEND_EQUATION_RGB, &previousBlendEquationRgb);
+    glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &previousBlendEquationAlpha);
+    glGetIntegerv(GL_SCISSOR_BOX, previousScissorBox);
+    glGetBooleanv(GL_COLOR_WRITEMASK, previousColorMask);
+
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glViewport(0, 0, outputWidth, outputHeight);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_RASTERIZER_DISCARD);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendEquation(GL_FUNC_ADD);
+    glUseProgram(scanlineProgram_);
+    glBindVertexArray(0);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    glBindVertexArray(previousVertexArray);
+    glUseProgram(previousProgram);
+    glBlendFuncSeparate(
+        previousBlendSrcRgb, previousBlendDstRgb,
+        previousBlendSrcAlpha, previousBlendDstAlpha);
+    glBlendEquationSeparate(previousBlendEquationRgb, previousBlendEquationAlpha);
+    if (!blendEnabled) glDisable(GL_BLEND);
+    if (depthEnabled) glEnable(GL_DEPTH_TEST);
+    if (stencilEnabled) glEnable(GL_STENCIL_TEST);
+    if (cullEnabled) glEnable(GL_CULL_FACE);
+    if (scissorEnabled) glEnable(GL_SCISSOR_TEST);
+    if (rasterizerDiscardEnabled) glEnable(GL_RASTERIZER_DISCARD);
+    glScissor(
+        previousScissorBox[0], previousScissorBox[1],
+        previousScissorBox[2], previousScissorBox[3]);
+    glColorMask(
+        previousColorMask[0], previousColorMask[1],
+        previousColorMask[2], previousColorMask[3]);
+    glViewport(
+        previousViewport[0], previousViewport[1],
+        previousViewport[2], previousViewport[3]);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previousFramebuffer);
 }
 
 }  // namespace romm::player

@@ -26,6 +26,7 @@ public:
     bool hasSurface() override { return false; }
     void unmakeCurrent() override {}
     bool makeCurrent() override { return false; }
+    void setScanlines(bool /*enabled*/) override {}
     bool swapBuffers() override { return false; }
     void destroyContext() override {}
     void* currentContext() const override { return nullptr; }
