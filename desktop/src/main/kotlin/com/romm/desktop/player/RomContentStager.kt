@@ -10,6 +10,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipFile
 
 /** Staged ROM content ready to be pinned in a player launch request. */
@@ -104,6 +105,16 @@ interface RomContentStager {
 }
 
 /**
+ * ROM transfers may legitimately run for many minutes. Remove only OkHttp's whole-call deadline;
+ * the shared client's connect and read-inactivity timeouts still detect unreachable or stalled
+ * servers, and its authentication/cookie interceptors are retained by [OkHttpClient.newBuilder].
+ */
+internal fun gameDownloadClient(client: OkHttpClient): OkHttpClient =
+    client.newBuilder()
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+
+/**
  * Production [RomContentStager]: downloads via the authenticated OkHttp client (the same Bearer +
  * cookie + CSRF stack as images and BIOS staging) and stages under
  * `cacheDir/roms/<origin-key>/<romId>/<fileName>` — the "roms" cache subdirectory Android maps for
@@ -136,6 +147,8 @@ class OkHttpRomContentStager(
     private val originProvider: () -> String?,
     private val romCacheDir: Path,
 ) : RomContentStager {
+
+    private val downloadClient = gameDownloadClient(client)
 
     override fun stage(
         romId: Long,
@@ -191,7 +204,7 @@ class OkHttpRomContentStager(
         try {
             val url = RommApi.romContentUrl(origin, romId, fileName)
             val request = Request.Builder().url(url).get().build()
-            client.newCall(request).execute().use { response ->
+            downloadClient.newCall(request).execute().use { response ->
                 when {
                     !response.isSuccessful ->
                         throw RomContentStagingException(

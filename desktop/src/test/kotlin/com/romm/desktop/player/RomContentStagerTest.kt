@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -70,6 +71,21 @@ class RomContentStagerTest {
     /** The per-ROM cache directory: `roms/<origin-key>/<romId>`. */
     private fun romDir(dir: Path, romId: Long, origin: String = ORIGIN) =
         dir.resolve("roms").resolve(originKey(origin)).resolve(romId.toString())
+
+    @Test
+    fun `game downloads have no whole-call deadline`() {
+        val shared = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS)
+            .build()
+
+        val download = gameDownloadClient(shared)
+
+        assertThat(download.callTimeoutMillis).isZero()
+        assertThat(download.connectTimeoutMillis).isEqualTo(10_000)
+        assertThat(download.readTimeoutMillis).isEqualTo(30_000)
+    }
 
     @Test
     fun `stage downloads the ROM to the roms cache dir and returns its sha256`(@TempDir dir: Path) {
