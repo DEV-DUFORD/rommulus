@@ -1,11 +1,16 @@
 #include "romm_test.h"
 
 #include "native/player/display_geometry.h"
+#include "native/player/steam_deck.h"
 
 int main() {
-    CHECK(!romm::player::needsOffscreenPresentation(1280, 800, 1280, 800));
-    CHECK(romm::player::needsOffscreenPresentation(1280, 720, 2560, 1440));
-    CHECK(!romm::player::needsOffscreenPresentation(0, 0, 1280, 800));
+    CHECK(romm::player::isSteamDeckIdentity("1", "", "", ""));
+    CHECK(romm::player::isSteamDeckIdentity(
+        nullptr, "Valve", "Jupiter", ""));
+    CHECK(romm::player::isSteamDeckIdentity(
+        nullptr, "Valve Corporation", "", "Galileo"));
+    CHECK(!romm::player::isSteamDeckIdentity(
+        nullptr, "Apple Inc.", "MacBookPro11,4", ""));
 
     using romm::player::n64RenderSizeForOutput;
 

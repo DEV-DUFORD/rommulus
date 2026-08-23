@@ -51,6 +51,7 @@
 #include "native/player/sdl_input.h"
 #include "native/player/sdl_log_sink.h"
 #include "native/player/sdl_video_sink.h"
+#include "native/player/steam_deck.h"
 #include "native/player/validation.h"
 
 namespace {
@@ -383,6 +384,8 @@ int main(int argc, char* argv[]) {
 
     // 7. Create the window and apply the requested video settings.
     const bool useHardwareRendering = request.coreId == "mupen64plus_next";
+    const bool useSteamDeckN64Path =
+        useHardwareRendering && romm::player::isSteamDeck();
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (useHardwareRendering) {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -391,7 +394,7 @@ int main(int argc, char* argv[]) {
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-        windowFlags |= SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        windowFlags |= SDL_WINDOW_OPENGL;
     }
     if (request.video.fullscreen) windowFlags |= SDL_WINDOW_FULLSCREEN;
     SDL_Window* window = SDL_CreateWindow("rommulus_player", 1280, 720, windowFlags);
@@ -408,25 +411,27 @@ int main(int argc, char* argv[]) {
     videoSink->setFullscreen(request.video.fullscreen);
     std::string hardwareRenderSize;
     if (useHardwareRendering) {
-        SDL_SyncWindow(window);
-        int logicalWidth = 0;
-        int logicalHeight = 0;
-        int outputWidth = 0;
-        int outputHeight = 0;
-        SDL_GetWindowSize(window, &logicalWidth, &logicalHeight);
-        SDL_GetWindowSizeInPixels(window, &outputWidth, &outputHeight);
-        const bool useOffscreenPresentation = romm::player::needsOffscreenPresentation(
-            logicalWidth, logicalHeight, outputWidth, outputHeight);
+        const bool useOffscreenPresentation = !useSteamDeckN64Path;
         if (useOffscreenPresentation) {
+            int outputWidth = 0;
+            int outputHeight = 0;
+            SDL_GetWindowSizeInPixels(window, &outputWidth, &outputHeight);
             const auto renderSize =
                 romm::player::n64RenderSizeForOutput(outputWidth, outputHeight);
             hardwareRenderSize =
                 std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
+            videoSink->attachWindow(
+                reinterpret_cast<romm::video::NativeWindowHandle>(window));
         }
 
         romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(
             window, useOffscreenPresentation));
-        romm::gl::context().setScanlines(request.video.scanlines);
+        romm::gl::context().setScanlines(
+            !useSteamDeckN64Path && request.video.scanlines);
+        std::fprintf(
+            stderr, "info: N64 presentation path: %s\n",
+            useSteamDeckN64Path ? "Steam Deck direct framebuffer"
+                                : "Linux offscreen compositor");
     }
 
     // Give the window manager one chance to deliver an early close/quit
@@ -443,7 +448,7 @@ int main(int argc, char* argv[]) {
 
     // 8. Load and start the core.
     romm::EmulationSession session;
-    session.setReleaseHardwareContextWhenPaused(useHardwareRendering);
+    session.setReleaseHardwareContextWhenPaused(useSteamDeckN64Path);
     // GLideN64 runs the N64 RDP on the GPU; HLE avoids the much heavier cxd4
     // RSP path. Other cores ignore these Mupen64Plus-specific options.
     session.setCoreOptionOverride("mupen64plus-rdp-plugin", "gliden64");
@@ -605,13 +610,13 @@ int main(int argc, char* argv[]) {
         switch (effect) {
             case romm::player::PauseMenuEffect::kResume:
                 // The menu closed via Resume (or cancel): unfreeze the core.
-                if (useHardwareRendering) videoSink->detachWindow();
+                if (useSteamDeckN64Path) videoSink->detachWindow();
                 session.setPaused(false);
                 break;
             case romm::player::PauseMenuEffect::kQuit:
                 // Quit was confirmed: leave through the normal shutdown path,
                 // which checkpoints and reports exitKind=completed.
-                if (useHardwareRendering) videoSink->detachWindow();
+                if (useSteamDeckN64Path) videoSink->detachWindow();
                 running = false;
                 break;
             // Video Options toggles: apply the menu's NEW state to the sink
@@ -619,7 +624,8 @@ int main(int argc, char* argv[]) {
             case romm::player::PauseMenuEffect::kToggleScanlines:
                 videoSink->setScanlines(pauseMenu.scanlinesEnabled());
                 if (useHardwareRendering) {
-                    romm::gl::context().setScanlines(pauseMenu.scanlinesEnabled());
+                    romm::gl::context().setScanlines(
+                        !useSteamDeckN64Path && pauseMenu.scanlinesEnabled());
                 }
                 break;
             case romm::player::PauseMenuEffect::kToggleIntegerScaling:
@@ -689,7 +695,7 @@ int main(int argc, char* argv[]) {
         pauseMenu.open();
         videoSink->requestRepaint();
         takeCheckpoint(session, request);
-        if (useHardwareRendering) {
+        if (useSteamDeckN64Path) {
             const auto deadline =
                 std::chrono::steady_clock::now() + std::chrono::seconds(1);
             while (!session.hardwareContextReleasedForPause() &&
