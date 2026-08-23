@@ -113,6 +113,10 @@ bool SdlHardwareContext::makeCurrent() {
 
 void SdlHardwareContext::setScanlines(bool) {}
 
+void SdlHardwareContext::setIntegerScaling(bool) {}
+
+void SdlHardwareContext::setSharpFilter(bool) {}
+
 bool SdlHardwareContext::swapBuffers() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!surfaceAttached_ || window_ == nullptr) return false;
