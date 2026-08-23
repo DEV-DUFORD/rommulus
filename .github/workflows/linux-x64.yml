@@ -996,7 +996,7 @@ jobs:
       - name: Assert — package has every required license
         run: |
           set -euo pipefail
-          for f in libretro.txt NOTICE third_party_license_metadata third_party_licenses; do
+          for f in libretro.txt libglvnd.txt NOTICE third_party_license_metadata third_party_licenses; do
             p="audit/extract/share/licenses/rommulus/$f"
             if [ ! -s "$p" ]; then
               echo "::error::required license missing or empty in package: $p"
@@ -1088,7 +1088,8 @@ jobs:
       - name: Assert — player has no direct JVM/Android dependency
         run: |
           set -euo pipefail
-          ldd audit/extract/bin/rommulus-player > /tmp/player-ldd.txt
+          LD_LIBRARY_PATH="$PWD/audit/extract/lib/rommulus" \
+            ldd audit/extract/bin/rommulus-player > /tmp/player-ldd.txt
           [ -s /tmp/player-ldd.txt ] || { echo "::error::ldd produced no output"; exit 1; }
           cat /tmp/player-ldd.txt
           if grep -q 'not found' /tmp/player-ldd.txt; then
@@ -1099,6 +1100,10 @@ jobs:
             echo "::error::rommulus-player links against JVM/Android libraries"
             exit 1
           fi
+          grep -F "$PWD/audit/extract/lib/rommulus/libGLESv2.so.2" /tmp/player-ldd.txt \
+            || { echo "::error::rommulus-player did not resolve the bundled libGLESv2.so.2"; exit 1; }
+          grep -F "$PWD/audit/extract/lib/rommulus/libGLdispatch.so.0" /tmp/player-ldd.txt \
+            || { echo "::error::rommulus-player did not resolve the bundled libGLdispatch.so.0"; exit 1; }
           echo "✓ rommulus-player has no unresolved or direct JVM/Android library dependency"
 
       - name: Note — §15 assertions deferred to follow-up sub-units

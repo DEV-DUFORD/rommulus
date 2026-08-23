@@ -64,6 +64,8 @@ APP_JAR="${APP_JAR:-$REPO_ROOT/desktop/build/libs/desktop.jar}"
 APP_LIB_DIR="${APP_LIB_DIR:-$REPO_ROOT/desktop/build/runtime-libs}"
 RUNTIME_DIR="${RUNTIME_DIR:-$REPO_ROOT/build/runtime}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/dist}"
+GLESV2_LIBRARY="${GLESV2_LIBRARY:-$(ldconfig -p | awk '/libGLESv2\.so\.2 \(/{print $NF; exit}')}"
+GLDISPATCH_LIBRARY="${GLDISPATCH_LIBRARY:-$(ldconfig -p | awk '/libGLdispatch\.so\.0 \(/{print $NF; exit}')}"
 
 command -v zstd >/dev/null 2>&1 || die "zstd is required (apt-get install zstd)"
 [ -x "$PLAYER_BUILD_DIR/rommulus_player" ] \
@@ -74,6 +76,10 @@ command -v zstd >/dev/null 2>&1 || die "zstd is required (apt-get install zstd)"
   || die "desktop runtime libraries not found: $APP_LIB_DIR — run './gradlew :desktop:copyRuntimeClasspath' first (override with APP_LIB_DIR=...)"
 [ -x "$RUNTIME_DIR/bin/java" ] \
   || die "jlink JVM runtime not found at $RUNTIME_DIR (needs bin/java) — build the jlink image per packaging/README.md, or override with RUNTIME_DIR=..."
+[ -f "$GLESV2_LIBRARY" ] \
+  || die "libGLESv2.so.2 not found — install the GLES runtime, or override with GLESV2_LIBRARY=..."
+[ -f "$GLDISPATCH_LIBRARY" ] \
+  || die "libGLdispatch.so.0 not found — install the GLVND runtime, or override with GLDISPATCH_LIBRARY=..."
 
 # Validate the core manifest before it ships.
 if command -v python3 >/dev/null 2>&1; then
@@ -119,6 +125,10 @@ for f in "$PLAYER_BUILD_DIR"/lib*.so; do
 done
 [ "$core_count" -gt 0 ] \
   || die "no core shared libraries (lib*_core.so) found in $PLAYER_BUILD_DIR — build the player with cores enabled"
+install -m 0644 "$(readlink -f "$GLESV2_LIBRARY")" \
+  "$STAGE/lib/rommulus/libGLESv2.so.2"
+install -m 0644 "$(readlink -f "$GLDISPATCH_LIBRARY")" \
+  "$STAGE/lib/rommulus/libGLdispatch.so.0"
 
 # --- share/ (desktop entry, icons, licenses, core manifest) ------------------
 cp -a "$SCRIPT_DIR/share"/. "$STAGE/share/"
