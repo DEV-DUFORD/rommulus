@@ -825,11 +825,10 @@ jobs:
             ./lib/runtime/bin/java \
             ./lib/rommulus/app.jar \
             ./share/rommulus/PACKAGE.sha256; do
-            printf '%s\n' "$listing" | grep -qx "$entry" \
+            grep -qx "$entry" <<< "$listing" \
               || { echo "::error::required entry missing from tarball: $entry"; exit 1; }
           done
-          printf '%s\n' "$listing" \
-            | grep -Eq '^\./lib/rommulus/lib/kotlin-stdlib-[^/]+\.jar$' \
+          grep -Eq '^\./lib/rommulus/lib/kotlin-stdlib-[^/]+\.jar$' <<< "$listing" \
             || { echo "::error::Kotlin runtime is missing from tarball"; exit 1; }
           echo "✓ required entries present in tarball"
 
