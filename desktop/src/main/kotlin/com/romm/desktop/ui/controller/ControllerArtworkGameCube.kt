@@ -49,6 +49,6 @@ val ControllerOutlineGamecube: ImageVector = ImageVector.Builder(
             M90.9,193.4c-6.8-2.2-12.8-5.8-17.9-10.9c-5.3-5.3-9.1-11.8-11.2-18.9c-2.1,19.1-1.8,38.9-1.6,46.9c0,1.4,0,2.4,0,3c0,5.6,0.6,55,20,55c17.3,0,17.7-27.9,17.9-41.2c0-1.5,0-2.9,0.1-4l0-0.4c0.2-4,0.5-12.3,4.2-21.1C99.5,197.8,95.5,194.9,90.9,193.4z
             """.trimIndent(),
         ).toNodes(),
-        fill = SolidColor(Color(0xFF000000)),
+        fill = SolidColor(Color(0xFFD6D1E2)),
     )
 }.build()

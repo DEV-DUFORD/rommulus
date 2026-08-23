@@ -141,6 +141,40 @@ class DesktopControllerConfigRepositoryTest {
     }
 
     @Test
+    fun `GameCube analog controls serialize as full axis bindings`() = runTest {
+        val gameCubeCoreId = "dolphin"
+        repo.setBinding(
+            gameCubeCoreId,
+            0,
+            CoreControlId.LEFT_STICK_X,
+            PhysicalBinding.Axis(NeutralAxis.Z.platformCode),
+        )
+
+        assertThat(RetroPadControlMapping.coreControlIdForSlot(gameCubeCoreId, "select"))
+            .isEqualTo(CoreControlId.LEFT_STICK_X)
+        assertThat(RetroPadControlMapping.coreControlIdForSlot(gameCubeCoreId, "left_shoulder"))
+            .isEqualTo(CoreControlId.LEFT_STICK_Y)
+        assertThat(RetroPadControlMapping.coreControlIdForSlot(gameCubeCoreId, "left_stick"))
+            .isEqualTo(CoreControlId.RIGHT_STICK_X)
+        assertThat(RetroPadControlMapping.coreControlIdForSlot(gameCubeCoreId, "right_stick"))
+            .isEqualTo(CoreControlId.RIGHT_STICK_Y)
+
+        val launch = RetroPadControlMapping.toLaunchBindings(
+            repo.effectiveLaunchRecords(gameCubeCoreId, 0),
+        )
+        assertThat(launch).isNotNull()
+        val slots = launch!!.devices.single().bindings
+        assertThat(slots.single { it.slot == "select" })
+            .isEqualTo(PlayerSlotBinding("select", PlayerBindingType.AXIS, axis = "right_x"))
+        assertThat(slots.single { it.slot == "left_shoulder" })
+            .isEqualTo(PlayerSlotBinding("left_shoulder", PlayerBindingType.AXIS, axis = "left_y"))
+        assertThat(slots.single { it.slot == "left_stick" })
+            .isEqualTo(PlayerSlotBinding("left_stick", PlayerBindingType.AXIS, axis = "right_x"))
+        assertThat(slots.single { it.slot == "right_stick" })
+            .isEqualTo(PlayerSlotBinding("right_stick", PlayerBindingType.AXIS, axis = "right_y"))
+    }
+
+    @Test
     fun `N64 in-game remaps survive sidecar ingestion and launch serialization`() = runTest {
         val n64CoreId = "mupen64plus_next"
         val defaults = mapOf(
@@ -217,6 +251,38 @@ class DesktopControllerConfigRepositoryTest {
         val migratedIds = store.loadForCore("mupen64plus_next").map { it.controlId }.toSet()
         assertThat(migratedIds).contains(CoreControlId.N64_C_DOWN.id, CoreControlId.N64_C_LEFT.id)
         assertThat(migratedIds).doesNotContain(CoreControlId.SELECT.id)
+    }
+
+    @Test
+    fun `legacy GameCube sidecar rows gain analog axis defaults`() {
+        val legacy = RETRO_PAD_SLOT_NAMES.map { slotName ->
+            ControllerBindingRecord(
+                coreId = "dolphin",
+                playerIndex = 0,
+                controlId = RetroPadControlMapping.SLOT_TO_CONTROL_ID.getValue(slotName),
+                bindingSlot = BindingSlot.PRIMARY.index,
+                bindingType = RetroPadControlMapping.TYPE_KEY,
+                inputCode = PAD_BUTTON_NAMES.indexOf("south"),
+                polarity = null,
+            )
+        }
+        store.upsertAll(legacy).getOrThrow()
+
+        DesktopControllerConfigRepository(store)
+
+        val migrated = store.loadForCore("dolphin").associateBy { it.controlId }
+        assertThat(migrated.getValue(CoreControlId.LEFT_STICK_X.id).bindingType)
+            .isEqualTo(RetroPadControlMapping.TYPE_AXIS)
+        assertThat(migrated.getValue(CoreControlId.LEFT_STICK_X.id).inputCode)
+            .isEqualTo(NeutralAxis.X.platformCode)
+        assertThat(migrated.getValue(CoreControlId.RIGHT_STICK_Y.id).inputCode)
+            .isEqualTo(NeutralAxis.RY.platformCode)
+        assertThat(migrated).doesNotContainKeys(
+            CoreControlId.SELECT.id,
+            CoreControlId.L1.id,
+            CoreControlId.L3.id,
+            CoreControlId.R3.id,
+        )
     }
 
     @Test

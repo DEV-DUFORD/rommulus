@@ -50,9 +50,10 @@ internal val PAD_AXIS_NAMES: List<String> = listOf(
     "left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger",
 )
 
-/** The wire type of one RetroPad slot binding entry. */
+/** The wire type of one slot binding entry, including GameCube's full-axis targets. */
 enum class PlayerBindingType(val wireName: String) {
     BUTTON("button"),
+    AXIS("axis"),
     AXIS_DIRECTION("axis_direction"),
     UNBOUND("unbound");
 
@@ -463,6 +464,10 @@ object PlayerProtocol {
                             writer.name("type").value(PlayerBindingType.BUTTON.wireName)
                             writer.name("button").value(checkNotNull(binding.button))
                         }
+                        PlayerBindingType.AXIS -> {
+                            writer.name("type").value(PlayerBindingType.AXIS.wireName)
+                            writer.name("axis").value(checkNotNull(binding.axis))
+                        }
                         PlayerBindingType.AXIS_DIRECTION -> {
                             writer.name("type").value(PlayerBindingType.AXIS_DIRECTION.wireName)
                             writer.name("axis").value(checkNotNull(binding.axis))
@@ -832,6 +837,15 @@ object PlayerProtocol {
                     val buttonName = button ?: throw ProtocolException("missing button")
                     if (buttonName !in PAD_BUTTON_NAMES) {
                         throw ProtocolException("unknown pad button: $buttonName")
+                    }
+                }
+                PlayerBindingType.AXIS -> {
+                    if (button != null || polarity != null) {
+                        throw ProtocolException("axis binding must not carry button/polarity")
+                    }
+                    val axisName = axis ?: throw ProtocolException("missing axis")
+                    if (axisName !in PAD_AXIS_NAMES) {
+                        throw ProtocolException("unknown pad axis: $axisName")
                     }
                 }
                 PlayerBindingType.AXIS_DIRECTION -> {

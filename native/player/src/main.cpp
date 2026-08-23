@@ -600,6 +600,7 @@ int main(int argc, char* argv[]) {
     // 11. Main loop.
     bool running = true;
     romm::player::SdlInput input;
+    input.configureForCore(request.coreId);
     // v2: apply the stored controller bindings from the launch request so
     // they are active from the FIRST FRAME (the desktop supervisor ingests
     // the previous session's sidecar and serializes it into this field).
@@ -655,7 +656,7 @@ int main(int argc, char* argv[]) {
     romm::player::PauseMenu pauseMenu;
     pauseMenu.setBindingSlotCount(
         request.coreId == "mupen64plus_next" ? 14 :
-        request.coreId == "pcsx_rearmed" ? 16 : 12
+        request.coreId == "pcsx_rearmed" || request.coreId == "dolphin" ? 16 : 12
     );
     pauseMenu.setKeyboardRowCount(
         romm::player::coreKeyboardRowCount(request.coreId));
@@ -717,8 +718,7 @@ int main(int argc, char* argv[]) {
                 }
                 break;
             case romm::player::PauseMenuEffect::kBeginCapture: {
-                // A slot row was confirmed: start capturing a digital binding
-                // for it. Every connected pad is eligible — the first
+                // A slot row was confirmed. Every connected pad is eligible — the first
                 // qualifying input wins (Android's coordinator semantics).
                 captureDevices.clear();
                 for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
@@ -727,10 +727,15 @@ int main(int argc, char* argv[]) {
                 // Seed edge history from live levels so the opening button
                 // cannot become another action when capture finishes.
                 input.resetMenuEdges();
+                const int target =
+                    romm::player::coreBindingSlotAt(request.coreId, pauseMenu.selection());
                 captureCoordinator.begin(
-                    romm::player::coreBindingSlotAt(request.coreId, pauseMenu.selection()),
+                    target,
                     captureDevices.data(), static_cast<int>(captureDevices.size()),
-                    romm::player::CaptureTarget::kDigital);
+                    request.coreId == "dolphin" &&
+                            romm::player::isGameCubeAnalogSlot(target)
+                        ? romm::player::CaptureTarget::kAnalog
+                        : romm::player::CaptureTarget::kDigital);
                 break;
             }
             case romm::player::PauseMenuEffect::kResetDefault:
@@ -909,13 +914,12 @@ int main(int argc, char* argv[]) {
                     case romm::player::CaptureState::kResult: {
                         const romm::player::CapturedBinding* result = captureCoordinator.result();
                         if (result != nullptr) {
-                            // Apply the captured binding to the table. A full
-                            // analog axis cannot occur here (the editor always
-                            // captures digital targets); bind its positive
-                            // half defensively if it ever did.
                             romm::player::BindingSource source =
                                 result->kind == romm::player::CapturedBinding::Kind::kButton
                                     ? romm::player::BindingSource::ofButton(result->button)
+                                    : result->kind ==
+                                              romm::player::CapturedBinding::Kind::kAxis
+                                        ? romm::player::BindingSource::ofAxis(result->axis)
                                     : romm::player::BindingSource::axisDirection(
                                           result->axis,
                                           result->kind ==

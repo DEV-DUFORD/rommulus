@@ -21,9 +21,9 @@ import com.romm.desktop.player.RetroPadControlMapping
  *   ([PAD_BUTTON_NAMES] index)
  * - [RetroPadControlMapping.TYPE_AXIS_DIRECTION]→ the player's `PadAxis` ordinal
  *   ([PAD_AXIS_NAMES] index) + polarity
- * - [RetroPadControlMapping.TYPE_AXIS]          → the raw axis platform code (Android-origin
- *   full-analog rows; kept for cross-platform portability — the 16-slot RetroPad table cannot
- *   express them, so launch serialization omits such cores, exactly as documented upstream)
+ * - [RetroPadControlMapping.TYPE_AXIS]          → the raw axis platform code. GameCube carries
+ *   its four analog targets in otherwise-unused RetroPad slots; other cores retain these rows
+ *   for cross-platform portability.
  *
  * Digital triggers reported as key presses (e.g. Xbox LT/RT on Linux arrive as
  * [NeutralKey.BUTTON_L2]/[BUTTON_R2]) have no `PadButton` name; they are expressed as the
@@ -37,7 +37,7 @@ object DesktopControllerBindingCodec {
     const val SCHEMA_VERSION = 1
 
     private val TYPE_KEY = RetroPadControlMapping.TYPE_KEY
-    private val TYPE_AXIS = "AXIS"
+    private val TYPE_AXIS = RetroPadControlMapping.TYPE_AXIS
     private val TYPE_AXIS_DIRECTION = RetroPadControlMapping.TYPE_AXIS_DIRECTION
     private val TYPE_UNMAPPED = RetroPadControlMapping.TYPE_UNMAPPED
 

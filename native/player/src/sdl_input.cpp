@@ -9,6 +9,8 @@
 
 #include <libretro.h>
 
+#include <cstdlib>
+
 #include "emulation_session.h"
 #include "native/player/pause_chord.h"
 
@@ -184,6 +186,8 @@ void SdlInput::poll() {
                     switch (source.kind) {
                         case BindingSource::Kind::kButton:
                             return SDL_GetGamepadButton(gamepad, toSdlButton(source.button));
+                        case BindingSource::Kind::kAxis:
+                            return false;
                         case BindingSource::Kind::kAxisDirection: {
                             const Sint16 raw =
                                 SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis));
@@ -214,15 +218,23 @@ void SdlInput::poll() {
         p.buttonsMask = mask | (port == 0 ? keyboard.buttonsMask : 0);
 
         if (gamepad != nullptr) {
-            p.leftX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
-            p.leftY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
-            p.rightX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-            p.rightY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+            if (gameCubeBindings_) {
+                p.leftX = analogValue(gamepad, kSlotSelect);
+                p.leftY = analogValue(gamepad, kSlotLeftShoulder);
+                p.rightX = analogValue(gamepad, kSlotLeftStick);
+                p.rightY = analogValue(gamepad, kSlotRightStick);
+            } else {
+                p.leftX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
+                p.leftY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
+                p.rightX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
+                p.rightY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+            }
         } else {
             // No pad on this port: keep the snapshot neutral (closeGamepad
             // already resets the port when a device is removed).
             p.leftX = p.leftY = p.rightX = p.rightY = 0;
         }
+
         if (port == 0) {
             if (keyboard.leftX != 0) p.leftX = keyboard.leftX;
             if (keyboard.leftY != 0) p.leftY = keyboard.leftY;
@@ -230,6 +242,29 @@ void SdlInput::poll() {
             if (keyboard.rightY != 0) p.rightY = keyboard.rightY;
         }
     }
+}
+
+void SdlInput::configureForCore(const std::string& coreId) {
+    gameCubeBindings_ = coreId == "dolphin";
+    applyCoreBindingDefaults();
+}
+
+void SdlInput::applyCoreBindingDefaults() {
+    if (!gameCubeBindings_) return;
+    for (int slot : {kSlotSelect, kSlotLeftShoulder, kSlotLeftStick, kSlotRightStick}) {
+        bindings_.set(slot, gameCubeAnalogSourceForSlot(slot));
+    }
+}
+
+int16_t SdlInput::analogValue(SDL_Gamepad* gamepad, int slot) const {
+    const auto read = [gamepad](const BindingSource& source) -> int16_t {
+        if (source.kind != BindingSource::Kind::kAxis) return 0;
+        return applyDeadzone(SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis)));
+    };
+    const int16_t primary = read(bindings_.get(slot));
+    const int16_t secondary = read(secondaryBindings_.get(slot));
+    return std::abs(static_cast<int>(secondary)) > std::abs(static_cast<int>(primary))
+        ? secondary : primary;
 }
 
 std::optional<int> SdlInput::captureKeyboardScancode(const SDL_Event& event) {

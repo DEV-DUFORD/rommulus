@@ -100,6 +100,10 @@ void testSetGetReset() {
     CHECK(left.axis == PadAxis::kLeftX);
     CHECK_EQ(left.polarity, -1);
 
+    table.set(romm::player::kSlotSelect, BindingSource::ofAxis(PadAxis::kRightX));
+    CHECK(table.get(romm::player::kSlotSelect) ==
+          BindingSource::ofAxis(PadAxis::kRightX));
+
     // Unbind a slot.
     table.set(romm::player::kSlotSelect, BindingSource::unbound());
     CHECK(table.get(romm::player::kSlotSelect).kind == BindingSource::Kind::kUnbound);
@@ -126,6 +130,8 @@ void testSetGetReset() {
 
 void testDisplayLabels() {
     CHECK(std::string(BindingSource::ofButton(PadButton::kSouth).display()) == "Button A");
+    CHECK(std::string(BindingSource::ofAxis(PadAxis::kRightX).display()) ==
+          "Right Stick X");
     CHECK(std::string(BindingSource::axisDirection(PadAxis::kLeftX, 1).display()) ==
           "Left Stick X +");
     CHECK(std::string(BindingSource::axisDirection(PadAxis::kRightY, -1).display()) ==
@@ -157,6 +163,13 @@ void testDisplayLabels() {
              romm::player::kSlotRightShoulder);
     CHECK_EQ(romm::player::coreBindingSlotAt("dolphin", 11),
              romm::player::kSlotStart);
+    CHECK_EQ(romm::player::coreBindingSlotAt("dolphin", 12),
+             romm::player::kSlotSelect);
+    CHECK(romm::player::isGameCubeAnalogSlot(romm::player::kSlotSelect));
+    CHECK(romm::player::gameCubeAnalogSourceForSlot(romm::player::kSlotSelect) ==
+          BindingSource::ofAxis(PadAxis::kLeftX));
+    CHECK(romm::player::gameCubeAnalogSourceForSlot(romm::player::kSlotRightStick) ==
+          BindingSource::ofAxis(PadAxis::kRightY));
 }
 
 void testNormalizedIdentity() {
@@ -186,6 +199,8 @@ void testSidecarSerializeAndWrite() {
     // One custom edit so the JSON carries a non-default row.
     table.set(romm::player::kSlotDpadLeft,
               romm::player::BindingSource::axisDirection(romm::player::PadAxis::kLeftX, -1));
+    table.set(romm::player::kSlotSelect,
+              romm::player::BindingSource::ofAxis(romm::player::PadAxis::kLeftX));
 
     const std::string guid = "034c05a017" + std::string(22, '0');
     romm::player::DeviceBindings device;
@@ -209,6 +224,8 @@ void testSidecarSerializeAndWrite() {
     CHECK(entry["bindings"][0]["slot"] == "a");
     CHECK(entry["bindings"][0]["type"] == "button");
     CHECK(entry["bindings"][0]["button"] == "south");
+    CHECK(entry["bindings"][4]["type"] == "axis");
+    CHECK(entry["bindings"][4]["axis"] == "left_x");
     // Index 10 in RetroPadSlot order (A,B,X,Y,Select,Start,L,R,Up,Down,Left…).
     const json& dpadLeft = entry["bindings"][10];
     CHECK(dpadLeft["slot"] == "dpad_left");

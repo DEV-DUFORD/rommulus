@@ -257,7 +257,28 @@ class DesktopControllerConfigRepository(
                 val replacement = slotName?.let(slotToControlId::get)
                 if (replacement != null && replacement != record.controlId) {
                     changed = true
-                    record.copy(controlId = replacement)
+                    val gameCubeAxis = if (profile.coreId == "dolphin") {
+                        GAMECUBE_ANALOG_AXIS_BY_SLOT[slotName]
+                    } else {
+                        null
+                    }
+                    if (gameCubeAxis != null && record.bindingSlot == BindingSlot.PRIMARY.index) {
+                        record.copy(
+                            controlId = replacement,
+                            bindingType = RetroPadControlMapping.TYPE_AXIS,
+                            inputCode = RetroPadControlMapping.platformCodeForPadAxisName(gameCubeAxis),
+                            polarity = null,
+                        )
+                    } else if (gameCubeAxis != null) {
+                        record.copy(
+                            controlId = replacement,
+                            bindingType = RetroPadControlMapping.TYPE_UNMAPPED,
+                            inputCode = 0,
+                            polarity = null,
+                        )
+                    } else {
+                        record.copy(controlId = replacement)
+                    }
                 } else {
                     record
                 }
@@ -269,5 +290,14 @@ class DesktopControllerConfigRepository(
                 }).getOrThrow()
             }
         }
+    }
+
+    private companion object {
+        val GAMECUBE_ANALOG_AXIS_BY_SLOT = mapOf(
+            "select" to "left_x",
+            "left_shoulder" to "left_y",
+            "left_stick" to "right_x",
+            "right_stick" to "right_y",
+        )
     }
 }

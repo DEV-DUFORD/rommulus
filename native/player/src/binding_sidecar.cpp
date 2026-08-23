@@ -52,6 +52,10 @@ json bindingSourceToJson(const BindingSource& source) {
             entry["type"] = "button";
             entry["button"] = padButtonName(source.button);
             break;
+        case BindingSource::Kind::kAxis:
+            entry["type"] = "axis";
+            entry["axis"] = padAxisName(source.axis);
+            break;
         case BindingSource::Kind::kAxisDirection:
             entry["type"] = "axis_direction";
             entry["axis"] = padAxisName(source.axis);

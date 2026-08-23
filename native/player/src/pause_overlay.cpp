@@ -446,6 +446,10 @@ const char* controlLabelForCoreSlot(const char* coreId, int slot) {
         if (slot == kSlotLeftTrigger) return "L";
         if (slot == kSlotRightTrigger) return "R";
         if (slot == kSlotRightShoulder) return "Z";
+        if (slot == kSlotSelect) return "Control Stick X";
+        if (slot == kSlotLeftShoulder) return "Control Stick Y";
+        if (slot == kSlotLeftStick) return "C-Stick X";
+        if (slot == kSlotRightStick) return "C-Stick Y";
     } else if (id == "mgba") {
         if (slot == kSlotLeftShoulder) return "L";
         if (slot == kSlotRightShoulder) return "R";

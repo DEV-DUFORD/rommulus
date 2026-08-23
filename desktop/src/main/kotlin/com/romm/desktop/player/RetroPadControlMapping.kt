@@ -6,6 +6,7 @@ import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.controller.config.CoreControlId
 import com.romm.androidtv.controller.config.isPauseMenuControl
+import com.romm.androidtv.controller.model.NeutralAxis
 import com.romm.androidtv.storage.records.BindingSlots
 import com.romm.androidtv.storage.records.ControllerBindingRecord
 
@@ -31,6 +32,7 @@ object RetroPadControlMapping {
     // Persistence-stable bindingType constants — IDENTICAL to Android's
     // ControllerBindingCodec so rows written on either platform decode on the other.
     const val TYPE_KEY = "KEY"
+    const val TYPE_AXIS = "AXIS"
     const val TYPE_AXIS_DIRECTION = "AXIS_DIRECTION"
     const val TYPE_UNMAPPED = "UNMAPPED"
 
@@ -105,36 +107,44 @@ object RetroPadControlMapping {
         controlId: String,
         slot: PlayerSlotBinding,
         bindingSlot: Int,
-    ): ControllerBindingRecord {
-            return when (slot.type) {
-                PlayerBindingType.UNBOUND -> ControllerBindingRecord(
-                    coreId = coreId,
-                    playerIndex = PLAYER_INDEX,
-                    controlId = controlId,
-                    bindingSlot = bindingSlot,
-                    bindingType = TYPE_UNMAPPED,
-                    inputCode = 0,
-                    polarity = null,
-                )
-                PlayerBindingType.BUTTON -> ControllerBindingRecord(
-                    coreId = coreId,
-                    playerIndex = PLAYER_INDEX,
-                    controlId = controlId,
-                    bindingSlot = bindingSlot,
-                    bindingType = TYPE_KEY,
-                    inputCode = PAD_BUTTON_NAMES.indexOf(checkNotNull(slot.button)),
-                    polarity = null,
-                )
-                PlayerBindingType.AXIS_DIRECTION -> ControllerBindingRecord(
-                    coreId = coreId,
-                    playerIndex = PLAYER_INDEX,
-                    controlId = controlId,
-                    bindingSlot = bindingSlot,
-                    bindingType = TYPE_AXIS_DIRECTION,
-                    inputCode = PAD_AXIS_NAMES.indexOf(checkNotNull(slot.axis)),
-                    polarity = checkNotNull(slot.polarity),
-                )
-            }
+    ): ControllerBindingRecord =
+        when (slot.type) {
+            PlayerBindingType.UNBOUND -> ControllerBindingRecord(
+                coreId = coreId,
+                playerIndex = PLAYER_INDEX,
+                controlId = controlId,
+                bindingSlot = bindingSlot,
+                bindingType = TYPE_UNMAPPED,
+                inputCode = 0,
+                polarity = null,
+            )
+            PlayerBindingType.BUTTON -> ControllerBindingRecord(
+                coreId = coreId,
+                playerIndex = PLAYER_INDEX,
+                controlId = controlId,
+                bindingSlot = bindingSlot,
+                bindingType = TYPE_KEY,
+                inputCode = PAD_BUTTON_NAMES.indexOf(checkNotNull(slot.button)),
+                polarity = null,
+            )
+            PlayerBindingType.AXIS -> ControllerBindingRecord(
+                coreId = coreId,
+                playerIndex = PLAYER_INDEX,
+                controlId = controlId,
+                bindingSlot = bindingSlot,
+                bindingType = TYPE_AXIS,
+                inputCode = platformCodeForPadAxisName(checkNotNull(slot.axis)),
+                polarity = null,
+            )
+            PlayerBindingType.AXIS_DIRECTION -> ControllerBindingRecord(
+                coreId = coreId,
+                playerIndex = PLAYER_INDEX,
+                controlId = controlId,
+                bindingSlot = bindingSlot,
+                bindingType = TYPE_AXIS_DIRECTION,
+                inputCode = PAD_AXIS_NAMES.indexOf(checkNotNull(slot.axis)),
+                polarity = checkNotNull(slot.polarity),
+            )
         }
 
     /**
@@ -152,21 +162,28 @@ object RetroPadControlMapping {
             for (slotName in RETRO_PAD_SLOT_NAMES) {
                 val record = byAddress[coreControlIdForSlot(coreId, slotName).id to bindingSlot]
                     ?: if (required) return null else return null
-            when (record.bindingType) {
-                TYPE_UNMAPPED -> slots += PlayerSlotBinding(slotName, PlayerBindingType.UNBOUND)
-                TYPE_KEY -> {
-                    val button = PAD_BUTTON_NAMES.getOrNull(record.inputCode) ?: return null
-                    slots += PlayerSlotBinding(slotName, PlayerBindingType.BUTTON, button = button)
+                when (record.bindingType) {
+                    TYPE_UNMAPPED -> slots += PlayerSlotBinding(slotName, PlayerBindingType.UNBOUND)
+                    TYPE_KEY -> {
+                        val button = PAD_BUTTON_NAMES.getOrNull(record.inputCode) ?: return null
+                        slots += PlayerSlotBinding(slotName, PlayerBindingType.BUTTON, button = button)
+                    }
+                    TYPE_AXIS_DIRECTION -> {
+                        val axis = PAD_AXIS_NAMES.getOrNull(record.inputCode) ?: return null
+                        val polarity = record.polarity?.takeIf { it == -1 || it == 1 } ?: return null
+                        slots += PlayerSlotBinding(
+                            slotName,
+                            PlayerBindingType.AXIS_DIRECTION,
+                            axis = axis,
+                            polarity = polarity,
+                        )
+                    }
+                    TYPE_AXIS -> {
+                        val axis = padAxisNameForPlatformCode(record.inputCode) ?: return null
+                        slots += PlayerSlotBinding(slotName, PlayerBindingType.AXIS, axis = axis)
+                    }
+                    else -> return null
                 }
-                TYPE_AXIS_DIRECTION -> {
-                    val axis = PAD_AXIS_NAMES.getOrNull(record.inputCode) ?: return null
-                    val polarity = record.polarity?.takeIf { it == -1 || it == 1 } ?: return null
-                    slots += PlayerSlotBinding(slotName, PlayerBindingType.AXIS_DIRECTION, axis = axis, polarity = polarity)
-                }
-                // A full-analog AXIS row (Android-only) or an unknown type cannot be expressed
-                // in a digital RetroPad slot: omit the field rather than fabricate semantics.
-                else -> return null
-            }
             }
             return slots
         }
@@ -190,11 +207,39 @@ object RetroPadControlMapping {
     }
 
     internal fun coreControlIdForSlot(coreId: String, slotName: String): CoreControlId {
+        if (coreId == "dolphin") {
+            when (slotName) {
+                "select" -> return CoreControlId.LEFT_STICK_X
+                "left_shoulder" -> return CoreControlId.LEFT_STICK_Y
+                "left_stick" -> return CoreControlId.RIGHT_STICK_X
+                "right_stick" -> return CoreControlId.RIGHT_STICK_Y
+            }
+        }
         val target = SLOT_TO_CONTROL.getValue(slotName)
         return CoreControllerProfiles.byCoreId(coreId)
             ?.controls
             ?.firstOrNull { !it.id.isPauseMenuControl && it.target == target }
             ?.id
             ?: CoreControlId.entries.first { it.id == SLOT_TO_CONTROL_ID.getValue(slotName) }
+    }
+
+    internal fun platformCodeForPadAxisName(name: String): Int = when (name) {
+        "left_x" -> NeutralAxis.X.platformCode
+        "left_y" -> NeutralAxis.Y.platformCode
+        "right_x" -> NeutralAxis.RX.platformCode
+        "right_y" -> NeutralAxis.RY.platformCode
+        "left_trigger" -> NeutralAxis.LTRIGGER.platformCode
+        "right_trigger" -> NeutralAxis.RTRIGGER.platformCode
+        else -> error("unknown pad axis: $name")
+    }
+
+    internal fun padAxisNameForPlatformCode(code: Int): String? = when (NeutralAxis.fromPlatform(code)) {
+        NeutralAxis.X -> "left_x"
+        NeutralAxis.Y -> "left_y"
+        NeutralAxis.RX, NeutralAxis.Z -> "right_x"
+        NeutralAxis.RY, NeutralAxis.RZ -> "right_y"
+        NeutralAxis.LTRIGGER, NeutralAxis.BRAKE -> "left_trigger"
+        NeutralAxis.RTRIGGER, NeutralAxis.GAS -> "right_trigger"
+        null -> null
     }
 }

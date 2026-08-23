@@ -351,15 +351,14 @@ inline const char* padAxisDisplay(PadAxis axis) {
     return "";
 }
 
-// One RetroPad slot's physical source. Android's PhysicalBinding model has
-// Key / Axis / AxisDirection; a RetroPad slot is digital, so the table uses
-// button or axis-half (axis + polarity) or unbound.
+// One physical source. Most RetroPad slots are digital and use a button or
+// axis half; GameCube's otherwise-unused slots carry the four full stick axes.
 struct BindingSource {
-    enum class Kind : int { kUnbound = 0, kButton, kAxisDirection };
+    enum class Kind : int { kUnbound = 0, kButton, kAxis, kAxisDirection };
 
     Kind kind = Kind::kUnbound;
     PadButton button = PadButton::kSouth;  // valid when kind == kButton
-    PadAxis axis = PadAxis::kLeftX;        // valid when kind == kAxisDirection
+    PadAxis axis = PadAxis::kLeftX;        // valid when kind == kAxis/kAxisDirection
     int polarity = 1;                      // +1 or -1, kAxisDirection only
 
     BindingSource() = default;
@@ -370,6 +369,12 @@ struct BindingSource {
         BindingSource s;
         s.kind = Kind::kButton;
         s.button = b;
+        return s;
+    }
+    static BindingSource ofAxis(PadAxis a) {
+        BindingSource s;
+        s.kind = Kind::kAxis;
+        s.axis = a;
         return s;
     }
     static BindingSource axisDirection(PadAxis a, int polarity) {
@@ -383,6 +388,7 @@ struct BindingSource {
     bool operator==(const BindingSource& other) const {
         if (kind != other.kind) return false;
         if (kind == Kind::kButton) return button == other.button;
+        if (kind == Kind::kAxis) return axis == other.axis;
         if (kind == Kind::kAxisDirection) {
             return axis == other.axis && polarity == other.polarity;
         }
@@ -397,12 +403,29 @@ struct BindingSource {
                 return "Unmapped";
             case Kind::kButton:
                 return padButtonDisplay(button);
+            case Kind::kAxis:
+                return padAxisDisplay(axis);
             case Kind::kAxisDirection:
                 return std::string(padAxisDisplay(axis)) + (polarity > 0 ? " +" : " -");
         }
         return "";
     }
 };
+
+inline bool isGameCubeAnalogSlot(int slot) {
+    return slot == kSlotSelect || slot == kSlotLeftShoulder ||
+           slot == kSlotLeftStick || slot == kSlotRightStick;
+}
+
+inline BindingSource gameCubeAnalogSourceForSlot(int slot) {
+    switch (slot) {
+        case kSlotSelect: return BindingSource::ofAxis(PadAxis::kLeftX);
+        case kSlotLeftShoulder: return BindingSource::ofAxis(PadAxis::kLeftY);
+        case kSlotLeftStick: return BindingSource::ofAxis(PadAxis::kRightX);
+        case kSlotRightStick: return BindingSource::ofAxis(PadAxis::kRightY);
+        default: return BindingSource::unbound();
+    }
+}
 
 // The built-in gamepad -> RetroPad mapping (what SdlInput::poll() hardcoded
 // before the editor landed): every slot bound to its standard SDL button.
@@ -430,8 +453,8 @@ inline BindingSource defaultSourceForSlot(int slot) {
     }
 }
 
-// The 16-slot table SdlInput::poll() consults. Defaults are the built-in
-// mapping; the editor mutates it at runtime and reset() restores defaults.
+// The 16-slot table SdlInput::poll() consults. GameCube reuses four controls
+// it does not expose as full-axis targets; other cores retain the RetroPad defaults.
 class BindingTable {
 public:
     explicit BindingTable(bool useDefaults = true) {

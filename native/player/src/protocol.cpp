@@ -180,6 +180,21 @@ bool parseBindingEntry(const ordered_json& j, int slot, BindingTable& table,
         table.set(slot, BindingSource::ofButton(*button));
         return true;
     }
+    if (type == "axis") {
+        if (j.contains("button") || j.contains("polarity")) {
+            error = "axis binding must not carry button/polarity";
+            return false;
+        }
+        std::string axisName;
+        if (!getString(j, "axis", axisName, error)) return false;
+        const auto axis = padAxisFromName(axisName);
+        if (!axis) {
+            error = "unknown pad axis: " + axisName;
+            return false;
+        }
+        table.set(slot, BindingSource::ofAxis(*axis));
+        return true;
+    }
     if (type == "axis_direction") {
         if (j.contains("button")) {
             error = "axis_direction binding must not carry button";
@@ -686,6 +701,10 @@ std::string serializeRequest(const PlayerRequest& r) {
                         bindingEntry["type"] = "button";
                         bindingEntry["button"] = padButtonName(source.button);
                         break;
+                    case BindingSource::Kind::kAxis:
+                        bindingEntry["type"] = "axis";
+                        bindingEntry["axis"] = padAxisName(source.axis);
+                        break;
                     case BindingSource::Kind::kAxisDirection:
                         bindingEntry["type"] = "axis_direction";
                         bindingEntry["axis"] = padAxisName(source.axis);
@@ -708,6 +727,10 @@ std::string serializeRequest(const PlayerRequest& r) {
                         case BindingSource::Kind::kButton:
                             bindingEntry["type"] = "button";
                             bindingEntry["button"] = padButtonName(source.button);
+                            break;
+                        case BindingSource::Kind::kAxis:
+                            bindingEntry["type"] = "axis";
+                            bindingEntry["axis"] = padAxisName(source.axis);
                             break;
                         case BindingSource::Kind::kAxisDirection:
                             bindingEntry["type"] = "axis_direction";

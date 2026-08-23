@@ -33,6 +33,7 @@ constexpr int kDrainPollIntervalMs = 5;
 constexpr unsigned kPcsxRearmedDualShockDevice =
     RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1);
 constexpr unsigned kPlayStationControllerPorts = 2;
+constexpr unsigned kGameCubeControllerPorts = 4;
 }  // namespace
 
 #define LOG_TAG "romm_emulation_session"
@@ -115,6 +116,8 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
 
     const bool isMupen64PlusNext = systemInfo.library_name != nullptr &&
         std::strcmp(systemInfo.library_name, "Mupen64Plus-Next") == 0;
+    const bool isDolphin = systemInfo.library_name != nullptr &&
+        std::strcmp(systemInfo.library_name, "dolphin-emu") == 0;
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     if (isMupen64PlusNext) {
         // The libretro threaded path keeps render-context commands on this
@@ -180,6 +183,14 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
             fns.retro_set_controller_port_device(port, kPcsxRearmedDualShockDevice);
         }
         LOGI("configured PCSX-ReARMed ports 1-2 as DualShock");
+    }
+    if (isDolphin) {
+        // Dolphin constructs the GameCube pad's button and analog expressions
+        // only when the frontend selects a device for the port.
+        for (unsigned port = 0; port < kGameCubeControllerPorts; ++port) {
+            fns.retro_set_controller_port_device(port, RETRO_DEVICE_JOYPAD);
+        }
+        LOGI("configured Dolphin ports 1-4 as GameCube controllers");
     }
 
     threadShouldRun_ = true;

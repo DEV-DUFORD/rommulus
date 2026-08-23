@@ -50,8 +50,8 @@ PlayerRequest sampleRequest() {
     return r;
 }
 
-// A v2 controllerBindings value with ONE device covering all three entry
-// shapes (button / axis_direction / unbound) across the legacy 12 slots, plus one
+// A v2 controllerBindings value with ONE device covering all four entry
+// shapes (button / axis / axis_direction / unbound), plus one
 // "apply to every controller" device with an empty guid/identity.
 ControllerBindings sampleControllerBindings() {
     ControllerBindings cb;
@@ -65,7 +65,7 @@ ControllerBindings sampleControllerBindings() {
     usb.table.set(1, BindingSource::axisDirection(PadAxis::kLeftX, -1));  // b
     usb.table.set(2, BindingSource::ofButton(PadButton::kWest));        // x
     usb.table.set(3, BindingSource::unbound());                         // y
-    usb.table.set(4, BindingSource::ofButton(PadButton::kBack));        // select
+    usb.table.set(4, BindingSource::ofAxis(PadAxis::kLeftX));          // select
     usb.table.set(5, BindingSource::ofButton(PadButton::kStart));       // start
     usb.table.set(6, BindingSource::axisDirection(PadAxis::kLeftTrigger, 1));  // left_shoulder
     usb.table.set(7, BindingSource::ofButton(PadButton::kRightShoulder));      // right_shoulder

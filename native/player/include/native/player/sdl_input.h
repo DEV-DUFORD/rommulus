@@ -100,10 +100,12 @@ public:
         bindings_ = table;
         secondaryBindings_ = secondary;
     }
+    void configureForCore(const std::string& coreId);
     // Restores the built-in default mapping (the editor's Reset to Default).
     void resetBindings() {
         bindings_.reset();
         secondaryBindings_.clear();
+        applyCoreBindingDefaults();
     }
     // Explicitly unmaps every slot (the editor's Clear Mappings action).
     void clearBindings() {
@@ -189,6 +191,8 @@ private:
     void closeGamepad(int port);
 
     static int16_t applyDeadzone(Sint16 value);
+    int16_t analogValue(SDL_Gamepad* gamepad, int slot) const;
+    void applyCoreBindingDefaults();
 
     std::array<PortState, kPorts> ports_{};
     std::array<GamepadSlot, kPorts> gamepads_{};
@@ -198,6 +202,7 @@ private:
     // mapping. See binding_table.h.
     BindingTable bindings_{};
     BindingTable secondaryBindings_{false};
+    bool gameCubeBindings_ = false;
     KeyboardBindingTable keyboardBindings_{};
 
     // Held physical scancodes. poll() resolves them through the live table,

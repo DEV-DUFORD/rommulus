@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test
  */
 class PlayerProtocolTest {
 
-    /** One device covering all three entry shapes (button / axis_direction / unbound). */
+    /** One device covering all four entry shapes (button / axis / axis_direction / unbound). */
     private fun sampleControllerBindings(): ControllerBindings = ControllerBindings(
         devices = listOf(
             ControllerBindingDevice(
@@ -23,7 +23,7 @@ class PlayerProtocolTest {
                     PlayerSlotBinding("b", PlayerBindingType.AXIS_DIRECTION, axis = "left_x", polarity = -1),
                     PlayerSlotBinding("x", PlayerBindingType.BUTTON, button = "west"),
                     PlayerSlotBinding("y", PlayerBindingType.UNBOUND),
-                    PlayerSlotBinding("select", PlayerBindingType.BUTTON, button = "back"),
+                    PlayerSlotBinding("select", PlayerBindingType.AXIS, axis = "left_x"),
                     PlayerSlotBinding("start", PlayerBindingType.BUTTON, button = "start"),
                     PlayerSlotBinding("left_shoulder", PlayerBindingType.AXIS_DIRECTION, axis = "left_trigger", polarity = 1),
                     PlayerSlotBinding("right_shoulder", PlayerBindingType.BUTTON, button = "right_shoulder"),
