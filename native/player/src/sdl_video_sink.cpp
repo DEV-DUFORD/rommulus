@@ -119,6 +119,17 @@ void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
                               std::string("SDL_SetRenderVSync failed: ") +
                                   SDL_GetError());
     }
+    // Hardware-rendered cores never submit a software frame, but the pause
+    // overlay still needs a drawable coordinate space.
+    if (width_ == 0 || height_ == 0) {
+        int outputWidth = 0;
+        int outputHeight = 0;
+        if (SDL_GetRenderOutputSize(renderer_, &outputWidth, &outputHeight) &&
+            outputWidth > 0 && outputHeight > 0) {
+            width_ = static_cast<unsigned>(outputWidth);
+            height_ = static_cast<unsigned>(outputHeight);
+        }
+    }
     presentationState_.request();
     applyLogicalPresentationLocked();
 }

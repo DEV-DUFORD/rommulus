@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -58,23 +59,28 @@ fun KeyboardConfigScreen(
     DisposableEffect(Unit) {
         onDispose { onCaptureActiveChanged(false) }
     }
+    val captureKeyEvent: (KeyEvent) -> Boolean = { event ->
+        val pending = capture
+        if (pending == null) {
+            false
+        } else if (event.type != KeyEventType.KeyDown) {
+            true
+        } else if (event.key == Key.Escape) {
+            capture = null
+            true
+        } else {
+            keyboardKeyFor(event.key)?.let {
+                repository.set(coreId, pending.target, pending.slot, it.scancode)
+                capture = null
+            }
+            true
+        }
+    }
 
     Column(
         Modifier.fillMaxSize()
             .background(colors.nightHi)
-            .onPreviewKeyEvent { event ->
-                val pending = capture ?: return@onPreviewKeyEvent false
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent true
-                if (event.key == Key.Escape) {
-                    capture = null
-                    return@onPreviewKeyEvent true
-                }
-                keyboardKeyFor(event.key)?.let {
-                    repository.set(coreId, pending.target, pending.slot, it.scancode)
-                    capture = null
-                }
-                true
-            }
+            .onPreviewKeyEvent(captureKeyEvent)
             .padding(horizontal = 40.dp, vertical = 28.dp),
     ) {
         Row(
@@ -125,6 +131,7 @@ fun KeyboardConfigScreen(
     capture?.let { pending ->
         AlertDialog(
             onDismissRequest = { capture = null },
+            modifier = Modifier.onPreviewKeyEvent(captureKeyEvent),
             title = { Text("Map ${pending.label}") },
             text = { Text("Press a keyboard key. Escape cancels.") },
             confirmButton = {},

@@ -39,6 +39,7 @@
 
 #include "native/player/binding_capture.h"
 #include "native/player/binding_sidecar.h"
+#include "native/player/display_geometry.h"
 #include "native/player/keyboard_binding_sidecar.h"
 #include "native/player/pause_menu.h"
 #include "native/player/pause_overlay.h"
@@ -405,7 +406,24 @@ int main(int argc, char* argv[]) {
     videoSink->setScanlines(request.video.scanlines);
     videoSink->setSharpFilter(request.video.sharpFilter);
     videoSink->setFullscreen(request.video.fullscreen);
+    std::string hardwareRenderSize;
     if (useHardwareRendering) {
+        // The HW core renders directly into the window framebuffer. Size its
+        // viewport from physical pixels, not logical window points, so HiDPI
+        // desktops do not leave a tiny 320x240 image in one corner.
+        int outputWidth = 0;
+        int outputHeight = 0;
+        SDL_GetWindowSizeInPixels(window, &outputWidth, &outputHeight);
+        const auto renderSize =
+            romm::player::n64RenderSizeForOutput(outputWidth, outputHeight);
+        hardwareRenderSize =
+            std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
+
+        // Hardware frames bypass SdlVideoSink, but its renderer owns the
+        // pause overlay. Attach it explicitly; main only presents it while
+        // paused, avoiding contention with the core's GL context.
+        videoSink->attachWindow(
+            reinterpret_cast<romm::video::NativeWindowHandle>(window));
         romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(window));
     }
 
@@ -427,6 +445,9 @@ int main(int argc, char* argv[]) {
     // RSP path. Other cores ignore these Mupen64Plus-specific options.
     session.setCoreOptionOverride("mupen64plus-rdp-plugin", "gliden64");
     session.setCoreOptionOverride("mupen64plus-rsp-plugin", "hle");
+    if (!hardwareRenderSize.empty()) {
+        session.setCoreOptionOverride("mupen64plus-43screensize", hardwareRenderSize);
+    }
     if (!session.acquireProcessSlot()) {
         const std::string error = "another emulation session is already active in this process";
         std::fprintf(stderr, "error: %s\n", error.c_str());
@@ -845,13 +866,15 @@ int main(int argc, char* argv[]) {
             lastCaptureSecondsLeft = captureSecondsLeft;
             videoSink->requestRepaint();
         }
-        videoSink->present([&](SDL_Renderer* renderer) {
-            pauseOverlay.draw(
-                renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
-                input.keyboardBindings(),
-                captureSecondsLeft,
-                request.coreId.c_str());
-        });
+        if (!useHardwareRendering || pauseMenu.isOpen()) {
+            videoSink->present([&](SDL_Renderer* renderer) {
+                pauseOverlay.draw(
+                    renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
+                    input.keyboardBindings(),
+                    captureSecondsLeft,
+                    request.coreId.c_str());
+            });
+        }
         if (session.diagnostics().coreRequestedShutdown.load()) running = false;
         if (g_signal_flag.load()) running = false;  // SIGTERM/SIGINT
         SDL_Delay(1);
@@ -899,6 +922,7 @@ int main(int argc, char* argv[]) {
     ::alarm(0);
 
     session.releaseProcessSlot();  // stop() already released; idempotent no-op
+    videoSink->detachWindow();
     SDL_Quit();
     return 0;
 }

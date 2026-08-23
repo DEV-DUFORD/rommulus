@@ -128,7 +128,6 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // toggle, so user mappings would fire the wrong control.
         environment_.setCoreOptionOverride("mupen64plus-alt-map", "True");
         environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "True");
-        environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
         environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");
         environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");
         environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Off");
