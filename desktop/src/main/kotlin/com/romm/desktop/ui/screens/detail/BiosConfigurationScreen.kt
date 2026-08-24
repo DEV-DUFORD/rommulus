@@ -45,15 +45,16 @@ import com.romm.desktop.ui.navigation.keyboardShortcuts
 /**
  * RomM platform slug for a [DesktopAppCoordinator.BiosSystem]. The desktop
  * [com.romm.desktop.library.DesktopBiosConfigurationProvider] is constructed with the slug
- * ("segacd" / "psx"), exactly like the Android BIOS managers.
+ * ("segacd" / "psx" / "ps2"), exactly like the Android BIOS managers.
  */
 private fun slugFor(system: DesktopAppCoordinator.BiosSystem): String = when (system) {
     DesktopAppCoordinator.BiosSystem.SEGA_CD -> "segacd"
     DesktopAppCoordinator.BiosSystem.PLAYSTATION -> "psx"
+    DesktopAppCoordinator.BiosSystem.PLAYSTATION_2 -> "ps2"
 }
 
 /**
- * Desktop BIOS configuration screen (SEGA CD / PlayStation): a mirror of the Android
+ * Desktop BIOS configuration screen (SEGA CD / PlayStation / PlayStation 2): a mirror of the Android
  * [com.romm.androidtv.library.ui.BiosConfigurationScreen] driven through the shared
  * [com.romm.androidtv.library.BiosConfigurationPresenter].
  *

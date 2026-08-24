@@ -468,7 +468,7 @@ class DesktopAppCoordinator(
     var collectionDetailParent by mutableStateOf(Screen.HOME)
 
     /** Which BIOS-required console's configuration screen is active. */
-    enum class BiosSystem { SEGA_CD, PLAYSTATION }
+    enum class BiosSystem { SEGA_CD, PLAYSTATION, PLAYSTATION_2 }
     var selectedBiosSystem by mutableStateOf(BiosSystem.SEGA_CD)
 
     /** Which core's controller-configuration screen is active (CONTROLLER_CONFIG). */

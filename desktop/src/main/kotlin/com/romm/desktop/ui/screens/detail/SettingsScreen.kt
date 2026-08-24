@@ -122,6 +122,7 @@ fun SettingsScreen(
     val themeFocus = remember { FocusRequester() }
     val segaCdFocus = remember { FocusRequester() }
     val playStationFocus = remember { FocusRequester() }
+    val playStation2Focus = remember { FocusRequester() }
     val controllerSettingsFocus = remember { FocusRequester() }
     val keyboardSettingsFocus = remember { FocusRequester() }
     val verifySha1Focus = remember { FocusRequester() }
@@ -457,13 +458,28 @@ fun SettingsScreen(
                     .focusRequester(playStationFocus)
                     .focusProperties {
                         up = segaCdFocus
-                        down = controllerSettingsFocus
+                        down = playStation2Focus
                     }
                     .focusableItem("settings:playstation", navigator) {
                         coordinator.openBiosConfiguration(DesktopAppCoordinator.BiosSystem.PLAYSTATION)
                     },
             ) {
                 Text("PlayStation")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            TvOutlinedButton(
+                onClick = { coordinator.openBiosConfiguration(DesktopAppCoordinator.BiosSystem.PLAYSTATION_2) },
+                modifier = Modifier
+                    .focusRequester(playStation2Focus)
+                    .focusProperties {
+                        up = playStationFocus
+                        down = controllerSettingsFocus
+                    }
+                    .focusableItem("settings:playstation-2", navigator) {
+                        coordinator.openBiosConfiguration(DesktopAppCoordinator.BiosSystem.PLAYSTATION_2)
+                    },
+            ) {
+                Text("PlayStation 2")
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -481,7 +497,7 @@ fun SettingsScreen(
                 modifier = Modifier
                     .focusRequester(controllerSettingsFocus)
                     .focusProperties {
-                        up = playStationFocus
+                        up = playStation2Focus
                         down = keyboardSettingsFocus
                     }
                     .focusableItem("settings:controller-settings", navigator) {
