@@ -266,7 +266,8 @@ internal fun launchFailureIsAuthExpired(reason: String): Boolean =
  *  - BIOS download failed ([FirmwareStagingOutcome.NetworkError]).
  *
  * [platformSlug] selects the console display name ("segacd" → "SEGA CD", "psx" →
- * "PlayStation") so the message names the system the user is launching for.
+ * "PlayStation", "ps2" → "PlayStation 2") so the message names the system the user is
+ * launching for.
  */
 internal fun firmwareLaunchFailureReason(
     outcome: FirmwareStagingOutcome,
@@ -275,6 +276,7 @@ internal fun firmwareLaunchFailureReason(
     val systemName = when (platformSlug) {
         "segacd" -> "SEGA CD"
         "psx" -> "PlayStation"
+        "ps2" -> "PlayStation 2"
         else -> platformSlug.replaceFirstChar { it.uppercase() }
     }
     return when (outcome) {
@@ -1759,7 +1761,7 @@ class DesktopAppCoordinator(
             platformSlug = platformSlug,
         )
 
-    /** Whether [platformSlug] is a BIOS-required console (SEGA CD / PlayStation). */
+    /** Whether [platformSlug] is a BIOS-required console (SEGA CD / PlayStation / PlayStation 2). */
     fun requiresBios(platformSlug: String): Boolean = platformSlug in BIOS_PLATFORM_SLUGS
 
     /**
@@ -1937,7 +1939,7 @@ class DesktopAppCoordinator(
 
         /** Exit code passed to [onPlayerProcessExited] by the watcher (see [watchPlayerExit]). */
         const val UNKNOWN_PLAYER_EXIT_CODE = -1
-        val BIOS_PLATFORM_SLUGS = setOf("segacd", "psx")
+        val BIOS_PLATFORM_SLUGS = setOf("segacd", "psx", "ps2")
 
         fun defaultDeviceName(): String {
             return try {

@@ -118,6 +118,8 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         std::strcmp(systemInfo.library_name, "Mupen64Plus-Next") == 0;
     const bool isDolphin = systemInfo.library_name != nullptr &&
         std::strcmp(systemInfo.library_name, "dolphin-emu") == 0;
+    const bool isLrps2 = systemInfo.library_name != nullptr &&
+        std::strcmp(systemInfo.library_name, "LRPS2") == 0;
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     if (isMupen64PlusNext) {
         // The libretro threaded path keeps render-context commands on this
@@ -140,6 +142,17 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");
         environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Off");
         environment_.setCoreOptionOverride("mupen64plus-EnableCopyDepthToRDRAM", "Off");
+    }
+    if (isLrps2) {
+        // lrps2 embeds a GameIndex.yaml compatibility database in the core
+        // and only reads <system>/pcsx2/resources/GameIndex.yaml when this
+        // option is enabled. The player stages the packaged copy there at
+        // launch (main.cpp), so opt in to keep the database current with
+        // releases instead of the one frozen into the .so. Everything else
+        // defaults correctly for integration: the BIOS is auto-detected
+        // from pcsx2/bios and memory cards default to shared storage under
+        // pcsx2/memcards (a stable slot-0 image for save sync).
+        environment_.setCoreOptionOverride("pcsx2_use_external_gameindex", "enabled");
     }
 
     fns.retro_set_environment(&EmulationSession::environmentTrampoline);

@@ -144,6 +144,31 @@ std::optional<std::string> dolphinSystemDirectory() {
     return std::nullopt;
 }
 
+// Locates the packaged lrps2 GameIndex.yaml relative to the player
+// executable, mirroring dolphinSystemDirectory(): share/rommulus under the
+// bin directory or its parent. Returns nullopt when this build does not ship
+// it (the core then falls back to its built-in compatibility database).
+std::optional<std::string> lrps2GameIndexPath() {
+    std::error_code pathError;
+    const std::filesystem::path executable =
+        std::filesystem::read_symlink("/proc/self/exe", pathError);
+    if (pathError) return std::nullopt;
+
+    const std::array<std::filesystem::path, 2> roots = {
+        executable.parent_path() / "share/rommulus/lrps2/resources",
+        executable.parent_path() / "../share/rommulus/lrps2/resources",
+    };
+    for (const auto& root : roots) {
+        const std::filesystem::path candidate = root / "GameIndex.yaml";
+        if (std::filesystem::is_regular_file(candidate)) {
+            std::error_code canonicalError;
+            const auto canonical = std::filesystem::weakly_canonical(candidate, canonicalError);
+            if (!canonicalError) return canonical.string();
+        }
+    }
+    return std::nullopt;
+}
+
 // Builds the TrustedRoots from the ROMM_PLAYER_* environment contract.
 // Every root falls back to an XDG-based default under ~/.local/share,
 // ~/.cache, and ~/.local/state so a manually launched player still has a
@@ -537,6 +562,66 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         systemDir = *dolphinSystem;
+    }
+    if (request.coreId == "lrps2") {
+        // lrps2 resolves every data path relative to <system>/pcsx2 inside
+        // retro_load_game(): BIOS from pcsx2/bios (first valid file wins),
+        // resources from pcsx2/resources, memory cards under pcsx2/memcards.
+        // The desktop BIOS layer stages the PS2 BIOS as bios_PS2.bin directly
+        // in systemDir, so mirror it into the layout the core scans —
+        // overwritten on every launch so a re-staged BIOS wins. Unlike
+        // dolphin, systemDir itself is NOT replaced: the core must see the
+        // staged BIOS through the same tree.
+        const std::filesystem::path lrps2Root = std::filesystem::path(systemDir) / "pcsx2";
+        std::error_code fsError;
+        std::filesystem::create_directories(lrps2Root / "bios", fsError);
+        if (!fsError) {
+            std::filesystem::create_directories(lrps2Root / "resources", fsError);
+        }
+        if (fsError) {
+            const std::string error = "failed to create lrps2 system directories: " +
+                                      fsError.message();
+            std::fprintf(stderr, "error: %s\n", error.c_str());
+            writeResult(request, romm::player::ExitKind::LaunchFailed, false, 0, 0, 0, &error);
+            session.releaseProcessSlot();
+            SDL_Quit();
+            return 1;
+        }
+        const std::filesystem::path stagedBios = std::filesystem::path(systemDir) / "bios_PS2.bin";
+        if (std::filesystem::is_regular_file(stagedBios, fsError)) {
+            if (!std::filesystem::copy_file(
+                        stagedBios, lrps2Root / "bios" / "bios_PS2.bin",
+                        std::filesystem::copy_options::overwrite_existing, fsError) ||
+                fsError) {
+                const std::string error = "failed to stage PS2 BIOS into " +
+                                          (lrps2Root / "bios").string() + ": " +
+                                          fsError.message();
+                std::fprintf(stderr, "error: %s\n", error.c_str());
+                writeResult(request, romm::player::ExitKind::LaunchFailed, false, 0, 0, 0, &error);
+                session.releaseProcessSlot();
+                SDL_Quit();
+                return 1;
+            }
+        } else {
+            std::fprintf(stderr,
+                         "info: no staged PS2 BIOS at %s; the core will fail to boot without one\n",
+                         stagedBios.string().c_str());
+        }
+        const auto gameIndex = lrps2GameIndexPath();
+        if (gameIndex.has_value()) {
+            std::error_code copyError;
+            if (!std::filesystem::copy_file(
+                        *gameIndex, lrps2Root / "resources" / "GameIndex.yaml",
+                        std::filesystem::copy_options::overwrite_existing, copyError) ||
+                copyError) {
+                std::fprintf(stderr,
+                             "info: failed to stage lrps2 GameIndex.yaml (%s); the core will use its built-in database\n",
+                             copyError.message().c_str());
+            }
+        } else {
+            std::fprintf(stderr,
+                         "info: packaged lrps2 GameIndex.yaml not found; the core will use its built-in database\n");
+        }
     }
     if (!session.start(request.corePath, systemDir, saveDir, request.contentPath)) {
         const std::string error = session.lastError().empty()

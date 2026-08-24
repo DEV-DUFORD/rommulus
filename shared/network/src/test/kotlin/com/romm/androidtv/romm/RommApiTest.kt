@@ -133,6 +133,33 @@ class RommApiTest {
         fun `returns null for a malformed firmware list`() {
             assertThat(RommApi.parseFirmwareList("{not a list}")).isNull()
         }
+
+        @Test
+        fun `parses created_at and updated_at timestamps verbatim`() {
+            val list = RommApi.parseFirmwareList(
+                """
+                [
+                  {
+                    "id": 9,
+                    "file_name": "SCPH-79001 (USA).bin",
+                    "created_at": "2025-06-01T12:00:00Z",
+                    "updated_at": "2025-06-02T00:00:00+02:00"
+                  }
+                ]
+                """.trimIndent(),
+            )
+
+            assertThat(list!!.single().createdAt).isEqualTo("2025-06-01T12:00:00Z")
+            assertThat(list.single().updatedAt).isEqualTo("2025-06-02T00:00:00+02:00")
+        }
+
+        @Test
+        fun `missing created_at and updated_at default to null`() {
+            val list = RommApi.parseFirmwareList("""[{"id": 9, "file_name": "bios.bin"}]""")
+
+            assertThat(list!!.single().createdAt).isNull()
+            assertThat(list.single().updatedAt).isNull()
+        }
     }
 
     @Nested

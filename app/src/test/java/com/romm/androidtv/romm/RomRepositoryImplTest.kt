@@ -352,6 +352,23 @@ class RomRepositoryImplTest {
 
             assertThat(outcome).isEqualTo(StagingOutcome.NoApprovedCore("psp"))
         }
+
+        @Test
+        fun `the real, default resolver rejects Linux-only ps2 on Android ABIs`() {
+            // lrps2 is approved for linux-x86_64 only, so the Android-scoped default
+            // resolver (ANDROID_CORE_ABIS) must not resolve it — same as "gc" for dolphin.
+            val ps2RomJson = """
+                {"id": 63, "fs_name": "game.iso", "fs_size_bytes": 4, "platform_slug": "ps2", "has_multiple_files": false,
+                 "files": [{"id": 1, "file_name": "game.iso", "file_size_bytes": 4, "is_top_level": true}]}
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody(ps2RomJson))
+
+            val outcome = runBlocking {
+                RomRepositoryImpl(client, sessionStore, newCache()).stageForLaunch(63)
+            }
+
+            assertThat(outcome).isEqualTo(StagingOutcome.NoApprovedCore("ps2"))
+        }
     }
 
     @Nested

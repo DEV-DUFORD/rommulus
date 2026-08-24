@@ -85,6 +85,13 @@ class LibrarySupportTest {
     }
 
     @Test
+    fun `PlayStation 2 support is Linux-only`() {
+        // lrps2 is built for linux-x86_64 only, so it must not resolve on Android ABIs.
+        assertThat(isPlatformNativelySupported("ps2", setOf("armeabi-v7a", "arm64-v8a"))).isFalse()
+        assertThat(isPlatformNativelySupported("ps2", setOf("linux-x86_64"))).isTrue()
+    }
+
+    @Test
     fun `isPlatformNativelySupported returns false for blank and empty slugs`() {
         assertThat(isPlatformNativelySupported("")).isFalse()
         assertThat(isPlatformNativelySupported("  ")).isFalse()

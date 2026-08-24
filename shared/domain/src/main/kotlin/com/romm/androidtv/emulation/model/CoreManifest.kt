@@ -660,6 +660,39 @@ object CoreManifest {
             approved = true,
         ),
         CoreLicenseFinding(
+            coreName = "PS2 (PCSX2 fork)",
+            coreId = "lrps2",
+            upstreamRepository = "https://github.com/libretro/ps2",
+            commitSha = "7701fd27133f0b83d9e53107ca1e57446ba61090",
+            releaseTag = "",
+            licenseSummary = "GPL-3.0-or-later (COPYING.GPLv3): lrps2 is a PCSX2 fork and " +
+                "inherits PCSX2's GPL/LGPL licensing, with the complete dependency closure " +
+                "(glad, glslang, vulkan-headers, xbyak, vixl, libchdr, ...) vendored under " +
+                "3rdparty/ and per-file licenses retained in the source headers. The " +
+                "Linux-only Libretro build disables Vulkan and renders through the player's " +
+                "SDL3-managed OpenGL context. A user-supplied PS2 BIOS image is required at " +
+                "runtime; the core auto-detects it by content in its BIOS directory. Exact " +
+                "source pins are retained through the lrps2 git submodule; see " +
+                "third_party/cores/lrps2/COPYING.GPLv3.",
+            commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            sourceOfferSatisfied = true,
+            attributionSatisfied = true,
+            supportedSystems = listOf("ps2"),
+            supportedExtensions = listOf(
+                ".iso", ".chd", ".cso", ".ciso", ".gz",
+                ".bin", ".mdf", ".nrg", ".img", ".dump", ".elf", ".m3u",
+            ),
+            requiredFirmware = listOf("bios_PS2.bin"),
+            supportedAbis = listOf("linux-x86_64"),
+            buildCommand = "git submodule update --init --recursive && " +
+                "cmake -S native/player -B build/player && cmake --build build/player " +
+                "(target lrps2_core via native/cmake/cores/lrps2-linux.cmake; GCC C++17 " +
+                "make platform=unix, OpenGL hardware rendering, Vulkan disabled, CHD enabled)",
+            reviewedBy = "DEV-DUFORD",
+            reviewedOn = "2026-08-24",
+            approved = true,
+        ),
+        CoreLicenseFinding(
             coreName = "RomM Synthetic Test Core",
             coreId = "test_core",
             upstreamRepository = "https://github.com/romm-android-tv/rommulus",

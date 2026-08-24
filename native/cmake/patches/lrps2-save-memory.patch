@@ -1,0 +1,185 @@
+diff --git a/libretro/main.cpp b/libretro/main.cpp
+index 6988faf45..aaaa2ad11 100644
+--- a/libretro/main.cpp
++++ b/libretro/main.cpp
+@@ -45,6 +45,7 @@
+ #include "../pcsx2/Frontend/InputManager.h"
+ #include "../pcsx2/Frontend/LayeredSettingsInterface.h"
+ #include "../pcsx2/VMManager.h"
++#include "../pcsx2/MemoryCardFile.h"
+ #include "../pcsx2/Patch.h"
+ 
+ #include "../pcsx2/SPU2/spu2.h"
+@@ -2970,6 +2971,45 @@ bool retro_unserialize(const void* data, size_t size)
+ 	return true;
+ }
+ 
++/* RomMulus save-memory extensions (PS2 memory card image). The frontend
++ * resolves these by symbol name (see core_library.cpp) and drives them through
++ * the generic checkpoint / restore-on-launch flow. They read and write the
++ * whole in-RAM card image for slot 0 (Mcd001.ps2) without the PS2 flash
++ * AND-merge semantics of FileMcd_Save, so a previously captured image restores
++ * verbatim. FileMcd_EmuOpen() is idempotent (guarded by FileMcd_Open) and
++ * ensures the card is loaded even if the frontend calls in before the VM has
++ * fully booted (restore-on-launch happens right after retro_load_game()). */
++extern "C" {
++
++RETRO_API size_t romm_get_save_memory_size(void)
++{
++	FileMcd_EmuOpen();
++	return FileMcd_GetRawSize(0, 0);
++}
++
++RETRO_API void* romm_get_save_memory_data(void)
++{
++	static std::vector<u8> snapshot;
++	const size_t size = romm_get_save_memory_size();
++	if (size == 0)
++		return nullptr;
++	snapshot.resize(size);
++	if (FileMcd_ReadRaw(0, 0, snapshot.data(), size) != static_cast<s32>(size))
++	{
++		snapshot.clear();
++		return nullptr;
++	}
++	return snapshot.data();
++}
++
++RETRO_API bool romm_restore_save_memory(const void* data, size_t size)
++{
++	return data &&
++		FileMcd_SaveRaw(0, 0, static_cast<const u8*>(data), size) == static_cast<s32>(size);
++}
++
++}  // extern "C"
++
+ size_t retro_get_memory_size(unsigned id)
+ {
+ 	/* This only works because Scratch comes right after Main in eeMem */
+diff --git a/link.T b/link.T
+index 708a14b52..d5c119b62 100644
+--- a/link.T
++++ b/link.T
+@@ -1,5 +1,6 @@
+ {
+    global: retro_*;
++           romm_*;              /* RomMulus save-memory extensions (PS2 memcard image) */
+            pcsx2_jithash_dump;  /* JIT emission oracle; see pcsx2/x86/JitHash.cpp */
+    local: *;
+ };
+diff --git a/pcsx2/MemoryCardFile.cpp b/pcsx2/MemoryCardFile.cpp
+index f08b559c3..cc4374172 100644
+--- a/pcsx2/MemoryCardFile.cpp
++++ b/pcsx2/MemoryCardFile.cpp
+@@ -205,6 +205,13 @@ public:
+ 	s32 EraseBlock(uint slot, u32 adr);
+ 	u64 GetCRC(uint slot);
+ 
++	/* Raw full-card image access for the RomMulus save-memory extensions.
++	 * Unlike Save(), these operate on the whole in-RAM card image without the
++	 * PS2 flash AND-merge, so a previously captured image restores verbatim. */
++	size_t GetRawSize(uint slot);
++	bool CopyRaw(u8* dest, size_t size, uint slot);
++	bool RestoreRaw(const u8* src, size_t size, uint slot);
++
+ protected:
+ 	bool Seek(RFILE* f, u32 adr);
+ 	bool Create(const char* mcdFile, uint sizeInMB);
+@@ -573,6 +580,48 @@ u64 FileMemoryCard::GetCRC(uint slot)
+ 	return m_chksum[slot];
+ }
+ 
++size_t FileMemoryCard::GetRawSize(uint slot)
++{
++	if (!m_cardData[slot])
++		return 0;
++	return m_cardSize[slot];
++}
++
++bool FileMemoryCard::CopyRaw(u8* dest, size_t size, uint slot)
++{
++	if (!dest || size != m_cardSize[slot] || !m_cardData[slot])
++		return false;
++	memcpy(dest, m_cardData[slot], size);
++	return true;
++}
++
++bool FileMemoryCard::RestoreRaw(const u8* src, size_t size, uint slot)
++{
++	if (!src || size != m_cardSize[slot] || !m_cardData[slot])
++		return false;
++	memcpy(m_cardData[slot], src, size);
++
++	/* Recompute the checksum word from the restored bytes (it lives at
++	 * m_chkaddr) so the restored card passes PCSX2's integrity check on the
++	 * next read, then persist the whole image so the card survives Close. */
++	if (!m_ispsx[slot])
++	{
++		m_chksum[slot] = 0;
++		for (size_t i = 0; i < size; i += 8)
++		{
++			u64 w = 0;
++			const size_t n = (size - i < 8) ? (size - i) : 8;
++			memcpy(&w, m_cardData[slot] + i, n);
++			m_chksum[slot] ^= w;
++		}
++		memcpy(m_cardData[slot] + m_chkaddr, &m_chksum[slot], sizeof(m_chksum[slot]));
++	}
++
++	if (!Seek(m_file[slot], 0))
++		return false;
++	return rfwrite(m_cardData[slot], m_cardSize[slot], 1, m_file[slot]) == 1;
++}
++
+ // --------------------------------------------------------------------------------------
+ //  MemoryCard Component API Bindings
+ // --------------------------------------------------------------------------------------
+@@ -654,6 +703,32 @@ s32 FileMcd_Save(uint port, uint slot, const u8* src, u32 adr, int size)
+ 	return 0;
+ }
+ 
++size_t FileMcd_GetRawSize(uint port, uint slot)
++{
++	const uint combinedSlot = FileMcd_ConvertToSlot(port, slot);
++	if (EmuConfig.Mcd[combinedSlot].Type == MemoryCardType::File)
++		return Mcd::impl.GetRawSize(combinedSlot);
++	return 0;
++}
++
++s32 FileMcd_ReadRaw(uint port, uint slot, u8* dest, size_t size)
++{
++	const uint combinedSlot = FileMcd_ConvertToSlot(port, slot);
++	if (EmuConfig.Mcd[combinedSlot].Type == MemoryCardType::File &&
++		Mcd::impl.CopyRaw(dest, size, combinedSlot))
++		return static_cast<s32>(size);
++	return 0;
++}
++
++s32 FileMcd_SaveRaw(uint port, uint slot, const u8* src, size_t size)
++{
++	const uint combinedSlot = FileMcd_ConvertToSlot(port, slot);
++	if (EmuConfig.Mcd[combinedSlot].Type == MemoryCardType::File &&
++		Mcd::impl.RestoreRaw(src, size, combinedSlot))
++		return static_cast<s32>(size);
++	return 0;
++}
++
+ s32 FileMcd_EraseBlock(uint port, uint slot, u32 adr)
+ {
+ 	const uint combinedSlot = FileMcd_ConvertToSlot(port, slot);
+diff --git a/pcsx2/MemoryCardFile.h b/pcsx2/MemoryCardFile.h
+index d3eb3e926..b2d03b3e1 100644
+--- a/pcsx2/MemoryCardFile.h
++++ b/pcsx2/MemoryCardFile.h
+@@ -50,6 +50,11 @@ void FileMcd_GetSizeInfo(uint port, uint slot, McdSizeInfo* outways);
+ bool FileMcd_IsPSX(uint port, uint slot);
+ s32 FileMcd_Read(uint port, uint slot, u8* dest, u32 adr, int size);
+ s32 FileMcd_Save(uint port, uint slot, const u8* src, u32 adr, int size);
++/* Raw full-card image access (bypasses the PS2 flash AND-merge semantics of
++ * FileMcd_Save) used by the RomMulus save-memory extensions. */
++size_t FileMcd_GetRawSize(uint port, uint slot);
++s32 FileMcd_ReadRaw(uint port, uint slot, u8* dest, size_t size);
++s32 FileMcd_SaveRaw(uint port, uint slot, const u8* src, size_t size);
+ s32 FileMcd_EraseBlock(uint port, uint slot, u32 adr);
+ u64 FileMcd_GetCRC(uint port, uint slot);
+ bool FileMcd_ReIndex(uint port, uint slot, const char* filter);

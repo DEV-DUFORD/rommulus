@@ -30,6 +30,7 @@ gate before its gate status below may move to PASSED.
 | `pcsx_rearmed` | `native/cmake/cores/pcsx_rearmed-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box; Lightrec x86_64 dynarec (criterion 9 deferred — see note) | yes |
 | `mupen64plus_next` | `native/cmake/cores/mupen64plus_next-linux.cmake` (included by `native/player/CMakeLists.txt`) | PASSED — §13.2 gate on Ubuntu box; x86 dynarec. GLideN64 GLES3 acceleration is build-verified and pending physical Steam Deck validation (criterion 9 deferred — see note) | yes |
 | `dolphin` | `native/cmake/cores/dolphin-linux.cmake` (isolated ExternalProject included by `native/player/CMakeLists.txt`) | BUILD-INTEGRATED — physical Ubuntu and Steam Deck gameplay validation pending | yes |
+| `lrps2` | `native/cmake/cores/lrps2-linux.cmake` (isolated ExternalProject included by `native/player/CMakeLists.txt`) | BUILD-INTEGRATED — physical Ubuntu and Steam Deck gameplay validation pending; PS2 BIOS required | yes |
 
 ### Deferred verification: save round-trip (criterion 9)
 

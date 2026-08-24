@@ -1,0 +1,9 @@
+lrps2 (PS2)
+Upstream: https://github.com/libretro/ps2
+Revision: 7701fd27133f0b83d9e53107ca1e57446ba61090
+
+lrps2 is a PCSX2 fork. PCSX2 is licensed under the GNU General Public
+License v3 or later (GPLv3+); the full license text is retained in
+third_party/cores/lrps2/COPYING.GPLv3. Bundled third-party components
+(vendored under third_party/cores/lrps2/3rdparty/) carry their own
+licenses, referenced from the source headers.

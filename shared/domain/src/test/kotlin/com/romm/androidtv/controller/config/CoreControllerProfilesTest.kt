@@ -154,7 +154,7 @@ class CoreControllerProfilesTest {
                     }
 
                     assertThat(analogProfiles.map { it.coreId })
-                        .containsExactlyInAnyOrder("pcsx_rearmed", "mupen64plus_next", "dolphin")
+                        .containsExactlyInAnyOrder("pcsx_rearmed", "mupen64plus_next", "dolphin", "lrps2")
                     for (profile in analogProfiles) {
                         for (player in profile.defaults.values) {
                             assertThat(player.get(CoreControlId.D_PAD_UP, BindingSlot.SECONDARY)).isNull()
@@ -273,6 +273,21 @@ class CoreControllerProfilesTest {
     }
 
     @Test
+    fun `lrps2 maps PS2 DualShock 2 controls to their RetroPad targets`() {
+        val p = CoreControllerProfiles.byCoreId("lrps2")!!
+        assertThat(targetFor(p, CoreControlId.BUTTON_B)).isEqualTo(LogicalControl.BUTTON_B)
+        assertThat(targetFor(p, CoreControlId.BUTTON_A)).isEqualTo(LogicalControl.BUTTON_A)
+        assertThat(targetFor(p, CoreControlId.BUTTON_X)).isEqualTo(LogicalControl.BUTTON_X)
+        assertThat(targetFor(p, CoreControlId.BUTTON_Y)).isEqualTo(LogicalControl.BUTTON_Y)
+        assertThat(targetFor(p, CoreControlId.L1)).isEqualTo(LogicalControl.BUTTON_LB)
+        assertThat(targetFor(p, CoreControlId.R1)).isEqualTo(LogicalControl.BUTTON_RB)
+        assertThat(targetFor(p, CoreControlId.L2)).isEqualTo(LogicalControl.BUTTON_LT)
+        assertThat(targetFor(p, CoreControlId.R2)).isEqualTo(LogicalControl.BUTTON_RT)
+        assertThat(targetFor(p, CoreControlId.LEFT_STICK_X)).isEqualTo(LogicalControl.AXIS_LX)
+        assertThat(targetFor(p, CoreControlId.RIGHT_STICK_X)).isEqualTo(LogicalControl.AXIS_RX)
+    }
+
+    @Test
     fun `dolphin maps GameCube controls to their RetroPad targets`() {
         val p = CoreControllerProfiles.byCoreId("dolphin")!!
         assertThat(targetFor(p, CoreControlId.BUTTON_A)).isEqualTo(LogicalControl.BUTTON_A)
@@ -350,6 +365,7 @@ class CoreControllerProfilesTest {
             "pcsx_rearmed" to 2,
             "mupen64plus_next" to 4,
             "dolphin" to 4,
+            "lrps2" to 2,
         )
         for ((coreId, count) in expected) {
             val p = CoreControllerProfiles.byCoreId(coreId)
@@ -375,6 +391,7 @@ class CoreControllerProfilesTest {
             "pcsx_rearmed" to "PlayStation",
             "mupen64plus_next" to "Nintendo 64",
             "dolphin" to "Nintendo GameCube",
+            "lrps2" to "PlayStation 2",
         )
         for ((coreId, name) in expected) {
             val p = CoreControllerProfiles.byCoreId(coreId)

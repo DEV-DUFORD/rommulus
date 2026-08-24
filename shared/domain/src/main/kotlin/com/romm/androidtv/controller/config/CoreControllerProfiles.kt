@@ -36,8 +36,11 @@ import com.romm.androidtv.emulation.model.ANDROID_CORE_ABIS
  *   Control Stick -> AXIS_LX/LY.
  * - **dolphin** — D-Pad -> DPAD; A/B/X/Y -> A/B/X/Y; L/R -> L2/R2 triggers; Z -> R;
  *   Start->Start; Control Stick -> AXIS_LX/LY; C-Stick -> AXIS_RX/RY.
+ * - **lrps2** — D-Pad -> DPAD; Cross->B, Circle->A, Triangle->X, Square->Y; L1->L, R1->R,
+ *   L2->L2(trigger), R2->R2(trigger), L3->L3, R3->R3; Select->Select; Start->Start;
+ *   Left/Right Stick -> AXIS_LX/LY/RX/RY.
  *
- * Three profiles use authoritative Controllercons 2.1 vectors. The other eleven use
+ * One profile uses the authoritative Controllercons 2.1 vector. The other fourteen use
  * artist-provided "1 Color Controllers and Handhelds" silhouettes.
  */
 object CoreControllerProfiles {
@@ -58,6 +61,7 @@ object CoreControllerProfiles {
         pcsxRearmed(),
         mupen64PlusNext(),
         dolphin(),
+        lrps2(),
     )
 
     /** Look up a profile by its core id. */
@@ -312,6 +316,34 @@ object CoreControllerProfiles {
             desc(CoreControlId.LEFT_STICK_Y, "Control Stick Y", LogicalControl.AXIS_LY, InputKind.ANALOG_STICK, circle("left_stick_y", 0.283f, 0.413f, 0.086f)),
             desc(CoreControlId.RIGHT_STICK_X, "C-Stick X", LogicalControl.AXIS_RX, InputKind.ANALOG_STICK, circle("right_stick_x", 0.616f, 0.573f, 0.058f)),
             desc(CoreControlId.RIGHT_STICK_Y, "C-Stick Y", LogicalControl.AXIS_RY, InputKind.ANALOG_STICK, circle("right_stick_y", 0.616f, 0.573f, 0.058f)),
+        ),
+    )
+
+    private fun lrps2() = profile(
+        coreId = "lrps2",
+        consoleName = "PlayStation 2",
+        consoleSubtitle = null,
+        playerCount = 2,
+        artwork = artistProvidedArt("controller_outline_playstation2"),
+        // DualShock 2 keeps the DualShock layout (the core exposes no named input
+        // descriptors), so this mirrors the pcsx_rearmed geometry and RetroPad targets.
+        controls = dpad(0.288f, 0.454f, 0.075f) + listOf(
+            desc(CoreControlId.BUTTON_B, "Cross", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.675f, 0.475f, 0.07f)),
+            desc(CoreControlId.BUTTON_A, "Circle", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.731f, 0.419f, 0.07f)),
+            desc(CoreControlId.BUTTON_X, "Triangle", LogicalControl.BUTTON_X, InputKind.BUTTON, circle("button_x", 0.675f, 0.362f, 0.07f)),
+            desc(CoreControlId.BUTTON_Y, "Square", LogicalControl.BUTTON_Y, InputKind.BUTTON, circle("button_y", 0.620f, 0.419f, 0.07f)),
+            desc(CoreControlId.L1, "L1", LogicalControl.BUTTON_LB, InputKind.BUTTON, rect("l1", 0.235f, 0.305f, 0.155f, 0.05f)),
+            desc(CoreControlId.R1, "R1", LogicalControl.BUTTON_RB, InputKind.BUTTON, rect("r1", 0.610f, 0.305f, 0.155f, 0.05f)),
+            desc(CoreControlId.L2, "L2", LogicalControl.BUTTON_LT, InputKind.TRIGGER, rect("l2", 0.260f, 0.278f, 0.115f, 0.04f)),
+            desc(CoreControlId.R2, "R2", LogicalControl.BUTTON_RT, InputKind.TRIGGER, rect("r2", 0.625f, 0.278f, 0.115f, 0.04f)),
+            desc(CoreControlId.L3, "L3", LogicalControl.BUTTON_L3, InputKind.BUTTON, circle("l3", 0.322f, 0.487f, 0.156f)),
+            desc(CoreControlId.R3, "R3", LogicalControl.BUTTON_R3, InputKind.BUTTON, circle("r3", 0.522f, 0.487f, 0.156f)),
+            desc(CoreControlId.SELECT, "Select", LogicalControl.BUTTON_SELECT, InputKind.BUTTON, oval("select", 0.410f, 0.430f, 0.055f, 0.045f)),
+            desc(CoreControlId.START, "Start", LogicalControl.BUTTON_START, InputKind.BUTTON, rect("start", 0.535f, 0.425f, 0.060f, 0.055f)),
+            desc(CoreControlId.LEFT_STICK_X, "Left Stick X", LogicalControl.AXIS_LX, InputKind.ANALOG_STICK, circle("left_stick_x", 0.322f, 0.487f, 0.156f)),
+            desc(CoreControlId.LEFT_STICK_Y, "Left Stick Y", LogicalControl.AXIS_LY, InputKind.ANALOG_STICK, circle("left_stick_y", 0.322f, 0.487f, 0.156f)),
+            desc(CoreControlId.RIGHT_STICK_X, "Right Stick X", LogicalControl.AXIS_RX, InputKind.ANALOG_STICK, circle("right_stick_x", 0.522f, 0.487f, 0.156f)),
+            desc(CoreControlId.RIGHT_STICK_Y, "Right Stick Y", LogicalControl.AXIS_RY, InputKind.ANALOG_STICK, circle("right_stick_y", 0.522f, 0.487f, 0.156f)),
         ),
     )
 

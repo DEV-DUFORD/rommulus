@@ -12,7 +12,7 @@ class CoreManifestTest {
         // (LIBRETRO_REFACTOR.md section 4.1) — approving this core must not silently
         // approve any other entry.
         assertThat(CoreManifest.approvedEntries().map { it.coreId })
-            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem", "pcsx_rearmed", "mupen64plus_next", "dolphin", "test_core")
+            .containsExactlyInAnyOrder("gambatte", "genesis_plus_gx", "snes9x", "fceumm", "mgba", "stella", "beetle_pce_fast", "mednafen_ngp", "mednafen_wswan", "handy", "prosystem", "pcsx_rearmed", "mupen64plus_next", "dolphin", "lrps2", "test_core")
     }
 
     @Test
@@ -320,6 +320,21 @@ class CoreManifestTest {
             assertThat(dolphin.requiredFirmware).isEmpty()
             assertThat(dolphin.supportedAbis).containsExactly("linux-x86_64")
         }
+    }
+
+    @Test
+    fun `lrps2 is approved only for Linux PS2`() {
+        val lrps2 = CoreManifest.findById("lrps2")
+
+        assertThat(lrps2).isNotNull
+        assertThat(lrps2!!.approved).isTrue()
+        assertThat(lrps2.commercialUseFinding)
+            .isEqualTo(CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK)
+        assertThat(lrps2.supportedSystems).containsExactly("ps2")
+        assertThat(lrps2.supportedExtensions).contains(".iso", ".chd", ".cso")
+        // PS2 requires a user-supplied BIOS; the core auto-detects it by content.
+        assertThat(lrps2.requiredFirmware).containsExactly("bios_PS2.bin")
+        assertThat(lrps2.supportedAbis).containsExactly("linux-x86_64")
     }
 
     @Test

@@ -57,6 +57,10 @@ data class FirmwareInfo(
     val crcHash: String,
     val isVerified: Boolean,
     val missingFromFs: Boolean = false,
+    /** Raw ISO-8601 UTC `created_at` string, when the server returned one (null if absent). */
+    val createdAt: String? = null,
+    /** Raw ISO-8601 UTC `updated_at` string, when the server returned one (null if absent). */
+    val updatedAt: String? = null,
 )
 
 sealed interface RomInfoResult {
@@ -117,6 +121,8 @@ internal data class FirmwareJson(
     val crc_hash: String? = null,
     val is_verified: Boolean = false,
     val missing_from_fs: Boolean = false,
+    val created_at: String? = null,
+    val updated_at: String? = null,
 )
 
 @JsonClass(generateAdapter = false)
@@ -177,6 +183,8 @@ object RommApi {
                     crcHash = it.crc_hash.orEmpty(),
                     isVerified = it.is_verified,
                     missingFromFs = it.missing_from_fs,
+                    createdAt = it.created_at,
+                    updatedAt = it.updated_at,
                 )
             }
         } catch (_: Exception) {

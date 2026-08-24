@@ -132,6 +132,9 @@ install -m 0644 \
 mkdir -p "$STAGE/share/rommulus/dolphin-emu"
 cp -a "$REPO_ROOT/third_party/cores/dolphin/Data/Sys" \
   "$STAGE/share/rommulus/dolphin-emu/Sys"
+mkdir -p "$STAGE/share/rommulus/lrps2/resources"
+install -m 0644 "$REPO_ROOT/third_party/cores/lrps2/bin/resources/GameIndex.yaml" \
+  "$STAGE/share/rommulus/lrps2/resources/GameIndex.yaml"
 mkdir -p "$STAGE/share/rommulus/controllers"
 install -m 0644 "$REPO_ROOT"/assets/controllers/*.png \
   "$STAGE/share/rommulus/controllers/"

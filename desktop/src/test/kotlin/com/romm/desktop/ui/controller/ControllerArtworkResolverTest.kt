@@ -27,6 +27,7 @@ class ControllerArtworkResolverTest {
         "controller_outline_atari7800",
         "controller_outline_ps1",
         "controller_outline_n64",
+        "controller_outline_playstation2",
         "controller_outline_gamecube",
         "controller_outline_gba",
         "controller_outline_gb",
@@ -102,10 +103,10 @@ class ControllerArtworkResolverTest {
         @Test
         fun `every profile artwork resource name is a converted desktop vector`() {
             val catalogNames = CoreControllerProfiles.all.map { it.artwork.resourceName }.toSet()
-            // The catalog covers the 13 named consoles only; the generic placeholders exist as
+            // The catalog covers the 15 named consoles only; the generic placeholders exist as
             // fallbacks, not as declared profile artwork.
             assertThat(catalogNames).isSubsetOf(allResourceNames)
-            assertThat(catalogNames).hasSize(14)
+            assertThat(catalogNames).hasSize(15)
         }
     }
 

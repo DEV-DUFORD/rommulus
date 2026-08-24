@@ -573,6 +573,39 @@
         "linux-x86_64": null
       },
       "notes": "Dolphin's Data/Sys runtime files ship under share/rommulus/dolphin-emu/Sys. Ubuntu uses the offscreen compositor path; Steam Deck uses the isolated direct-framebuffer player path."
+    },
+    {
+      "coreId": "lrps2",
+      "coreName": "PS2 (PCSX2 fork)",
+      "enabled": true,
+      "linuxGateStatus": "BUILD-INTEGRATED — physical Ubuntu and Steam Deck gameplay validation pending; PS2 BIOS required",
+      "gateNotes": "Linux-only core. Android ABIs are intentionally absent. A user-supplied PS2 BIOS image (bios_PS2.bin) is required in the core's BIOS directory; the core auto-detects it by content.",
+      "coreLibraryFile": "liblrps2_core.so",
+      "upstreamRepository": "https://github.com/libretro/ps2",
+      "commitSha": "7701fd27133f0b83d9e53107ca1e57446ba61090",
+      "releaseTag": "",
+      "vendorSourceSubset": ["third_party/cores/lrps2 (recursive git submodule)"],
+      "vendoringDoc": "third_party/cores/lrps2/COPYING.GPLv3",
+      "localPatches": [],
+      "compilerBuild": "Linux GCC C++17 build of the core's own Makefile in an isolated ExternalProject (make platform=unix); OpenGL hardware rendering; Vulkan disabled; CHD enabled",
+      "buildCommand": "git submodule update --init --recursive && cmake -S native/player -B build/player && cmake --build build/player (target lrps2_core via native/cmake/cores/lrps2-linux.cmake)",
+      "license": {
+        "summary": "lrps2 is a PCSX2 fork and inherits PCSX2's GPL/LGPL licensing (COPYING.GPLv3); the complete dependency closure is vendored under 3rdparty/ with per-file licenses retained in the source headers.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": true,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-08-24"
+      },
+      "supportedSystems": ["ps2"],
+      "supportedExtensions": [".iso", ".chd", ".cso", ".ciso", ".gz", ".bin", ".mdf", ".nrg", ".img", ".dump", ".elf", ".m3u"],
+      "requiredFirmware": ["bios_PS2.bin"],
+      "supportedAbis": ["linux-x86_64"],
+      "renderer": "GPU-accelerated PCSX2 OpenGL backend through the player's SDL3 OpenGL ES 3 context; x86_64 native recompiler CPU core",
+      "binaryChecksums": {
+        "linux-x86_64": null
+      },
+      "notes": "PS2 BIOS required: a user-supplied BIOS image (bios_PS2.bin) must be present in the core's BIOS directory; the core auto-detects it by content. GameIndex.yaml ships under share/rommulus/lrps2/resources."
     }
   ]
 }

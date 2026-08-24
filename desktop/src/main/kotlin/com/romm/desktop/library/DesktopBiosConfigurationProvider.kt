@@ -53,10 +53,11 @@ import okhttp3.Request
  * §9 rules 7–9) and any pre-existing symlink at the destination is rejected (§9 rule 8).
  * The firmware directory is created user-only (0700, §9 rule 4).
  *
- * Zip handling: the Android managers extract single-entry zip payloads before staging.
- * Deliberately NOT done here — the desktop stages the raw server content, because RomM's
- * firmware endpoint streams the actual BIOS content and core payloads (BIOS mirrors) are
- * consumed verbatim.
+ * Zip handling: SEGA CD / PlayStation payloads are staged verbatim (the desktop consumes
+ * the raw server content). PS2 is the exception: uploads are commonly distributed as
+ * archives, so [prepareForLaunch] routes the staged PS2 download through
+ * [Ps2BiosSelection.preparePayload], which extracts the first `.bin` entry from a ZIP
+ * payload (size-guarded) and places it as `bios_PS2.bin`.
  *
  * Selection state: the desktop has no separate settings seam in this constructor, so the
  * staged file on disk is the source of truth: [fetchCatalog] reports the last catalog
@@ -77,6 +78,7 @@ class DesktopBiosConfigurationProvider(
     private val systemName: String = when (platformSlug) {
         "segacd" -> "SEGA CD"
         "psx" -> "PlayStation"
+        PS2_PLATFORM_SLUG -> "PlayStation 2"
         else -> platformSlug.replaceFirstChar { it.uppercase() }
     }
 
@@ -201,8 +203,15 @@ class DesktopBiosConfigurationProvider(
 
         try {
             ensureFirmwareDir()
-            for (fileName in requirements.canonicalFileNames) {
-                atomicCopy(source, systemDirectory.resolve(fileName))
+            if (platformSlug == PS2_PLATFORM_SLUG) {
+                // PS2 BIOSes arrive in many revisions (and often as ZIPs): extract/size-guard
+                // the payload and place it under the single canonical name the core expects.
+                val outcome = Ps2BiosSelection.preparePayload(source, systemDirectory)
+                if (outcome !is FirmwareStagingOutcome.Success) return@withContext outcome
+            } else {
+                for (fileName in requirements.canonicalFileNames) {
+                    atomicCopy(source, systemDirectory.resolve(fileName))
+                }
             }
         } catch (e: IOException) {
             return@withContext FirmwareStagingOutcome.NetworkError(
@@ -218,10 +227,12 @@ class DesktopBiosConfigurationProvider(
     }
 
     /**
-     * Whether this catalog contains a hash-recognized BIOS that can be selected automatically.
+     * Whether this catalog contains a BIOS that can be selected automatically.
      *
      * This mirrors Android's availability check: an explicit staged selection wins, but a known
      * USA (then Europe, then Japan) image also makes the system ready for launch preparation.
+     * PS2 has no fixed hash set — any catalog entry is auto-selectable (the newest US-region
+     * candidate wins; see [Ps2BiosSelection.select]).
      */
     fun hasAutoSelectableFirmware(catalog: BiosConfigurationCatalog.Success): Boolean =
         autoSelectableFirmware(catalog.options, firmwareRequirements()) != null
@@ -235,14 +246,23 @@ class DesktopBiosConfigurationProvider(
                 preferredSha1 = listOf(PSX_US_SHA1, PSX_EU_SHA1, PSX_JP_SHA1),
                 canonicalFileNames = CANONICAL_PSX_FILENAMES,
             )
+            PS2_PLATFORM_SLUG -> FirmwareRequirements(
+                // No fixed SHA-1 set: PS2 BIOS revisions are open-ended, so selection is
+                // rank-based (newest US-region candidate) via [Ps2BiosSelection.select].
+                preferredSha1 = emptyList(),
+                canonicalFileNames = listOf(Ps2BiosSelection.CANONICAL_FILENAME),
+            )
             else -> null
         }
 
     private fun autoSelectableFirmware(
         options: List<BiosConfigurationOption>,
         requirements: FirmwareRequirements?,
-    ): FirmwareInfo? = requirements?.preferredSha1?.firstNotNullOfOrNull { sha1 ->
-        options.firstOrNull { it.firmware.sha1Hash.equals(sha1, ignoreCase = true) }?.firmware
+    ): FirmwareInfo? = when (platformSlug) {
+        PS2_PLATFORM_SLUG -> Ps2BiosSelection.select(options.map { it.firmware }, null)
+        else -> requirements?.preferredSha1?.firstNotNullOfOrNull { sha1 ->
+            options.firstOrNull { it.firmware.sha1Hash.equals(sha1, ignoreCase = true) }?.firmware
+        }
     }
 
     /**
@@ -514,6 +534,7 @@ private const val SEGA_CD_EU_SHA1 = "f891e0ea651e2232af0c5c4cb46a0cae2ee8f356"
 private const val SEGA_CD_JP_SHA1 = "4846f448160059a7da0215a5df12ca160f26dd69"
 private val CANONICAL_SEGA_CD_FILENAMES = listOf("bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin")
 private const val PSX_PLATFORM_SLUG = "psx"
+private const val PS2_PLATFORM_SLUG = "ps2"
 private const val PSX_US_SHA1 = "0555c6fae8906f3f09baf5988f00e55f88e9f30b"
 private const val PSX_EU_SHA1 = "f6bc2d1f5eb6593de7d089c425ac681d6fffd3f0"
 private const val PSX_JP_SHA1 = "b05def971d8ec59f346f2d9ac21fb742e3eb6917"

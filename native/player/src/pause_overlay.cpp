@@ -487,6 +487,7 @@ const char* artworkNameForCore(const char* coreId) {
     if (id == "pcsx_rearmed") return "controller_outline_ps1.png";
     if (id == "mupen64plus_next") return "controller_outline_n64.png";
     if (id == "dolphin") return "controller_outline_gamecube.png";
+    if (id == "lrps2") return "controller_outline_playstation2.png";
     return "controller_outline_generic_gamepad.png";
 }
 
