@@ -124,6 +124,18 @@ std::string parentDirectory(const std::string& path) {
     return path.substr(0, pos);
 }
 
+// Single source of truth for the hardware-rendering core classification:
+// these cores render through the player's SDL-managed OpenGL context
+// (offscreen compositor on Linux, direct framebuffer on Steam Deck) instead
+// of the software video sink. Every hardware-vs-software decision in this
+// file — GL context attributes, SdlHardwareContext creation, the pause-menu
+// present() gate, and the Steam Deck player re-exec — must go through this
+// helper so a new GL core is added in exactly one place.
+bool isHardwareRenderingCore(const std::string& coreId) {
+    return coreId == "mupen64plus_next" || coreId == "dolphin" ||
+           coreId == "lrps2";
+}
+
 std::optional<std::string> dolphinSystemDirectory() {
     std::error_code pathError;
     const std::filesystem::path executable =
@@ -380,7 +392,7 @@ int main(int argc, char* argv[]) {
 
 #ifndef ROMM_STEAM_DECK_PLAYER
     if (parsed.has_value() &&
-        (parsed->coreId == "mupen64plus_next" || parsed->coreId == "dolphin") &&
+        isHardwareRenderingCore(parsed->coreId) &&
         romm::player::shouldUseSteamDeckPlayer()) {
         std::error_code pathError;
         const std::filesystem::path executable =
@@ -454,8 +466,7 @@ int main(int argc, char* argv[]) {
     ::sigaction(SIGINT, &sa, nullptr);
 
     // 7. Create the window and apply the requested video settings.
-    const bool useHardwareRendering =
-        request.coreId == "mupen64plus_next" || request.coreId == "dolphin";
+    const bool useHardwareRendering = isHardwareRenderingCore(request.coreId);
 #ifdef ROMM_STEAM_DECK_PLAYER
     const bool useSteamDeckHardwarePath = useHardwareRendering;
 #else
@@ -464,9 +475,29 @@ int main(int argc, char* argv[]) {
 #endif
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (useHardwareRendering) {
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+        // N64 (GLideN64) and Dolphin render on OpenGL ES 3.0. lrps2's GS
+        // OpenGL renderer hard-requires desktop OpenGL 3.3: its feature gate
+        // (GSDeviceOGL::CheckFeatures) accepts only GLAD_GL_VERSION_3_3 or
+        // GLAD_GL_ES_VERSION_3_1, and this core build always loads glad's
+        // DESKTOP loader (GLContext::m_version is never set, so IsGLES() is
+        // false and the ES flags are never populated) — meaning no GLES
+        // context (even 3.1/3.2) can pass the gate. Its shaders are likewise
+        // "#version 330 core" with a required ARB_shading_language_420pack.
+        // The libretro handshake still nominally negotiates OPENGLES3 (the
+        // engine's SET_HW_RENDER handler only accepts ES types), which is
+        // fine: glad resolves against the actual current context, so a
+        // desktop 3.3 core context satisfies the renderer. Scoped to lrps2
+        // so the N64/Dolphin path is byte-for-byte unchanged; on a machine
+        // without desktop GL 3.3 SDL_CreateWindow fails and the launch is
+        // reported as launch_failed instead of black-screening.
+        const bool useDesktopGlProfile = request.coreId == "lrps2";
+        SDL_GL_SetAttribute(
+            SDL_GL_CONTEXT_PROFILE_MASK,
+            useDesktopGlProfile ? SDL_GL_CONTEXT_PROFILE_CORE
+                                : SDL_GL_CONTEXT_PROFILE_ES);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        SDL_GL_SetAttribute(
+            SDL_GL_CONTEXT_MINOR_VERSION, useDesktopGlProfile ? 3 : 0);
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
