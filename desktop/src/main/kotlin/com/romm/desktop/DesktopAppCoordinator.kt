@@ -1172,6 +1172,13 @@ class DesktopAppCoordinator(
                 core.supportedExtensions.toSet(),
             )
         } catch (e: RomContentStagingException) {
+            // The user-facing reason below is intentionally generic for safety rejections
+            // (UnsafeContent), so keep the internal reason — e.g. "exceeds the extraction size
+            // limit of N bytes" — in the log: a field rejection must be diagnosable without a re-run.
+            log.log(
+                Level.WARNING,
+                "ROM content staging rejected for ROM $romId ('${detail.fileName}'): ${e.message} [${e.failure}]",
+            )
             // Focused, user-facing states for malformed / undownloadable ROM content
             // (Phase 11 work item 6) — mirrors [firmwareLaunchFailureReason] for BIOS.
             return PlayerLaunchResult.Failed(romContentLaunchFailureReason(e, detail.fileName))

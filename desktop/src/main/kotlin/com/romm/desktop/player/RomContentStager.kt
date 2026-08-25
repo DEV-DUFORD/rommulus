@@ -652,7 +652,7 @@ class OkHttpRomContentStager(
             }
             // Multiplicative comparison: integer division (`copied / compressedSize`) truncates, so a
             // ratio marginally above the limit would slip through. Multiplication is safe because
-            // realistic archives are far below Long.MAX_VALUE / 1000 and extraction has a 4 GiB cap.
+            // realistic archives are far below Long.MAX_VALUE / 1000 and extraction has a 5 GiB cap.
             if (copied > compressedSize.coerceAtLeast(1L) * limits.maxCompressionRatio) {
                 throw RomContentStagingException(
                     "archived ROM '${selected.name}' exceeds the compression ratio limit",
@@ -702,5 +702,8 @@ private val DISC_IMAGE_EXTENSIONS = setOf(
 )
 private const val MAX_EXTRACTED_CARTRIDGE_ROM_BYTES = 512L * 1024 * 1024
 private const val MAX_CARTRIDGE_ROM_COMPRESSION_RATIO = 200L
-private const val MAX_EXTRACTED_DISC_IMAGE_BYTES = 4L * 1024 * 1024 * 1024
+// 5 GiB: covers full-capacity DVD-5 images (4,700,372,992 bytes ≈ 4.38 GiB) — e.g. the ~4.1 GiB
+// "Kingdom Hearts - Re-Chain of Memories (USA)" PS2 ISO — with headroom for ISO padding, while
+// remaining a bounded fail-closed cap (dual-layer DVD-9 data, 8.54 GiB, is still rejected).
+private const val MAX_EXTRACTED_DISC_IMAGE_BYTES = 5L * 1024 * 1024 * 1024
 private const val MAX_DISC_IMAGE_COMPRESSION_RATIO = 1000L

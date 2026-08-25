@@ -8,7 +8,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.buffer
+import okio.source
 import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
 import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
 import org.assertj.core.api.Assertions.assertThat
@@ -16,6 +19,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
@@ -55,6 +59,25 @@ class RomContentStagerTest {
                     .code(code)
                     .message(if (code in 200..299) "OK" else "stub error")
                     .body(body.toResponseBody("application/octet-stream".toMediaType()))
+                    .build()
+
+            /**
+             * Serves [file] as a streaming response body — GB-class fixtures must never be read
+             * whole into the test JVM's heap.
+             */
+            fun streamingResponse(url: String, file: Path): Response =
+                Response.Builder()
+                    .request(Request.Builder().url(url).build())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(
+                        ResponseBody.create(
+                            "application/octet-stream".toMediaType(),
+                            Files.size(file),
+                            file.toFile().source().buffer(),
+                        ),
+                    )
                     .build()
         }
     }
@@ -220,10 +243,104 @@ class RomContentStagerTest {
         val compressedDisc = archiveExtractionLimitsFor(".rvz")
 
         assertThat(cartridge.maxBytes).isEqualTo(512L * 1024 * 1024)
-        assertThat(gameCube.maxBytes).isGreaterThan(1_459_978_240L)
+        // The disc-image ceiling is 5 GiB: it must cover a full-capacity DVD-5
+        // (4,700,372,992 bytes) — e.g. the ~4.1 GiB "Kingdom Hearts - Re-Chain of
+        // Memories (USA)" PS2 ISO — while staying bounded.
+        assertThat(gameCube.maxBytes).isEqualTo(5L * 1024 * 1024 * 1024)
+        assertThat(gameCube.maxBytes).isGreaterThanOrEqualTo(4_700_372_992L)
         assertThat(playStation.maxBytes).isEqualTo(gameCube.maxBytes)
         assertThat(compressedDisc.maxBytes).isEqualTo(gameCube.maxBytes)
         assertThat(gameCube.maxCompressionRatio).isGreaterThan(cartridge.maxCompressionRatio)
+    }
+
+    @Test
+    fun `stage accepts a disc image between the old 4 GiB ceiling and the new cap`(@TempDir dir: Path) {
+        // The ~4.1 GiB "Kingdom Hearts - Re-Chain of Memories (USA)" PS2 ISO was rejected by the
+        // old 4 GiB ceiling; the 5 GiB cap must stage it. Fixture: a STORED (uncompressed,
+        // ratio 1) ZIP entry just above the old ceiling, served from disk (never read whole into
+        // the test JVM's heap).
+        val isoBytes = 4L * 1024 * 1024 * 1024 + 1
+        val archivePath = dir.resolve("fixture.zip")
+        writeStoredZip(archivePath, "Kingdom Hearts - Re-Chain of Memories (USA).iso", isoBytes, isoBytes)
+        val http = StubHttp { req -> StubHttp.streamingResponse(req.url.toString(), archivePath) }
+
+        val staged = stager(http, dir).stage(
+            romId = 27304L,
+            fileName = "Kingdom Hearts - Re-Chain of Memories (USA)",
+            expectedSizeBytes = Files.size(archivePath),
+            supportedExtensions = setOf(".iso"),
+        )
+
+        assertThat(staged.path.fileName.toString()).isEqualTo("Kingdom Hearts - Re-Chain of Memories (USA).iso")
+        assertThat(Files.size(staged.path)).isEqualTo(isoBytes)
+    }
+
+    @Test
+    fun `stage rejects a disc image above the new 5 GiB cap`(@TempDir dir: Path) {
+        // The central directory declares a 5 GiB + 1 entry (zip64); the archive itself is tiny —
+        // the pre-extraction size gate must reject it from the declared size alone, fail-closed.
+        val declared = 5L * 1024 * 1024 * 1024 + 1
+        val archivePath = dir.resolve("fixture.zip")
+        writeStoredZip(archivePath, "too-big.iso", declared, actualSize = 3)
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "game", archiveBytes.size.toLong(), setOf(".iso"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("exceeds the extraction size limit of 5368709120 bytes")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.UnsafeContent }
+
+        assertThat(Files.exists(romDir(dir, 7L).resolve("game"))).isFalse()
+    }
+
+    @Test
+    fun `stage rejects an archive entry whose compression ratio exceeds the limit`(@TempDir dir: Path) {
+        // Cartridge limits: 512 MiB cap, ratio 200. A 4 MiB run of zeros deflates to a few KiB,
+        // so the ratio gate (copied > compressedSize * 200) trips long before the 512 MiB size
+        // cap would. A real DEFLATE entry is required: for STORED entries the JDK bounds the
+        // entry stream by the declared compressed size, so the ratio gate could never observe
+        // more copied bytes than compressed bytes.
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("bomb.gb"))
+            val zeros = ByteArray(1024 * 1024)
+            repeat(4) { archive.write(zeros) }
+            archive.closeEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "game", archiveBytes.size.toLong(), setOf(".gb"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("exceeds the compression ratio limit")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.UnsafeContent }
+
+        assertThat(Files.exists(romDir(dir, 7L).resolve("game"))).isFalse()
+    }
+
+    @Test
+    fun `stage rejects an archive with more entries than the limit`(@TempDir dir: Path) {
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            repeat(4097) { i ->
+                archive.putNextEntry(ZipEntry("entry-$i.txt"))
+                archive.write(byteArrayOf(1))
+                archive.closeEntry()
+            }
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "game", archiveBytes.size.toLong(), setOf(".gb"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("has 4097 entries; limit is 4096")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.UnsafeContent }
     }
 
     @Test
@@ -620,5 +737,148 @@ class RomContentStagerTest {
         assertThat(b.path).isNotEqualTo(a.path)
         assertThat(Files.readAllBytes(a.path)).containsExactly(*bytesA)
         assertThat(Files.readAllBytes(b.path)).containsExactly(*bytesB)
+    }
+
+    // ---------------------------------------------------------------- archive fixtures
+
+    /**
+     * Streams a minimal single-entry STORED (uncompressed) ZIP to [archivePath]: the central
+     * directory claims [declaredSize] uncompressed bytes (and [declaredCompressedSize] compressed
+     * bytes when given) while the archive actually carries [actualSize] bytes of pattern data.
+     * The stager reads entry sizes from the central directory, so this exercises the size / ratio
+     * gates end to end — with only [actualSize] bytes on disk, and no GB-class heap allocation.
+     *
+     * CRCs are zero: the JDK's [java.util.zip.ZipFile] does not verify them on read, so a
+     * zero-CRC stored fixture is fully readable — and a real CRC would need a pass over the
+     * (GB-class) content plus a [ZipOutputStream] that refuses stored entries without one.
+     *
+     * Sizes above 4 GiB use a zip64 extra field: 32-bit fields set to the 0xFFFFFFFF sentinel,
+     * 64-bit UNCOMPRESSED size first, then compressed (the PKWARE order the JDK expects), and
+     * the field's declared length is 20 (id + size header + 16 data bytes).
+     */
+    private fun writeStoredZip(
+        archivePath: Path,
+        entryName: String,
+        declaredSize: Long,
+        actualSize: Long,
+        declaredCompressedSize: Long? = null,
+    ) {
+        val name = entryName.toByteArray(Charsets.UTF_8)
+        val compressed = declaredCompressedSize ?: actualSize
+        val zip64 = declaredSize > 0xFFFFFFFFL || compressed > 0xFFFFFFFFL
+        val pattern = ByteArray(1024 * 1024) { i -> (i % 251).toByte() }
+
+        val counting = CountingOutputStream(Files.newOutputStream(archivePath))
+        counting.use { out ->
+            fun u16(v: Int) {
+                out.write(v and 0xFF)
+                out.write((v ushr 8) and 0xFF)
+            }
+
+            fun u32(v: Long) {
+                repeat(4) { i -> out.write(((v ushr (8 * i)) and 0xFF).toInt()) }
+            }
+
+            fun u64(v: Long) {
+                repeat(8) { i -> out.write(((v ushr (8 * i)) and 0xFF).toInt()) }
+            }
+
+            // Local file header. The JDK locates the data right after it (no local extra field);
+            // the 32-bit size fields carry the zip64 sentinel when needed.
+            u32(0x04034B50) // local file header signature
+            u16(45)         // version needed to extract (zip64)
+            u16(0)          // general purpose flags
+            u16(0)          // method: stored
+            u16(0)          // mod time
+            u16(0)          // mod date
+            u32(0)          // crc-32 (not verified on read)
+            u32(if (zip64) -1L else actualSize)
+            u32(if (zip64) -1L else actualSize)
+            u16(name.size)
+            u16(0)          // extra field length
+            out.write(name)
+            val centralDirectoryOffset = counting.position + actualSize
+
+            var written = 0L
+            while (written < actualSize) {
+                val n = minOf(pattern.size.toLong(), actualSize - written).toInt()
+                out.write(pattern, 0, n)
+                written += n
+            }
+
+            // Central directory file header.
+            u32(0x02014B50) // central directory signature
+            u16(45)         // version made by
+            u16(45)         // version needed to extract
+            u16(0)          // general purpose flags
+            u16(0)          // method: stored
+            u16(0)          // mod time
+            u16(0)          // mod date
+            u32(0)          // crc-32
+            u32(if (zip64) -1L else compressed)
+            u32(if (zip64) -1L else declaredSize)
+            u16(name.size)
+            u16(if (zip64) 20 else 0) // extra field length
+            u16(0)                    // comment length
+            u16(0)                    // disk number start
+            u16(0)                    // internal attributes
+            u32(0)                    // external attributes
+            u32(0)                    // local header offset
+            out.write(name)
+            if (zip64) {
+                u16(0x0001) // zip64 extra field id
+                u16(16)     // data length
+                u64(declaredSize)
+                u64(compressed)
+            }
+            val centralDirectorySize = counting.position - centralDirectoryOffset
+
+            // End of central directory. When the CEN offset (or size) does not fit in 32 bits —
+            // true for fixtures whose data itself exceeds 4 GiB — the EOCD carries the
+            // 0xFFFFFFFF sentinels and the real values live in a zip64 EOCD record + locator
+            // immediately before it (the layout the JDK's findEND expects).
+            val zip64End = centralDirectoryOffset > 0xFFFFFFFFL || centralDirectorySize > 0xFFFFFFFFL
+            if (zip64End) {
+                val zip64EocdOffset = counting.position
+                u32(0x06064B50) // zip64 end of central directory signature
+                u64(44)         // size of the remaining record
+                u16(45)         // version made by
+                u16(45)         // version needed to extract
+                u32(0)          // disk number
+                u32(0)          // disk with central directory
+                u64(1)          // entries on this disk
+                u64(1)          // total entries
+                u64(centralDirectorySize)
+                u64(centralDirectoryOffset)
+                u32(0x07064B50) // zip64 end of central directory locator signature
+                u32(0)          // disk with zip64 EOCD
+                u64(zip64EocdOffset) // offset of the zip64 EOCD record
+                u32(1)          // total number of disks
+            }
+            u32(0x06054B50) // end of central directory signature
+            u16(0)          // disk number
+            u16(0)          // disk with central directory
+            u16(if (zip64End) -1 else 1) // entries on this disk
+            u16(if (zip64End) -1 else 1) // total entries
+            u32(if (zip64End) -1L else centralDirectorySize)
+            u32(if (zip64End) -1L else centralDirectoryOffset)
+            u16(0)          // comment length
+        }
+    }
+}
+
+/** Tracks the bytes written so the fixture can address its central directory. */
+private class CountingOutputStream(private val delegate: OutputStream) : OutputStream() {
+    var position: Long = 0
+        private set
+
+    override fun write(b: Int) {
+        delegate.write(b)
+        position++
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        delegate.write(b, off, len)
+        position += len
     }
 }
