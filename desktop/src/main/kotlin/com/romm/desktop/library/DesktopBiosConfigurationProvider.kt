@@ -111,7 +111,9 @@ class DesktopBiosConfigurationProvider(
 
         when (val result = RommApi.fetchFirmwareList(client, origin, platformId)) {
             is FirmwareListResult.Success -> {
-                logger.log(Level.INFO, "Fetched BIOS catalog for $systemName: {0} file(s)", listOf(result.firmware.size))
+                // A bare Object (not a List) so JUL binds log(Level, String, Object) and
+                // MessageFormat substitutes {0} with the count itself, not "[count]".
+                logger.log(Level.INFO, "Fetched BIOS catalog for $systemName: {0} file(s)", result.firmware.size)
                 return@withContext BiosConfigurationCatalog.Success(
                     options = result.firmware.map { BiosConfigurationOption(it, it.fileName) },
                     selectedFirmwareId = selectedStagedFirmwareId(result.firmware),
@@ -161,11 +163,13 @@ class DesktopBiosConfigurationProvider(
 
         val error = stageDownload(firmware, destination)
         if (error != null) {
-            logger.log(Level.WARNING, "BIOS staging failed for {0}: {1}", listOf(firmware.fileName, error))
+            // Array (not List) so JUL binds log(Level, String, Object[]) and {0}/{1} substitute
+            // the individual values instead of the list's toString() landing in {0}.
+            logger.log(Level.WARNING, "BIOS staging failed for {0}: {1}", arrayOf(firmware.fileName, error))
             return@withContext error
         }
 
-        logger.log(Level.INFO, "Staged BIOS {0} -> {1}", listOf(firmware.fileName, destination))
+        logger.log(Level.INFO, "Staged BIOS {0} -> {1}", arrayOf(firmware.fileName, destination))
         FirmwareStagingOutcome.Success(mapOf(fileName to destination.toAbsolutePath().toString()))
     }
 
