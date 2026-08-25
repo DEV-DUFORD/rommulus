@@ -783,6 +783,121 @@ class DesktopAppCoordinatorTest {
     }
 
     @Test
+    fun `launchPlayer surfaces a focused reason when the ROM is a multi-file (multi-disc) package`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val stager = FakeRomContentStager()
+        stager.failure = RomContentStagingException(
+            "downloaded ZIP ROM 'Kingdom Hearts Re Chain of Memories (USA)' contains multiple files " +
+                "(multi-disc or multi-part ROM); only single-file ROMs can be played",
+            failure = RomContentStagingFailure.MultiFileContent,
+        )
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb", fileName = "Kingdom Hearts Re Chain of Memories (USA)") },
+            romContentStagerOverride = stager,
+        )
+
+        val result = c.launchPlayer(romId = 7L)
+
+        // The multi-file case is intact content, not corruption: the reason must say so and point
+        // the user at a single-file version instead of "re-upload this ROM".
+        assertThat(result).isEqualTo(
+            PlayerLaunchResult.Failed(
+                "This game's ROM has multiple files (for example, multiple discs) and can't be played " +
+                    "on desktop yet. Use a single-file version of this game in your RomM library.",
+            ),
+        )
+        assertThat(launcher.launches).isEmpty()
+    }
+
+    @Test
+    fun `launchPlayer logs the exact user-facing failure reason for pre-launch failures`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher()
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val stager = FakeRomContentStager()
+        stager.failure = RomContentStagingException(
+            "ROM size mismatch for 'zelda.gb': expected 1234 bytes, got 5",
+            failure = RomContentStagingFailure.SizeMismatch,
+        )
+        val c = DesktopAppCoordinator(
+            paths = paths,
+            secretBackend = FakeSecretBackend(),
+            appVersion = "test",
+            buildDefaultOrigin = "https://demo.romm.app",
+            playerSupervisorOverride = supervisor,
+            romDetailLookup = { testRom(platformSlug = "gb", fileName = "zelda.gb") },
+            romContentStagerOverride = stager,
+        )
+
+        // Capture what the production logger (com.romm.desktop) receives.
+        val logger = java.util.logging.Logger.getLogger("com.romm.desktop")
+        val records = mutableListOf<java.util.logging.LogRecord>()
+        val handler = object : java.util.logging.Handler() {
+            override fun publish(record: java.util.logging.LogRecord) { records += record }
+            override fun flush() {}
+            override fun close() {}
+        }
+        logger.addHandler(handler)
+        try {
+            val result = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Failed // cast asserts Failed
+            assertThat(result.reason).contains("Content verification failed")
+
+            // The exact user-facing reason must reach the log (WARNING) — previously a pre-launch
+            // failure was only shown under the Play button and left no trace in the log file.
+            assertThat(records.any {
+                it.level == java.util.logging.Level.WARNING &&
+                    (it.message ?: "").contains(result.reason)
+            }).isTrue()
+        } finally {
+            logger.removeHandler(handler)
+        }
+        assertThat(launcher.launches).isEmpty()
+    }
+
+    @Test
+    fun `launchPlayer converts an unexpected pre-launch exception into a logged failure instead of throwing`(@TempDir dir: Path) {
+        // A throw from any step the pipeline does not anticipate (here: the spawn itself) must
+        // NOT escape launchPlayer — an escape would skip finishGameLaunch, leaving the Play
+        // button stuck on "Preparing…" with no message, and leave nothing in the log.
+        val paths = dir.testRoot()
+        installGambatte(paths)
+        val launcher = FakePlayerProcessLauncher(outcomeFor = { throw RuntimeException("spawn exploded") })
+        val supervisor = LaunchJournalSupervisor(journalsRoot = paths.stateDir.resolve("journals"), launcher = launcher)
+        val c = launchCoordinator(paths, platformSlug = "gb", supervisor = supervisor, stager = FakeRomContentStager())
+
+        val logger = java.util.logging.Logger.getLogger("com.romm.desktop")
+        val records = mutableListOf<java.util.logging.LogRecord>()
+        val handler = object : java.util.logging.Handler() {
+            override fun publish(record: java.util.logging.LogRecord) { records += record }
+            override fun flush() {}
+            override fun close() {}
+        }
+        logger.addHandler(handler)
+        try {
+            val result = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Failed // cast asserts Failed
+            assertThat(result.reason).contains("Launch failed unexpectedly").contains("spawn exploded")
+
+            // The unexpected error must reach the log at SEVERE (with the reason in WARNING too).
+            assertThat(records.any { it.level == java.util.logging.Level.SEVERE }).isTrue()
+            assertThat(records.any {
+                it.level == java.util.logging.Level.WARNING &&
+                    (it.message ?: "").contains(result.reason)
+            }).isTrue()
+        } finally {
+            logger.removeHandler(handler)
+        }
+    }
+
+    @Test
     fun `savePath is stable across launches of the same rom`(@TempDir dir: Path) {
         val paths = dir.testRoot()
         installGambatte(paths)

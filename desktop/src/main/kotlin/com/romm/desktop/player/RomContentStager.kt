@@ -39,6 +39,14 @@ enum class RomContentStagingFailure {
     /** Content was rejected for safety: unsafe archive entry path, extraction-limit trip. */
     UnsafeContent,
 
+    /**
+     * The ROM is multi-file (multi-disc / multi-part): the server packages it as an archive with
+     * more than one playable file (RomM serves every file of a multi-file ROM as a ZIP, adding a
+     * synthesized `.m3u` when none exists), which the single-file staging path cannot reduce to
+     * one core-loadable file. Not a corruption — the content is intact, just not playable yet.
+     */
+    MultiFileContent,
+
     /** The download itself failed (HTTP error, transport failure). */
     DownloadFailed,
 
@@ -135,9 +143,13 @@ internal fun gameDownloadClient(client: OkHttpClient): OkHttpClient =
  * rename over the destination (temp + fsync-free rename is sufficient here — the file is cache,
  * and a torn cache file is healed by the next launch's size/hash pass). A failed download never
  * leaves a partial destination behind. ZIP and 7z content is detected by file signature (the
- * detail API's file name may omit the archive extension), then its sole file is validated against
- * the selected core's supported extensions and extracted atomically with the same safety limits
- * as Android.
+ * detail API's file name may omit the archive extension), then its playable members — the entries
+ * matching the selected core's supported extensions, ignoring `.m3u` playlist metadata — are
+ * resolved: exactly one is extracted atomically with the same safety limits as Android, zero or
+ * two-plus reject fail-closed (no usable content / genuinely multi-file ROM). A size-mismatched
+ * download that still reads as a complete archive takes this same path instead of failing as a
+ * corrupt transfer, because RomM's multi-file packages are compressed ZIPs whose size can never
+ * equal the declared sum of their members.
  *
  * All operations are blocking (synchronous OkHttp + file I/O); callers must run this off the UI
  * thread ([DesktopAppCoordinator.launchPlayer] already does — see its KDoc).
@@ -250,11 +262,21 @@ class OkHttpRomContentStager(
             )
         }
         if (expectedSizeBytes > 0 && size != expectedSizeBytes) {
-            dropPart(part)
-            throw RomContentStagingException(
-                "ROM size mismatch for '$fileName': expected $expectedSizeBytes bytes, got $size",
-                failure = RomContentStagingFailure.SizeMismatch,
-            )
+            // A compressed archive can legitimately differ from the declared size: RomM serves
+            // every file of a multi-file ROM as one ZIP, whose compressed size can never equal
+            // the declared sum of its members' sizes. When the bytes are still a COMPLETE,
+            // readable archive, keep them and let prepareContent decide — it extracts the
+            // package when exactly one member is playable for the core (a single-disc ROM
+            // shipped with extra non-playable files) and rejects it otherwise. Anything that
+            // does not read as an archive fails closed as a plain size mismatch (truncated or
+            // corrupt transfer).
+            if (!isReadableArchive(part, safeName)) {
+                dropPart(part)
+                throw RomContentStagingException(
+                    "ROM size mismatch for '$fileName': expected $expectedSizeBytes bytes, got $size",
+                    failure = RomContentStagingFailure.SizeMismatch,
+                )
+            }
         }
 
         runCatching {
@@ -322,20 +344,36 @@ class OkHttpRomContentStager(
         }
 
         val entries = readArchiveEntries(downloadedFile, archiveFormat, safeName)
-        if (entries.size != 1) {
+        // Pick the playable member(s). `.m3u` entries are playlist metadata — RomM synthesizes
+        // one into every multi-file package it serves — never the payload itself, so they are
+        // not candidates. A candidate is any other entry whose name matches a core-supported
+        // extension. Exactly one candidate is stageable:
+        //  - zero candidates -> no usable content in the package (mislabeled/corrupt upload);
+        //  - two or more     -> genuinely multi-file content (multi-disc / multi-part ROM),
+        //    rejected as such — the archive is intact, not corrupt.
+        val candidates = entries
+            .filterNot { it.name.lowercase(Locale.ROOT).endsWith(M3U_EXTENSION) }
+            .filter { entry ->
+                normalizedExtensions.any { ext -> entry.name.lowercase(Locale.ROOT).endsWith(ext) }
+            }
+        if (candidates.isEmpty()) {
             throw RomContentStagingException(
-                "downloaded ${archiveFormat.label} ROM '$safeName' must contain exactly one file; found ${entries.size}",
+                "downloaded ${archiveFormat.label} ROM '$safeName' contains no file supported by the selected core",
                 failure = RomContentStagingFailure.CorruptContent,
             )
         }
+        if (candidates.size > 1) {
+            throw RomContentStagingException(
+                "downloaded ${archiveFormat.label} ROM '$safeName' contains multiple files supported by the selected core " +
+                    "(${candidates.joinToString(", ") { it.name }}); only single-file ROMs can be played",
+                failure = RomContentStagingFailure.MultiFileContent,
+            )
+        }
 
-        val selected = entries.single()
-        val extension = normalizedExtensions.firstOrNull {
+        val selected = candidates.single()
+        val extension = checkNotNull(normalizedExtensions.firstOrNull {
             selected.name.lowercase(Locale.ROOT).endsWith(it)
-        } ?: throw RomContentStagingException(
-            "archived file '${selected.name}' is not supported by the selected core",
-            failure = RomContentStagingFailure.CorruptContent,
-        )
+        })
         if (selected.size < 0) {
             throw RomContentStagingException(
                 "archived ROM '${selected.name}' has an invalid size: ${selected.size} bytes",
@@ -411,6 +449,34 @@ class OkHttpRomContentStager(
             }
         }
         return null
+    }
+
+    /**
+     * Whether [path] is a complete, readable archive: its signature is ZIP/7z AND its entry
+     * list parses. Used by the size gate in [stage] to tell "the server served a compressed
+     * multi-file package" (whose size can never match the declared sum of its members) apart
+     * from a genuinely truncated/corrupt download. When true, [prepareContent] re-inspects the
+     * entries and decides between extracting the sole playable member and rejecting the
+     * package. A safety-limit rejection ([RomContentStagingException]) still counts as
+     * readable — prepareContent re-runs the check and reports the real reason; any other read
+     * failure (truncated central directory, partial 7z header) returns false so the caller
+     * keeps the plain size-mismatch diagnosis.
+     */
+    private fun isReadableArchive(path: Path, safeName: String): Boolean {
+        val format = detectArchiveFormat(path) ?: return false
+        return try {
+            readArchiveEntries(path, format, safeName)
+            true
+        } catch (e: RomContentStagingException) {
+            // Only a policy rejection means the archive parsed completely: the entry-count limit
+            // and unsafe-entry checks both throw UnsafeContent. Every other staging exception
+            // from readArchiveEntries is a parse failure ("cannot read downloaded …") wrapped
+            // as CorruptContent — the archive is structurally unreadable (truncated central
+            // directory, partial 7z header), so the caller keeps the size-mismatch diagnosis.
+            e.failure == RomContentStagingFailure.UnsafeContent
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**
@@ -623,6 +689,8 @@ class OkHttpRomContentStager(
         val ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
         val CHD_SIGNATURE = "MComprHD".toByteArray(Charsets.US_ASCII)
         const val CHD_EXTENSION = ".chd"
+        /** Playlist metadata, never playable content (RomM synthesizes one into every multi-file package). */
+        const val M3U_EXTENSION = ".m3u"
         const val MAX_ARCHIVE_ENTRIES = 4096
         const val COPY_BUFFER_BYTES = 64 * 1024
     }

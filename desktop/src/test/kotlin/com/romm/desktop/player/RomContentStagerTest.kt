@@ -284,7 +284,7 @@ class RomContentStagerTest {
     }
 
     @Test
-    fun `stage rejects a 7z download with multiple supported ROMs`(@TempDir dir: Path) {
+    fun `stage rejects a 7z download with multiple supported ROMs as multi-file content`(@TempDir dir: Path) {
         val archivePath = dir.resolve("fixture.7z")
         SevenZOutputFile(archivePath.toFile()).use { archive ->
             listOf("one.gb", "two.gbc").forEach { name ->
@@ -304,7 +304,167 @@ class RomContentStagerTest {
             stager(http, dir).stage(7L, "game", archiveBytes.size.toLong(), setOf(".gb", ".gbc"))
         }
             .isInstanceOf(RomContentStagingException::class.java)
-            .hasMessageContaining("exactly one")
+            .hasMessageContaining("multiple files")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.MultiFileContent }
+
+        // Fail closed: the multi-file package is not usable, so no cache entry is kept.
+        assertThat(Files.exists(romDir(dir, 7L).resolve("game"))).isFalse()
+    }
+
+    @Test
+    fun `stage rejects a multi-disc ZIP package with a focused MultiFileContent failure`(@TempDir dir: Path) {
+        // A two-disc game uploaded as one RomM folder: the server serves every file as a ZIP
+        // (plus a synthesized .m3u when none exists). The archive is intact — the failure must
+        // be "multiple files", not "corrupt".
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("Kingdom Hearts Re Chain of Memories (USA) (Disc 1).iso"))
+            archive.write(byteArrayOf(1, 1, 1))
+            archive.closeEntry()
+            archive.putNextEntry(ZipEntry("Kingdom Hearts Re Chain of Memories (USA) (Disc 2).iso"))
+            archive.write(byteArrayOf(2, 2, 2))
+            archive.closeEntry()
+            archive.putNextEntry(ZipEntry("Kingdom Hearts Re Chain of Memories (USA).m3u"))
+            archive.write("Disc 1.iso\nDisc 2.iso\n".toByteArray())
+            archive.closeEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(
+                romId = 7L,
+                fileName = "Kingdom Hearts Re Chain of Memories (USA)",
+                expectedSizeBytes = archiveBytes.size.toLong(),
+                supportedExtensions = setOf(".iso", ".chd", ".cso"),
+            )
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("multiple files")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.MultiFileContent }
+
+        // No cache entry is kept for the unusable package.
+        assertThat(Files.exists(romDir(dir, 7L).resolve("Kingdom Hearts Re Chain of Memories (USA)"))).isFalse()
+    }
+
+    @Test
+    fun `stage classifies a size-mismatched multi-file ZIP as MultiFileContent, not a corrupt download`(@TempDir dir: Path) {
+        // RomM's declared size for a multi-file ROM is the SUM of its files; the served ZIP is
+        // compressed, so the size gate fires first. The bytes must still be diagnosed as a
+        // multi-file package (multiple playable files), not an "incomplete or corrupt" transfer.
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("game (Disc 1).iso"))
+            archive.write(ByteArray(64) { 1 })
+            archive.closeEntry()
+            archive.putNextEntry(ZipEntry("game (Disc 2).iso"))
+            archive.write(ByteArray(64) { 2 })
+            archive.closeEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        // What the server reports as fs_size_bytes: the sum of the files' sizes, which can never
+        // equal the compressed package's size (guaranteed mismatch, no coincidence).
+        val declaredSum = 64L + 64L + 4096
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "game", declaredSum, setOf(".iso"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("multiple files")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.MultiFileContent }
+
+        assertThat(Files.exists(romDir(dir, 7L).resolve("game"))).isFalse()
+    }
+
+    @Test
+    fun `stage extracts the sole playable file from a size-mismatched package with extra non-playable files`(@TempDir dir: Path) {
+        // The single-disc case: one ROM image plus non-playable extras (e.g. a manual) in the
+        // RomM folder, and the server-synthesized .m3u playlist. The declared size is the sum of
+        // the members, which never equals the compressed package — but exactly ONE member is
+        // playable for the core (.m3u is metadata, not content), so staging must succeed with
+        // that file instead of rejecting the intact single-disc ROM.
+        val isoBytes = ByteArray(128) { 0x45 }
+        val manualBytes = "manual-bytes".toByteArray()
+        val m3uBytes = "Kingdom Hearts Re Chain of Memories (USA).iso".toByteArray()
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("Kingdom Hearts Re Chain of Memories (USA).iso"))
+            archive.write(isoBytes)
+            archive.closeEntry()
+            archive.putNextEntry(ZipEntry("manual.pdf"))
+            archive.write(manualBytes)
+            archive.closeEntry()
+            archive.putNextEntry(ZipEntry("Kingdom Hearts Re Chain of Memories (USA).m3u"))
+            archive.write(m3uBytes)
+            archive.closeEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        // Declared size: the sum of the members' sizes (the server's fs_size_bytes), which the
+        // compressed package can never equal.
+        val declaredSum = isoBytes.size.toLong() + manualBytes.size + m3uBytes.size
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        val staged = stager(http, dir).stage(
+            romId = 7L,
+            fileName = "Kingdom Hearts Re Chain of Memories (USA)",
+            expectedSizeBytes = declaredSum,
+            // .m3u is core-supported but must NOT count as a playable candidate.
+            supportedExtensions = setOf(".iso", ".chd", ".cso", ".m3u"),
+        )
+
+        assertThat(staged.path.fileName.toString()).isEqualTo("Kingdom Hearts Re Chain of Memories (USA).iso")
+        assertThat(Files.readAllBytes(staged.path)).containsExactly(*isoBytes)
+        assertThat(staged.sha256).isEqualTo(sha256Hex(isoBytes))
+    }
+
+    @Test
+    fun `stage rejects a package with no core-supported file as corrupt content`(@TempDir dir: Path) {
+        // A multi-entry package whose members are all non-playable (e.g. only a manual and the
+        // synthesized .m3u): there is no usable ROM in it — CorruptContent, not MultiFileContent.
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("manual.pdf"))
+            archive.write("pdf-bytes".toByteArray())
+            archive.closeEntry()
+            archive.putNextEntry(ZipEntry("game.m3u"))
+            archive.write("track.bin\n".toByteArray())
+            archive.closeEntry()
+        }
+        val archiveBytes = Files.readAllBytes(archivePath)
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = archiveBytes) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "game", expectedSizeBytes = 999_999L, supportedExtensions = setOf(".iso", ".bin"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("no file supported")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.CorruptContent }
+
+        assertThat(Files.exists(romDir(dir, 7L).resolve("game"))).isFalse()
+    }
+
+    @Test
+    fun `stage keeps SizeMismatch for a truncated archive whose size does not match`(@TempDir dir: Path) {
+        // A truncated download of a single-file ZIP ROM: the PK header is present (so the
+        // signature says "archive") but the central directory is gone (unreadable) — it must
+        // stay a plain size mismatch, not be misdiagnosed as multi-file.
+        val archivePath = dir.resolve("fixture.zip")
+        ZipOutputStream(Files.newOutputStream(archivePath)).use { archive ->
+            archive.putNextEntry(ZipEntry("Pokemon Red.gb"))
+            archive.write(ByteArray(512) { 7 })
+            archive.closeEntry()
+        }
+        val full = Files.readAllBytes(archivePath)
+        val truncated = full.copyOf(16) // PK\x03\x04 header + a few bytes, no central directory
+        val http = StubHttp { req -> StubHttp.response(req.url.toString(), body = truncated) }
+
+        assertThatThrownBy {
+            stager(http, dir).stage(7L, "Pokemon Red", full.size.toLong(), setOf(".gb"))
+        }
+            .isInstanceOf(RomContentStagingException::class.java)
+            .hasMessageContaining("size mismatch")
+            .matches { it is RomContentStagingException && it.failure == RomContentStagingFailure.SizeMismatch }
     }
 
     @Test

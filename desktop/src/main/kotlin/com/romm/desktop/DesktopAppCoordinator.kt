@@ -305,6 +305,9 @@ internal fun firmwareLaunchFailureReason(
  *    or corrupt transfer; re-downloading may heal it);
  *  - corrupt or unusable content ([RomContentStagingFailure.CorruptContent]: malformed archive,
  *    truncated entry, payload the core cannot load);
+ *  - multi-file / multi-disc content ([RomContentStagingFailure.MultiFileContent]: the server
+ *    packaged more than one playable file — e.g. a two-disc game — which the single-file staging
+ *    path cannot reduce to one core-loadable file; the content is intact, not corrupt);
  *  - security rejection ([RomContentStagingFailure.UnsafeContent]: path-escape archive entries,
  *    extraction-limit trips);
  *  - download / write / configuration failures (infrastructure problems, surfaced with detail).
@@ -319,6 +322,8 @@ internal fun romContentLaunchFailureReason(
         "Content verification failed: '$fileName' is incomplete or does not match its expected size. The download may be corrupt — try launching again, or re-upload this ROM in your RomM library."
     RomContentStagingFailure.CorruptContent ->
         "Content verification failed: '$fileName' is corrupt or unreadable. Re-upload this ROM in your RomM library, or try a different file version."
+    RomContentStagingFailure.MultiFileContent ->
+        "This game's ROM has multiple files (for example, multiple discs) and can't be played on desktop yet. Use a single-file version of this game in your RomM library."
     RomContentStagingFailure.UnsafeContent ->
         "Content verification failed: '$fileName' contains unsafe content and was rejected. Re-upload this ROM in your RomM library."
     RomContentStagingFailure.DownloadFailed -> "Could not download the ROM content: ${e.message}."
@@ -1128,10 +1133,32 @@ class DesktopAppCoordinator(
      *
      * Threading: this function BLOCKS (content download + file I/O + process spawn) and must be
      * called off the UI thread — [GameDetailScreen] wraps it in `withContext(Dispatchers.Default)`.
+     *
+     * Every [PlayerLaunchResult.Failed] is logged (WARNING, with the ROM id and the exact
+     * user-facing reason) before it is returned — the reason is also shown under the Play button,
+     * but a pre-launch failure that only lived in the UI was invisible in the log file, which
+     * made field diagnosis (e.g. a ROM rejected during content staging) impossible. An UNEXPECTED
+     * exception from any pre-launch step is likewise converted to a logged [PlayerLaunchResult.Failed]
+     * instead of escaping: an escape would skip the caller's `finishGameLaunch` (leaving the Play
+     * button stuck on "Preparing…" with no message shown) and leave no trace in the log.
      */
     fun launchPlayer(romId: Long): PlayerLaunchResult {
         // A new session supersedes any earlier exit event (the UI clears its status on Ended).
         playerSessionEvents.value = null
+        val result = try {
+            runLaunch(romId)
+        } catch (e: Exception) {
+            log.log(Level.SEVERE, "launch failed for ROM $romId with an unexpected error", e)
+            PlayerLaunchResult.Failed("Launch failed unexpectedly: ${e.message ?: e::class.java.simpleName}")
+        }
+        if (result is PlayerLaunchResult.Failed) {
+            log.warning("launch failed for ROM $romId: ${result.reason}")
+        }
+        return result
+    }
+
+    /** The pre-launch pipeline of [launchPlayer] (see its KDoc); failures are logged by the caller. */
+    private fun runLaunch(romId: Long): PlayerLaunchResult {
         val detail = detailLookup(romId) ?: return PlayerLaunchResult.Failed("detail not loaded")
 
         val core = resolveLaunchCore(detail.platformSlug)
@@ -1929,7 +1956,13 @@ class DesktopAppCoordinator(
             SaveSyncStatus.PENDING_DOWNLOAD,
         )
 
-        private val log: java.util.logging.Logger = java.util.logging.Logger.getLogger("DesktopAppCoordinator")
+        /**
+         * The production logger (token-redacting, file + stderr handlers under the state dir's
+         * `logs/`). A plain `Logger.getLogger("DesktopAppCoordinator")` has no handlers anywhere
+         * in its JUL hierarchy (only `com.romm.desktop` is configured), so its records were
+         * silently dropped — launch failures and sidecar-ingestion warnings never reached the log.
+         */
+        private val log: java.util.logging.Logger = com.romm.desktop.log.DesktopLogger.get()
 
         /** [SavePathPolicy] server key when no origin is configured. */
         private const val NO_ORIGIN_KEY = "no-origin"
