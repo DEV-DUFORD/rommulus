@@ -53,6 +53,8 @@ bool SdlHardwareContext::createContext() {
 
 void SdlHardwareContext::setBufferGeometry(unsigned, unsigned) {}
 
+void SdlHardwareContext::setContentGeometry(unsigned, unsigned) {}
+
 void SdlHardwareContext::attachWindow(romm::video::NativeWindowHandle window) {
     std::lock_guard<std::mutex> lock(mutex_);
     pendingWindow_ = static_cast<SDL_Window*>(window);
