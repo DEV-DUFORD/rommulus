@@ -85,6 +85,18 @@ class PlayerProtocolTest {
     }
 
     @Test
+    fun `software renderer override round-trips and rejects unknown values`() {
+        val original = sampleRequest().copy(rendererOverride = RendererOverride.SOFTWARE_HW)
+        val json = PlayerProtocol.serializeRequest(original)
+        assertThat(PlayerProtocol.parseRequest(json).getOrNull()).isEqualTo(original)
+        assertThat(
+            PlayerProtocol.parseRequest(
+                json.replace("\"software_hw\"", "\"unknown_renderer\""),
+            ).isFailure,
+        ).isTrue()
+    }
+
+    @Test
     fun `result round-trips with all nullable fields set`() {
         val original = sampleResult().copy(errorCode = "E_CORE", errorMessage = "boom")
         assertThat(PlayerProtocol.parseResult(PlayerProtocol.serializeResult(original)).getOrNull())

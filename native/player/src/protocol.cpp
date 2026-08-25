@@ -440,11 +440,12 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
 
     // controllerBindings is v2's OPTIONAL field: it passes the unknown-field
     // check below but is not part of the required set (absent = defaults).
-    static const std::array<const char*, 15> kFields = {{
+    static const std::array<const char*, 16> kFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
         "corePath",        "contentPath", "contentHash", "systemDir",
         "savePath",        "candidateSavePath", "resultPath",
         "expectedSaveSize", "video", "controllerBindings", "keyboardBindings",
+        "rendererOverride",
     }};
     static const std::array<const char*, 13> kRequiredFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
@@ -538,6 +539,15 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
         if (!parseKeyboardBindings(j["keyboardBindings"], bindings, err))
             return reject<PlayerRequest>(error, err);
         r.keyboardBindings = std::move(bindings);
+    }
+    if (j.contains("rendererOverride")) {
+        if (!j["rendererOverride"].is_string())
+            return reject<PlayerRequest>(error, "rendererOverride must be a string");
+        const std::string value = j["rendererOverride"].get<std::string>();
+        if (value != "software_hw")
+            return reject<PlayerRequest>(
+                error, "unknown rendererOverride: " + value);
+        r.rendererOverride = RendererOverride::SoftwareHw;
     }
 
     return r;
@@ -764,6 +774,8 @@ std::string serializeRequest(const PlayerRequest& r) {
         keyboardBindings["bindings"] = std::move(entries);
         j["keyboardBindings"] = std::move(keyboardBindings);
     }
+    if (r.rendererOverride.has_value())
+        j["rendererOverride"] = "software_hw";
     return j.dump(2);
 }
 

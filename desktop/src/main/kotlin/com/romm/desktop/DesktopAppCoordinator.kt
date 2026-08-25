@@ -76,6 +76,7 @@ import com.romm.desktop.player.PlayerExitReport
 import com.romm.desktop.player.PlayerLaunchParams
 import com.romm.desktop.player.PlayerProtocol
 import com.romm.desktop.player.PrepareLaunchResult
+import com.romm.desktop.player.Ps2CompatibilityOverrides
 import com.romm.desktop.player.RetroPadControlMapping
 import com.romm.desktop.player.RomContentStagingException
 import com.romm.desktop.player.RomContentStagingFailure
@@ -1353,6 +1354,11 @@ class DesktopAppCoordinator(
             // null when nothing is stored — the player then keeps its built-in defaults.
             controllerBindings = loadLaunchControllerBindings(core.coreId),
             keyboardBindings = keyboardMappingRepository.launchBindings(core.coreId),
+            rendererOverride = Ps2CompatibilityOverrides.rendererFor(
+                detail.platformSlug,
+                detail.title,
+                detail.fileName,
+            ),
         )
 
         return when (val result = playerSupervisor.prepareLaunch(params, sessionId)) {

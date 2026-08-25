@@ -569,6 +569,19 @@ int main(int argc, char* argv[]) {
     if (!hardwareRenderSize.empty()) {
         session.setCoreOptionOverride("mupen64plus-43screensize", hardwareRenderSize);
     }
+    if (request.rendererOverride.has_value() &&
+        *request.rendererOverride == romm::player::RendererOverride::SoftwareHw) {
+        if (request.coreId != "lrps2") {
+            const std::string error =
+                "software_hw renderer override is only supported by lrps2";
+            std::fprintf(stderr, "error: %s\n", error.c_str());
+            writeResult(request, romm::player::ExitKind::LaunchFailed, false, 0, 0, 0, &error);
+            SDL_Quit();
+            return 1;
+        }
+        session.setCoreOptionOverride("pcsx2_renderer", "Software (HW)");
+        std::fprintf(stderr, "info: compatibility renderer override: Software (HW)\n");
+    }
     if (!session.acquireProcessSlot()) {
         const std::string error = "another emulation session is already active in this process";
         std::fprintf(stderr, "error: %s\n", error.c_str());

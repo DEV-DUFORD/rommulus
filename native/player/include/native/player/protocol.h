@@ -71,11 +71,15 @@ struct KeyboardBindings {
     KeyboardBindingTable table;
 };
 
+enum class RendererOverride {
+    SoftwareHw,
+};
+
 // Launch request version 2 (LINUX_X64.md section 12.2). Every field except
-// controllerBindings and keyboardBindings is required; contentHash may be the empty string (hash
-// verification is then skipped), expectedSaveSize may be null, and
-// controllerBindings may be absent (the player then uses its built-in
-// default binding table).
+// controllerBindings, keyboardBindings, and rendererOverride is required;
+// contentHash may be the empty string (hash verification is then skipped),
+// expectedSaveSize may be null, and absent optional fields keep player/core
+// defaults.
 struct PlayerRequest {
     int protocolVersion = kProtocolVersion;
     std::string sessionId;
@@ -99,6 +103,9 @@ struct PlayerRequest {
     // Optional and backward-compatible; absent keeps the built-in keyboard
     // defaults.
     std::optional<KeyboardBindings> keyboardBindings;
+    // Optional curated compatibility override. SoftwareHw keeps the core's
+    // CPU rasterizer while using the frontend's GPU presentation context.
+    std::optional<RendererOverride> rendererOverride;
 };
 
 // Result exit kinds (LINUX_X64.md section 12.3). Signals, a missing

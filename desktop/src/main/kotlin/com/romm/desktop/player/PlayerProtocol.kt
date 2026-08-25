@@ -107,6 +107,15 @@ data class KeyboardBindingEntry(
 
 data class KeyboardBindings(val bindings: List<KeyboardBindingEntry>)
 
+enum class RendererOverride(val wireName: String) {
+    SOFTWARE_HW("software_hw");
+
+    companion object {
+        fun fromWireName(value: String): RendererOverride? =
+            entries.firstOrNull { it.wireName == value }
+    }
+}
+
 /** Video settings block of a v1 launch request (§12.2). All four fields are required on the wire. */
 data class VideoSettings(
     val fullscreen: Boolean = false,
@@ -134,7 +143,8 @@ enum class PlayerExitKind(val wireName: String) {
 }
 
 /**
- * Launch request v2 (§12.2). Every field except [controllerBindings] is required on the wire;
+ * Launch request v2 (§12.2). Every field except [controllerBindings], [keyboardBindings], and
+ * [rendererOverride] is required on the wire;
  * [contentHash] may be the empty string (the player then skips hash verification),
  * [expectedSaveSize] may be null, and [controllerBindings] may be absent (the player then
  * keeps its built-in default binding table).
@@ -160,6 +170,8 @@ data class PlayerRequest(
     val controllerBindings: ControllerBindings? = null,
     /** Optional Linux keyboard bindings; null keeps the player's built-in defaults. */
     val keyboardBindings: KeyboardBindings? = null,
+    /** Optional curated compatibility override; absent keeps the core's renderer default. */
+    val rendererOverride: RendererOverride? = null,
 )
 
 /** Result v1 (§12.3). [saveHash], [saveSize], [errorCode], and [errorMessage] may be null. */
@@ -246,6 +258,7 @@ object PlayerProtocol {
             var video: VideoSettings? = null
             var controllerBindings: ControllerBindings? = null
             var keyboardBindings: KeyboardBindings? = null
+            var rendererOverride: RendererOverride? = null
 
             while (reader.peek() != JsonReader.Token.END_OBJECT) {
                 val name = reader.nextName()
@@ -273,6 +286,11 @@ object PlayerProtocol {
                     // v2 optional field (not in REQUIRED_REQUEST_FIELDS): absent = defaults.
                     "controllerBindings" -> controllerBindings = readControllerBindings(reader)
                     "keyboardBindings" -> keyboardBindings = readKeyboardBindings(reader)
+                    "rendererOverride" -> {
+                        val value = readString(reader, name)
+                        rendererOverride = RendererOverride.fromWireName(value)
+                            ?: throw ProtocolException("unknown rendererOverride: $value")
+                    }
                     else -> throw ProtocolException("unknown field: $name")
                 }
             }
@@ -300,6 +318,7 @@ object PlayerProtocol {
                 video = video!!,
                 controllerBindings = controllerBindings,
                 keyboardBindings = keyboardBindings,
+                rendererOverride = rendererOverride,
             )
         }
 
@@ -358,6 +377,9 @@ object PlayerProtocol {
                 }
                 writer.endArray()
                 writer.endObject()
+            }
+            request.rendererOverride?.let {
+                writer.name("rendererOverride").value(it.wireName)
             }
             writer.endObject()
         }

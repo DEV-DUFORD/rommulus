@@ -29,6 +29,8 @@ data class PlayerLaunchParams(
     val controllerBindings: ControllerBindings? = null,
     /** Optional Linux keyboard bindings to apply from the first frame. */
     val keyboardBindings: KeyboardBindings? = null,
+    /** Curated per-game renderer override; null preserves the core default. */
+    val rendererOverride: RendererOverride? = null,
 )
 
 /** A prepared (or recovered) player session and its on-disk artifacts. */
@@ -352,6 +354,7 @@ class LaunchJournalSupervisor(
             video = params.video,
             controllerBindings = params.controllerBindings,
             keyboardBindings = params.keyboardBindings,
+            rendererOverride = params.rendererOverride,
         )
 
         // Step 2: request first — an orphan request (no journal) is inert.

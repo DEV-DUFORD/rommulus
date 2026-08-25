@@ -136,6 +136,7 @@ void checkRoundTripRequest(const PlayerRequest& in) {
     CHECK_EQ(out->video.integerScaling, in.video.integerScaling);
     CHECK_EQ(out->video.scanlines, in.video.scanlines);
     CHECK_EQ(out->video.sharpFilter, in.video.sharpFilter);
+    CHECK(out->rendererOverride == in.rendererOverride);
 
     // v2 optional field: presence must round-trip, and every device's
     // guid/identity/table must be byte-equal.
@@ -223,6 +224,13 @@ int main() {
 
     // --- Round-trips -------------------------------------------------
     checkRoundTripRequest(sampleRequest());
+    {
+        PlayerRequest software = sampleRequest();
+        software.rendererOverride = romm::player::RendererOverride::SoftwareHw;
+        checkRoundTripRequest(software);
+        CHECK(serializeRequest(software).find("\"rendererOverride\": \"software_hw\"") !=
+              std::string::npos);
+    }
 
     // Empty contentHash and null expectedSaveSize must survive a
     // round-trip (both are legal in v2).
