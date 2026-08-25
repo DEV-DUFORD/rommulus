@@ -6,6 +6,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Files
@@ -213,6 +214,126 @@ class PlayerProcessLauncherTest {
 
         try {
             handle.onExit().get(5, TimeUnit.SECONDS)
+            assertThat(supervisor.onPlayerExit(ready.session, -1))
+                .isInstanceOf(PlayerExitReport.CrashInterrupted::class.java)
+        } finally {
+            if (handle.isAlive) handle.destroyForcibly()
+        }
+    }
+
+    // ---------------------------------------------------------------- player log capture
+
+    @Test
+    fun `player log capture rotates at the cap and bounds the on-disk footprint`(@TempDir dir: Path) {
+        val logFile = dir.resolve("player.log")
+        val capture = PlayerLogCapture(logFile, maxBytes = 256)
+        // 1000 bytes > cap: must split across the active file and the rotation slot.
+        capture.append("x".repeat(1000).toByteArray())
+        capture.appendLine("tail")
+        capture.close()
+
+        val active = Files.size(logFile)
+        val rotated = Files.size(dir.resolve("player.log.1"))
+        assertThat(active).isLessThanOrEqualTo(256L)
+        assertThat(rotated).isLessThanOrEqualTo(256L)
+        assertThat(active + rotated).isLessThanOrEqualTo(512L)
+        // The newest content survives rotation.
+        assertThat(Files.readString(logFile)).endsWith("tail\n")
+    }
+
+    @Test
+    fun `player log capture is a no-op when the session directory was never prepared`(@TempDir dir: Path) {
+        val logFile = dir.resolve("missing-session").resolve("player.log")
+        val capture = PlayerLogCapture(logFile)
+        capture.appendLine("should not be written anywhere")
+        capture.close()
+        // No orphan session directory is created for a session that was never prepared.
+        assertThat(Files.exists(dir.resolve("missing-session"))).isFalse()
+    }
+
+    @Test
+    fun `a failed spawn is recorded in the per-session player log`(@TempDir dir: Path) {
+        val paths = TestAppPaths(dir)
+        val journalsRoot = dir.resolve("journals")
+        val sessionId = "session-1"
+        Files.createDirectories(journalsRoot.resolve(sessionId))
+        Files.writeString(journalsRoot.resolve(sessionId).resolve("request.json"), "{}")
+        val launcher = ProcessBuilderPlayerLauncher(
+            playerBinaryPath = dir.resolve("rommulus_player"),
+            journalsRoot = journalsRoot,
+            appPaths = paths,
+            starter = { _, _ -> throw IOException("spawn refused (test)") },
+        )
+
+        val outcome = launcher.launch(requestFor(paths, paths.dataDir.resolve("cores")))
+
+        assertThat(outcome).isEqualTo(LaunchOutcome.Error("failed to spawn player: spawn refused (test)"))
+        val logFile = journalsRoot.resolve(sessionId).resolve("player.log")
+        assertThat(Files.exists(logFile)).isTrue()
+        assertThat(Files.readString(logFile)).contains("[pre-launch]").contains("spawn refused (test)")
+        assertThat(Files.getPosixFilePermissions(logFile))
+            .containsExactlyInAnyOrder(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+    }
+
+    @Test
+    fun `player output is captured to the per-session log and stays bounded`(@TempDir dir: Path) {
+        val paths = TestAppPaths(dir)
+        val journalsRoot = paths.stateDir.resolve("journals")
+        val syntheticPlayer = dir.resolve("chatty-player.sh")
+        // 3 MiB of output: exceeds the 2 MiB active-file cap, so a rotation must happen.
+        Files.writeString(
+            syntheticPlayer,
+            """
+            #!/bin/sh
+            head -c 3145728 /dev/zero
+            exit 0
+            """.trimIndent(),
+        )
+        Files.setPosixFilePermissions(
+            syntheticPlayer,
+            setOf(
+                PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.OWNER_EXECUTE,
+            ),
+        )
+        val launcher = ProcessBuilderPlayerLauncher(syntheticPlayer, journalsRoot, paths)
+        val supervisor = LaunchJournalSupervisor(journalsRoot, launcher)
+        val prepared = supervisor.prepareLaunch(
+            PlayerLaunchParams(
+                coreId = "test_core",
+                coreBuildRevision = "test",
+                corePath = paths.dataDir.resolve("cores").resolve("libtest_core.so"),
+                systemDir = paths.firmwareDir(),
+                savePath = paths.dataDir.resolve("saves").resolve("chatty.srm"),
+            ),
+            sessionId = "log-capture",
+        )
+        assertThat(prepared).isInstanceOf(PrepareLaunchResult.Ready::class.java)
+        val ready = prepared as PrepareLaunchResult.Ready
+        val pid = (ready.launch as LaunchOutcome.Started).pid
+        val handle = ProcessHandle.of(pid).orElseThrow()
+
+        val sessionDir = journalsRoot.resolve("log-capture")
+        val logFile = sessionDir.resolve("player.log")
+        val rotatedFile = sessionDir.resolve("player.log.1")
+        try {
+            handle.onExit().get(10, TimeUnit.SECONDS)
+            // Wait for the drain thread to finish (EOF → flush + close): the captured total
+            // is monotonic and stabilizes at the full output size.
+            val deadline = System.currentTimeMillis() + 10_000
+            var total = -1L
+            while (System.currentTimeMillis() < deadline) {
+                total = (if (Files.exists(logFile)) Files.size(logFile) else 0L) +
+                    (if (Files.exists(rotatedFile)) Files.size(rotatedFile) else 0L)
+                if (total == 3_145_728L) break
+                Thread.sleep(50)
+            }
+            assertThat(total).isEqualTo(3_145_728L)
+            assertThat(Files.size(logFile)).isLessThanOrEqualTo(PlayerLogCapture.DEFAULT_MAX_BYTES)
+            assertThat(total).isLessThanOrEqualTo(2 * PlayerLogCapture.DEFAULT_MAX_BYTES)
+            // The output exceeded the active-file cap, so a rotation must have happened.
+            assertThat(Files.exists(rotatedFile)).isTrue()
             assertThat(supervisor.onPlayerExit(ready.session, -1))
                 .isInstanceOf(PlayerExitReport.CrashInterrupted::class.java)
         } finally {

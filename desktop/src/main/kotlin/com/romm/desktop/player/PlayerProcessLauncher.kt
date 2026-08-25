@@ -114,6 +114,12 @@ sealed interface LaunchOutcome {
  * `ROMM_PLAYER_EXPECTED_CONTENT_HASH` on the child process from the desktop's [AppPaths]
  * and the request's content hash. `ROMM_PLAYER_ALLOWED_CORES` is derived at launch time via
  * [deriveAllowedCores] over [scanInstalledCoreIds] of the cores root — no hard-coded list.
+ *
+ * Diagnostics: the player's combined stdout+stderr are drained (async daemon thread, see
+ * [PlayerLogCapture]) into the bounded per-session log `<sessionDir>/player.log` — never
+ * discarded (the core's serial/renderer/shader diagnostics land there) and never left in an
+ * unread pipe (a full pipe deadlocks the player). A failed spawn is recorded in the same file
+ * as a `[pre-launch]` line, so launch failures are diagnosable on-device too.
  */
 class ProcessBuilderPlayerLauncher(
     private val playerBinaryPath: Path,
@@ -123,28 +129,52 @@ class ProcessBuilderPlayerLauncher(
     private val starter: (List<String>, Map<String, String>) -> Process = { command, env ->
         ProcessBuilder(command).apply {
             environment().putAll(env)
+            // Merge stderr into stdout so the async drain captures both in one stream. The
+            // output stays piped (the default): [launch] drains it into the bounded per-session
+            // log, so the pipe is never left unread (a full pipe deadlocks the player) and the
+            // core's diagnostics are never discarded.
             redirectErrorStream(true)
-            // Native cores can emit synchronous debug output indefinitely. No desktop feature
-            // consumes it, so leaving a pipe risks deadlocking the player when that pipe fills;
-            // retaining it in a file would instead permit unbounded per-session disk growth.
-            redirectOutput(ProcessBuilder.Redirect.DISCARD)
         }.start()
     },
 ) : PlayerProcessLauncher {
 
-    override fun launch(request: PlayerRequest): LaunchOutcome = runCatching {
-        val rawPath = journalsRoot.resolve(request.sessionId).resolve(LaunchJournalStore.REQUEST_FILE_NAME)
-        val requestFile = SecureFiles.resolveExistingRegular(rawPath).getOrThrow()
-        if (!SecureFiles.isWithin(requestFile, journalsRoot.toRealPath())) {
-            throw SecurityException("request file escapes the journals root: $requestFile")
+    override fun launch(request: PlayerRequest): LaunchOutcome {
+        // Per-session log capture, opened BEFORE the spawn so a failed spawn (missing binary,
+        // invalid request file) is recorded in the same file the player's own diagnostics land
+        // in. The session directory was prepared by the supervisor; if it is absent the
+        // capture degrades to a no-op (no orphan directory is created).
+        val playerLog = runCatching {
+            SecureFiles.requireSessionId(request.sessionId).getOrThrow()
+            PlayerLogCapture(journalsRoot.resolve(request.sessionId).resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME))
+        }.getOrElse { e ->
+            return LaunchOutcome.Error("failed to spawn player: ${e.message ?: e::class.java.simpleName}")
         }
-        val envVars = buildEnvVars(request)
-        val command = listOf(playerBinaryPath.toString(), "--request", requestFile.toString())
-        starter(command, envVars)
-    }.fold(
-        onSuccess = { process -> LaunchOutcome.Started(process.pid()) },
-        onFailure = { e -> LaunchOutcome.Error("failed to spawn player: ${e.message ?: e::class.java.simpleName}") },
-    )
+        return runCatching {
+            val rawPath = journalsRoot.resolve(request.sessionId).resolve(LaunchJournalStore.REQUEST_FILE_NAME)
+            val requestFile = SecureFiles.resolveExistingRegular(rawPath).getOrThrow()
+            if (!SecureFiles.isWithin(requestFile, journalsRoot.toRealPath())) {
+                throw SecurityException("request file escapes the journals root: $requestFile")
+            }
+            val envVars = buildEnvVars(request)
+            val command = listOf(playerBinaryPath.toString(), "--request", requestFile.toString())
+            val process = starter(command, envVars)
+            try {
+                playerLog.startDraining(process)
+            } catch (e: Exception) {
+                // Without a drain the pipe would fill and deadlock the player: fail closed.
+                runCatching { process.destroy() }
+                throw e
+            }
+            process
+        }.fold(
+            onSuccess = { process -> LaunchOutcome.Started(process.pid()) },
+            onFailure = { e ->
+                playerLog.appendLine("[pre-launch] failed to spawn player: ${e.message ?: e::class.java.simpleName}")
+                playerLog.close()
+                LaunchOutcome.Error("failed to spawn player: ${e.message ?: e::class.java.simpleName}")
+            },
+        )
+    }
 
     private fun buildEnvVars(request: PlayerRequest): Map<String, String> = buildMap {
         val coresDir = appPaths.dataDir.resolve("cores")

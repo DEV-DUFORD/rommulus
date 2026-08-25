@@ -815,6 +815,10 @@ class LaunchJournalSupervisor(
         runCatching { Files.deleteIfExists(store.requestPath(sessionId)) }
         runCatching { Files.deleteIfExists(store.resultPath(sessionId)) }
         runCatching { Files.deleteIfExists(store.candidatePath(sessionId)) }
+        // Player log capture (active + rotated): a reconciled session keeps no diagnostics;
+        // INTERRUPTED sessions preserve them (the directory deletion below is a no-op then).
+        runCatching { Files.deleteIfExists(store.playerLogPath(sessionId)) }
+        runCatching { Files.deleteIfExists(store.playerLogRotationPath(sessionId)) }
         // Remove the directory when empty; preserved leftovers keep it in place.
         runCatching { Files.deleteIfExists(store.sessionDir(sessionId)) }
     }

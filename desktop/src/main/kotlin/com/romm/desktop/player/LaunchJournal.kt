@@ -155,6 +155,7 @@ internal const val JOURNAL_SCHEMA_VERSION: Int = 1
  * journals/<sessionId>/request.json    — v1 launch request written by the supervisor
  * journals/<sessionId>/candidate.srm   — save candidate written by the player
  * journals/<sessionId>/result.json     — v1 result written by the player
+ * journals/<sessionId>/player.log      — bounded player stdout+stderr capture (0600, rotated to player.log.1)
  * ```
  *
  * Writes are atomic (temp + fsync + rename, see [AtomicFileIo]) and journal files are 0600.
@@ -185,6 +186,13 @@ class LaunchJournalStore(private val journalsRoot: Path) {
     fun resultPath(sessionId: String): Path = sessionDir(sessionId).resolve(RESULT_FILE_NAME)
 
     fun candidatePath(sessionId: String): Path = sessionDir(sessionId).resolve(CANDIDATE_FILE_NAME)
+
+    /** Bounded player stdout+stderr capture ([PlayerLogCapture], 0600). */
+    fun playerLogPath(sessionId: String): Path = sessionDir(sessionId).resolve(PLAYER_LOG_FILE_NAME)
+
+    /** Rotation slot for the player log (older content, replaced on each rotation). */
+    fun playerLogRotationPath(sessionId: String): Path =
+        sessionDir(sessionId).resolve(PLAYER_LOG_FILE_NAME + PlayerLogCapture.ROTATION_SUFFIX)
 
     /** Atomically writes [journal]'s record file (0600); creates the session directory (0700) when absent. */
     fun write(journal: LaunchJournal) {
@@ -249,5 +257,6 @@ class LaunchJournalStore(private val journalsRoot: Path) {
         const val REQUEST_FILE_NAME = "request.json"
         const val RESULT_FILE_NAME = "result.json"
         const val CANDIDATE_FILE_NAME = "candidate.srm"
+        const val PLAYER_LOG_FILE_NAME = "player.log"
     }
 }
