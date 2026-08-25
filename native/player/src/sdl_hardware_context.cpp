@@ -6,7 +6,10 @@
 #include <native/engine/LogSink.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <string>
 
 namespace romm::player {
@@ -14,6 +17,35 @@ namespace romm::player {
 namespace {
 
 constexpr const char* kTag = "sdl_gl_context";
+// Diagnostics tag for the offscreen-FBO present path (core renders into an
+// offscreen framebuffer that swapBuffers() blits into the window). Kept
+// distinct and low-noise (one line on any dims change, one line per second,
+// one sampled FBO read-back per second, GL error lines only on state change)
+// so the next on-device test can read player.log and tell whether the core is
+// actually producing non-black frames (and at what content geometry) even
+// while the window is black — i.e. distinguish "core emits no/empty frames"
+// (content dims 0 / all-black read-back with 0 dims) from "a valid image was
+// lost in the frontend blit" (content dims nonzero but all-black read-back).
+// Written directly to stderr (captured to player.log) so it is independent of
+// any log-level filtering.
+constexpr const char* kPresentDiagTag = "offscreen_present";
+
+// File-local diagnostic state for the offscreen present path. Only the
+// emulation thread calls swapBuffers(), and the player is a fresh process per
+// session, so no locking/reset is needed here. Seeded to values that force a
+// log on the first frame.
+int g_diagOutW = -1;
+int g_diagOutH = -1;
+unsigned g_diagBufW = 0;
+unsigned g_diagBufH = 0;
+unsigned g_diagContentW = 0;
+unsigned g_diagContentH = 0;
+uint64_t g_diagFrameCount = 0;
+uint64_t g_diagLastLogFrame = 0;
+std::chrono::steady_clock::time_point g_diagLastLogTime{};
+GLenum g_diagLastFbStatus = GL_FRAMEBUFFER_COMPLETE;
+GLenum g_diagLastGlError = GL_NO_ERROR;
+std::chrono::steady_clock::time_point g_diagLastGlLogTime{};
 
 void logSdlError(const char* operation) {
     romm::log::sink().log(
@@ -162,6 +194,55 @@ bool SdlHardwareContext::swapBuffers() {
     int outputWidth = 0;
     int outputHeight = 0;
     SDL_GetWindowSizeInPixels(window_, &outputWidth, &outputHeight);
+
+    // Bounded offscreen-present diagnostics (see kPresentDiagTag). This path
+    // blits the core's offscreen FBO into the window, so these logs confirm
+    // whether frames are flowing and at what content geometry — the key
+    // evidence for whether a black screen is a core-side empty-frame issue
+    // (content dims stay 0 / frame counter stalls) vs. a blit problem.
+    const auto diagNow = std::chrono::steady_clock::now();
+    const bool diagPerSecond =
+        g_diagLastLogTime == std::chrono::steady_clock::time_point{} ||
+        diagNow - g_diagLastLogTime >= std::chrono::seconds(1);
+    if (useOffscreenPresentation_) {
+        ++g_diagFrameCount;
+        const bool dimsChanged =
+            outputWidth != g_diagOutW || outputHeight != g_diagOutH ||
+            contentWidth_ != g_diagContentW || contentHeight_ != g_diagContentH ||
+            bufferWidth_ != g_diagBufW || bufferHeight_ != g_diagBufH;
+        if (dimsChanged) {
+            std::fprintf(
+                stderr,
+                "[%s] dims: content=%ux%u%s buffer=%ux%u%s window=%dx%d%s\n",
+                kPresentDiagTag,
+                contentWidth_, contentHeight_,
+                (contentWidth_ == 0 || contentHeight_ == 0) ? " (ZERO)" : "",
+                bufferWidth_, bufferHeight_,
+                (bufferWidth_ == 0 || bufferHeight_ == 0) ? " (ZERO)" : "",
+                outputWidth, outputHeight,
+                (outputWidth <= 0 || outputHeight <= 0) ? " (ZERO)" : "");
+            g_diagOutW = outputWidth;
+            g_diagOutH = outputHeight;
+            g_diagContentW = contentWidth_;
+            g_diagContentH = contentHeight_;
+            g_diagBufW = bufferWidth_;
+            g_diagBufH = bufferHeight_;
+        }
+        if (diagPerSecond) {
+            const uint64_t framesThisSecond = g_diagFrameCount - g_diagLastLogFrame;
+            std::fprintf(
+                stderr,
+                "[%s] frames: %llu/s (total %llu) content=%ux%u buffer=%ux%u "
+                "window=%dx%d\n",
+                kPresentDiagTag,
+                static_cast<unsigned long long>(framesThisSecond),
+                static_cast<unsigned long long>(g_diagFrameCount),
+                contentWidth_, contentHeight_, bufferWidth_, bufferHeight_,
+                outputWidth, outputHeight);
+            g_diagLastLogTime = diagNow;
+            g_diagLastLogFrame = g_diagFrameCount;
+        }
+    }
     if (framebuffer_ != 0 && bufferWidth_ > 0 && bufferHeight_ > 0 &&
         outputWidth > 0 && outputHeight > 0) {
         // A core may render only a native-resolution region at the top-left of
@@ -199,6 +280,51 @@ bool SdlHardwareContext::swapBuffers() {
             0, 0, static_cast<GLint>(srcW), static_cast<GLint>(srcH),
             x, y, x + width, y + height, GL_COLOR_BUFFER_BIT,
             sharpFilterEnabled_.load() ? GL_NEAREST : GL_LINEAR);
+
+        // Bounded GL health check after the blit: logged only when the FBO is
+        // incomplete or a GL error is present, and only when the observed
+        // state changes (throttled to at most one line per 500ms if it keeps
+        // flapping).
+        const GLenum fbStatus = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+        const GLenum blitError = glGetError();
+        if ((fbStatus != GL_FRAMEBUFFER_COMPLETE || blitError != GL_NO_ERROR) &&
+            (fbStatus != g_diagLastFbStatus || blitError != g_diagLastGlError)) {
+            if (g_diagLastGlLogTime == std::chrono::steady_clock::time_point{} ||
+                diagNow - g_diagLastGlLogTime >= std::chrono::milliseconds(500)) {
+                std::fprintf(
+                    stderr,
+                    "[%s] gl: fbo-status=0x%lx error=0x%lx\n",
+                    kPresentDiagTag,
+                    static_cast<unsigned long>(fbStatus),
+                    static_cast<unsigned long>(blitError));
+                g_diagLastGlLogTime = diagNow;
+            }
+            g_diagLastFbStatus = fbStatus;
+            g_diagLastGlError = blitError;
+        }
+
+        // Bounded pixel read-back, at most once per second: sample a few
+        // points of the FBO over the exact content region the blit reads
+        // (four corners + center) to tell whether the core actually produced
+        // a non-black image. All-black here with nonzero content dims means
+        // the image is being lost between the FBO and the window; all-black
+        // with content dims 0 means the core emitted an empty frame.
+        if (diagPerSecond) {
+            const unsigned sx[5] = {0, srcW - 1, 0, srcW - 1, srcW / 2};
+            const unsigned sy[5] = {0, 0, srcH - 1, srcH - 1, srcH / 2};
+            unsigned nonBlack = 0;
+            unsigned char pixel[4] = {0, 0, 0, 0};
+            for (int i = 0; i < 5; ++i) {
+                glReadPixels(
+                    static_cast<GLint>(sx[i]), static_cast<GLint>(sy[i]), 1, 1,
+                    GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+                if (pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0) ++nonBlack;
+            }
+            std::fprintf(
+                stderr,
+                "[%s] fb-readback: %u/5 samples non-black (content=%ux%u)\n",
+                kPresentDiagTag, nonBlack, srcW, srcH);
+        }
     }
     if (scanlinesEnabled_.load() && outputWidth > 0 && outputHeight > 0) {
         drawScanlinesLocked(outputWidth, outputHeight);
