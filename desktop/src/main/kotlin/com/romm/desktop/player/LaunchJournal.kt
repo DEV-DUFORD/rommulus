@@ -161,6 +161,11 @@ internal const val JOURNAL_SCHEMA_VERSION: Int = 1
  * Writes are atomic (temp + fsync + rename, see [AtomicFileIo]) and journal files are 0600.
  * Malformed journal files are never deleted or overwritten: [read] surfaces the failure and
  * the supervisor preserves the file and surfaces a recovery diagnostic (§12.5).
+ *
+ * A reconciled session's `player.log` (+ rotation) is the one retained artifact: it is kept
+ * for on-device diagnostics and pruned by [LaunchJournalSupervisor] to the newest
+ * [LaunchJournalSupervisor.RETAINED_PLAYER_LOG_SESSIONS] sessions; every other artifact is
+ * deleted with the journal.
  */
 class LaunchJournalStore(private val journalsRoot: Path) {
 

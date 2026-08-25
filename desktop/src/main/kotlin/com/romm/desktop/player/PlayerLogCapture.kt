@@ -18,9 +18,11 @@ import java.nio.file.attribute.PosixFilePermission
  * The active file is capped at [maxBytes] ([DEFAULT_MAX_BYTES] = 2 MiB). When the cap would be
  * exceeded, the active file is rotated to `player.log.1` (replacing the previous rotation) and
  * a fresh `player.log` is started — so one session can never write more than 2 × [maxBytes]
- * (4 MiB by default) no matter how chatty the core is. Across sessions the log is deleted with
- * the other session artifacts once the session is reconciled ([LaunchJournalSupervisor]); only
- * INTERRUPTED (forensic) sessions retain it, consistent with the "files preserved" invariant.
+ * (4 MiB by default) no matter how chatty the core is. Across sessions the log is RETAINED for
+ * a cleanly reconciled session — a clean exit is exactly when the renderer/core diagnostics
+ * are needed — and pruned by [LaunchJournalSupervisor] to the newest
+ * [LaunchJournalSupervisor.RETAINED_PLAYER_LOG_SESSIONS] sessions; INTERRUPTED (forensic)
+ * sessions retain it unconditionally, consistent with the "files preserved" invariant.
  *
  * ## Never blocks the player
  * The drain reads the stream unconditionally: even when a file write fails (disk full,

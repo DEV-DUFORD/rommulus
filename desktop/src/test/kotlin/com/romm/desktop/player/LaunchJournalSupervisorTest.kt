@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.FileTime
 
 /**
  * LaunchJournalSupervisor tests (plans/LINUX_X64.md §12.4/§12.5): the full journal lifecycle,
@@ -629,5 +630,108 @@ class LaunchJournalSupervisorTest {
         assertThat(f.supervisor.store.read(session.sessionId).getOrNull()).isNotNull
         assertThat(Files.isSymbolicLink(session.candidateSavePath)).isTrue()
         assertThat(Files.exists(f.params.savePath)).isFalse()
+    }
+
+    // ------------------------------------------------------------------ player log retention
+
+    /** Writes [session]'s player log and pins its mtime (deterministic retention ordering). */
+    private fun writePlayerLog(f: Fixture, session: LaunchSession, mtimeMillis: Long) {
+        val log = f.journalsRoot.resolve(session.sessionId).resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME)
+        Files.writeString(log, "renderer: diagnostics for ${session.sessionId}\n")
+        Files.setLastModifiedTime(log, FileTime.fromMillis(mtimeMillis))
+    }
+
+    @Test
+    fun `reconciled session retains its player log and the startup scan reports no orphan`() {
+        val f = fixture()
+        val session = readySession(f)
+        simulatePlayer(session)
+        writePlayerLog(f, session, 1_000L)
+
+        val report = f.supervisor.onPlayerExit(session, exitCode = 0)
+        assertThat(report).isInstanceOf(PlayerExitReport.Reconciled::class.java)
+
+        // Journal + request + result + candidate are gone; the player log is RETAINED.
+        assertThat(f.supervisor.store.read(session.sessionId).getOrNull()).isNull()
+        assertThat(Files.exists(session.requestPath)).isFalse()
+        assertThat(Files.exists(session.resultPath)).isFalse()
+        assertThat(Files.exists(session.candidateSavePath)).isFalse()
+        assertThat(Files.exists(f.journalsRoot.resolve(session.sessionId).resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME))).isTrue()
+
+        // A retained log is retention residue, not an orphan: startup scans are clean.
+        assertThat(f.supervisor.scanIncompleteJournals()).isEmpty()
+    }
+
+    @Test
+    fun `retention prunes the oldest reconciled logs beyond the newest three`() {
+        val f = fixture()
+        val sessionIds = (1..5).map { i ->
+            val session = readySession(f)
+            simulatePlayer(session)
+            writePlayerLog(f, session, 1_000L * i)
+            val report = f.supervisor.onPlayerExit(session, exitCode = 0)
+            assertThat(report).isInstanceOf(PlayerExitReport.Reconciled::class.java)
+            session.sessionId
+        }
+
+        // The two oldest sessions' logs are pruned (with their now-empty directories)...
+        assertThat(Files.exists(f.journalsRoot.resolve(sessionIds[0]))).isFalse()
+        assertThat(Files.exists(f.journalsRoot.resolve(sessionIds[1]))).isFalse()
+        // ...and the newest three sessions' logs are retained.
+        for (id in sessionIds.subList(2, 5)) {
+            assertThat(Files.exists(f.journalsRoot.resolve(id).resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME))).isTrue()
+        }
+        // Bounded: exactly three log-only session directories remain.
+        assertThat(Files.list(f.journalsRoot).use { it.count() }).isEqualTo(3L)
+    }
+
+    @Test
+    fun `retention never prunes an INTERRUPTED session's player log`() {
+        val f = fixture()
+        // An INTERRUPTED (crashed) session whose player log is the OLDEST on disk.
+        val interrupted = readySession(f)
+        writePlayerLog(f, interrupted, 1L)
+        val report = f.supervisor.onPlayerExit(interrupted, exitCode = -1)
+        assertThat(report).isInstanceOf(PlayerExitReport.CrashInterrupted::class.java)
+        assertThat(f.supervisor.store.read(interrupted.sessionId).getOrNull()?.state).isEqualTo(JournalState.INTERRUPTED)
+
+        // Four cleanly reconciled sessions, all newer than the interrupted one.
+        (1..4).forEach { i ->
+            val session = readySession(f)
+            simulatePlayer(session)
+            writePlayerLog(f, session, 1_000L * i)
+            assertThat(f.supervisor.onPlayerExit(session, exitCode = 0)).isInstanceOf(PlayerExitReport.Reconciled::class.java)
+        }
+
+        // The INTERRUPTED log survives despite being the oldest (forensics preserved)...
+        assertThat(Files.exists(f.journalsRoot.resolve(interrupted.sessionId).resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME))).isTrue()
+        // ...and the reconciled logs are still bounded to the newest three (1 pruned).
+        assertThat(Files.list(f.journalsRoot).use { it.count() }).isEqualTo(4L)
+    }
+
+    @Test
+    fun `startup scan prunes retained logs beyond the bound after a crash during cleanup`() {
+        val f = fixture()
+        // Simulate four reconciled sessions whose cleanup crashed after the RECONCILED write
+        // (log-only residue directories, no journal), exceeding the retention bound.
+        val residueIds = (1..4).map { i ->
+            val sessionId = "residue-$i"
+            val dir = f.journalsRoot.resolve(sessionId)
+            Files.createDirectories(dir)
+            val log = dir.resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME)
+            Files.writeString(log, "residue $i\n")
+            Files.setLastModifiedTime(log, FileTime.fromMillis(1_000L * i))
+            sessionId
+        }
+
+        val diagnostics = f.supervisor.scanIncompleteJournals()
+
+        // No orphan diagnostic for log-only residue...
+        assertThat(diagnostics.none { it.kind == LaunchRecoveryDiagnostic.Kind.ORPHAN_SESSION_FILES }).isTrue()
+        // ...and the sweep pruned the oldest residue beyond the bound of three.
+        assertThat(Files.exists(f.journalsRoot.resolve(residueIds[0]))).isFalse()
+        for (id in residueIds.subList(1, 4)) {
+            assertThat(Files.exists(f.journalsRoot.resolve(id).resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME))).isTrue()
+        }
     }
 }

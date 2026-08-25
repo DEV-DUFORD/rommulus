@@ -258,6 +258,14 @@ class DefaultSaveAdoptionPolicy : SaveAdoptionPolicy {
  * session artifacts deleted (§12.4: "The client commits result reconciliation before deleting
  * the journal").
  *
+ * ## Player log retention
+ * A cleanly reconciled session RETAINS its `player.log` (+ rotation) — a clean exit is exactly
+ * when the renderer/core diagnostics are needed (a black-screen session closes cleanly). The
+ * retention is bounded: [pruneRetainedPlayerLogs] keeps only the newest
+ * [RETAINED_PLAYER_LOG_SESSIONS] sessions' logs (each ≤ 2 × 2 MiB by rotation), and the
+ * startup scan treats a log-only session directory as retention residue, never as an orphan.
+ * INTERRUPTED (forensic) sessions keep their log unconditionally.
+ *
  * ## Fail-closed invariants
  * - A journal is never deleted while its result is unreconciled (malformed result, adoption
  *   rejection, hash mismatch → files preserved + a recovery diagnostic).
@@ -440,23 +448,34 @@ class LaunchJournalSupervisor(
      *   mark INTERRUPTED + preserve files + surface a recovery diagnostic (never delete);
      * - player still alive and owned → leave the journal untouched and do NOT start another player.
      */
-    fun scanIncompleteJournals(): List<LaunchRecoveryDiagnostic> = store.listSessionIds().flatMap { sessionId ->
-        try {
-            scanOne(sessionId)
-        } catch (e: Exception) {
-            listOf(
-                LaunchRecoveryDiagnostic(
-                    sessionId,
-                    LaunchRecoveryDiagnostic.Kind.UNEXPECTED_ERROR,
-                    e.message ?: e::class.java.simpleName,
-                ),
-            )
+    fun scanIncompleteJournals(): List<LaunchRecoveryDiagnostic> {
+        val diagnostics = store.listSessionIds().flatMap { sessionId ->
+            try {
+                scanOne(sessionId)
+            } catch (e: Exception) {
+                listOf(
+                    LaunchRecoveryDiagnostic(
+                        sessionId,
+                        LaunchRecoveryDiagnostic.Kind.UNEXPECTED_ERROR,
+                        e.message ?: e::class.java.simpleName,
+                    ),
+                )
+            }
         }
+        // A crash between the RECONCILED write and the cleanup sweep can leave more than
+        // [RETAINED_PLAYER_LOG_SESSIONS] log-only session directories behind; prune them here
+        // too so the retention bound holds across restarts.
+        pruneRetainedPlayerLogs()
+        return diagnostics
     }
 
     private fun scanOne(sessionId: String): List<LaunchRecoveryDiagnostic> {
         val journalPath = store.journalPath(sessionId)
         if (!Files.exists(journalPath)) {
+            // A reconciled session retains its player log (bounded, see
+            // [pruneRetainedPlayerLogs]): a log-only directory is retention residue, not an
+            // orphan — no diagnostic.
+            if (isRetainedLogResidue(sessionId)) return emptyList()
             return listOf(
                 diag(
                     sessionId,
@@ -809,23 +828,95 @@ class LaunchJournalSupervisor(
      * now-empty session directory — is what keeps a cleanly reconciled session from being
      * misreported as ORPHAN_SESSION_FILES on every later startup. A failed deletion is harmless:
      * the next startup sees RECONCILED and cleans up again (idempotent).
+     *
+     * The player log (active + rotated) is the one retained artifact: a clean exit is exactly
+     * when the renderer/core diagnostics are needed (a black-screen session closes cleanly), so
+     * the log is kept for on-device debugging. [pruneRetainedPlayerLogs] bounds the retention to
+     * the newest [RETAINED_PLAYER_LOG_SESSIONS] sessions; INTERRUPTED sessions keep their log
+     * unconditionally (forensics).
      */
     private fun cleanupSession(sessionId: String) {
         runCatching { Files.deleteIfExists(store.journalPath(sessionId)) }
         runCatching { Files.deleteIfExists(store.requestPath(sessionId)) }
         runCatching { Files.deleteIfExists(store.resultPath(sessionId)) }
         runCatching { Files.deleteIfExists(store.candidatePath(sessionId)) }
-        // Player log capture (active + rotated): a reconciled session keeps no diagnostics;
-        // INTERRUPTED sessions preserve them (the directory deletion below is a no-op then).
-        runCatching { Files.deleteIfExists(store.playerLogPath(sessionId)) }
-        runCatching { Files.deleteIfExists(store.playerLogRotationPath(sessionId)) }
-        // Remove the directory when empty; preserved leftovers keep it in place.
+        // Player log capture (active + rotated): RETAINED for diagnostics (see KDoc); the
+        // retention sweep bounds it to the newest [RETAINED_PLAYER_LOG_SESSIONS] sessions.
+        pruneRetainedPlayerLogs()
+        // Remove the directory when empty (no log → nothing left); a retained log keeps the
+        // directory in place until the retention sweep prunes it.
         runCatching { Files.deleteIfExists(store.sessionDir(sessionId)) }
+    }
+
+    /**
+     * True when [sessionId]'s directory holds nothing but the retained player log (+ its
+     * rotation slot) — the residue of a cleanly reconciled session whose log is kept for
+     * diagnostics (see [pruneRetainedPlayerLogs]). Such a directory is NOT an orphan: the
+     * journal was committed and reconciliation completed, so the startup scan reports no
+     * ORPHAN_SESSION_FILES for it. An empty directory (a crash between the artifact deletions
+     * and the directory deletion) counts too — the sweep removes it.
+     */
+    private fun isRetainedLogResidue(sessionId: String): Boolean =
+        runCatching {
+            val dir = store.sessionDir(sessionId)
+            Files.isDirectory(dir) &&
+                Files.list(dir).use { stream ->
+                    stream.allMatch { it.fileName.toString() in RETAINED_LOG_FILE_NAMES }
+                }
+        }.getOrDefault(false)
+
+    /**
+     * Bounded retention for reconciled sessions' player logs: a cleanly reconciled session
+     * keeps its `player.log` (+ rotation) for on-device diagnostics, and this sweep drops the
+     * oldest retained logs beyond [RETAINED_PLAYER_LOG_SESSIONS] (newest first, by the log's
+     * last-modified time; the session ID breaks ties deterministically). Each session's log is
+     * bounded to 2 × [PlayerLogCapture.DEFAULT_MAX_BYTES] (4 MiB) by rotation, so the total
+     * retention is bounded to [RETAINED_PLAYER_LOG_SESSIONS] × 4 MiB.
+     *
+     * Only log-only residue is ever touched: a directory that still carries a journal
+     * (PENDING/INTERRUPTED — forensics; INTERRUPTED logs are preserved unconditionally) or any
+     * other artifact (orphan files, preserved for the scan to report) is left alone. The
+     * "no orphan session files" invariant for non-log artifacts is unchanged: a pruned
+     * directory is removed once empty.
+     */
+    private fun pruneRetainedPlayerLogs() {
+        val retained = store.listSessionIds().mapNotNull { sessionId ->
+            if (Files.exists(store.journalPath(sessionId))) return@mapNotNull null // in-flight or forensics
+            if (!isRetainedLogResidue(sessionId)) return@mapNotNull null // orphan files: preserved
+            val newest = maxOf(
+                runCatching { Files.getLastModifiedTime(store.playerLogPath(sessionId)).toMillis() }.getOrDefault(0L),
+                runCatching { Files.getLastModifiedTime(store.playerLogRotationPath(sessionId)).toMillis() }.getOrDefault(0L),
+            )
+            if (newest == 0L) null else store.sessionDir(sessionId) to newest
+        }
+        retained
+            .sortedWith(compareByDescending<Pair<Path, Long>> { it.second }.thenBy { it.first.fileName.toString() })
+            .drop(RETAINED_PLAYER_LOG_SESSIONS)
+            .forEach { (dir, _) ->
+                runCatching { Files.deleteIfExists(dir.resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME)) }
+                runCatching { Files.deleteIfExists(dir.resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME + PlayerLogCapture.ROTATION_SUFFIX)) }
+                // The directory held only logs: remove it once empty (no orphan residue).
+                runCatching { Files.deleteIfExists(dir) }
+            }
     }
 
     companion object {
         /** Clean exits for which a written checkpoint is eligible for adoption (fail-closed: a crashed session's save is not trusted). */
         val ADOPTABLE_EXIT_KINDS = setOf(PlayerExitKind.COMPLETED, PlayerExitKind.CORE_REQUESTED_SHUTDOWN)
+
+        /**
+         * Number of most-recently reconciled sessions whose player logs are retained for
+         * on-device diagnostics (a clean exit is exactly when the renderer/core logs are
+         * needed). Each session's log is bounded to 2 × [PlayerLogCapture.DEFAULT_MAX_BYTES]
+         * (4 MiB) by rotation, so the retention is bounded to N × 4 MiB.
+         */
+        const val RETAINED_PLAYER_LOG_SESSIONS = 3
+
+        /** The only files a retained (reconciled) session directory may hold. */
+        private val RETAINED_LOG_FILE_NAMES = setOf(
+            LaunchJournalStore.PLAYER_LOG_FILE_NAME,
+            LaunchJournalStore.PLAYER_LOG_FILE_NAME + PlayerLogCapture.ROTATION_SUFFIX,
+        )
 
         /** Production wiring: journals under the XDG state root, real ProcessBuilder launcher. */
         fun forPaths(
