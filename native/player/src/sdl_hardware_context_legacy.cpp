@@ -4,18 +4,42 @@
 
 #include <native/engine/LogSink.h>
 
+#include <chrono>
+#include <cstdio>
 #include <string>
 
 namespace romm::player {
 namespace {
 
 constexpr const char* kTag = "sdl_gl_context";
+// Diagnostics tag for the Steam Deck direct-framebuffer present path. Kept
+// distinct and low-noise (one line on any dims change, one line per second)
+// so the next on-device test can read player.log and tell whether the core is
+// actually producing frames (and at what content geometry) even while the
+// window is black — i.e. distinguish "core emits no/empty frames" from a
+// presentation problem. Written directly to stderr (captured to player.log)
+// so it is independent of any log-level filtering.
+constexpr const char* kPresentDiagTag = "deck_present";
 
 void logSdlError(const char* operation) {
     romm::log::sink().log(
         romm::log::Severity::Error, kTag,
         std::string(operation) + " failed: " + SDL_GetError());
 }
+
+// File-local diagnostic state for the direct-framebuffer present path. Only
+// the emulation thread calls swapBuffers(), and the deck player is a fresh
+// process per session, so no locking/reset is needed here. Seeded to values
+// that force a log on the first frame.
+int g_diagOutW = -1;
+int g_diagOutH = -1;
+unsigned g_diagBufW = 0;
+unsigned g_diagBufH = 0;
+unsigned g_diagContentW = 0;
+unsigned g_diagContentH = 0;
+uint64_t g_diagFrameCount = 0;
+uint64_t g_diagLastLogFrame = 0;
+std::chrono::steady_clock::time_point g_diagLastLogTime{};
 
 }  // namespace
 
@@ -51,9 +75,17 @@ bool SdlHardwareContext::createContext() {
     return true;
 }
 
-void SdlHardwareContext::setBufferGeometry(unsigned, unsigned) {}
+void SdlHardwareContext::setBufferGeometry(unsigned width, unsigned height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    bufferWidth_ = width;
+    bufferHeight_ = height;
+}
 
-void SdlHardwareContext::setContentGeometry(unsigned, unsigned) {}
+void SdlHardwareContext::setContentGeometry(unsigned width, unsigned height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    contentWidth_ = width;
+    contentHeight_ = height;
+}
 
 void SdlHardwareContext::attachWindow(romm::video::NativeWindowHandle window) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -122,6 +154,50 @@ void SdlHardwareContext::setSharpFilter(bool) {}
 bool SdlHardwareContext::swapBuffers() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!surfaceAttached_ || window_ == nullptr) return false;
+
+    int outputWidth = 0;
+    int outputHeight = 0;
+    SDL_GetWindowSizeInPixels(window_, &outputWidth, &outputHeight);
+
+    // Bounded direct-path diagnostics (see kPresentDiagTag). This present path
+    // has NO offscreen FBO (createFramebufferLocked() returns false and
+    // currentFramebuffer() returns 0), so the core renders directly into the
+    // window's default/back framebuffer and swapBuffers() merely swaps — there
+    // is no engine-side blit to center or crop the content. These logs confirm
+    // whether frames are flowing and at what content geometry, which is the
+    // key evidence for whether a black screen is a core-side empty-frame issue
+    // (content dims stay 0 / frame counter stalls) vs. a presentation problem.
+    ++g_diagFrameCount;
+    const bool dimsChanged =
+        outputWidth != g_diagOutW || outputHeight != g_diagOutH ||
+        contentWidth_ != g_diagContentW || contentHeight_ != g_diagContentH ||
+        bufferWidth_ != g_diagBufW || bufferHeight_ != g_diagBufH;
+    if (dimsChanged) {
+        std::fprintf(
+            stderr,
+            "[%s] direct-present dims: content=%ux%u buffer=%ux%u window=%dx%d\n",
+            kPresentDiagTag, contentWidth_, contentHeight_, bufferWidth_,
+            bufferHeight_, outputWidth, outputHeight);
+        g_diagOutW = outputWidth;
+        g_diagOutH = outputHeight;
+        g_diagContentW = contentWidth_;
+        g_diagContentH = contentHeight_;
+        g_diagBufW = bufferWidth_;
+        g_diagBufH = bufferHeight_;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (g_diagLastLogTime == std::chrono::steady_clock::time_point{} ||
+        now - g_diagLastLogTime >= std::chrono::seconds(1)) {
+        const uint64_t framesThisSecond = g_diagFrameCount - g_diagLastLogFrame;
+        std::fprintf(
+            stderr,
+            "[%s] direct-present frames: %llu/s (total %llu)\n", kPresentDiagTag,
+            static_cast<unsigned long long>(framesThisSecond),
+            static_cast<unsigned long long>(g_diagFrameCount));
+        g_diagLastLogTime = now;
+        g_diagLastLogFrame = g_diagFrameCount;
+    }
+
     if (!SDL_GL_SwapWindow(window_)) {
         logSdlError("SDL_GL_SwapWindow");
         return false;
