@@ -395,6 +395,7 @@ const char* consoleNameForCore(const char* coreId) {
     if (id == "handy") return "Atari Lynx";
     if (id == "prosystem") return "Atari 7800";
     if (id == "pcsx_rearmed") return "PlayStation";
+    if (id == "lrps2") return "PlayStation 2";
     if (id == "mupen64plus_next") return "Nintendo 64";
     if (id == "dolphin") return "Nintendo GameCube";
     return "Controller Settings";
@@ -429,7 +430,10 @@ const char* controlLabelForCoreSlot(const char* coreId, int slot) {
         if (slot == kSlotA) return "Button 2";
         if (slot == kSlotB) return "Button 1";
         if (slot == kSlotStart) return "Pause";
-    } else if (id == "pcsx_rearmed") {
+    } else if (id == "pcsx_rearmed" || id == "lrps2") {
+        // PlayStation face buttons (DualShock / DualShock 2): RetroPad A is
+        // Circle, B is Cross, X is Triangle, Y is Square; the L2/R2 trigger
+        // and L3/R3 stick-click slots keep their retroPadSlotLabel names.
         static constexpr const char* labels[] = {
             "Circle", "Cross", "Triangle", "Square", "Select", "Start", "L1", "R1",
         };

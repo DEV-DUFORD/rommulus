@@ -157,13 +157,14 @@ private:
 
 inline int coreKeyboardTargetAt(const std::string& coreId, int row) {
     const int digitalRows = coreId == "mupen64plus_next" ? 14
-        : coreId == "pcsx_rearmed" ? 16 : 12;
+        : coreId == "pcsx_rearmed" || coreId == "lrps2" ? 16 : 12;
     if (row < digitalRows) return coreBindingSlotAt(coreId, row);
     const int analogRow = row - digitalRows;
     if (coreId == "mupen64plus_next" && analogRow >= 0 && analogRow < 4) {
         return kKeyboardLeftXNegative + analogRow;
     }
-    if (coreId == "pcsx_rearmed" && analogRow >= 0 && analogRow < 8) {
+    if ((coreId == "pcsx_rearmed" || coreId == "lrps2") &&
+        analogRow >= 0 && analogRow < 8) {
         return kKeyboardLeftXNegative + analogRow;
     }
     if (coreId == "dolphin" && analogRow >= 0 && analogRow < 8) {
@@ -174,7 +175,7 @@ inline int coreKeyboardTargetAt(const std::string& coreId, int row) {
 
 inline int coreKeyboardRowCount(const std::string& coreId) {
     if (coreId == "mupen64plus_next") return 18;
-    if (coreId == "pcsx_rearmed") return 24;
+    if (coreId == "pcsx_rearmed" || coreId == "lrps2") return 24;
     if (coreId == "dolphin") return 20;
     return 12;
 }

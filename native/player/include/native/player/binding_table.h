@@ -197,6 +197,10 @@ inline int coreBindingSlotAt(const std::string& coreId, int row) {
         kSlotLeftShoulder, kSlotRightShoulder, kSlotLeftTrigger,
         kSlotRightTrigger, kSlotLeftStick, kSlotRightStick,
     };
+    // Shared by pcsx_rearmed and lrps2: the DualShock 2 keeps the DualShock
+    // layout and RetroPad mapping (Cross->B, Circle->A, Triangle->X,
+    // Square->Y, L1->L, R1->R, L2/R2 triggers, L3/R3 stick clicks), so the
+    // PS2 editor shows the same 16 rows.
     static constexpr std::array<int, kRetroPadSlotCount> kPsx = {
         kSlotDpadUp, kSlotDpadDown, kSlotDpadLeft, kSlotDpadRight,
         kSlotB, kSlotA, kSlotX, kSlotY, kSlotLeftShoulder,
@@ -217,7 +221,7 @@ inline int coreBindingSlotAt(const std::string& coreId, int row) {
         : coreId == "mednafen_ngp" ? kNgp
         : coreId == "handy" ? kHandy
         : coreId == "prosystem" ? kProsystem
-        : coreId == "pcsx_rearmed" ? kPsx
+        : (coreId == "pcsx_rearmed" || coreId == "lrps2") ? kPsx
         : coreId == "dolphin" ? kGameCube
         : (coreId == "fceumm" || coreId == "gambatte" ||
            coreId == "mednafen_wswan") ? kTwoButton

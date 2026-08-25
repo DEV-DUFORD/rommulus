@@ -165,6 +165,41 @@ void testDisplayLabels() {
              romm::player::kSlotStart);
     CHECK_EQ(romm::player::coreBindingSlotAt("dolphin", 12),
              romm::player::kSlotSelect);
+    // lrps2 (PS2 DualShock 2) mirrors the PlayStation row order: face
+    // buttons Cross(B)/Circle(A)/Triangle(X)/Square(Y), then L1/R1, L2/R2,
+    // L3/R3, Select, Start — all 16 rows, no hidden trigger/stick rows.
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 0),
+             romm::player::kSlotDpadUp);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 4),
+             romm::player::kSlotB);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 5),
+             romm::player::kSlotA);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 6),
+             romm::player::kSlotX);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 7),
+             romm::player::kSlotY);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 8),
+             romm::player::kSlotLeftShoulder);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 9),
+             romm::player::kSlotRightShoulder);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 10),
+             romm::player::kSlotLeftTrigger);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 11),
+             romm::player::kSlotRightTrigger);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 12),
+             romm::player::kSlotLeftStick);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 13),
+             romm::player::kSlotRightStick);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 14),
+             romm::player::kSlotSelect);
+    CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", 15),
+             romm::player::kSlotStart);
+    // Row-for-row identical to pcsx_rearmed (DualShock 2 keeps the DualShock
+    // layout and RetroPad mapping).
+    for (int row = 0; row < romm::player::kRetroPadSlotCount; ++row) {
+        CHECK_EQ(romm::player::coreBindingSlotAt("lrps2", row),
+                 romm::player::coreBindingSlotAt("pcsx_rearmed", row));
+    }
     CHECK(romm::player::isGameCubeAnalogSlot(romm::player::kSlotSelect));
     CHECK(romm::player::gameCubeAnalogSourceForSlot(romm::player::kSlotSelect) ==
           BindingSource::ofAxis(PadAxis::kLeftX));

@@ -772,7 +772,8 @@ int main(int argc, char* argv[]) {
     romm::player::PauseMenu pauseMenu;
     pauseMenu.setBindingSlotCount(
         request.coreId == "mupen64plus_next" ? 14 :
-        request.coreId == "pcsx_rearmed" || request.coreId == "dolphin" ? 16 : 12
+        request.coreId == "pcsx_rearmed" || request.coreId == "dolphin" ||
+        request.coreId == "lrps2" ? 16 : 12
     );
     pauseMenu.setKeyboardRowCount(
         romm::player::coreKeyboardRowCount(request.coreId));
