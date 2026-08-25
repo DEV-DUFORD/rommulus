@@ -71,6 +71,18 @@ void testDriftRecovery() {
     CHECK(delta <= milliseconds(20));
 }
 
+void testBoundedCatchUp() {
+    FrameScheduler sched(60.0);
+    sched.waitForNextFrame();
+    std::this_thread::sleep_for(milliseconds(350));
+
+    sched.waitForNextFrame(false, milliseconds(200));
+
+    const auto debt = steady_clock::now() - sched.nextFrameTime();
+    CHECK(debt > milliseconds(150));
+    CHECK(debt <= milliseconds(210));
+}
+
 void testExpensiveFrameClampsDelayToZero() {
     // Once the measured frame work exceeds the frame budget minus the safety
     // margin, the scheduler stops delaying (frameDelay clamps to zero).
@@ -89,6 +101,7 @@ int main() {
     testFpsAccessors();
     testFixedRatePacing();
     testDriftRecovery();
+    testBoundedCatchUp();
     testExpensiveFrameClampsDelayToZero();
     return rommtest::finish("test_frame_scheduler");
 }

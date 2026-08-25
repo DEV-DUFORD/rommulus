@@ -30,6 +30,7 @@ std::atomic<EmulationSession*> g_active_session{nullptr};
 
 constexpr int kMaxDrainWaitMs = 500;
 constexpr int kDrainPollIntervalMs = 5;
+constexpr auto kLrps2MaxCatchUpDebt = std::chrono::milliseconds(200);
 constexpr unsigned kPcsxRearmedDualShockDevice =
     RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1);
 constexpr unsigned kPlayStationControllerPorts = 2;
@@ -121,6 +122,7 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     const bool isLrps2 = systemInfo.library_name != nullptr &&
         std::strcmp(systemInfo.library_name, "LRPS2") == 0;
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
+    catchUpAfterStall_ = isLrps2;
     if (isMupen64PlusNext) {
         // The libretro threaded path keeps render-context commands on this
         // context-owning frontend thread while moving N64 emulation to a
@@ -339,7 +341,14 @@ void EmulationSession::runLoop() {
         // emulation back up. Resetting the schedule here would pace cheap
         // skipped runs as new frames and preserve the slowdown we are trying
         // to recover from.
-        scheduler.waitForNextFrame(videoEnabled);
+        // lrps2 compiles new GS shaders synchronously. Preserve bounded pacing
+        // debt across those temporary stalls so subsequent frames refill the
+        // audio queue without allowing a long stall to cause prolonged
+        // fast-forward.
+        scheduler.waitForNextFrame(
+            videoEnabled && !catchUpAfterStall_,
+            catchUpAfterStall_ ? kLrps2MaxCatchUpDebt
+                               : std::chrono::steady_clock::duration::zero());
         presentVideoFrame_.store(videoEnabled, std::memory_order_relaxed);
         environment_.setVideoEnabled(videoEnabled);
         const auto frameWorkStarted = std::chrono::steady_clock::now();

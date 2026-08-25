@@ -9,7 +9,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace romm::player {
@@ -17,10 +19,10 @@ namespace romm::player {
 namespace {
 
 constexpr const char* kTag = "sdl_gl_context";
-// Diagnostics tag for the offscreen-FBO present path (core renders into an
-// offscreen framebuffer that swapBuffers() blits into the window). Kept
-// distinct and low-noise (one line on any dims change, one line per second,
-// one sampled FBO read-back per second, GL error lines only on state change)
+// Opt-in diagnostics for the offscreen-FBO present path (core renders into an
+// offscreen framebuffer that swapBuffers() blits into the window). Enable with
+// ROMM_PS2_PRESENT_DIAGNOSTICS=1. Kept distinct and low-noise (one line on any
+// dims change, one line per second, one sampled FBO read-back per second)
 // so the next on-device test can read player.log and tell whether the core is
 // actually producing non-black frames (and at what content geometry) even
 // while the window is black — i.e. distinguish "core emits no/empty frames"
@@ -46,6 +48,15 @@ std::chrono::steady_clock::time_point g_diagLastLogTime{};
 GLenum g_diagLastFbStatus = GL_FRAMEBUFFER_COMPLETE;
 GLenum g_diagLastGlError = GL_NO_ERROR;
 std::chrono::steady_clock::time_point g_diagLastGlLogTime{};
+
+bool presentDiagnosticsEnabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("ROMM_PS2_PRESENT_DIAGNOSTICS");
+        return value != nullptr && value[0] != '\0' &&
+            std::strcmp(value, "0") != 0 && std::strcmp(value, "false") != 0;
+    }();
+    return enabled;
+}
 
 void logSdlError(const char* operation) {
     romm::log::sink().log(
@@ -200,11 +211,15 @@ bool SdlHardwareContext::swapBuffers() {
     // whether frames are flowing and at what content geometry — the key
     // evidence for whether a black screen is a core-side empty-frame issue
     // (content dims stay 0 / frame counter stalls) vs. a blit problem.
-    const auto diagNow = std::chrono::steady_clock::now();
+    const bool diagnosticsEnabled = presentDiagnosticsEnabled();
+    const auto diagNow = diagnosticsEnabled
+        ? std::chrono::steady_clock::now()
+        : std::chrono::steady_clock::time_point{};
     const bool diagPerSecond =
-        g_diagLastLogTime == std::chrono::steady_clock::time_point{} ||
-        diagNow - g_diagLastLogTime >= std::chrono::seconds(1);
-    if (useOffscreenPresentation_) {
+        diagnosticsEnabled &&
+        (g_diagLastLogTime == std::chrono::steady_clock::time_point{} ||
+         diagNow - g_diagLastLogTime >= std::chrono::seconds(1));
+    if (diagnosticsEnabled && useOffscreenPresentation_) {
         ++g_diagFrameCount;
         const bool dimsChanged =
             outputWidth != g_diagOutW || outputHeight != g_diagOutH ||
@@ -285,22 +300,24 @@ bool SdlHardwareContext::swapBuffers() {
         // incomplete or a GL error is present, and only when the observed
         // state changes (throttled to at most one line per 500ms if it keeps
         // flapping).
-        const GLenum fbStatus = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
-        const GLenum blitError = glGetError();
-        if ((fbStatus != GL_FRAMEBUFFER_COMPLETE || blitError != GL_NO_ERROR) &&
-            (fbStatus != g_diagLastFbStatus || blitError != g_diagLastGlError)) {
-            if (g_diagLastGlLogTime == std::chrono::steady_clock::time_point{} ||
-                diagNow - g_diagLastGlLogTime >= std::chrono::milliseconds(500)) {
-                std::fprintf(
-                    stderr,
-                    "[%s] gl: fbo-status=0x%lx error=0x%lx\n",
-                    kPresentDiagTag,
-                    static_cast<unsigned long>(fbStatus),
-                    static_cast<unsigned long>(blitError));
-                g_diagLastGlLogTime = diagNow;
+        if (diagnosticsEnabled) {
+            const GLenum fbStatus = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+            const GLenum blitError = glGetError();
+            if ((fbStatus != GL_FRAMEBUFFER_COMPLETE || blitError != GL_NO_ERROR) &&
+                (fbStatus != g_diagLastFbStatus || blitError != g_diagLastGlError)) {
+                if (g_diagLastGlLogTime == std::chrono::steady_clock::time_point{} ||
+                    diagNow - g_diagLastGlLogTime >= std::chrono::milliseconds(500)) {
+                    std::fprintf(
+                        stderr,
+                        "[%s] gl: fbo-status=0x%lx error=0x%lx\n",
+                        kPresentDiagTag,
+                        static_cast<unsigned long>(fbStatus),
+                        static_cast<unsigned long>(blitError));
+                    g_diagLastGlLogTime = diagNow;
+                }
+                g_diagLastFbStatus = fbStatus;
+                g_diagLastGlError = blitError;
             }
-            g_diagLastFbStatus = fbStatus;
-            g_diagLastGlError = blitError;
         }
 
         // Bounded pixel read-back, at most once per second: sample a few

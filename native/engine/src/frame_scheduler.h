@@ -22,13 +22,20 @@ public:
     // production within the current interval while retaining enough measured
     // headroom for the core to finish. This reduces the age of input in the
     // presented frame without changing emulation speed.
-    void waitForNextFrame(bool resetIfBehind = true) {
+    void waitForNextFrame(
+        bool resetIfBehind = true,
+        std::chrono::steady_clock::duration maxCatchUpDebt =
+            std::chrono::steady_clock::duration::zero()) {
         auto now = std::chrono::steady_clock::now();
         const auto duration =
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDuration_);
 
         if (resetIfBehind && now - nextFrameTime_ > duration) {
             nextFrameTime_ = now;
+        } else if (!resetIfBehind &&
+                   maxCatchUpDebt > std::chrono::steady_clock::duration::zero() &&
+                   now - nextFrameTime_ > maxCatchUpDebt) {
+            nextFrameTime_ = now - maxCatchUpDebt;
         }
 
         const auto availableHeadroom = frameDuration_ - estimatedWorkDuration_ - safetyMargin_;

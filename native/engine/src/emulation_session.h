@@ -210,6 +210,7 @@ private:
     double avFps_ = 60.0;
     double avSampleRate_ = 44100.0;
     bool adaptiveFrameSkipEnabled_ = false;
+    bool catchUpAfterStall_ = false;
     std::atomic<bool> presentVideoFrame_{true};
 
     std::thread thread_;

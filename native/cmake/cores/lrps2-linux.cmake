@@ -65,6 +65,15 @@ ExternalProject_Add(lrps2_core
         -DSOURCE_DIR=${LRPS2_DIR}
         -DPATCH_FILE=${ROMM_REPO_ROOT}/native/cmake/patches/lrps2-rip-relative-reach.patch
         -P ${ROMM_REPO_ROOT}/native/cmake/apply-git-patch.cmake
+    # PDIVW and PDIVBW are signed packed divides. The pinned core emits CDQ
+    # followed by unsigned DIV for both, which raises SIGFPE whenever a
+    # negative dividend produces a quotient that does not fit in uint32_t.
+    PATCH_COMMAND
+        ${CMAKE_COMMAND}
+        -DGIT_EXECUTABLE=${LRPS2_GIT}
+        -DSOURCE_DIR=${LRPS2_DIR}
+        -DPATCH_FILE=${ROMM_REPO_ROOT}/native/cmake/patches/lrps2-pdiv-signed-division.patch
+        -P ${ROMM_REPO_ROOT}/native/cmake/apply-git-patch.cmake
     # The core's Makefile builds in-source (objects land in the submodule tree;
     # `make -C ${LRPS2_DIR} clean` removes them). GCC is the PCSX2 reference
     # toolchain and is already required by the dolphin fragment, so no new CI
