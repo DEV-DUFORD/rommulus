@@ -582,7 +582,7 @@
       "gateNotes": "Linux-only core. Android ABIs are intentionally absent. A user-supplied PS2 BIOS image (bios_PS2.bin) is required in the core's BIOS directory; the core auto-detects it by content.",
       "coreLibraryFile": "liblrps2_core.so",
       "upstreamRepository": "https://github.com/libretro/ps2",
-      "commitSha": "7701fd27133f0b83d9e53107ca1e57446ba61090",
+      "commitSha": "0cd22a097b38c710befd60868c2a34a02e3f5360",
       "releaseTag": "",
       "vendorSourceSubset": ["third_party/cores/lrps2 (recursive git submodule)"],
       "vendoringDoc": "third_party/cores/lrps2/COPYING.GPLv3",

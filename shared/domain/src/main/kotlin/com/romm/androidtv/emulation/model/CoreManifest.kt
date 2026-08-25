@@ -663,7 +663,7 @@ object CoreManifest {
             coreName = "PS2 (PCSX2 fork)",
             coreId = "lrps2",
             upstreamRepository = "https://github.com/libretro/ps2",
-            commitSha = "7701fd27133f0b83d9e53107ca1e57446ba61090",
+            commitSha = "0cd22a097b38c710befd60868c2a34a02e3f5360",
             releaseTag = "",
             licenseSummary = "GPL-3.0-or-later (COPYING.GPLv3): lrps2 is a PCSX2 fork and " +
                 "inherits PCSX2's GPL/LGPL licensing, with the complete dependency closure " +
