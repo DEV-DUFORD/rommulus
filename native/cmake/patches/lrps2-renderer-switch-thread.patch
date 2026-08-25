@@ -1,0 +1,59 @@
+diff --git a/pcsx2/GS.h b/pcsx2/GS.h
+index 0204ea5ed..9676e6425 100644
+--- a/pcsx2/GS.h
++++ b/pcsx2/GS.h
+@@ -284,7 +284,8 @@ enum MTGS_RingCommand
+ 	GS_RINGTYPE_RESET, // issues a GSreset() command.
+ 	GS_RINGTYPE_GSPACKET,
+ 	GS_RINGTYPE_MTVU_GSPACKET,
+-	GS_RINGTYPE_INIT_AND_READ_FIFO
++	GS_RINGTYPE_INIT_AND_READ_FIFO,
++	GS_RINGTYPE_SWITCH_RENDERER
+ };
+ 
+ 
+diff --git a/pcsx2/MTGS.cpp b/pcsx2/MTGS.cpp
+index c0de2ce2f..b2140e169 100644
+--- a/pcsx2/MTGS.cpp
++++ b/pcsx2/MTGS.cpp
+@@ -280,6 +280,10 @@ void MTGS::MainLoop(bool flush_all)
+ 				case GS_RINGTYPE_INIT_AND_READ_FIFO:
+ 					GSInitAndReadFIFO((u8*)tag.pointer, tag.data[0]);
+ 					break;
++				case GS_RINGTYPE_SWITCH_RENDERER:
++					GSSwitchRenderer(static_cast<GSRendererType>(tag.data[0]), hw_render.context_type,
++						static_cast<GSInterlaceMode>(tag.data[1]));
++					break;
+ 				// Optimized performance in non-Dev builds.
+ 				default:
+ 					break;
+@@ -429,10 +433,25 @@ void MTGS::ApplySettings()
+ 
+ void MTGS::SwitchRenderer(GSRendererType renderer, GSInterlaceMode interlace)
+ {
+-	GSSwitchRenderer(renderer, hw_render.context_type, interlace);
+-	// See note in ApplySettings() for reasoning here.
+-	if (EmuConfig.GS.HWDownloadMode == GSHardwareDownloadMode::Unsynchronized)
+-		WaitGS(false);
++	if (sthread_get_current_thread_id() == s_thread)
++	{
++		GSSwitchRenderer(renderer, hw_render.context_type, interlace);
++		return;
++	}
++
++	const unsigned int writepos = retro_atomic_load_acquire_int(&s_WritePos);
++	PacketTagType& tag = (PacketTagType&)m_Ring[writepos];
++
++	tag.command = GS_RINGTYPE_SWITCH_RENDERER;
++	tag.data[0] = static_cast<int>(renderer);
++	tag.data[1] = static_cast<int>(interlace);
++	tag.data[2] = 0;
++
++	retro_atomic_store_release_int(&s_WritePos, (writepos + 1) & RINGBUFFERMASK);
++
++	// Renderer creation and destruction must run on the libretro thread,
++	// where the frontend's graphics context is current.
++	WaitGS(false);
+ }
+ 
+ // Adds a finished GS Packet to the MTGS ring buffer

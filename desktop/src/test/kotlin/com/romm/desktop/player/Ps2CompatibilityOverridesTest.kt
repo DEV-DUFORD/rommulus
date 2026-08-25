@@ -28,12 +28,12 @@ class Ps2CompatibilityOverridesTest {
     }
 
     @Test
-    fun `Ace Combat 04 avoids the FMV renderer transition crash`() {
+    fun `Ace Combat 04 uses its core gamefix instead of a renderer override`() {
         assertThat(
             Ps2CompatibilityOverrides.rendererFor(
                 "ps2",
                 "Ace Combat 04 - Shattered Skies",
             ),
-        ).isEqualTo(RendererOverride.SOFTWARE_HW)
+        ).isNull()
     }
 }
