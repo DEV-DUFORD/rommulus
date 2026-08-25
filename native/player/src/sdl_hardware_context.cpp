@@ -71,6 +71,12 @@ void SdlHardwareContext::setBufferGeometry(unsigned width, unsigned height) {
     bufferHeight_ = height;
 }
 
+void SdlHardwareContext::setContentGeometry(unsigned width, unsigned height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    contentWidth_ = width;
+    contentHeight_ = height;
+}
+
 void SdlHardwareContext::attachWindow(romm::video::NativeWindowHandle window) {
     std::lock_guard<std::mutex> lock(mutex_);
     pendingWindow_ = static_cast<SDL_Window*>(window);
@@ -158,6 +164,19 @@ bool SdlHardwareContext::swapBuffers() {
     SDL_GetWindowSizeInPixels(window_, &outputWidth, &outputHeight);
     if (framebuffer_ != 0 && bufferWidth_ > 0 && bufferHeight_ > 0 &&
         outputWidth > 0 && outputHeight > 0) {
+        // A core may render only a native-resolution region at the top-left of
+        // the offscreen buffer instead of filling it (e.g. lrps2 reports a
+        // fixed 640x448 base geometry but draws the game's actual resolution,
+        // which for many PS2 titles is narrower, e.g. 512x448). Present just
+        // that content region, stretched to the buffer's aspect ratio and
+        // centered, so a narrower native frame is centered rather than being
+        // left-aligned inside the full buffer (which the outer centering of
+        // bufferWidth_ x bufferHeight_ cannot compensate for).
+        const unsigned srcW = (contentWidth_ > 0) ? std::min(contentWidth_, bufferWidth_) : bufferWidth_;
+        const unsigned srcH = (contentHeight_ > 0) ? std::min(contentHeight_, bufferHeight_) : bufferHeight_;
+
+        // Destination keeps the buffer's aspect (base geometry), which is what
+        // the reported content is meant to be displayed at.
         double scale = std::min(
             static_cast<double>(outputWidth) / bufferWidth_,
             static_cast<double>(outputHeight) / bufferHeight_);
@@ -177,7 +196,7 @@ bool SdlHardwareContext::swapBuffers() {
         glClear(GL_COLOR_BUFFER_BIT);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_);
         glBlitFramebuffer(
-            0, 0, static_cast<GLint>(bufferWidth_), static_cast<GLint>(bufferHeight_),
+            0, 0, static_cast<GLint>(srcW), static_cast<GLint>(srcH),
             x, y, x + width, y + height, GL_COLOR_BUFFER_BIT,
             sharpFilterEnabled_.load() ? GL_NEAREST : GL_LINEAR);
     }

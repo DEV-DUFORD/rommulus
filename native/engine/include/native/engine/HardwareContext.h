@@ -57,6 +57,15 @@ public:
     // Sets the buffer geometry used when (re)creating the window surface.
     virtual void setBufferGeometry(unsigned width, unsigned height) = 0;
 
+    // Reports the size of the actual rendered content within the framebuffer,
+    // as delivered by the core's hardware video refresh callback. Some cores
+    // (e.g. lrps2) report a fixed base geometry but render only a
+    // native-resolution region at the top-left of the buffer, leaving the
+    // remainder black. Compositing frontends use this to present (and center)
+    // only the real content instead of the full buffer. Defaults to a no-op so
+    // platforms/contexts that present the whole buffer are unaffected.
+    virtual void setContentGeometry(unsigned width, unsigned height) {}
+
     // Queues a window owned by this context (takes ownership of the handle
     // reference). The emulation thread consumes it through
     // applyPendingWindowUpdate().

@@ -16,6 +16,7 @@ public:
 
     bool createContext() override;
     void setBufferGeometry(unsigned width, unsigned height) override;
+    void setContentGeometry(unsigned width, unsigned height) override;
     void attachWindow(romm::video::NativeWindowHandle window) override;
     void detachWindow() override;
     WindowUpdateResult applyPendingWindowUpdate() override;
@@ -42,6 +43,8 @@ private:
     bool surfaceAttached_ = false;
     unsigned bufferWidth_ = 0;
     unsigned bufferHeight_ = 0;
+    unsigned contentWidth_ = 0;
+    unsigned contentHeight_ = 0;
     unsigned framebuffer_ = 0;
     unsigned colorTexture_ = 0;
     unsigned depthStencil_ = 0;

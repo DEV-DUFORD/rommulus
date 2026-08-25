@@ -577,10 +577,14 @@ void EmulationSession::videoRefreshTrampoline(const void* data, unsigned width, 
         // Defensive fallback for cores that do not honor
         // RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE themselves.
     } else if (self->environment_.isHardwareRendering()) {
-        // Hardware-rendering core (GLideN64): the core drew directly to the
-        // render backbuffer. data is nullptr for HW rendering (the core
-        // doesn't pass pixel data — it's already in the framebuffer). We
-        // just swap the front/back buffers to present the frame.
+        // Hardware-rendering core (GLideN64/lrps2): the core drew directly to
+        // the render backbuffer. data is nullptr for HW rendering (the core
+        // doesn't pass pixel data — it's already in the framebuffer). width/
+        // height describe the actual rendered content region; forward them so
+        // a compositing frontend can center content that doesn't fill the full
+        // buffer (e.g. lrps2 reports a fixed 640x448 base geometry but renders
+        // the game's native resolution). Then swap the buffers to present.
+        romm::gl::context().setContentGeometry(width, height);
         if (!romm::gl::context().swapBuffers()) {
             LOGE("HW render: swapBuffers failed — context may be lost");
         }
