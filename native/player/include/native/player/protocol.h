@@ -12,6 +12,7 @@
 // vendored header-only nlohmann/json (MIT, third_party/nlohmann/).
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -63,6 +64,7 @@ struct ControllerBindingDevice {
 // devices array is legal and behaves like an absent field (defaults kept).
 struct ControllerBindings {
     std::vector<ControllerBindingDevice> devices;
+    std::optional<std::array<BindingSource, 2>> pauseMenuBindings;
 };
 
 // Optional launch-time keyboard table. The wire object contains one required

@@ -152,7 +152,10 @@ object RetroPadControlMapping {
      * the stored table is incomplete/invalid (the caller then omits the field and the player
      * keeps its defaults — a request must never be written with a partial table).
      */
-    fun toLaunchBindings(records: List<ControllerBindingRecord>): ControllerBindings? {
+    fun toLaunchBindings(
+        records: List<ControllerBindingRecord>,
+        pauseMenuRecords: List<ControllerBindingRecord> = emptyList(),
+    ): ControllerBindings? {
         if (records.isEmpty()) return null
         val byAddress = records.associateBy { it.controlId to it.bindingSlot }
         val coreId = records.first().coreId
@@ -162,28 +165,7 @@ object RetroPadControlMapping {
             for (slotName in RETRO_PAD_SLOT_NAMES) {
                 val record = byAddress[coreControlIdForSlot(coreId, slotName).id to bindingSlot]
                     ?: if (required) return null else return null
-                when (record.bindingType) {
-                    TYPE_UNMAPPED -> slots += PlayerSlotBinding(slotName, PlayerBindingType.UNBOUND)
-                    TYPE_KEY -> {
-                        val button = PAD_BUTTON_NAMES.getOrNull(record.inputCode) ?: return null
-                        slots += PlayerSlotBinding(slotName, PlayerBindingType.BUTTON, button = button)
-                    }
-                    TYPE_AXIS_DIRECTION -> {
-                        val axis = PAD_AXIS_NAMES.getOrNull(record.inputCode) ?: return null
-                        val polarity = record.polarity?.takeIf { it == -1 || it == 1 } ?: return null
-                        slots += PlayerSlotBinding(
-                            slotName,
-                            PlayerBindingType.AXIS_DIRECTION,
-                            axis = axis,
-                            polarity = polarity,
-                        )
-                    }
-                    TYPE_AXIS -> {
-                        val axis = padAxisNameForPlatformCode(record.inputCode) ?: return null
-                        slots += PlayerSlotBinding(slotName, PlayerBindingType.AXIS, axis = axis)
-                    }
-                    else -> return null
-                }
+                slots += toPlayerBinding(record, slotName) ?: return null
             }
             return slots
         }
@@ -203,7 +185,48 @@ object RetroPadControlMapping {
             bindings = slots,
             secondaryBindings = secondarySlots,
         )
-        return ControllerBindings(listOf(device))
+        val pauseBindings = if (pauseMenuRecords.isEmpty()) {
+            null
+        } else {
+            val bySlot = pauseMenuRecords.associateBy { it.bindingSlot }
+            listOf(
+                toPlayerBinding(
+                    bySlot[BindingSlots.PRIMARY] ?: return null,
+                    "primary",
+                ) ?: return null,
+                toPlayerBinding(
+                    bySlot[BindingSlots.SECONDARY] ?: return null,
+                    "secondary",
+                ) ?: return null,
+            )
+        }
+        return ControllerBindings(listOf(device), pauseBindings)
+    }
+
+    private fun toPlayerBinding(
+        record: ControllerBindingRecord,
+        slotName: String,
+    ): PlayerSlotBinding? {
+        return when (record.bindingType) {
+            TYPE_UNMAPPED -> PlayerSlotBinding(slotName, PlayerBindingType.UNBOUND)
+            TYPE_KEY -> PAD_BUTTON_NAMES.getOrNull(record.inputCode)?.let {
+                PlayerSlotBinding(slotName, PlayerBindingType.BUTTON, button = it)
+            }
+            TYPE_AXIS_DIRECTION -> {
+                val axis = PAD_AXIS_NAMES.getOrNull(record.inputCode) ?: return null
+                val polarity = record.polarity?.takeIf { it == -1 || it == 1 } ?: return null
+                PlayerSlotBinding(
+                    slotName,
+                    PlayerBindingType.AXIS_DIRECTION,
+                    axis = axis,
+                    polarity = polarity,
+                )
+            }
+            TYPE_AXIS -> padAxisNameForPlatformCode(record.inputCode)?.let {
+                PlayerSlotBinding(slotName, PlayerBindingType.AXIS, axis = it)
+            }
+            else -> null
+        }
     }
 
     internal fun coreControlIdForSlot(coreId: String, slotName: String): CoreControlId {

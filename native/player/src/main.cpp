@@ -747,6 +747,12 @@ int main(int argc, char* argv[]) {
             request.controllerBindings->devices.front().secondaryTable
         );
     }
+    if (request.controllerBindings.has_value() &&
+        request.controllerBindings->pauseMenuBindings.has_value()) {
+        const auto& pauseBindings =
+            *request.controllerBindings->pauseMenuBindings;
+        input.setPauseMenuBindings(pauseBindings[0], pauseBindings[1]);
+    }
     if (request.keyboardBindings.has_value()) {
         input.setKeyboardBindings(request.keyboardBindings->table);
     }

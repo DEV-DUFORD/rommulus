@@ -82,6 +82,10 @@ ControllerBindings sampleControllerBindings() {
     any.identity.productId = std::nullopt;
     any.identity.descriptor = "";
     cb.devices.push_back(std::move(any));  // default table
+    cb.pauseMenuBindings = std::array<BindingSource, 2>{
+        BindingSource::ofButton(PadButton::kLeftStick),
+        BindingSource::ofButton(PadButton::kBack),
+    };
 
     return cb;
 }
@@ -155,6 +159,10 @@ void checkRoundTripRequest(const PlayerRequest& in) {
                 CHECK(a[d].secondaryTable.get(slot) == b[d].secondaryTable.get(slot));
             }
         }
+        CHECK(
+            out->controllerBindings->pauseMenuBindings ==
+            in.controllerBindings->pauseMenuBindings
+        );
         CHECK(out->keyboardBindings.has_value() == in.keyboardBindings.has_value());
         if (in.keyboardBindings.has_value() && out->keyboardBindings.has_value()) {
             for (int target = 0; target < romm::player::kKeyboardTargetCount; ++target) {

@@ -97,7 +97,10 @@ data class ControllerBindingDevice(
 )
 
 /** The v2 request's optional controllerBindings field (absent = player keeps its defaults). */
-data class ControllerBindings(val devices: List<ControllerBindingDevice>)
+data class ControllerBindings(
+    val devices: List<ControllerBindingDevice>,
+    val pauseMenuBindings: List<PlayerSlotBinding>? = null,
+)
 
 data class KeyboardBindingEntry(
     val target: String,
@@ -355,6 +358,9 @@ object PlayerProtocol {
             if (request.controllerBindings != null) {
                 writer.name("controllerBindings").beginObject()
                 writeControllerBindingDevices(writer, request.controllerBindings.devices)
+                request.controllerBindings.pauseMenuBindings?.let {
+                    writeSlotBindings(writer, "pauseMenuBindings", it)
+                }
                 writer.endObject()
             }
             request.keyboardBindings?.let { keyboard ->
@@ -709,15 +715,18 @@ object PlayerProtocol {
         }
         reader.beginObject()
         var devices: List<ControllerBindingDevice>? = null
+        var pauseMenuBindings: List<PlayerSlotBinding>? = null
         while (reader.peek() != JsonReader.Token.END_OBJECT) {
             when (val name = reader.nextName()) {
                 "devices" -> devices = readControllerBindingDevices(reader)
+                "pauseMenuBindings" -> pauseMenuBindings =
+                    readSlotBindings(reader, PAUSE_MENU_SLOT_NAMES)
                 else -> throw ProtocolException("unknown field: $name")
             }
         }
         reader.endObject()
         if (devices == null) throw ProtocolException("missing controllerBindings field: devices")
-        return ControllerBindings(devices)
+        return ControllerBindings(devices, pauseMenuBindings)
     }
 
     /** Reads a `devices` array (may be empty). Shared with [ControllerBindingSidecarCodec]. */
@@ -798,7 +807,10 @@ object PlayerProtocol {
      * the exact field set for its declared type (mirrors C++ `parseBindingEntry`). The union of
      * all entry fields is checked per token; the declared type then pins the subset.
      */
-    internal fun readSlotBindings(reader: JsonReader): List<PlayerSlotBinding> {
+    internal fun readSlotBindings(
+        reader: JsonReader,
+        expectedSlots: List<String> = RETRO_PAD_SLOT_NAMES,
+    ): List<PlayerSlotBinding> {
         if (reader.peek() != JsonReader.Token.BEGIN_ARRAY) {
             throw ProtocolException("bindings must be an array")
         }
@@ -839,7 +851,7 @@ object PlayerProtocol {
             reader.endObject()
 
             val slotName = checkNotNull(slot) { "missing binding slot" }
-            if (slotName !in RETRO_PAD_SLOT_NAMES) {
+            if (slotName !in expectedSlots) {
                 throw ProtocolException("unknown binding slot: $slotName")
             }
             if (!seenSlots.add(slotName)) {
@@ -885,18 +897,21 @@ object PlayerProtocol {
         }
         reader.endArray()
 
-        if (bindings.size != LEGACY_RETRO_PAD_SLOT_COUNT &&
-            bindings.size != RETRO_PAD_SLOT_NAMES.size
-        ) {
+        val validSize = if (expectedSlots == RETRO_PAD_SLOT_NAMES) {
+            bindings.size == LEGACY_RETRO_PAD_SLOT_COUNT ||
+                bindings.size == RETRO_PAD_SLOT_NAMES.size
+        } else {
+            bindings.size == expectedSlots.size
+        }
+        if (!validSize) {
             throw ProtocolException(
-                "bindings must carry exactly $LEGACY_RETRO_PAD_SLOT_COUNT or " +
-                    "${RETRO_PAD_SLOT_NAMES.size} entries",
+                "bindings must carry exactly ${expectedSlots.size} entries",
             )
         }
         // Entries must arrive in slot order (the canonical producers — the sidecar and the
         // desktop serializer — both emit all entries in order); a gap is rejected here.
         bindings.forEachIndexed { index, binding ->
-            if (binding.slot != RETRO_PAD_SLOT_NAMES[index]) {
+            if (binding.slot != expectedSlots[index]) {
                 throw ProtocolException("binding slot out of order or duplicate: ${binding.slot}")
             }
         }
@@ -922,6 +937,8 @@ object PlayerProtocol {
         "savePath", "candidateSavePath", "resultPath",
         "expectedSaveSize", "video",
     )
+
+    private val PAUSE_MENU_SLOT_NAMES = listOf("primary", "secondary")
 
     private val REQUIRED_RESULT_FIELDS = listOf(
         "protocolVersion", "sessionId", "exitKind", "checkpointWritten",

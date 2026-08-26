@@ -53,6 +53,7 @@ fun DownloadedGamesScreen(coordinator: DesktopAppCoordinator) {
                 onOpen = { coordinator.openGameDetail(it, Screen.DOWNLOADED) },
                 modifier = Modifier.fillMaxSize(),
                 isLoadingMore = false,
+                contentPaddingTop = 12.dp,
             )
         }
     }

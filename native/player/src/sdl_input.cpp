@@ -225,26 +225,9 @@ void SdlInput::poll() {
         int32_t mask = 0;
         if (gamepad != nullptr) {
             for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
-                const auto sourcePressed = [gamepad](const BindingSource& source) {
-                    switch (source.kind) {
-                        case BindingSource::Kind::kButton:
-                            return SDL_GetGamepadButton(gamepad, toSdlButton(source.button));
-                        case BindingSource::Kind::kAxis:
-                            return false;
-                        case BindingSource::Kind::kAxisDirection: {
-                            const Sint16 raw =
-                                SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis));
-                            const int16_t value = applyDeadzone(raw);
-                            return source.polarity > 0 ? (value >= kAxisBindLevel)
-                                                       : (value <= -kAxisBindLevel);
-                        }
-                        case BindingSource::Kind::kUnbound:
-                            return false;
-                    }
-                    return false;
-                };
-                const bool pressed = sourcePressed(bindings_.get(slot)) ||
-                    sourcePressed(secondaryBindings_.get(slot));
+                const bool pressed =
+                    sourcePressed(gamepad, bindings_.get(slot)) ||
+                    sourcePressed(gamepad, secondaryBindings_.get(slot));
                 if (pressed) {
                     mask |= (1 << retroPadSlotJoypadBit(slot));
                 }
@@ -345,6 +328,27 @@ void SdlInput::updateSession(romm::EmulationSession& session) {
     }
 }
 
+bool SdlInput::sourcePressed(
+    SDL_Gamepad* gamepad,
+    const BindingSource& source
+) const {
+    switch (source.kind) {
+        case BindingSource::Kind::kButton:
+            return SDL_GetGamepadButton(gamepad, toSdlButton(source.button));
+        case BindingSource::Kind::kAxis:
+            return false;
+        case BindingSource::Kind::kAxisDirection: {
+            const Sint16 raw = SDL_GetGamepadAxis(gamepad, toSdlAxis(source.axis));
+            const int16_t value = applyDeadzone(raw);
+            return source.polarity > 0 ? (value >= kAxisBindLevel)
+                                       : (value <= -kAxisBindLevel);
+        }
+        case BindingSource::Kind::kUnbound:
+            return false;
+    }
+    return false;
+}
+
 bool SdlInput::pollPauseTrigger() {
     bool trigger = false;
     for (int port = 0; port < kPorts; ++port) {
@@ -352,24 +356,20 @@ bool SdlInput::pollPauseTrigger() {
         if (gamepad == nullptr) continue;
 
         PrevButtons& prev = prevButtons_[port];
-        const bool back = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK);
-        const bool start = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
-        const bool leftStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
-        const bool rightStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        const bool primary = sourcePressed(gamepad, pauseMenuPrimary_);
+        const bool secondary = sourcePressed(gamepad, pauseMenuSecondary_);
 
         if (pauseChordPressed(
-                leftStick,
-                rightStick,
-                prev.leftStick,
-                prev.rightStick
+                primary,
+                secondary,
+                prev.pausePrimary,
+                prev.pauseSecondary
             )) {
             trigger = true;
         }
 
-        prev.back = back;
-        prev.start = start;
-        prev.leftStick = leftStick;
-        prev.rightStick = rightStick;
+        prev.pausePrimary = primary;
+        prev.pauseSecondary = secondary;
     }
     return trigger;
 }
@@ -454,8 +454,8 @@ void SdlInput::resetMenuEdges() {
         prev.east = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST);
         prev.back = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK);
         prev.start = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
-        prev.leftStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
-        prev.rightStick = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        prev.pausePrimary = sourcePressed(gamepad, pauseMenuPrimary_);
+        prev.pauseSecondary = sourcePressed(gamepad, pauseMenuSecondary_);
         prevBackHeld_[port] = prev.back;
     }
 }

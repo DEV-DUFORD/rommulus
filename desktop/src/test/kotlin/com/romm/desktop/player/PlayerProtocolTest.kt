@@ -130,6 +130,30 @@ class PlayerProtocolTest {
     }
 
     @Test
+    fun `pause menu bindings round-trip inside controller bindings`() {
+        val original = sampleRequest().copy(
+            controllerBindings = sampleControllerBindings().copy(
+                pauseMenuBindings = listOf(
+                    PlayerSlotBinding(
+                        "primary",
+                        PlayerBindingType.BUTTON,
+                        button = "left_stick",
+                    ),
+                    PlayerSlotBinding(
+                        "secondary",
+                        PlayerBindingType.BUTTON,
+                        button = "back",
+                    ),
+                ),
+            ),
+        )
+
+        assertThat(
+            PlayerProtocol.parseRequest(PlayerProtocol.serializeRequest(original)).getOrNull(),
+        ).isEqualTo(original)
+    }
+
+    @Test
     fun `secondary controller bindings round-trip`() {
         val base = sampleControllerBindings()
         val device = base.devices.single()

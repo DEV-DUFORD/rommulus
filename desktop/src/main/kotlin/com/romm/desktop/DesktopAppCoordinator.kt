@@ -886,7 +886,11 @@ class DesktopAppCoordinator(
             coreId,
             RetroPadControlMapping.PLAYER_INDEX,
         )
-        RetroPadControlMapping.toLaunchBindings(records)
+        val pauseMenuRecords = controllerConfigRepository.effectivePauseMenuRecords(
+            coreId,
+            RetroPadControlMapping.PLAYER_INDEX,
+        )
+        RetroPadControlMapping.toLaunchBindings(records, pauseMenuRecords)
     }.getOrElse { e ->
         log.warning("loading stored controller bindings for $coreId failed: $e; launching with defaults")
         null

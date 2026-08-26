@@ -69,9 +69,8 @@ public:
     // neutral state rather than going stale).
     void updateSession(romm::EmulationSession& session);
 
-    // Edge-detected pause trigger: true on the single frame in which a
-    // gamepad's L3+R3 pause combination transitions from not-held to held.
-    // Call once per frame while gameplay input is active.
+    // Edge-detected pause trigger: true when the configured two-input chord
+    // transitions from not-held to held. Defaults to L3+R3.
     bool pollPauseTrigger();
 
     // Edge-detected menu navigation for the pause overlay: d-pad up/down/
@@ -99,6 +98,12 @@ public:
     void setBindings(const BindingTable& table, const BindingTable& secondary = BindingTable(false)) {
         bindings_ = table;
         secondaryBindings_ = secondary;
+    }
+    void setPauseMenuBindings(const BindingSource& primary,
+                              const BindingSource& secondary) {
+        pauseMenuPrimary_ = primary;
+        pauseMenuSecondary_ = secondary;
+        resetMenuEdges();
     }
     void configureForCore(const std::string& coreId);
     // Restores the built-in default mapping (the editor's Reset to Default).
@@ -196,6 +201,7 @@ private:
 
     static int16_t applyDeadzone(Sint16 value);
     int16_t analogValue(SDL_Gamepad* gamepad, int slot) const;
+    bool sourcePressed(SDL_Gamepad* gamepad, const BindingSource& source) const;
     void applyCoreBindingDefaults();
 
     std::array<PortState, kPorts> ports_{};
@@ -207,6 +213,10 @@ private:
     // mapping. See binding_table.h.
     BindingTable bindings_{};
     BindingTable secondaryBindings_{false};
+    BindingSource pauseMenuPrimary_ =
+        BindingSource::ofButton(PadButton::kLeftStick);
+    BindingSource pauseMenuSecondary_ =
+        BindingSource::ofButton(PadButton::kRightStick);
     bool gameCubeBindings_ = false;
     KeyboardBindingTable keyboardBindings_{};
 
@@ -221,8 +231,8 @@ private:
     struct PrevButtons {
         bool back = false;
         bool start = false;
-        bool leftStick = false;   // L3
-        bool rightStick = false;  // R3
+        bool pausePrimary = false;
+        bool pauseSecondary = false;
         bool up = false;
         bool down = false;
         bool left = false;

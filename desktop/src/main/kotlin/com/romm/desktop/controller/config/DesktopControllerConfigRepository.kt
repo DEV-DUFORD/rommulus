@@ -85,6 +85,36 @@ class DesktopControllerConfigRepository(
                     BindingAddress(controlId, slot),
                 )
             }
+
+        }
+    }
+
+    fun effectivePauseMenuRecords(
+        coreId: String,
+        playerIndex: Int,
+    ): List<ControllerBindingRecord> {
+        val stored = store.loadForCore(coreId)
+        if (stored.isEmpty()) return emptyList()
+        val player = resolve(coreId, stored).players[playerIndex] ?: return emptyList()
+        val storedByAddress = stored
+            .filter { it.playerIndex == playerIndex }
+            .associateBy { it.controlId to it.bindingSlot }
+        return BindingSlot.entries.map { slot ->
+            storedByAddress[CoreControlId.PAUSE_MENU.id to slot.index]
+                ?: player.get(CoreControlId.PAUSE_MENU, slot)?.let {
+                    DesktopControllerBindingCodec.encodeForLaunch(
+                        coreId,
+                        playerIndex,
+                        CoreControlId.PAUSE_MENU,
+                        it,
+                        slot.index,
+                    )
+                }
+                ?: DesktopControllerBindingCodec.encodeUnmapped(
+                    coreId,
+                    playerIndex,
+                    BindingAddress(CoreControlId.PAUSE_MENU, slot),
+                )
         }
     }
 

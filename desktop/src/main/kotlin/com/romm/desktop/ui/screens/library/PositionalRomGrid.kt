@@ -63,6 +63,7 @@ internal fun PositionalRomGrid(
     onOpen: (Long) -> Unit,
     modifier: Modifier = Modifier,
     isLoadingMore: Boolean = false,
+    contentPaddingTop: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     val colors = LocalRommulusColors.current
     // Per-card requesters so a positional move can focus the target even when it is not the
@@ -110,7 +111,7 @@ internal fun PositionalRomGrid(
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Adaptive(minSize = CARD_MIN_SIZE),
-            contentPadding = PaddingValues(bottom = 24.dp),
+            contentPadding = PaddingValues(top = contentPaddingTop, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(ITEM_SPACING),
             verticalArrangement = Arrangement.spacedBy(ITEM_SPACING),
             modifier = Modifier

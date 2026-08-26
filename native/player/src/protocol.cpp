@@ -223,13 +223,30 @@ bool parseBindingEntry(const ordered_json& j, int slot, BindingTable& table,
     return false;
 }
 
+bool parseNamedBindingSource(const ordered_json& j, const char* expectedSlot,
+                             BindingSource& out, std::string& error) {
+    std::string slotName;
+    if (!getString(j, "slot", slotName, error)) return false;
+    if (slotName != expectedSlot) {
+        error = "binding slot out of order or duplicate: " + slotName;
+        return false;
+    }
+    ordered_json normalized = j;
+    normalized["slot"] = retroPadSlotName(0);
+    BindingTable table(false);
+    if (!parseBindingEntry(normalized, 0, table, error)) return false;
+    out = table.get(0);
+    return true;
+}
+
 // Parses the v2 request's optional controllerBindings object. Devices carry
 // guid + identity + all RetroPad slot bindings in slot order. Twelve-entry
 // tables from older desktop builds remain accepted; their new L2/R2/L3/R3
 // slots retain the BindingTable defaults.
 bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
                              std::string& error) {
-    static const std::array<const char*, 1> kFields = {{"devices"}};
+    static const std::array<const char*, 2> kFields = {
+        {"devices", "pauseMenuBindings"}};
     if (!j.contains("devices")) {
         error = "missing controllerBindings field: devices";
         return false;
@@ -317,6 +334,21 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         }
 
         out.devices.push_back(std::move(device));
+    }
+    if (j.contains("pauseMenuBindings")) {
+        const ordered_json& pauseBindings = j["pauseMenuBindings"];
+        if (!pauseBindings.is_array() || pauseBindings.size() != 2) {
+            error = "pauseMenuBindings must carry exactly 2 entries";
+            return false;
+        }
+        std::array<BindingSource, 2> parsed;
+        if (!parseNamedBindingSource(
+                pauseBindings[0], "primary", parsed[0], error) ||
+            !parseNamedBindingSource(
+                pauseBindings[1], "secondary", parsed[1], error)) {
+            return false;
+        }
+        out.pauseMenuBindings = parsed;
     }
     return true;
 }
@@ -756,6 +788,38 @@ std::string serializeRequest(const PlayerRequest& r) {
         }
         ordered_json controllerBindings;
         controllerBindings["devices"] = std::move(devices);
+        if (r.controllerBindings->pauseMenuBindings.has_value()) {
+            ordered_json pauseBindings = ordered_json::array();
+            static constexpr const char* kPauseSlots[] = {
+                "primary", "secondary"};
+            for (int i = 0; i < 2; ++i) {
+                ordered_json entry;
+                entry["slot"] = kPauseSlots[i];
+                const BindingSource& source =
+                    (*r.controllerBindings->pauseMenuBindings)[i];
+                switch (source.kind) {
+                    case BindingSource::Kind::kUnbound:
+                        entry["type"] = "unbound";
+                        break;
+                    case BindingSource::Kind::kButton:
+                        entry["type"] = "button";
+                        entry["button"] = padButtonName(source.button);
+                        break;
+                    case BindingSource::Kind::kAxis:
+                        entry["type"] = "axis";
+                        entry["axis"] = padAxisName(source.axis);
+                        break;
+                    case BindingSource::Kind::kAxisDirection:
+                        entry["type"] = "axis_direction";
+                        entry["axis"] = padAxisName(source.axis);
+                        entry["polarity"] = source.polarity < 0 ? -1 : 1;
+                        break;
+                }
+                pauseBindings.push_back(std::move(entry));
+            }
+            controllerBindings["pauseMenuBindings"] =
+                std::move(pauseBindings);
+        }
         j["controllerBindings"] = std::move(controllerBindings);
     }
     if (r.keyboardBindings.has_value()) {

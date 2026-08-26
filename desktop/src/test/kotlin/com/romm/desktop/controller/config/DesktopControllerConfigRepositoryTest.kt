@@ -127,6 +127,36 @@ class DesktopControllerConfigRepositoryTest {
     }
 
     @Test
+    fun `configured pause chord is serialized independently of core controls`() = runTest {
+        val ps2CoreId = "lrps2"
+        repo.setBinding(
+            ps2CoreId,
+            0,
+            CoreControlId.PAUSE_MENU,
+            PhysicalBinding.Key(NeutralKey.BUTTON_THUMBL.platformCode),
+            BindingSlot.PRIMARY,
+        )
+        repo.setBinding(
+            ps2CoreId,
+            0,
+            CoreControlId.PAUSE_MENU,
+            PhysicalBinding.Key(NeutralKey.BUTTON_SELECT.platformCode),
+            BindingSlot.SECONDARY,
+        )
+
+        val launch = RetroPadControlMapping.toLaunchBindings(
+            repo.effectiveLaunchRecords(ps2CoreId, 0),
+            repo.effectivePauseMenuRecords(ps2CoreId, 0),
+        )
+
+        assertThat(launch).isNotNull()
+        assertThat(launch!!.pauseMenuBindings).containsExactly(
+            PlayerSlotBinding("primary", PlayerBindingType.BUTTON, button = "left_stick"),
+            PlayerSlotBinding("secondary", PlayerBindingType.BUTTON, button = "back"),
+        )
+    }
+
+    @Test
     fun `N64 RetroPad slots resolve to console control ids`() {
         assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "b"))
             .isEqualTo(CoreControlId.BUTTON_A)

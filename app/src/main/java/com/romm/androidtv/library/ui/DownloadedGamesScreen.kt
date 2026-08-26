@@ -41,7 +41,7 @@ fun DownloadedGamesScreen(
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(136.dp),
-                contentPadding = PaddingValues(bottom = 24.dp),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxSize(),
