@@ -30,7 +30,7 @@ std::atomic<EmulationSession*> g_active_session{nullptr};
 
 constexpr int kMaxDrainWaitMs = 500;
 constexpr int kDrainPollIntervalMs = 5;
-constexpr auto kLrps2MaxCatchUpDebt = std::chrono::milliseconds(200);
+constexpr auto kShaderStallMaxCatchUpDebt = std::chrono::milliseconds(200);
 constexpr unsigned kPcsxRearmedDualShockDevice =
     RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1);
 constexpr unsigned kPlayStationControllerPorts = 2;
@@ -122,7 +122,7 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     const bool isLrps2 = systemInfo.library_name != nullptr &&
         std::strcmp(systemInfo.library_name, "LRPS2") == 0;
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
-    catchUpAfterStall_ = isLrps2;
+    catchUpAfterStall_ = isDolphin || isLrps2;
     if (isMupen64PlusNext) {
         // The libretro threaded path keeps render-context commands on this
         // context-owning frontend thread while moving N64 emulation to a
@@ -155,6 +155,17 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // from pcsx2/bios and memory cards default to shared storage under
         // pcsx2/memcards (a stable slot-0 image for save sync).
         environment_.setCoreOptionOverride("pcsx2_use_external_gameindex", "enabled");
+    }
+    if (isDolphin) {
+        // Restore Dolphin's desktop default. The libretro core disables
+        // precision timing on every platform, not only battery-powered ones.
+        environment_.setCoreOptionOverride("dolphin_precision_frame_timing", "enabled");
+
+        // Hybrid UberShaders render immediately with generic shaders while
+        // optimized shaders compile in the background. Dolphin's libretro
+        // default is synchronous compilation, which visibly stalls the first
+        // time a game encounters each specialized shader.
+        environment_.setCoreOptionOverride("dolphin_shader_compilation_mode", "2");
     }
 
     fns.retro_set_environment(&EmulationSession::environmentTrampoline);
@@ -348,13 +359,12 @@ void EmulationSession::runLoop() {
         // emulation back up. Resetting the schedule here would pace cheap
         // skipped runs as new frames and preserve the slowdown we are trying
         // to recover from.
-        // lrps2 compiles new GS shaders synchronously. Preserve bounded pacing
-        // debt across those temporary stalls so subsequent frames refill the
-        // audio queue without allowing a long stall to cause prolonged
-        // fast-forward.
+        // Preserve bounded pacing debt across temporary shader stalls so
+        // subsequent frames refill the audio queue without allowing a long
+        // stall to cause prolonged fast-forward.
         scheduler.waitForNextFrame(
             videoEnabled && !catchUpAfterStall_,
-            catchUpAfterStall_ ? kLrps2MaxCatchUpDebt
+            catchUpAfterStall_ ? kShaderStallMaxCatchUpDebt
                                : std::chrono::steady_clock::duration::zero());
         presentVideoFrame_.store(videoEnabled, std::memory_order_relaxed);
         environment_.setVideoEnabled(videoEnabled);

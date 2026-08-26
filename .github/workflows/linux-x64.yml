@@ -1052,6 +1052,9 @@ jobs:
           #   • README.md          — documentation prose
           #   • lib/runtime/**     — upstream Temurin JDK 17 jlink image (integrity
           #                         covered by PACKAGE.sha256 + jlink provenance)
+          #   • emulator metadata  — upstream Dolphin system/game settings and
+          #                         the lrps2 game index contain game titles and
+          #                         cheat descriptions using words such as "Secret"
           #   • shell comment lines and binary files (grep -I skips binaries)
           scan() {
             grep -rniIE 'password|token|secret|BEGIN [A-Z ]*PRIVATE KEY' "$1" 2>/dev/null \
@@ -1059,6 +1062,8 @@ jobs:
               | grep -vE '/docs/' \
               | grep -vE '(^|/)README\.md:' \
               | grep -vE '/lib/runtime/' \
+              | grep -vE '/share/rommulus/dolphin-emu/Sys/' \
+              | grep -vE '/share/rommulus/lrps2/resources/GameIndex\.yaml:' \
               | grep -vE ':[0-9]+:[[:space:]]*#' \
               || true
           }
