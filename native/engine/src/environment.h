@@ -33,10 +33,13 @@ struct OpenGlEsHwRenderInterface {
 // contract with cores that cast to this interface.
 constexpr unsigned kHwRenderInterfaceEs = 6;
 
-// The ES2/ES3 context-type values from libretro.h's retro_hw_context_type,
+// The OpenGL context-type values from libretro.h's retro_hw_context_type,
 // restated as plain integers for the same reason (stable Libretro ABI
-// values: ES2 = 2, ES3 = 4, ES-version-specific = 5).
+// values: desktop GL = 1, ES2 = 2, desktop GL core = 3, ES3 = 4,
+// ES-version-specific = 5).
+constexpr unsigned kHwContextOpenGl = 1;
 constexpr unsigned kHwContextEs2 = 2;
+constexpr unsigned kHwContextOpenGlCore = 3;
 constexpr unsigned kHwContextEs3 = 4;
 constexpr unsigned kHwContextEsVersion = 5;
 
@@ -64,6 +67,9 @@ public:
     void setSaveDirectory(const std::string& dir) { saveDirectory_ = dir; }
     void setContentDirectory(const std::string& dir) { contentDirectory_ = dir; }
     void setCoreOptionOverride(const std::string& key, const std::string& value);
+    void setPreferredHardwareContext(unsigned contextType) {
+        preferredHwContext_ = contextType;
+    }
     void setVideoEnabled(bool enabled) { videoEnabled_ = enabled; }
     void setGeometryCallback(
             std::function<void(const struct retro_game_geometry&)> callback) {
@@ -122,6 +128,7 @@ private:
     // Hardware rendering state (populated by SET_HW_RENDER)
     struct retro_hw_render_callback hwRenderCallback_{};
     bool hwRenderActive_ = false;
+    unsigned preferredHwContext_ = kHwContextEs3;
 
     // Lazily-fetched render context for GET_HW_RENDER_INTERFACE, and the
     // owned interface struct handed to the core (static so the pointer stays

@@ -383,9 +383,11 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
             auto* cb = static_cast<struct retro_hw_render_callback*>(data);
             if (cb == nullptr) return false;
 
-            // Only accept OpenGL ES contexts.
+            // Accept the OpenGL family hosted by the platform context.
             switch (cb->context_type) {
+                case kHwContextOpenGl:
                 case kHwContextEs2:
+                case kHwContextOpenGlCore:
                 case kHwContextEs3:
                 case kHwContextEsVersion:
                     break;
@@ -446,8 +448,8 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
         case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
             auto* type = static_cast<unsigned*>(data);
             if (type == nullptr) return false;
-            *type = kHwContextEs3;
-            LOGI("GET_PREFERRED_HW_RENDER: returning ES3");
+            *type = preferredHwContext_;
+            LOGI("GET_PREFERRED_HW_RENDER: returning context type %u", *type);
             return true;
         }
 

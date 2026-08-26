@@ -123,6 +123,9 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         std::strcmp(systemInfo.library_name, "LRPS2") == 0;
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     catchUpAfterStall_ = isDolphin || isLrps2;
+    if (isDolphin) {
+        environment_.setPreferredHardwareContext(kHwContextOpenGlCore);
+    }
     if (isMupen64PlusNext) {
         // The libretro threaded path keeps render-context commands on this
         // context-owning frontend thread while moving N64 emulation to a
@@ -161,11 +164,13 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // precision timing on every platform, not only battery-powered ones.
         environment_.setCoreOptionOverride("dolphin_precision_frame_timing", "enabled");
 
-        // Hybrid UberShaders render immediately with generic shaders while
-        // optimized shaders compile in the background. Dolphin's libretro
-        // default is synchronous compilation, which visibly stalls the first
-        // time a game encounters each specialized shader.
-        environment_.setCoreOptionOverride("dolphin_shader_compilation_mode", "2");
+        // Dolphin's libretro GLContext cannot create the shared worker
+        // contexts required by its asynchronous shader compiler. Keep
+        // specialized compilation synchronous instead of compiling both a
+        // specialized and an UberShader pipeline inline, and precompile
+        // pipelines learned by the persistent shader cache at next launch.
+        environment_.setCoreOptionOverride("dolphin_shader_compilation_mode", "0");
+        environment_.setCoreOptionOverride("dolphin_wait_for_shaders", "enabled");
     }
 
     fns.retro_set_environment(&EmulationSession::environmentTrampoline);

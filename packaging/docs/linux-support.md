@@ -30,7 +30,7 @@ again, only Ubuntu 24.04 has been exercised so far.
 
 ## GPU and graphics expectations
 
-**Nintendo 64, GameCube, and PS2 use GPU-accelerated OpenGL ES rendering; the other current cores use software rendering.**
+**Nintendo 64, GameCube, and PS2 use GPU-accelerated OpenGL rendering; the other current cores use software rendering.**
 
 - The player (`bin/rommulus-player`) runs a separate SDL3 window. For software-rendered cores it uses
   the **software frame path** (`plans/LINUX_X64.md` §11.6): each frame produced by the core is
@@ -40,14 +40,17 @@ again, only Ubuntu 24.04 has been exercised so far.
   Android build and is the default on Linux, including Steam Deck. The package intentionally uses
   the host's OpenGL ES/EGL dispatch libraries so they remain compatible with the installed GPU
   driver rather than bundling the Ubuntu build machine's graphics stack.
-- **GameCube hardware rendering:** Dolphin uses the same SDL3-managed OpenGL ES 3 frontend.
+- **GameCube hardware rendering:** Dolphin uses an SDL3-managed desktop OpenGL 4.5 context,
+  giving its backend access to capabilities unavailable on the former OpenGL ES 3 path.
   Ubuntu uses the offscreen compositor path; Steam Deck uses the isolated direct-framebuffer
-  player, matching the N64 platform split. Dolphin remains Linux-only.
-- **PS2 hardware rendering:** lrps2 (a PCSX2 fork) uses the same SDL3-managed OpenGL ES 3
-  frontend, with the x86_64 EE/IOP/VU recompiler. Like the other hardware cores it is
-  Linux-only. PS2 requires a console BIOS (PS2 BIOS images are not shipped; point the
-  player's BIOS directory at your own copy); the core's `GameIndex.yaml` (PS2 game
-  database) ships in the package at `share/rommulus/lrps2/resources/GameIndex.yaml`.
+  player, matching the N64 platform split. The packaged `dolphin-emu/Sys/GameSettings`
+  database applies Dolphin's upstream per-game compatibility overrides automatically.
+  Dolphin remains Linux-only.
+- **PS2 hardware rendering:** lrps2 (a PCSX2 fork) uses an SDL3-managed desktop OpenGL 3.3
+  context with the x86_64 EE/IOP/VU recompiler. Like the other hardware cores it is Linux-only.
+  PS2 requires a console BIOS (PS2 BIOS images are not shipped; point the player's BIOS
+  directory at your own copy); the core's `GameIndex.yaml` (PS2 game database) ships in the
+  package at `share/rommulus/lrps2/resources/GameIndex.yaml`.
 - The other enabled cores remain software-rendered by the player (see
   `docs/linux-support-manifest.md`):
   - `pcsx_rearmed` — Lightrec x86_64 dynarec with a software renderer;
@@ -146,5 +149,5 @@ reconciled from the journal/candidate files (§8.3). When reporting a crash, att
 - **No Windows, macOS, ARM64 Linux, or musl Linux builds** (§4 non-goals).
 - **No save UI.** Saves are checkpointed on disk, but there is no Linux desktop saves screen yet;
   per-core criterion 9 round-trip verification is deferred (see above).
-- **No Vulkan negotiation.** The N64 and GameCube hardware paths use OpenGL ES 3.
+- **No Vulkan negotiation.** N64 uses OpenGL ES 3; GameCube and PS2 use desktop OpenGL.
 - **No save states, rewind, netplay, or shaders** — explicitly out of scope (§4 non-goals).

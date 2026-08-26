@@ -554,7 +554,7 @@
       "vendorSourceSubset": ["third_party/cores/dolphin (recursive git submodule)"],
       "vendoringDoc": "third_party/cores/dolphin/COPYING",
       "localPatches": [],
-      "compilerBuild": "Linux GCC C++23 Release build in an isolated ExternalProject; LIBRETRO=ON; OpenGL ES hardware rendering; Vulkan, X11, EGL, standalone UI, analytics, updater, RetroAchievements, and platform audio/input backends disabled",
+      "compilerBuild": "Linux GCC C++23 Release build in an isolated ExternalProject; LIBRETRO=ON; desktop OpenGL hardware rendering; Vulkan, X11, EGL, standalone UI, analytics, updater, RetroAchievements, and platform audio/input backends disabled",
       "buildCommand": "git submodule update --init --recursive && cmake -S native/player -B build/player && cmake --build build/player (target dolphin_core via native/cmake/cores/dolphin-linux.cmake)",
       "license": {
         "summary": "Dolphin original source is GPL-2.0-or-later. Upstream declares the aggregate repository, including its pinned dependencies, GPLv3-compatible; per-file SPDX licenses are retained in third_party/cores/dolphin/LICENSES/.",
@@ -568,7 +568,7 @@
       "supportedExtensions": [".elf", ".dol", ".gcm", ".iso", ".tgc", ".wbfs", ".ciso", ".gcz", ".wia", ".rvz", ".m3u"],
       "requiredFirmware": [],
       "supportedAbis": ["linux-x86_64"],
-      "renderer": "GPU-accelerated Dolphin OpenGL backend through the player's SDL3 OpenGL ES 3 context; x86_64 JIT64 CPU core",
+      "renderer": "GPU-accelerated Dolphin OpenGL backend through the player's SDL3 desktop OpenGL 4.5 context; x86_64 JIT64 CPU core",
       "binaryChecksums": {
         "linux-x86_64": null
       },

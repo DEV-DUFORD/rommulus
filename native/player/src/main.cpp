@@ -474,29 +474,31 @@ int main(int argc, char* argv[]) {
 #endif
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (useHardwareRendering) {
-        // N64 (GLideN64) and Dolphin render on OpenGL ES 3.0. lrps2's GS
-        // OpenGL renderer hard-requires desktop OpenGL 3.3: its feature gate
+        // N64 (GLideN64) renders on OpenGL ES 3.0. Dolphin uses desktop GL
+        // 4.5 so its backend can use buffer-storage and other capabilities
+        // unavailable in the ES 3.0 path. lrps2's GS OpenGL renderer
+        // hard-requires desktop OpenGL 3.3: its feature gate
         // (GSDeviceOGL::CheckFeatures) accepts only GLAD_GL_VERSION_3_3 or
         // GLAD_GL_ES_VERSION_3_1, and this core build always loads glad's
         // DESKTOP loader (GLContext::m_version is never set, so IsGLES() is
         // false and the ES flags are never populated) — meaning no GLES
         // context (even 3.1/3.2) can pass the gate. Its shaders are likewise
         // "#version 330 core" with a required ARB_shading_language_420pack.
-        // The libretro handshake still nominally negotiates OPENGLES3 (the
-        // engine's SET_HW_RENDER handler only accepts ES types), which is
-        // fine: glad resolves against the actual current context, so a
-        // desktop 3.3 core context satisfies the renderer. Scoped to lrps2
-        // so the N64/Dolphin path is byte-for-byte unchanged; on a machine
-        // without desktop GL 3.3 SDL_CreateWindow fails and the launch is
-        // reported as launch_failed instead of black-screening.
-        const bool useDesktopGlProfile = request.coreId == "lrps2";
+        // lrps2 still nominally negotiates OPENGLES3, but glad resolves
+        // against its actual desktop context. Dolphin explicitly negotiates
+        // OPENGL_CORE through the environment handler.
+        const bool useDolphinDesktopGl = request.coreId == "dolphin";
+        const bool useDesktopGlProfile =
+            useDolphinDesktopGl || request.coreId == "lrps2";
         SDL_GL_SetAttribute(
             SDL_GL_CONTEXT_PROFILE_MASK,
             useDesktopGlProfile ? SDL_GL_CONTEXT_PROFILE_CORE
                                 : SDL_GL_CONTEXT_PROFILE_ES);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(
-            SDL_GL_CONTEXT_MINOR_VERSION, useDesktopGlProfile ? 3 : 0);
+            SDL_GL_CONTEXT_MAJOR_VERSION, useDolphinDesktopGl ? 4 : 3);
+        SDL_GL_SetAttribute(
+            SDL_GL_CONTEXT_MINOR_VERSION,
+            useDolphinDesktopGl ? 5 : (useDesktopGlProfile ? 3 : 0));
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
