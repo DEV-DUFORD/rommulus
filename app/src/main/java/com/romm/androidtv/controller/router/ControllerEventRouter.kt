@@ -686,18 +686,6 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     }
 
     /**
-     * Adapter: translate an Android `InputDevice` source mask into the neutral
-     * [SourceMask] bits consumed by the shared source filter policy.
-     */
-    private fun sourceMaskFromAndroid(sources: Int): Int {
-        var mask = 0
-        if ((sources and android.view.InputDevice.SOURCE_GAMEPAD) != 0) mask = mask or SourceMask.GAMEPAD
-        if ((sources and android.view.InputDevice.SOURCE_JOYSTICK) != 0) mask = mask or SourceMask.JOYSTICK
-        if ((sources and android.view.InputDevice.SOURCE_DPAD) != 0) mask = mask or SourceMask.DPAD
-        return mask
-    }
-
-    /**
      * Swap A/B buttons for a given slot. Used by the diagnostics screen.
      */
     fun swapAB(slotIndex: Int) {
@@ -833,3 +821,14 @@ internal fun physicalDeviceIds(
     .sortedBy { (_, assignedSlot) -> assignedSlot }
     .map { (deviceId, _) -> deviceId }
     .toList()
+
+internal fun sourceMaskFromAndroid(sources: Int): Int {
+    var mask = 0
+    if (sources.hasAndroidSource(InputDevice.SOURCE_GAMEPAD)) mask = mask or SourceMask.GAMEPAD
+    if (sources.hasAndroidSource(InputDevice.SOURCE_JOYSTICK)) mask = mask or SourceMask.JOYSTICK
+    if (sources.hasAndroidSource(InputDevice.SOURCE_DPAD)) mask = mask or SourceMask.DPAD
+    return mask
+}
+
+private fun Int.hasAndroidSource(source: Int): Boolean =
+    (this and source) == source
