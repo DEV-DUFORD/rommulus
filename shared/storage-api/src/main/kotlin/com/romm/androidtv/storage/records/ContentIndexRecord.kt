@@ -26,4 +26,6 @@ data class ContentIndexRecord(
     val platformSlug: String = "",
     val coverUrl: String? = null,
     val fileName: String = "",
+    /** File modification time captured when [contentHash] was verified. Zero marks a legacy entry. */
+    val lastModifiedEpochMs: Long = 0,
 )

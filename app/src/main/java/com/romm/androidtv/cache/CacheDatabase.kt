@@ -46,6 +46,8 @@ data class CacheEntry(
     val platformSlug: String = "",
     val coverUrl: String? = null,
     val fileName: String = "",
+    /** Modification time captured when [contentHash] was verified. Zero marks a legacy entry. */
+    val lastModifiedEpochMs: Long = 0,
 )
 
 @JsonClass(generateAdapter = false)

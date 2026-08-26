@@ -56,6 +56,12 @@ class ContentCache(
             database.remove(entry.key)
             return null
         }
+        if (entry.lastModifiedEpochMs > 0 &&
+            file.lastModified() != entry.lastModifiedEpochMs
+        ) {
+            database.remove(entry.key)
+            return null
+        }
         if (touch) database.touch(entry.key, clock())
         return entry
     }
@@ -93,6 +99,7 @@ class ContentCache(
                 platformSlug = platformSlug,
                 coverUrl = coverUrl,
                 fileName = fileName,
+                lastModifiedEpochMs = file.lastModified(),
             )
         )
     }

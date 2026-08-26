@@ -37,6 +37,7 @@ class CacheDatabaseContentIndexStore(
             platformSlug = e.platformSlug,
             coverUrl = e.coverUrl,
             fileName = e.fileName,
+            lastModifiedEpochMs = e.lastModifiedEpochMs,
         )
 
     private fun recordToEntry(r: ContentIndexRecord): CacheEntry =
@@ -59,6 +60,7 @@ class CacheDatabaseContentIndexStore(
             platformSlug = r.platformSlug,
             coverUrl = r.coverUrl,
             fileName = r.fileName,
+            lastModifiedEpochMs = r.lastModifiedEpochMs,
         )
 
     override fun get(cacheKey: String): ContentIndexRecord? =

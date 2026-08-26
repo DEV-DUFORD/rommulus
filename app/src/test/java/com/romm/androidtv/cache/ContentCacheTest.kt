@@ -103,6 +103,18 @@ class ContentCacheTest {
         }
 
         @Test
+        fun `same-size file changed after verification is never reused`() {
+            val file = writeFile("42_7.gb", sizeBytes = 100)
+            val key = cache.key(CacheEntryKind.ROM, "server", "user", 42, listOf(7))
+            cache.record(key, CacheEntryKind.ROM, "server", "user", 42, "7", "hash123", file)
+            val verifiedModifiedTime = file.lastModified()
+            file.writeBytes(ByteArray(100) { 1 })
+            file.setLastModified(verifiedModifiedTime + 2_000)
+
+            assertThat(cache.findValidEntry(key)).isNull()
+        }
+
+        @Test
         fun `finding a valid entry marks it freshly accessed for LRU ordering`() {
             val file = writeFile("42_7.gb", sizeBytes = 10)
             val key = cache.key(CacheEntryKind.ROM, "server", "user", 42, listOf(7))

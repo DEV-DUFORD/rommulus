@@ -144,6 +144,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
+internal fun cachedContentIdentityMatches(
+    record: ContentIndexRecord,
+    sizeBytes: Long,
+    lastModifiedEpochMs: Long,
+): Boolean =
+    record.lastModifiedEpochMs > 0 &&
+        record.sizeBytes == sizeBytes &&
+        record.lastModifiedEpochMs == lastModifiedEpochMs
+
 /**
  * The desktop app coordinator — the keystone of the Phase 6 Compose Desktop
  * browser-only product (plans/PHASE6.md, plans/LINUX_X64.md).
@@ -1172,7 +1181,7 @@ class DesktopAppCoordinator(
             ?: return PlayerLaunchResult.Failed("console is not supported on desktop")
 
         val staged: StagedContent = try {
-            cachedStagedContent(romId).takeIf { !serverReachable }
+            cachedStagedContent(romId)
                 ?: romContentStager.stage(
                     romId,
                     detail.fileName,
@@ -1215,6 +1224,7 @@ class DesktopAppCoordinator(
                 platformSlug = detail.platformSlug,
                 coverUrl = detail.coverUrl,
                 fileName = detail.fileName,
+                lastModifiedEpochMs = Files.getLastModifiedTime(staged.path).toMillis(),
             )
         ).getOrElse {
             return PlayerLaunchResult.Failed("could not record downloaded game: ${it.message}")
@@ -1719,7 +1729,15 @@ class DesktopAppCoordinator(
             .firstNotNullOfOrNull {
                 runCatching {
                     val path = Path.of(it.absolutePath)
-                    if (!Files.isRegularFile(path) || Files.size(path) != it.sizeBytes) return@runCatching null
+                    if (!Files.isRegularFile(path) ||
+                        !cachedContentIdentityMatches(
+                            it,
+                            Files.size(path),
+                            Files.getLastModifiedTime(path).toMillis(),
+                        )
+                    ) {
+                        return@runCatching null
+                    }
                     StagedContent(path, it.contentHash)
                 }.getOrNull()
             }
