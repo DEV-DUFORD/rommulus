@@ -246,6 +246,13 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
 void EmulationSession::runLoop() {
     FrameScheduler scheduler(avFps_);
     AdaptiveFrameSkip frameSkip(avFps_);
+    std::chrono::seconds initialAutosaveInterval;
+    {
+        std::lock_guard<std::mutex> lock(autosaveConfigMutex_);
+        initialAutosaveInterval = autosaveInterval_;
+    }
+    auto nextAutosaveCheck =
+        std::chrono::steady_clock::now() + initialAutosaveInterval;
 
     // For hardware-rendering cores (GLideN64), we need a hardware render
     // context current on this thread. Create it now and make it current
@@ -352,7 +359,10 @@ void EmulationSession::runLoop() {
         presentVideoFrame_.store(videoEnabled, std::memory_order_relaxed);
         environment_.setVideoEnabled(videoEnabled);
         const auto frameWorkStarted = std::chrono::steady_clock::now();
-        core_.functions().retro_run();
+        {
+            std::lock_guard<std::mutex> lock(coreExecutionMutex_);
+            core_.functions().retro_run();
+        }
         const auto frameWorkDuration = std::chrono::steady_clock::now() - frameWorkStarted;
         scheduler.reportFrameWorkDuration(frameWorkDuration);
         if (adaptiveFrameSkipEnabled_) {
@@ -366,6 +376,13 @@ void EmulationSession::runLoop() {
             diagnostics_.coreRequestedShutdown = true;
             threadShouldRun_ = false;
             break;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (autosaveEnabled_.load(std::memory_order_acquire) && now >= nextAutosaveCheck) {
+            checkpointAutosaveIfChanged();
+            std::lock_guard<std::mutex> lock(autosaveConfigMutex_);
+            nextAutosaveCheck = now + autosaveInterval_;
         }
     }
 
@@ -436,7 +453,7 @@ void EmulationSession::stop() {
     LOGI("session stopped");
 }
 
-void* EmulationSession::memoryData(unsigned id) {
+void* EmulationSession::memoryDataUnlocked(unsigned id) {
     if (!core_.isLoaded()) return nullptr;
     const CoreFunctions& fns = core_.functions();
     if (id == RETRO_MEMORY_SAVE_RAM && fns.romm_get_save_memory_data != nullptr &&
@@ -446,7 +463,7 @@ void* EmulationSession::memoryData(unsigned id) {
     return fns.retro_get_memory_data(id);
 }
 
-size_t EmulationSession::memorySize(unsigned id) {
+size_t EmulationSession::memorySizeUnlocked(unsigned id) {
     if (!core_.isLoaded()) return 0;
     const CoreFunctions& fns = core_.functions();
     if (id == RETRO_MEMORY_SAVE_RAM && fns.romm_get_save_memory_size != nullptr) {
@@ -456,17 +473,34 @@ size_t EmulationSession::memorySize(unsigned id) {
     return fns.retro_get_memory_size(id);
 }
 
+void* EmulationSession::memoryData(unsigned id) {
+    std::lock_guard<std::mutex> lock(coreExecutionMutex_);
+    return memoryDataUnlocked(id);
+}
+
+size_t EmulationSession::memorySize(unsigned id) {
+    std::lock_guard<std::mutex> lock(coreExecutionMutex_);
+    return memorySizeUnlocked(id);
+}
+
 bool EmulationSession::checkpointSaveRam(const std::string& savePath) {
-    void* data = memoryData(RETRO_MEMORY_SAVE_RAM);
-    size_t size = memorySize(RETRO_MEMORY_SAVE_RAM);
-    if (data == nullptr || size == 0) {
-        LOGE("checkpointSaveRam: core exposes no RETRO_MEMORY_SAVE_RAM region");
-        return false;
+    std::vector<uint8_t> image;
+    {
+        std::lock_guard<std::mutex> lock(coreExecutionMutex_);
+        void* data = memoryDataUnlocked(RETRO_MEMORY_SAVE_RAM);
+        const size_t size = memorySizeUnlocked(RETRO_MEMORY_SAVE_RAM);
+        if (data == nullptr || size == 0) {
+            LOGE("checkpointSaveRam: core exposes no RETRO_MEMORY_SAVE_RAM region");
+            return false;
+        }
+        const auto* bytes = static_cast<const uint8_t*>(data);
+        image.assign(bytes, bytes + size);
     }
-    return atomicWriteFile(savePath, data, size);
+    return atomicWriteFile(savePath, image.data(), image.size());
 }
 
 bool EmulationSession::restoreSaveRam(const std::string& savePath) {
+    std::lock_guard<std::mutex> lock(coreExecutionMutex_);
     const CoreFunctions& fns = core_.functions();
     if (fns.romm_restore_save_memory != nullptr) {
         std::vector<uint8_t> saveImage;
@@ -478,8 +512,8 @@ bool EmulationSession::restoreSaveRam(const std::string& savePath) {
         return true;
     }
 
-    void* data = memoryData(RETRO_MEMORY_SAVE_RAM);
-    size_t size = memorySize(RETRO_MEMORY_SAVE_RAM);
+    void* data = memoryDataUnlocked(RETRO_MEMORY_SAVE_RAM);
+    size_t size = memorySizeUnlocked(RETRO_MEMORY_SAVE_RAM);
     if (data == nullptr || size == 0) {
         LOGE("restoreSaveRam: core exposes no RETRO_MEMORY_SAVE_RAM region");
         return false;
@@ -494,6 +528,58 @@ bool EmulationSession::restoreSaveRam(const std::string& savePath) {
         }
     }
     return true;
+}
+
+void EmulationSession::configureAutosave(const std::string& savePath,
+                                         std::chrono::seconds interval) {
+    {
+        std::lock_guard<std::mutex> lock(autosaveConfigMutex_);
+        autosavePath_ = savePath;
+        autosaveInterval_ = interval > std::chrono::seconds::zero()
+                                ? interval
+                                : std::chrono::seconds(30);
+    }
+    autosaveEnabled_.store(!savePath.empty(), std::memory_order_release);
+}
+
+void EmulationSession::checkpointAutosaveIfChanged() {
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(autosaveConfigMutex_);
+        path = autosavePath_;
+    }
+    if (path.empty()) return;
+    if (path != lastAutosavePath_) {
+        lastAutosavePath_ = path;
+        lastAutosaveImage_.clear();
+    }
+
+    std::vector<uint8_t> image;
+    {
+        std::lock_guard<std::mutex> lock(coreExecutionMutex_);
+        void* data = memoryDataUnlocked(RETRO_MEMORY_SAVE_RAM);
+        const size_t size = memorySizeUnlocked(RETRO_MEMORY_SAVE_RAM);
+        if (data == nullptr || size == 0) return;
+        const auto* bytes = static_cast<const uint8_t*>(data);
+        image.assign(bytes, bytes + size);
+    }
+
+    if (lastAutosaveImage_.empty()) {
+        std::vector<uint8_t> durableImage;
+        if (readWholeFile(path, durableImage) && durableImage == image) {
+            lastAutosaveImage_ = std::move(image);
+            return;
+        }
+    } else if (lastAutosaveImage_ == image) {
+        return;
+    }
+
+    if (atomicWriteFile(path, image.data(), image.size())) {
+        lastAutosaveImage_ = std::move(image);
+        LOGI("periodic SRAM checkpoint written");
+    } else {
+        LOGE("periodic SRAM checkpoint failed for %s", path.c_str());
+    }
 }
 
 bool EmulationSession::serialize(void* buffer, size_t size) {

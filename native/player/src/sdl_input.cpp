@@ -168,7 +168,48 @@ void SdlInput::handleEvent(const SDL_Event& event) {
     }
 }
 
+void SdlInput::refreshGamepads() {
+    for (int port = 0; port < kPorts; ++port) {
+        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+        if (gamepad != nullptr && !SDL_GamepadConnected(gamepad)) {
+            closeGamepad(port);
+        }
+    }
+
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (ids == nullptr) return;
+    for (int i = 0; i < count; ++i) {
+        if (!SDL_IsGamepad(ids[i])) continue;
+        bool alreadyOpen = false;
+        for (int port = 0; port < kPorts; ++port) {
+            if (gamepads_[port].gamepad != nullptr &&
+                SDL_GetGamepadID(gamepads_[port].gamepad) == ids[i]) {
+                alreadyOpen = true;
+                break;
+            }
+        }
+        if (alreadyOpen) continue;
+        const int port = findFreePort();
+        if (port < 0) break;
+        openGamepad(port, ids[i]);
+    }
+    SDL_free(ids);
+}
+
+int SdlInput::connectedGamepadCount() const {
+    return static_cast<int>(std::count_if(
+        gamepads_.begin(),
+        gamepads_.end(),
+        [](const GamepadSlot& slot) { return slot.gamepad != nullptr; }));
+}
+
 void SdlInput::poll() {
+    const Uint64 now = SDL_GetTicks();
+    if (now - lastGamepadRefreshMs_ >= 1000) {
+        refreshGamepads();
+        lastGamepadRefreshMs_ = now;
+    }
     const KeyboardRuntimeState keyboard =
         synthesizeKeyboardState(keyboardBindings_, heldScancodes_);
     for (int port = 0; port < kPorts; ++port) {

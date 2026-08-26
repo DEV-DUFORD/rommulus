@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -49,6 +50,7 @@ internal enum class DesktopNavDestination(
     HOME(Screen.HOME, "Home", Icons.Filled.Home),
     PLATFORMS(Screen.PLATFORMS, "Platforms", Icons.Filled.Apps),
     COLLECTIONS(Screen.COLLECTIONS, "Collections", Icons.Filled.Collections),
+    DOWNLOADED(Screen.DOWNLOADED, "Downloaded Games", Icons.Filled.Download),
     SEARCH(Screen.SEARCH, "Search", Icons.Filled.Search),
     SETTINGS(Screen.SETTINGS, "Settings", Icons.Filled.Settings),
     ;
@@ -67,6 +69,7 @@ internal fun libraryNavDestination(
     Screen.HOME, Screen.ONBOARDING -> DesktopNavDestination.HOME
     Screen.PLATFORMS, Screen.PLATFORM_DETAIL -> DesktopNavDestination.PLATFORMS
     Screen.COLLECTIONS, Screen.COLLECTION_DETAIL -> DesktopNavDestination.COLLECTIONS
+    Screen.DOWNLOADED -> DesktopNavDestination.DOWNLOADED
     Screen.SEARCH -> DesktopNavDestination.SEARCH
     Screen.SETTINGS, Screen.BIOS_CONFIGURATION, Screen.LICENSE,
     Screen.CONTROLLER_LIST, Screen.CONTROLLER_CONFIG,

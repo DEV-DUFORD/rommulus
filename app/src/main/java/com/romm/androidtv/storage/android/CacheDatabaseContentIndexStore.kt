@@ -32,6 +32,11 @@ class CacheDatabaseContentIndexStore(
             absolutePath = e.absolutePath,
             sizeBytes = e.sizeBytes,
             lastAccessedEpochMs = e.lastAccessedEpochMs,
+            title = e.title,
+            platformDisplayName = e.platformDisplayName,
+            platformSlug = e.platformSlug,
+            coverUrl = e.coverUrl,
+            fileName = e.fileName,
         )
 
     private fun recordToEntry(r: ContentIndexRecord): CacheEntry =
@@ -49,6 +54,11 @@ class CacheDatabaseContentIndexStore(
             absolutePath = r.absolutePath,
             sizeBytes = r.sizeBytes,
             lastAccessedEpochMs = r.lastAccessedEpochMs,
+            title = r.title,
+            platformDisplayName = r.platformDisplayName,
+            platformSlug = r.platformSlug,
+            coverUrl = r.coverUrl,
+            fileName = r.fileName,
         )
 
     override fun get(cacheKey: String): ContentIndexRecord? =
@@ -68,4 +78,7 @@ class CacheDatabaseContentIndexStore(
 
     override fun totalSizeBytes(): Long =
         cacheDatabase.all().sumOf { it.sizeBytes }
+
+    override fun allRecords(): List<ContentIndexRecord> =
+        cacheDatabase.all().map { entryToRecord(it) }
 }

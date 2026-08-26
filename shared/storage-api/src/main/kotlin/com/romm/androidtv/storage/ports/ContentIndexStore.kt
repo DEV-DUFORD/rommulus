@@ -11,4 +11,6 @@ interface ContentIndexStore {
     fun evictionCandidates(limit: Int): List<ContentIndexRecord>
     /** Sum of sizeBytes across all records. */
     fun totalSizeBytes(): Long
+    /** Snapshot of every indexed entry. */
+    fun allRecords(): List<ContentIndexRecord>
 }

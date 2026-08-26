@@ -46,13 +46,17 @@ class ContentCache(
      */
     fun findValidEntry(key: String): CacheEntry? {
         val entry = database.find(key) ?: return null
+        return validateEntry(entry, touch = true)
+    }
+
+    private fun validateEntry(entry: CacheEntry, touch: Boolean): CacheEntry? {
         val file = File(entry.absolutePath)
         if (!file.isFile || file.length() != entry.sizeBytes) {
             // Stale record pointing at a missing/altered file — never expose it as launchable.
-            database.remove(key)
+            database.remove(entry.key)
             return null
         }
-        database.touch(key, clock())
+        if (touch) database.touch(entry.key, clock())
         return entry
     }
 
@@ -66,6 +70,11 @@ class ContentCache(
         fileIdsKey: String,
         contentHash: String,
         file: File,
+        title: String = "",
+        platformDisplayName: String = "",
+        platformSlug: String = "",
+        coverUrl: String? = null,
+        fileName: String = "",
     ) {
         database.upsert(
             CacheEntry(
@@ -79,9 +88,36 @@ class ContentCache(
                 absolutePath = file.absolutePath,
                 sizeBytes = file.length(),
                 lastAccessedEpochMs = clock(),
+                title = title,
+                platformDisplayName = platformDisplayName,
+                platformSlug = platformSlug,
+                coverUrl = coverUrl,
+                fileName = fileName,
             )
         )
     }
+
+    fun findValidRom(remoteId: Long): CacheEntry? =
+        database.all()
+            .asSequence()
+            .filter { it.kind == CacheEntryKind.ROM && it.remoteId == remoteId }
+            .sortedByDescending { it.lastAccessedEpochMs }
+            .mapNotNull { validateEntry(it, touch = false) }
+            .firstOrNull()
+
+    fun isRomPlayableOffline(remoteId: Long): Boolean =
+        findValidRom(remoteId)?.let {
+            it.platformSlug.isNotBlank() && it.fileName.isNotBlank()
+        } == true
+
+    fun downloadedRoms(): List<CacheEntry> =
+        database.all()
+            .asSequence()
+            .filter { it.kind == CacheEntryKind.ROM }
+            .mapNotNull { validateEntry(it, touch = false) }
+            .distinctBy { it.remoteId }
+            .sortedByDescending { it.lastAccessedEpochMs }
+            .toList()
 
     /**
      * Evicts least-recently-used entries until the cache's total size is at or

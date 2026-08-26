@@ -367,6 +367,8 @@ private fun GameDetailContent(
             is SectionState.Loaded -> GameDetailBody(
                 rom = section.data,
                 playEnabled = coordinator.isPlatformPlayable(section.data.platformSlug),
+                isOffline = !coordinator.serverReachable,
+                isAvailableOffline = coordinator.isRomDownloaded(romId),
                 onPlayClick = {
                     launchScope.launch {
                         // Android `nativeLibraryOnPlay` parity: publish the staging state (with
@@ -532,6 +534,8 @@ private fun GameDetailContent(
 private fun GameDetailBody(
     rom: RomDetail,
     playEnabled: Boolean,
+    isOffline: Boolean,
+    isAvailableOffline: Boolean,
     onPlayClick: () -> Unit,
     isStaging: Boolean,
     isAuthExpired: Boolean,
@@ -632,6 +636,16 @@ private fun GameDetailBody(
                         // `RequiredBiosUnavailableState` parity): disabled Play + per-state message.
                         biosState !is RequiredBiosState.Ready -> RequiredBiosUnavailableState(biosState)
 
+                        isOffline && !isAvailableOffline -> Column {
+                            DisabledPlayButton()
+                            Text(
+                                text = "Offline - download this game before playing.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textSecondary,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+
                         else -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             PlayButton(
                                 enabled = playEnabled,
@@ -669,6 +683,7 @@ private fun GameDetailBody(
                     Spacer(modifier = Modifier.height(10.dp))
                     SaveStatusLine(
                         state = saveUiState,
+                        isOffline = isOffline,
                         serverAvailability = serverSaveAvailability,
                         loadedSaveFileName = loadedSaveFileName,
                         actionMessage = saveActionMessage,
@@ -1219,6 +1234,7 @@ private val NEEDS_ATTENTION_SYNC_STATUSES = setOf(SaveSyncStatus.CONFLICT, SaveS
 @Composable
 private fun SaveStatusLine(
     state: SaveSyncUiState,
+    isOffline: Boolean,
     serverAvailability: ServerSaveAvailability,
     loadedSaveFileName: String?,
     actionMessage: String?,
@@ -1237,18 +1253,22 @@ private fun SaveStatusLine(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = saveStatusLabel(state, serverAvailability, loadedSaveFileName),
+            text = if (isOffline) {
+                "Save: Offline - progress is checkpointed locally"
+            } else {
+                saveStatusLabel(state, serverAvailability, loadedSaveFileName)
+            },
             style = MaterialTheme.typography.bodySmall,
             color = if (needsAttention) PlayButtonErrorColor else colors.textSecondary,
         )
-        if (actions.canSyncNow) {
+        if (!isOffline && actions.canSyncNow) {
             SaveActionButton("Sync now", "detail:save-sync", onSyncNow, navigator)
         }
-        if (actions.canResolveConflict) {
+        if (!isOffline && actions.canResolveConflict) {
             SaveActionButton("Keep local", "detail:keep-local", onKeepLocal, navigator)
             SaveActionButton("Keep server", "detail:keep-server", onKeepServer, navigator)
         }
-        if (actions.canViewQuarantine) {
+        if (!isOffline && actions.canViewQuarantine) {
             // QUARANTINED offers ONLY this action — never "Sync now" (a quarantined save needs an
             // explicit compatibility/import decision; auto-redraining could undo that choice).
             SaveActionButton("View quarantine", "detail:view-quarantine", onViewQuarantine, navigator)

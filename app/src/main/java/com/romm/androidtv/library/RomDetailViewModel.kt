@@ -17,6 +17,7 @@ class RomDetailViewModel(
     private val repository: LibraryRepository,
     private val romId: Long,
     refreshEvents: Flow<Unit>? = null,
+    offlineDetail: (() -> RomDetail?)? = null,
     private val onLibraryMutated: () -> Unit = {},
 ) : ViewModel() {
 
@@ -25,6 +26,7 @@ class RomDetailViewModel(
         repository = repository,
         romId = romId,
         refreshEvents = refreshEvents,
+        offlineDetail = offlineDetail,
         onLibraryMutated = onLibraryMutated,
     )
 
@@ -79,11 +81,18 @@ class RomDetailViewModel(
         private val repository: LibraryRepository,
         private val romId: Long,
         private val refreshEvents: Flow<Unit>? = null,
+        private val offlineDetail: (() -> RomDetail?)? = null,
         private val onLibraryMutated: () -> Unit = {},
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return RomDetailViewModel(repository, romId, refreshEvents, onLibraryMutated) as T
+            return RomDetailViewModel(
+                repository,
+                romId,
+                refreshEvents,
+                offlineDetail,
+                onLibraryMutated,
+            ) as T
         }
     }
 }

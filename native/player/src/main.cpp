@@ -12,6 +12,7 @@
 #include <sys/file.h>
 #include <sys/param.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
 #include <fcntl.h>
 #include <pwd.h>
 #include <unistd.h>
@@ -444,11 +445,9 @@ int main(int argc, char* argv[]) {
 
     // 6. Initialize SDL.
     SDL_SetAppMetadata("rommulus_player", "0.1", "com.romm.player");
-    // The Compose shell remains alive while this child player runs. Some
-    // Linux window managers can return focus to the shell after the player
-    // is created; SDL otherwise stops refreshing gamepad state until another
-    // player-window interaction (such as resize) briefly restores focus.
-    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    // Steam and Quick Access own their system buttons and overlays. Never
+    // keep consuming gameplay input after the player loses focus to them.
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         const std::string error = std::string("SDL_Init failed: ") + SDL_GetError();
         std::fprintf(stderr, "error: %s\n", error.c_str());
@@ -512,6 +511,7 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
+    SDL_RaiseWindow(window);
     videoSink->setIntegerScaling(request.video.integerScaling);
     videoSink->setScanlines(request.video.scanlines);
     videoSink->setSharpFilter(request.video.sharpFilter);
@@ -718,6 +718,7 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "info: no existing save at %s; starting with fresh SRAM\n",
                          request.savePath.c_str());
         }
+        session.configureAutosave(request.savePath, std::chrono::seconds(30));
     }
 
     // 10. Attach the video surface. Software cores do not wait for this in
@@ -728,6 +729,9 @@ int main(int argc, char* argv[]) {
 
     // 11. Main loop.
     bool running = true;
+    bool windowHasFocus = true;
+    bool pausedForFocusLoss = false;
+    auto nextHealthLog = std::chrono::steady_clock::now() + std::chrono::minutes(1);
     romm::player::SdlInput input;
     input.configureForCore(request.coreId);
     // v2: apply the stored controller bindings from the launch request so
@@ -1002,7 +1006,27 @@ int main(int argc, char* argv[]) {
                     break;
                 }
                 case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    windowHasFocus = false;
                     input.reset();
+                    input.updateSession(session);
+                    pausedForFocusLoss = !pauseMenu.isOpen();
+                    session.setPaused(true);
+                    if (!request.savePath.empty() &&
+                        session.memorySize(RETRO_MEMORY_SAVE_RAM) > 0 &&
+                        !session.checkpointSaveRam(request.savePath)) {
+                        std::fprintf(
+                            stderr,
+                            "error: focus-loss SRAM checkpoint failed for %s\n",
+                            request.savePath.c_str());
+                    }
+                    break;
+                case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                    windowHasFocus = true;
+                    input.reset();
+                    if (pausedForFocusLoss && !pauseMenu.isOpen()) {
+                        session.setPaused(false);
+                    }
+                    pausedForFocusLoss = false;
                     break;
                 case SDL_EVENT_WINDOW_EXPOSED:
                 case SDL_EVENT_WINDOW_RESIZED:
@@ -1103,7 +1127,7 @@ int main(int argc, char* argv[]) {
                 const auto actions = input.pollMenuActions();
                 if (actions.any()) handlePauseEffect(pauseMenu.handle(actions));
             }
-        } else {
+        } else if (windowHasFocus) {
             if (input.pollPauseTrigger()) openPause();
             input.updateSession(session);
         }
@@ -1125,6 +1149,25 @@ int main(int argc, char* argv[]) {
         }
         if (session.diagnostics().coreRequestedShutdown.load()) running = false;
         if (g_signal_flag.load()) running = false;  // SIGTERM/SIGINT
+        const auto healthNow = std::chrono::steady_clock::now();
+        if (healthNow >= nextHealthLog) {
+            struct rusage usage {};
+            if (::getrusage(RUSAGE_SELF, &usage) == 0) {
+                std::fprintf(
+                    stderr,
+                    "health: frames=%llu max_rss_kib=%ld audio_underrun=%llu "
+                    "audio_overrun=%llu controllers=%d\n",
+                    static_cast<unsigned long long>(
+                        session.diagnostics().frameCount.load()),
+                    usage.ru_maxrss,
+                    static_cast<unsigned long long>(
+                        romm::audio::sink().underrunFrames()),
+                    static_cast<unsigned long long>(
+                        romm::audio::sink().overrunFrames()),
+                    input.connectedGamepadCount());
+            }
+            nextHealthLog = healthNow + std::chrono::minutes(1);
+        }
         SDL_Delay(1);
         lastFrameTime = std::chrono::steady_clock::now();
     }

@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.romm.androidtv.auth.AuthRepository
 import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.onboarding.OnboardingEffect
@@ -141,7 +142,7 @@ fun Modifier.tvSelect(onSelect: () -> Unit): Modifier = onKeyEvent { event ->
 class MainActivity : ComponentActivity() {
 
     private enum class Screen {
-        NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_SEARCH,
+        NATIVE_HOME, NATIVE_PLATFORMS, NATIVE_COLLECTIONS, NATIVE_DOWNLOADED, NATIVE_SEARCH,
         NATIVE_SETTINGS, NATIVE_PLATFORM_DETAIL, NATIVE_COLLECTION_DETAIL, NATIVE_GAME_DETAIL,
         NATIVE_CONFLICT, NATIVE_QUARANTINE, NATIVE_SAVE_PICKER, NATIVE_VERSION_PICKER, NATIVE_BIOS_CONFIGURATION,
         NATIVE_CONTROLLER_LIST, NATIVE_CONTROLLER_CONFIG,
@@ -211,6 +212,7 @@ class MainActivity : ComponentActivity() {
 
     /** Re-fetches any library view model that survived a pre-login navigation session. */
     private val libraryRefreshEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val serverReachable = MutableStateFlow(true)
 
     // Pre-launch save sync overlay state (conflict/quarantine). Scoped to a single ROM/session;
     // survives recomposition because it lives on the Activity, not inside remember().
@@ -343,6 +345,32 @@ class MainActivity : ComponentActivity() {
     private val currentOrigin: String
         get() = settingsRepository.currentProfile().origin
 
+    private fun cachedRomDetail(romId: Long): com.romm.androidtv.library.RomDetail? {
+        val cached = contentCache.findValidRom(romId) ?: return null
+        if (cached.platformSlug.isBlank() || cached.fileName.isBlank()) return null
+        return com.romm.androidtv.library.RomDetail(
+            id = romId,
+            title = cached.title.ifBlank { cached.fileName.substringBeforeLast('.') },
+            platformDisplayName = cached.platformDisplayName.ifBlank { cached.platformSlug },
+            platformSlug = cached.platformSlug,
+            summary = null,
+            coverUrl = cached.coverUrl,
+            screenshotUrls = emptyList(),
+            genres = emptyList(),
+            companies = emptyList(),
+            gameModes = emptyList(),
+            playerCount = null,
+            firstReleaseDateEpochMillis = null,
+            averageRating = null,
+            regions = emptyList(),
+            languages = emptyList(),
+            fileSizeBytes = cached.sizeBytes,
+            lastPlayedIso = null,
+            nowPlaying = false,
+            fileName = cached.fileName.substringBeforeLast('.'),
+        )
+    }
+
     // Controller event router — captures, maps, and produces StateFlow snapshots
     private val controllerRouter: ControllerEventRouter by lazy {
         ControllerEventRouter()
@@ -473,6 +501,7 @@ class MainActivity : ComponentActivity() {
         private const val DIAG_TAG = "RommAuthDx"
         /** Duration of the fade-to-black transition before EmulationActivity launches. */
         private const val LAUNCH_FADE_MS = 400
+        private const val SERVER_REACHABILITY_INTERVAL_MS = 15_000L
         private const val STATE_SCREEN = "navigation.screen"
         private const val STATE_GAME_DETAIL_PARENT = "navigation.gameDetailParent"
         private const val STATE_PLATFORM_ID = "navigation.platformId"
@@ -494,6 +523,7 @@ class MainActivity : ComponentActivity() {
         com.romm.androidtv.library.ui.NavDestination.HOME -> Screen.NATIVE_HOME
         com.romm.androidtv.library.ui.NavDestination.PLATFORMS -> Screen.NATIVE_PLATFORMS
         com.romm.androidtv.library.ui.NavDestination.COLLECTIONS -> Screen.NATIVE_COLLECTIONS
+        com.romm.androidtv.library.ui.NavDestination.DOWNLOADED -> Screen.NATIVE_DOWNLOADED
         com.romm.androidtv.library.ui.NavDestination.SEARCH -> Screen.NATIVE_SEARCH
         com.romm.androidtv.library.ui.NavDestination.SETTINGS -> Screen.NATIVE_SETTINGS
     }
@@ -586,6 +616,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lifecycleScope.launch {
+            while (true) {
+                val session = sessionStore.current()
+                if (session != null) {
+                    serverReachable.value =
+                        authRepository.checkHeartbeat(session.origin) is
+                            com.romm.androidtv.network.HeartbeatCallResult.Success
+                } else {
+                    serverReachable.value = true
+                }
+                kotlinx.coroutines.delay(SERVER_REACHABILITY_INTERVAL_MS)
+            }
+        }
         enableEdgeToEdge()
 
         // Initialize controller router and register device listener
@@ -768,7 +811,8 @@ class MainActivity : ComponentActivity() {
                 OnboardingHost()
             } else {
                 when (currentScreen) {
-                Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS, Screen.NATIVE_SEARCH,
+                Screen.NATIVE_HOME, Screen.NATIVE_PLATFORMS, Screen.NATIVE_COLLECTIONS,
+                        Screen.NATIVE_DOWNLOADED, Screen.NATIVE_SEARCH,
                         Screen.NATIVE_SETTINGS, Screen.NATIVE_PLATFORM_DETAIL, Screen.NATIVE_COLLECTION_DETAIL,
                         Screen.NATIVE_GAME_DETAIL, Screen.NATIVE_CONFLICT, Screen.NATIVE_QUARANTINE,
                         Screen.NATIVE_SAVE_PICKER, Screen.NATIVE_VERSION_PICKER, Screen.NATIVE_BIOS_CONFIGURATION,
@@ -861,6 +905,7 @@ class MainActivity : ComponentActivity() {
                                                         libraryRepository,
                                                         romId,
                                                         refreshEvents = libraryRefreshEvents,
+                                                        offlineDetail = { cachedRomDetail(romId) },
                                                         onLibraryMutated = { libraryRefreshEvents.tryEmit(Unit) },
                                                     ),
                                             )
@@ -870,6 +915,7 @@ class MainActivity : ComponentActivity() {
                                             if (state != null && state.matchesScope(romId, state.sessionId) && state.hasBlockingOverlay) {
                                                 renderPreLaunchOverlay(state)
                                             } else {
+                                                    val serverOnline by serverReachable.collectAsState()
                                                     com.romm.androidtv.library.ui.GameDetailScreen(
                                                             viewModel = detailViewModel,
                                                             onBack = ::returnFromGameDetail,
@@ -882,6 +928,8 @@ class MainActivity : ComponentActivity() {
                                                         onChooseVersion = { chooseRomId ->
                                                             nativeLibraryOnChooseVersion(chooseRomId)
                                                         },
+                                                        isOffline = !serverOnline,
+                                                        isAvailableOffline = contentCache.isRomPlayableOffline(romId),
                                                         isStaging = state?.let { s ->
                                                             s.matchesScope(romId, s.sessionId) && s.isStaging
                                                         } ?: false,
@@ -1009,7 +1057,38 @@ class MainActivity : ComponentActivity() {
                                             )
                                         }
                                     }
-                                    Screen.NATIVE_SEARCH -> com.romm.androidtv.library.ui.LibraryScaffold(
+                                    Screen.NATIVE_DOWNLOADED -> {
+                                            com.romm.androidtv.library.ui.LibraryScaffold(
+                                                current = com.romm.androidtv.library.ui.NavDestination.DOWNLOADED,
+                                                onNavigate = { destination -> currentScreen = destination.toScreen() },
+                                            ) {
+                                                com.romm.androidtv.library.ui.DownloadedGamesScreen(
+                                                    roms = contentCache.downloadedRoms().map { cached ->
+                                                        com.romm.androidtv.library.LibraryRom(
+                                                            id = cached.remoteId,
+                                                            title = cached.title.ifBlank {
+                                                                cached.fileName.substringBeforeLast('.')
+                                                            },
+                                                            platformDisplayName =
+                                                                cached.platformDisplayName.ifBlank {
+                                                                    cached.platformSlug
+                                                                },
+                                                            platformSlug = cached.platformSlug,
+                                                            coverUrl = cached.coverUrl,
+                                                            lastPlayedIso = null,
+                                                            nowPlaying = false,
+                                                        )
+                                                    },
+                                                    onOpenGame = { romId ->
+                                                        selectedRomId = romId
+                                                        gameDetailOriginRomId = romId
+                                                        gameDetailParent = Screen.NATIVE_DOWNLOADED
+                                                        currentScreen = Screen.NATIVE_GAME_DETAIL
+                                                    },
+                                                )
+                                            }
+                                        }
+                                        Screen.NATIVE_SEARCH -> com.romm.androidtv.library.ui.LibraryScaffold(
                                         current = com.romm.androidtv.library.ui.NavDestination.SEARCH,
                                         onNavigate = { destination -> currentScreen = destination.toScreen() },
                                     ) {

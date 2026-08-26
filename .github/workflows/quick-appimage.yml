@@ -1,5 +1,5 @@
-name: Quick Linux AppImage
-run-name: Quick AppImage ${{ inputs.version }}
+name: Quick AppImage + Debug APK
+run-name: Quick test builds ${{ inputs.version }}
 
 on:
   workflow_dispatch:
@@ -27,9 +27,9 @@ env:
 
 jobs:
   build:
-    name: Build AppImage
+    name: Build AppImage and debug APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
 
     steps:
       - name: Check out repository
@@ -117,6 +117,26 @@ jobs:
             --no-header-files \
             --no-man-pages
 
+      - name: Build Android debug APK
+        run: |
+          set -euo pipefail
+          ./gradlew --configure-on-demand :app:assembleDebug
+
+      - name: Prepare debug APK
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          [ -f "$apk" ] || {
+            echo "::error::Debug APK was not produced at $apk."
+            exit 1
+          }
+          mkdir -p dist
+          output="dist/rommulus-${VERSION}-android-debug.apk"
+          cp "$apk" "$output"
+          sha256sum "$output" > "${output}.sha256"
+
       - name: Assemble AppImage
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -156,6 +176,16 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-${{ steps.version.outputs.version }}-android-debug
+          path: |
+            dist/*-android-debug.apk
+            dist/*-android-debug.apk.sha256
+          if-no-files-found: error
+          compression-level: 0
+
       - name: Publish prerelease
         if: inputs.publish_prerelease
         env:
@@ -177,4 +207,6 @@ jobs:
           gh release upload "$TAG" \
             "dist/rommulus-${VERSION}-linux-x86_64.AppImage" \
             "dist/rommulus-${VERSION}-linux-x86_64.AppImage.sha256" \
+            "dist/rommulus-${VERSION}-android-debug.apk" \
+            "dist/rommulus-${VERSION}-android-debug.apk.sha256" \
             --clobber

@@ -13,6 +13,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.logging.Level
 import java.util.logging.Logger
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * JInput -> neutral model translation tables (the desktop ingestion boundary,
@@ -137,6 +138,8 @@ class JInputControllerSource : JInputSource {
 
     /** Wrappers are cached per underlying JInput controller instance. */
     private val wrappers = HashMap<Controller, JInputController>()
+    private val rescanRequested = AtomicBoolean(false)
+    private var nextRescanAllowedNanos = 0L
 
     /** Set when the native bootstrap could not make the native libraries available. */
     @Volatile
@@ -156,6 +159,9 @@ class JInputControllerSource : JInputSource {
      */
     override fun enumerate(): List<JInputController> {
         return synchronized(this) {
+            if (rescanRequested.compareAndSet(true, false)) {
+                if (refreshCachedControllers()) wrappers.clear()
+            }
             // getControllers() returns a Controller[] (a snapshot array in 2.0.10).
             val controllers = environment.controllers
             val result = ArrayList<JInputController>(controllers.size)
@@ -163,8 +169,13 @@ class JInputControllerSource : JInputSource {
             for (controller in controllers) {
                 if (!controller.isGameController()) continue
                 seen.add(controller)
-                result.add(wrappers.getOrPut(controller) { LiveJInputController(controller) })
+                result.add(
+                    wrappers.getOrPut(controller) {
+                        LiveJInputController(controller) { rescanRequested.set(true) }
+                    }
+                )
             }
+
             // Drop wrappers for controllers that were unplugged since the last tick.
             wrappers.keys.retainAll(seen)
 
@@ -200,7 +211,28 @@ class JInputControllerSource : JInputSource {
                     )
                 }
             }
+
             result
+        }
+    }
+
+    private fun refreshCachedControllers(): Boolean {
+        val now = System.nanoTime()
+        if (now < nextRescanAllowedNanos) return false
+        nextRescanAllowedNanos = now + 2_000_000_000L
+        return try {
+            val controllersField = environment.javaClass.getDeclaredField("controllers")
+            controllersField.isAccessible = true
+            controllersField.set(environment, null)
+            logger.info("JInput controller poll failed; rescanning devices")
+            true
+        } catch (e: ReflectiveOperationException) {
+            logger.log(
+                Level.WARNING,
+                "JInput controller poll failed and the device cache could not be refreshed",
+                e,
+            )
+            false
         }
     }
 
@@ -300,7 +332,10 @@ internal fun Controller.isGameController(): Boolean =
  * of the OS session — the same session-stability guarantee the Android
  * signature adapter provides for transient device ids.
  */
-internal class LiveJInputController(private val controller: Controller) : JInputController {
+internal class LiveJInputController(
+    private val controller: Controller,
+    private val onPollFailed: () -> Unit = {},
+) : JInputController {
 
     override val id: String = controller.name?.takeIf { it.isNotBlank() } ?: controller.javaClass.name
 
@@ -322,6 +357,7 @@ internal class LiveJInputController(private val controller: Controller) : JInput
             // JInput only refreshes Component.pollData when the owning controller is polled.
             // A failed poll means the device is unavailable, so expose a neutral state.
             if (!controller.poll()) {
+                onPollFailed()
                 return JInputControllerState(buttons = emptySet(), axes = emptyMap())
             }
 

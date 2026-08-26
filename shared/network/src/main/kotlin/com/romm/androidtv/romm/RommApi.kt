@@ -45,6 +45,9 @@ data class RomInfo(
     val platformSlug: String,
     val hasMultipleFiles: Boolean,
     val files: List<RomFileInfo>,
+    val title: String = "",
+    val platformDisplayName: String = "",
+    val coverUrl: String? = null,
 )
 
 /** One firmware/BIOS file RomM knows about (`FirmwareSchema`). */
@@ -104,9 +107,15 @@ internal data class RomFileJson(
 @JsonClass(generateAdapter = false)
 internal data class RomJson(
     val id: Long = 0,
+    val name: String? = null,
     val fs_name: String = "",
+    val fs_name_no_tags: String = "",
     val fs_size_bytes: Long = 0,
+    val platform_display_name: String = "",
     val platform_slug: String = "",
+    val path_cover_small: String? = null,
+    val path_cover_large: String? = null,
+    val url_cover: String? = null,
     val has_multiple_files: Boolean = false,
     @Json(name = "files") val files: List<RomFileJson>? = null,
 )
@@ -142,7 +151,7 @@ object RommApi {
     private val platformListAdapter = moshi.adapter<List<PlatformIdentityJson>>()
 
     /** Parses the JSON body of `GET /api/roms/{id}`. Returns null on any malformed input. */
-    fun parseRomInfo(body: String): RomInfo? {
+    fun parseRomInfo(body: String, origin: String = ""): RomInfo? {
         return try {
             val json = romAdapter.fromJson(body.trim()) ?: return null
             if (json.id <= 0 || json.fs_name.isBlank()) return null
@@ -163,10 +172,27 @@ object RommApi {
                         crcHash = it.crc_hash.orEmpty(),
                     )
                 },
+                title = json.name?.takeIf { it.isNotBlank() }
+                    ?: json.fs_name_no_tags.takeIf { it.isNotBlank() }
+                    ?: json.fs_name.substringBeforeLast('.'),
+                platformDisplayName = json.platform_display_name,
+                coverUrl = resolveCoverUrl(
+                    origin,
+                    json.path_cover_large ?: json.path_cover_small,
+                    json.url_cover,
+                ),
             )
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun resolveCoverUrl(origin: String, relative: String?, absolute: String?): String? {
+        val path = relative?.takeIf { it.isNotBlank() }
+        if (path != null && origin.isNotBlank()) {
+            return "${origin.removeSuffix("/")}/${path.removePrefix("/")}"
+        }
+        return absolute?.takeIf { it.isNotBlank() }
     }
 
     /** Parses the JSON body of `GET /api/firmware`. Returns null on any malformed input. */
@@ -216,7 +242,7 @@ object RommApi {
             client.newCall(request).execute().use { response ->
                 classifyResponse(response)?.let { return RomInfoResult.Failure(it, response.code) }
                 val body = response.body?.string()
-                val rom = body?.let { parseRomInfo(it) }
+                val rom = body?.let { parseRomInfo(it, normalizedOrigin) }
                 if (rom == null) RomInfoResult.Failure(RommApiError.PARSE_ERROR, response.code)
                 else RomInfoResult.Success(rom)
             }

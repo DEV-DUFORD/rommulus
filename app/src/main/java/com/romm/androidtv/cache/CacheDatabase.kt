@@ -41,6 +41,11 @@ data class CacheEntry(
     val absolutePath: String,
     val sizeBytes: Long,
     val lastAccessedEpochMs: Long,
+    val title: String = "",
+    val platformDisplayName: String = "",
+    val platformSlug: String = "",
+    val coverUrl: String? = null,
+    val fileName: String = "",
 )
 
 @JsonClass(generateAdapter = false)

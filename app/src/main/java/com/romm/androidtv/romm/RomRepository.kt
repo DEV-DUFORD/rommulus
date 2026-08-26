@@ -144,7 +144,38 @@ class RomRepositoryImpl(
 
         val rom = when (val result = RommApi.fetchRomInfo(client, origin, romId)) {
             is RomInfoResult.Success -> result.rom
-            is RomInfoResult.Failure -> return@withContext result.error.toStagingOutcome()
+            is RomInfoResult.Failure -> {
+                val cached = if (result.error in OFFLINE_FALLBACK_ERRORS) {
+                    contentCache.findValidRom(romId)
+                } else {
+                    null
+                }
+                if (cached != null && cached.platformSlug.isNotBlank() && cached.fileName.isNotBlank()) {
+                    val coreId = resolveApprovedCoreId(cached.platformSlug)
+                        ?: return@withContext StagingOutcome.NoApprovedCore(cached.platformSlug)
+                    return@withContext when (
+                        val resolution = resolveLaunchContentPath(
+                            File(cached.absolutePath),
+                            cached.fileName,
+                            cached.contentHash,
+                            "",
+                        )
+                    ) {
+                        is ContentPathResolution.Success -> StagingOutcome.Success(
+                            buildLaunchSpec(
+                                romId,
+                                resolution.romHash,
+                                resolution.path,
+                                coreId,
+                                cached.platformSlug,
+                                cached.fileName,
+                            )
+                        )
+                        is ContentPathResolution.Failure -> resolution.outcome
+                    }
+                }
+                return@withContext result.error.toStagingOutcome()
+            }
         }
 
         // Section 10: initial support explicitly rejects multi-file content with a clear message.
@@ -172,6 +203,21 @@ class RomRepositoryImpl(
 
         val cached = contentCache.findValidEntry(cacheKey)
         if (cached != null) {
+            contentCache.record(
+                key = cacheKey,
+                kind = CacheEntryKind.ROM,
+                serverKey = serverKey,
+                userKey = userKey,
+                remoteId = romId,
+                fileIdsKey = file.fileId.toString(),
+                contentHash = cached.contentHash,
+                file = File(cached.absolutePath),
+                title = rom.title,
+                platformDisplayName = rom.platformDisplayName,
+                platformSlug = rom.platformSlug,
+                coverUrl = rom.coverUrl,
+                fileName = file.fileName,
+            )
             return@withContext when (
                 val resolution = resolveLaunchContentPath(File(cached.absolutePath), file.fileName, cached.contentHash, effectiveDeclaredSha1(file.sha1Hash))
             ) {
@@ -221,6 +267,11 @@ class RomRepositoryImpl(
                     fileIdsKey = file.fileId.toString(),
                     contentHash = contentHash,
                     file = outcome.file,
+                    title = rom.title,
+                    platformDisplayName = rom.platformDisplayName,
+                    platformSlug = rom.platformSlug,
+                    coverUrl = rom.coverUrl,
+                    fileName = file.fileName,
                 )
                 when (val resolution = resolveLaunchContentPath(outcome.file, file.fileName, contentHash, effectiveDeclaredSha1(file.sha1Hash))) {
                     is ContentPathResolution.Success ->
@@ -400,6 +451,11 @@ class RomRepositoryImpl(
     }
 
     private companion object {
+        private val OFFLINE_FALLBACK_ERRORS = setOf(
+            RommApiError.NETWORK_ERROR,
+            RommApiError.TLS_ERROR,
+            RommApiError.SERVER_ERROR,
+        )
         /** Empty sentinel file marking a fully, successfully extracted archive directory. */
         const val EXTRACTION_COMPLETE_MARKER = ".complete"
 

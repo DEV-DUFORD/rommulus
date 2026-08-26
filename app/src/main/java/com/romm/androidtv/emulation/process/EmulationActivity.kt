@@ -334,6 +334,7 @@ class EmulationActivity : ComponentActivity() {
         const val EXTRA_ROM_ID = "com.romm.androidtv.emulation.EXTRA_ROM_ID"
         /** Authoritative app launch session ID (UUID string from LaunchSpec.sessionId). Required for journal/result correlation. */
         const val EXTRA_APP_SESSION_ID = "com.romm.androidtv.emulation.EXTRA_APP_SESSION_ID"
+        private const val SRAM_CHECKPOINT_INTERVAL_SECONDS = 30L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -573,6 +574,7 @@ class EmulationActivity : ComponentActivity() {
                 val restored = host.nativeRestoreSaveRam(savePath)
                 Log.d(TAG, "restore-on-launch: restored=$restored path=$savePath")
             }
+            host.nativeConfigureAutosave(savePath, SRAM_CHECKPOINT_INTERVAL_SECONDS)
 
             val inputManager = getSystemService(INPUT_SERVICE) as InputManager
             inputManager.registerInputDeviceListener(controllerRouter, null)

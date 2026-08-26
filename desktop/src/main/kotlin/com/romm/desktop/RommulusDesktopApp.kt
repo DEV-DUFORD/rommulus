@@ -46,6 +46,7 @@ import com.romm.desktop.ui.screens.controller.KeyboardConsoleListScreen
 import com.romm.desktop.ui.screens.detail.SettingsScreen
 import com.romm.desktop.ui.screens.library.HomeScreen
 import com.romm.desktop.ui.screens.library.CollectionsScreen
+import com.romm.desktop.ui.screens.library.DownloadedGamesScreen
 import com.romm.desktop.ui.screens.library.PlatformsScreen
 import com.romm.desktop.ui.screens.library.RomGridScreen
 import com.romm.desktop.ui.screens.library.SearchScreen
@@ -89,6 +90,12 @@ fun RommulusDesktopApp(
     // Exit-on-request: when the coordinator flags a root exit, close the window.
     LaunchedEffect(coordinator.exitRequested) {
         if (coordinator.exitRequested) onCloseRequest()
+    }
+    LaunchedEffect(coordinator.appMode) {
+        while (coordinator.appMode == AppMode.MAIN) {
+            coordinator.refreshServerReachability()
+            kotlinx.coroutines.delay(15_000)
+        }
     }
 
     // ── JInput controller router: created once; poll loop lives on the composition scope ──
@@ -208,6 +215,7 @@ fun RommulusDesktopApp(
 
                             Screen.PLATFORMS -> PlatformsScreen(coordinator)
                             Screen.COLLECTIONS -> CollectionsScreen(coordinator)
+                            Screen.DOWNLOADED -> DownloadedGamesScreen(coordinator)
 
                             Screen.SEARCH -> SearchScreen(coordinator)
                             Screen.SETTINGS -> SettingsScreen(coordinator)

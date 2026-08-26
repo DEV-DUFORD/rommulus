@@ -23,8 +23,11 @@
 #include <native/engine/VideoSink.h>
 
 #include <atomic>
+#include <chrono>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace romm {
 
@@ -131,6 +134,13 @@ public:
     // size").
     bool restoreSaveRam(const std::string& savePath);
 
+    // Enables changed-only, crash-safe SRAM checkpoints from the emulation
+    // thread. The first check occurs after interval; subsequent writes only
+    // happen when the core's persistent memory differs from the last durable
+    // image. An empty path disables periodic checkpointing.
+    void configureAutosave(const std::string& savePath,
+                           std::chrono::seconds interval = std::chrono::seconds(30));
+
     bool serialize(void* buffer, size_t size);
     bool unserialize(const void* buffer, size_t size);
     size_t serializeSize();
@@ -184,6 +194,9 @@ public:
 
 private:
     void runLoop();
+    void checkpointAutosaveIfChanged();
+    void* memoryDataUnlocked(unsigned id);
+    size_t memorySizeUnlocked(unsigned id);
 
     // Static trampolines: libretro core callbacks carry no context pointer,
     // and only one session is ever active per process, so these dispatch to
@@ -218,6 +231,19 @@ private:
     std::atomic<bool> paused_{false};
     std::atomic<bool> releaseHardwareContextWhenPaused_{false};
     std::atomic<bool> hardwareContextReleasedForPause_{false};
+
+    // Libretro has a single-threaded core contract. UI/player-thread save
+    // operations must never overlap retro_run() or they can capture torn
+    // SRAM. Periodic checkpoints run on the emulation thread but use the
+    // same boundary for consistency with explicit pause/quit checkpoints.
+    mutable std::mutex coreExecutionMutex_;
+
+    std::mutex autosaveConfigMutex_;
+    std::string autosavePath_;
+    std::chrono::seconds autosaveInterval_{30};
+    std::atomic<bool> autosaveEnabled_{false};
+    std::string lastAutosavePath_;
+    std::vector<uint8_t> lastAutosaveImage_;
 };
 
 }  // namespace romm

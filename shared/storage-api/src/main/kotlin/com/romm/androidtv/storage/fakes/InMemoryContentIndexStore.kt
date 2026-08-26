@@ -33,5 +33,8 @@ class InMemoryContentIndexStore : ContentIndexStore {
         return synchronized(lock) { entries.values.sumOf { it.sizeBytes } }
     }
 
+    override fun allRecords(): List<ContentIndexRecord> =
+        synchronized(lock) { entries.values.toList() }
+
     internal fun count(): Int = synchronized(lock) { entries.size }
 }

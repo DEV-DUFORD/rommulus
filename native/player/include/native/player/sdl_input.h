@@ -136,6 +136,7 @@ public:
     bool hasGamepad(int port) const {
         return port >= 0 && port < kPorts && gamepads_[port].gamepad != nullptr;
     }
+    int connectedGamepadCount() const;
 
     // One frame of capture samples for the binding editor: current button
     // levels and normalized axis values for every connected pad, plus Back
@@ -173,6 +174,7 @@ public:
     void reset();
 
 private:
+    void refreshGamepads();
     struct PortState {
         int32_t buttonsMask = 0;  // RETRO_DEVICE_ID_JOYPAD_* bit flags
         int16_t leftX = 0;
@@ -198,6 +200,7 @@ private:
 
     std::array<PortState, kPorts> ports_{};
     std::array<GamepadSlot, kPorts> gamepads_{};
+    Uint64 lastGamepadRefreshMs_ = 0;
 
     // The RetroPad slot -> physical control table poll() consults. Owned by
     // the editor (setBinding / resetBindings); defaults are the built-in

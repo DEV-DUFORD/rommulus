@@ -74,6 +74,9 @@ class JsonContentIndexStore(
     override fun totalSizeBytes(): Long =
         synchronized(lock) { recordsByKey.values.sumOf { it.sizeBytes } }
 
+    override fun allRecords(): List<ContentIndexRecord> =
+        synchronized(lock) { recordsByKey.values.toList() }
+
     /**
      * Load the index from [indexPath]. Absent file → empty. Present but blank
      * or malformed → empty (logged), never a crash: the index is rebuildable

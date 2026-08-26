@@ -26,6 +26,19 @@ class JInputControllerSourceTest {
     }
 
     @Test
+    fun `failed poll requests device re-enumeration and returns neutral input`() {
+        var rescanRequested = false
+        val state = LiveJInputController(
+            controller(emptyArray()) { false },
+            onPollFailed = { rescanRequested = true },
+        ).poll()
+
+        assertThat(rescanRequested).isTrue()
+        assertThat(state.buttons).isEmpty()
+        assertThat(state.axes).isEmpty()
+    }
+
+    @Test
     fun `POV dpad values map cardinal and diagonal directions`() {
         val expectations = mapOf(
             Component.POV.UP to setOf(NeutralKey.DPAD_UP),

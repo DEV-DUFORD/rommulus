@@ -12,6 +12,7 @@
 #include <android/native_window_jni.h>
 #include <string>
 #include <memory>
+#include <chrono>
 
 #include "emulation_session.h"
 
@@ -218,6 +219,18 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeCheckpoint
     if (g_session == nullptr) return JNI_FALSE;
     std::string path = jstringToStd(env, savePath);
     return g_session->checkpointSaveRam(path) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeConfigureAutosave(
+        JNIEnv* env, jobject /*thiz*/, jstring savePath, jlong intervalSeconds) {
+    if (g_session == nullptr) return;
+    const std::string path = jstringToStd(env, savePath);
+    const jlong boundedInterval = intervalSeconds > 0 ? intervalSeconds : 30;
+    g_session->configureAutosave(
+        path,
+        std::chrono::seconds(static_cast<std::chrono::seconds::rep>(boundedInterval)));
 }
 
 extern "C"

@@ -28,6 +28,7 @@ class RomDetailPresenter(
     private val repository: LibraryRepository,
     private val romId: Long,
     refreshEvents: Flow<Unit>? = null,
+    private val offlineDetail: (() -> RomDetail?)? = null,
     private val onLibraryMutated: () -> Unit = {},
 ) {
 
@@ -100,7 +101,8 @@ class RomDetailPresenter(
         detailJob = scope.launch {
             val resultState = when (val result = repository.fetchRomDetail(romId)) {
                 is LibraryResult.Success -> SectionState.Loaded(result.data)
-                is LibraryResult.Failure -> SectionState.Error(result.error)
+                is LibraryResult.Failure -> offlineDetail?.invoke()?.let { SectionState.Loaded(it) }
+                    ?: SectionState.Error(result.error)
             }
             if (capturedGeneration == generation) {
                 _uiState.update { it.copy(detail = resultState) }

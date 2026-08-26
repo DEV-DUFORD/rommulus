@@ -113,6 +113,63 @@ class ContentCacheTest {
 
             assertThat(db.find(key)!!.lastAccessedEpochMs).isEqualTo(99_999L)
         }
+
+        @Test
+        fun `downloaded games are valid unique and ordered by last play without touching LRU`() {
+            val older = writeFile("older.gb", 10)
+            now = 100L
+            cache.record(
+                cache.key(CacheEntryKind.ROM, "s", "u", 1),
+                CacheEntryKind.ROM, "s", "u", 1, "", "h1", older,
+                title = "Older", platformSlug = "gb", fileName = "older.gb",
+            )
+            val newer = writeFile("newer.gb", 10)
+            now = 200L
+            cache.record(
+                cache.key(CacheEntryKind.ROM, "s", "u", 2),
+                CacheEntryKind.ROM, "s", "u", 2, "", "h2", newer,
+                title = "Newer", platformSlug = "gb", fileName = "newer.gb",
+            )
+            now = 999L
+
+            val downloaded = cache.downloadedRoms()
+
+            assertThat(downloaded.map { it.remoteId }).containsExactly(2L, 1L)
+            assertThat(downloaded.map { it.title }).containsExactly("Newer", "Older")
+            assertThat(db.find(downloaded[0].key)!!.lastAccessedEpochMs).isEqualTo(200L)
+            assertThat(db.find(downloaded[1].key)!!.lastAccessedEpochMs).isEqualTo(100L)
+        }
+
+        @Test
+        fun `offline lookup rejects a missing cached file`() {
+            val file = writeFile("gone.gb", 10)
+            cache.record(
+                cache.key(CacheEntryKind.ROM, "s", "u", 3),
+                CacheEntryKind.ROM, "s", "u", 3, "", "h3", file,
+                platformSlug = "gb", fileName = "gone.gb",
+            )
+            file.delete()
+
+            assertThat(cache.findValidRom(3)).isNull()
+        }
+
+        @Test
+        fun `offline play requires cached launch metadata`() {
+            val legacy = writeFile("legacy.gb", 10)
+            cache.record(
+                cache.key(CacheEntryKind.ROM, "s", "u", 4),
+                CacheEntryKind.ROM, "s", "u", 4, "", "h4", legacy,
+            )
+            val current = writeFile("current.gb", 10)
+            cache.record(
+                cache.key(CacheEntryKind.ROM, "s", "u", 5),
+                CacheEntryKind.ROM, "s", "u", 5, "", "h5", current,
+                platformSlug = "gb", fileName = "current.gb",
+            )
+
+            assertThat(cache.isRomPlayableOffline(4)).isFalse()
+            assertThat(cache.isRomPlayableOffline(5)).isTrue()
+        }
     }
 
     @Nested

@@ -11,6 +11,7 @@ import com.romm.androidtv.library.BiosConfigurationCatalog
 import com.romm.androidtv.library.BiosConfigurationPresenter
 import com.romm.androidtv.library.BiosConfigurationProvider
 import com.romm.androidtv.library.HomePresenter
+import com.romm.androidtv.library.LibraryRom
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.library.RomDetailPresenter
 import com.romm.androidtv.library.RomGridPresenter
@@ -53,6 +54,8 @@ import com.romm.androidtv.storage.records.PendingOperationStatus
 import com.romm.androidtv.storage.records.PendingOperationType
 import com.romm.androidtv.storage.records.SaveReplicaRecord
 import com.romm.androidtv.storage.records.SaveSyncStatus
+import com.romm.androidtv.storage.records.ContentIndexKind
+import com.romm.androidtv.storage.records.ContentIndexRecord
 import com.romm.androidtv.storage.romCacheDir
 import com.romm.androidtv.storage.settingsFile
 import com.romm.desktop.controller.JInputControllerSource
@@ -457,6 +460,9 @@ class DesktopAppCoordinator(
 
     /** The single active main-mode screen (plans/LINUX_X64.md §8.1 — explicit, not a stack). */
     var currentScreen by mutableStateOf(Screen.HOME)
+
+    var serverReachable by mutableStateOf(true)
+        private set
 
     /** Set true only by an explicit flow that requests application shutdown. */
     var exitRequested by mutableStateOf(false)
@@ -1166,12 +1172,13 @@ class DesktopAppCoordinator(
             ?: return PlayerLaunchResult.Failed("console is not supported on desktop")
 
         val staged: StagedContent = try {
-            romContentStager.stage(
-                romId,
-                detail.fileName,
-                detail.fileSizeBytes,
-                core.supportedExtensions.toSet(),
-            )
+            cachedStagedContent(romId).takeIf { !serverReachable }
+                ?: romContentStager.stage(
+                    romId,
+                    detail.fileName,
+                    detail.fileSizeBytes,
+                    core.supportedExtensions.toSet(),
+                )
         } catch (e: RomContentStagingException) {
             // The user-facing reason below is intentionally generic for safety rejections
             // (UnsafeContent), so keep the internal reason — e.g. "exceeds the extraction size
@@ -1185,6 +1192,32 @@ class DesktopAppCoordinator(
             return PlayerLaunchResult.Failed(romContentLaunchFailureReason(e, detail.fileName))
         } catch (e: Exception) {
             return PlayerLaunchResult.Failed("failed to stage ROM content: ${e.message}")
+        }
+
+        val cacheOrigin = settingsAdapter.currentProfile().origin
+        val cacheUser = sessionStorage.coherentRecord(cacheOrigin)?.username.orEmpty()
+        val cacheServerKey = SavePathPolicy.sanitizeSegment(cacheOrigin.ifBlank { NO_ORIGIN_KEY })
+        val cacheUserKey = SavePathPolicy.sanitizeSegment(cacheUser.ifBlank { ANONYMOUS_USER_KEY })
+        contentIndexStore.upsert(
+            ContentIndexRecord(
+                key = "ROM:$cacheServerKey:$cacheUserKey:$romId:",
+                kind = ContentIndexKind.ROM,
+                serverKey = cacheServerKey,
+                userKey = cacheUserKey,
+                remoteId = romId,
+                fileIdsKey = "",
+                contentHash = staged.sha256,
+                absolutePath = staged.path.toAbsolutePath().normalize().toString(),
+                sizeBytes = Files.size(staged.path),
+                lastAccessedEpochMs = System.currentTimeMillis(),
+                title = detail.title,
+                platformDisplayName = detail.platformDisplayName,
+                platformSlug = detail.platformSlug,
+                coverUrl = detail.coverUrl,
+                fileName = detail.fileName,
+            )
+        ).getOrElse {
+            return PlayerLaunchResult.Failed("could not record downloaded game: ${it.message}")
         }
 
         if (detail.platformSlug in BIOS_PLATFORM_SLUGS) {
@@ -1662,9 +1695,96 @@ class DesktopAppCoordinator(
                     scope = scope,
                     repository = network.libraryRepository,
                     romId = romId,
+                    offlineDetail = { cachedRomDetail(romId) },
                 )
             }
         }
+
+    fun isRomDownloaded(romId: Long): Boolean =
+        contentIndexStore.allRecords().any {
+            it.kind == ContentIndexKind.ROM &&
+                it.remoteId == romId &&
+                it.platformSlug.isNotBlank() &&
+                it.fileName.isNotBlank() &&
+                runCatching {
+                    val path = Path.of(it.absolutePath)
+                    Files.isRegularFile(path) && Files.size(path) == it.sizeBytes
+                }.getOrDefault(false)
+        }
+
+    private fun cachedStagedContent(romId: Long): StagedContent? =
+        contentIndexStore.allRecords()
+            .filter { it.kind == ContentIndexKind.ROM && it.remoteId == romId }
+            .sortedByDescending { it.lastAccessedEpochMs }
+            .firstNotNullOfOrNull {
+                runCatching {
+                    val path = Path.of(it.absolutePath)
+                    if (!Files.isRegularFile(path) || Files.size(path) != it.sizeBytes) return@runCatching null
+                    StagedContent(path, it.contentHash)
+                }.getOrNull()
+            }
+
+    fun downloadedGames(): List<LibraryRom> =
+        contentIndexStore.allRecords()
+            .asSequence()
+            .filter {
+                it.kind == ContentIndexKind.ROM &&
+                    runCatching {
+                        val path = Path.of(it.absolutePath)
+                        Files.isRegularFile(path) && Files.size(path) == it.sizeBytes
+                    }.getOrDefault(false)
+            }
+            .distinctBy { it.remoteId }
+            .sortedByDescending { it.lastAccessedEpochMs }
+            .map {
+                LibraryRom(
+                    id = it.remoteId,
+                    title = it.title.ifBlank { it.fileName.substringBeforeLast('.') },
+                    platformDisplayName = it.platformDisplayName.ifBlank { it.platformSlug },
+                    platformSlug = it.platformSlug,
+                    coverUrl = it.coverUrl,
+                    lastPlayedIso = null,
+                    nowPlaying = false,
+                )
+            }
+            .toList()
+
+    private fun cachedRomDetail(romId: Long): RomDetail? {
+        val cached = contentIndexStore.allRecords()
+            .filter { it.kind == ContentIndexKind.ROM && it.remoteId == romId }
+            .maxByOrNull { it.lastAccessedEpochMs }
+            ?: return null
+        if (!isRomDownloaded(romId) || cached.platformSlug.isBlank()) return null
+        return RomDetail(
+            id = romId,
+            title = cached.title.ifBlank { cached.fileName.substringBeforeLast('.') },
+            platformDisplayName = cached.platformDisplayName.ifBlank { cached.platformSlug },
+            platformSlug = cached.platformSlug,
+            summary = null,
+            coverUrl = cached.coverUrl,
+            screenshotUrls = emptyList(),
+            genres = emptyList(),
+            companies = emptyList(),
+            gameModes = emptyList(),
+            playerCount = null,
+            firstReleaseDateEpochMillis = null,
+            averageRating = null,
+            regions = emptyList(),
+            languages = emptyList(),
+            fileSizeBytes = cached.sizeBytes,
+            lastPlayedIso = null,
+            nowPlaying = false,
+            fileName = cached.fileName,
+        )
+    }
+
+    suspend fun refreshServerReachability() {
+        val origin = settingsAdapter.currentProfile().origin
+        if (origin.isBlank()) return
+        serverReachable =
+            network.authRepository.checkHeartbeat(origin) is
+                com.romm.androidtv.network.HeartbeatCallResult.Success
+    }
 
     /**
      * Read-only save-sync status for the game detail screen (first piece of the Linux saves UI):
@@ -2002,14 +2122,14 @@ class DesktopAppCoordinator(
  * deliberately uses ONE [Screen] enum + a parent map for back — NOT an activity stack.
  */
 enum class Screen {
-    ONBOARDING, HOME, PLATFORMS, COLLECTIONS, SEARCH, SETTINGS,
+    ONBOARDING, HOME, PLATFORMS, COLLECTIONS, DOWNLOADED, SEARCH, SETTINGS,
     PLATFORM_DETAIL, COLLECTION_DETAIL, GAME_DETAIL, BIOS_CONFIGURATION, LICENSE,
     CONTROLLER_LIST, CONTROLLER_CONFIG, KEYBOARD_LIST, KEYBOARD_CONFIG;
 
     /** The screen Back returns to (root returns nothing; GAME_DETAIL uses its remembered parent). */
     fun parent(): Screen = when (this) {
         HOME -> HOME
-        PLATFORMS, COLLECTIONS, SEARCH, SETTINGS, LICENSE -> HOME
+        PLATFORMS, COLLECTIONS, DOWNLOADED, SEARCH, SETTINGS, LICENSE -> HOME
         PLATFORM_DETAIL -> PLATFORMS
         COLLECTION_DETAIL -> COLLECTIONS
         BIOS_CONFIGURATION -> SETTINGS
