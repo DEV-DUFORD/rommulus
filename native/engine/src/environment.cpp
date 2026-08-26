@@ -452,8 +452,8 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
         }
 
         case RETRO_ENVIRONMENT_SET_HW_SHARED_CONTEXT: {
-            // SDL owns one context that remains current for the core's render
-            // thread, satisfying Dolphin's shared-context contract.
+            // The platform frontend owns one context that remains current for
+            // the core's render thread, satisfying the shared-context contract.
             return hwRenderActive_;
         }
 
