@@ -68,6 +68,8 @@ data class SettingsUiState(
      * devices that lack a touchscreen.
      */
     val onScreenGameControlsEnabled: Boolean = true,
+    /** Light vibration on touch-control press edges. Off by default. */
+    val touchControlHapticsEnabled: Boolean = false,
     /** Currently active theme chosen from the Settings screen. */
     val activeTheme: RommTheme = RommTheme.RomMulus,
 )

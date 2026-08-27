@@ -2,6 +2,7 @@ package com.romm.androidtv.emulation.touch
 
 import com.romm.androidtv.controller.model.LogicalControl
 import kotlin.math.abs
+import kotlin.math.atan2
 
 data class TouchPoint(val x: Float, val y: Float)
 
@@ -66,10 +67,19 @@ fun resolveTouchGestureFrame(
                 val point = pointers.firstOrNull { region.bounds.contains(it, expansion = 1.12f) }
                 if (point != null) {
                     val normalized = region.bounds.normalized(point)
-                    if (normalized.x <= -DPAD_DIRECTION_THRESHOLD) buttons += region.left
-                    if (normalized.x >= DPAD_DIRECTION_THRESHOLD) buttons += region.right
-                    if (normalized.y <= -DPAD_DIRECTION_THRESHOLD) buttons += region.up
-                    if (normalized.y >= DPAD_DIRECTION_THRESHOLD) buttons += region.down
+                    val horizontalMagnitude = abs(normalized.x)
+                    val verticalMagnitude = abs(normalized.y)
+                    if (maxOf(horizontalMagnitude, verticalMagnitude) >= DPAD_DIRECTION_THRESHOLD) {
+                        val angle = atan2(verticalMagnitude, horizontalMagnitude)
+                        if (angle <= DIAGONAL_MAX_HORIZONTAL_ANGLE) {
+                            buttons += if (normalized.x < 0f) region.left else region.right
+                        } else if (angle >= DIAGONAL_MIN_VERTICAL_ANGLE) {
+                            buttons += if (normalized.y < 0f) region.up else region.down
+                        } else {
+                            buttons += if (normalized.x < 0f) region.left else region.right
+                            buttons += if (normalized.y < 0f) region.up else region.down
+                        }
+                    }
                 }
             }
             is TouchHitRegion.Stick -> {
@@ -89,6 +99,8 @@ fun resolveTouchGestureFrame(
 }
 
 private const val DPAD_DIRECTION_THRESHOLD = 0.18f
+private val DIAGONAL_MAX_HORIZONTAL_ANGLE = (Math.PI * 3.0 / 16.0).toFloat()
+private val DIAGONAL_MIN_VERTICAL_ANGLE = (Math.PI * 5.0 / 16.0).toFloat()
 // A thumb centered in the visual gap between adjacent face buttons should chord both.
 private const val BUTTON_HIT_EXPANSION = 1.70f
 

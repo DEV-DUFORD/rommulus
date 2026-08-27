@@ -1510,8 +1510,14 @@ class MainActivity : ComponentActivity() {
                 )
                 putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_SAVE_PATH, savePath)
                 putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_ROM_ID, spec.romId)
-                val hasTouchscreen = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
-                putExtra("on_screen_controls_enabled", hasTouchscreen && settingsRepository.onScreenGameControlsEnabled())
+                putExtra(
+                    com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_ON_SCREEN_CONTROLS_ENABLED,
+                    settingsRepository.onScreenGameControlsEnabled(),
+                )
+                putExtra(
+                    com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED,
+                    settingsRepository.touchControlHapticsEnabled(),
+                )
                 candidateMetadata?.let { CandidateExtras.putIntoIntent(this, it) }
             }
         )
@@ -1526,6 +1532,22 @@ class MainActivity : ComponentActivity() {
      */
     private fun handleEmulationActivityResult(result: androidx.activity.result.ActivityResult) {
         val data = result.data ?: return
+        if (data.hasExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_ON_SCREEN_CONTROLS_ENABLED)) {
+            settingsRepository.setOnScreenGameControlsEnabled(
+                data.getBooleanExtra(
+                    com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_ON_SCREEN_CONTROLS_ENABLED,
+                    true,
+                ),
+            )
+        }
+        if (data.hasExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED)) {
+            settingsRepository.setTouchControlHapticsEnabled(
+                data.getBooleanExtra(
+                    com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED,
+                    false,
+                ),
+            )
+        }
         val sessionId = data.getStringExtra("session_id") ?: return
 
         when (result.resultCode) {

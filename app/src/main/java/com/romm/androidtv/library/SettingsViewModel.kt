@@ -42,6 +42,10 @@ class SettingsViewModel(
     private val setAutocleanSavesOnUploadFn: (Boolean) -> Unit = {},
     private val getOnScreenGameControlsEnabled: () -> Boolean = { true },
     private val setOnScreenGameControlsEnabledFn: (Boolean) -> Unit = {},
+    private val onScreenGameControlsFlow: kotlinx.coroutines.flow.Flow<Boolean>? = null,
+    private val getTouchControlHapticsEnabled: () -> Boolean = { false },
+    private val setTouchControlHapticsEnabledFn: (Boolean) -> Unit = {},
+    private val touchControlHapticsFlow: kotlinx.coroutines.flow.Flow<Boolean>? = null,
     private val getTheme: () -> String = { RommTheme.RomMulus.name },
     private val setThemeFn: (String) -> Unit = {},
 ) : ViewModel() {
@@ -74,6 +78,10 @@ class SettingsViewModel(
         setAutocleanSavesOnUploadFn = setAutocleanSavesOnUploadFn,
         getOnScreenGameControlsEnabled = getOnScreenGameControlsEnabled,
         setOnScreenGameControlsEnabledFn = setOnScreenGameControlsEnabledFn,
+        onScreenGameControlsFlow = onScreenGameControlsFlow,
+        getTouchControlHapticsEnabled = getTouchControlHapticsEnabled,
+        setTouchControlHapticsEnabledFn = setTouchControlHapticsEnabledFn,
+        touchControlHapticsFlow = touchControlHapticsFlow,
         getTheme = getTheme,
         setThemeFn = setThemeFn,
         applyTheme = { theme -> applyTheme(theme) },
@@ -123,6 +131,10 @@ class SettingsViewModel(
         presenter.onOnScreenGameControlsChanged(enabled)
     }
 
+    fun onTouchControlHapticsChanged(enabled: Boolean) {
+        presenter.onTouchControlHapticsChanged(enabled)
+    }
+
     fun onUsernameTextChanged(newText: String) {
         presenter.onUsernameTextChanged(newText)
     }
@@ -167,6 +179,10 @@ class SettingsViewModel(
                 setAutocleanSavesOnUploadFn = { enabled -> settingsRepository.setAutocleanSavesOnUpload(enabled) },
                 getOnScreenGameControlsEnabled = { settingsRepository.onScreenGameControlsEnabled() },
                 setOnScreenGameControlsEnabledFn = { enabled -> settingsRepository.setOnScreenGameControlsEnabled(enabled) },
+                onScreenGameControlsFlow = settingsRepository.onScreenGameControlsFlow,
+                getTouchControlHapticsEnabled = { settingsRepository.touchControlHapticsEnabled() },
+                setTouchControlHapticsEnabledFn = settingsRepository::setTouchControlHapticsEnabled,
+                touchControlHapticsFlow = settingsRepository.touchControlHapticsFlow,
                 getTheme = { settingsRepository.theme() },
                 setThemeFn = { theme -> settingsRepository.setTheme(theme) },
             ) as T

@@ -169,6 +169,21 @@ class SettingsRepositoryTest {
         repo1.setOnScreenGameControlsEnabled(false)
 
         assertThat(repo2.onScreenGameControlsEnabled()).isFalse()
+        assertThat(repo1.onScreenGameControlsFlow.value).isFalse()
+    }
+
+    @Test
+    fun `touch control haptics default off and persist globally`() {
+        val prefs = FakeSharedPreferences()
+        val repo1 = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+        val repo2 = SettingsRepository(prefs, defaultOrigin = "https://example.com")
+
+        assertThat(repo1.touchControlHapticsEnabled()).isFalse()
+
+        repo1.setTouchControlHapticsEnabled(true)
+
+        assertThat(repo2.touchControlHapticsEnabled()).isTrue()
+        assertThat(repo1.touchControlHapticsFlow.value).isTrue()
     }
 
     @Test

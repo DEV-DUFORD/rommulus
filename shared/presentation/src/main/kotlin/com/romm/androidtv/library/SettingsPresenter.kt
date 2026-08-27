@@ -11,6 +11,7 @@ import com.romm.androidtv.network.RommOrigin
 import com.romm.androidtv.network.RommServerAddress
 import com.romm.androidtv.network.ServerAddressResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,6 +56,10 @@ class SettingsPresenter(
     private val setAutocleanSavesOnUploadFn: (Boolean) -> Unit = {},
     private val getOnScreenGameControlsEnabled: () -> Boolean = { true },
     private val setOnScreenGameControlsEnabledFn: (Boolean) -> Unit = {},
+    private val onScreenGameControlsFlow: Flow<Boolean>? = null,
+    private val getTouchControlHapticsEnabled: () -> Boolean = { false },
+    private val setTouchControlHapticsEnabledFn: (Boolean) -> Unit = {},
+    private val touchControlHapticsFlow: Flow<Boolean>? = null,
     private val getTheme: () -> String = { RommTheme.RomMulus.name },
     private val setThemeFn: (String) -> Unit = {},
     /** Platform hook that applies the chosen theme to the running UI. */
@@ -68,6 +73,20 @@ class SettingsPresenter(
 
     init {
         loadCurrentState()
+        onScreenGameControlsFlow?.let { flow ->
+            scope.launch {
+                flow.collect { enabled ->
+                    _uiState.value = _uiState.value.copy(onScreenGameControlsEnabled = enabled)
+                }
+            }
+        }
+        touchControlHapticsFlow?.let { flow ->
+            scope.launch {
+                flow.collect { enabled ->
+                    _uiState.value = _uiState.value.copy(touchControlHapticsEnabled = enabled)
+                }
+            }
+        }
     }
 
     /** Loads persisted origin and session info into UI state. */
@@ -83,6 +102,7 @@ class SettingsPresenter(
             verifySha1OnLaunch = getVerifySha1OnLaunch(),
             autocleanSavesOnUpload = getAutocleanSavesOnUpload(),
             onScreenGameControlsEnabled = getOnScreenGameControlsEnabled(),
+            touchControlHapticsEnabled = getTouchControlHapticsEnabled(),
             activeTheme = RommTheme.fromStorage(getTheme()),
         )
     }
@@ -109,6 +129,12 @@ class SettingsPresenter(
     fun onOnScreenGameControlsChanged(enabled: Boolean) {
         setOnScreenGameControlsEnabledFn(enabled)
         _uiState.value = _uiState.value.copy(onScreenGameControlsEnabled = enabled)
+    }
+
+    /** Toggles touch-control haptics and persists it immediately. */
+    fun onTouchControlHapticsChanged(enabled: Boolean) {
+        setTouchControlHapticsEnabledFn(enabled)
+        _uiState.value = _uiState.value.copy(touchControlHapticsEnabled = enabled)
     }
 
     /**

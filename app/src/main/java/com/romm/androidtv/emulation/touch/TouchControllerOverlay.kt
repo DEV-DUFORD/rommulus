@@ -1,5 +1,6 @@
 package com.romm.androidtv.emulation.touch
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.displayCutoutPadding
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.romm.androidtv.controller.config.CoreControllerProfile
@@ -33,6 +35,7 @@ fun TouchControllerOverlay(
     onButtonChange: (LogicalControl, Boolean) -> Unit,
     onAxisChange: (LogicalControl, Float) -> Unit,
     onPause: () -> Unit,
+    hapticsEnabled: Boolean,
     modifier: Modifier = Modifier,
     layoutOverride: TouchLayoutOverrideDocument? = null,
 ) {
@@ -46,6 +49,7 @@ fun TouchControllerOverlay(
         layout.controls.filter { it.visible }.map { it.resolve(profile) }
     }
     val density = LocalDensity.current
+    val view = LocalView.current
     var visualFrame by remember {
         mutableStateOf(TouchGestureFrame(emptySet(), emptyMap(), menuPressed = false))
     }
@@ -98,7 +102,7 @@ fun TouchControllerOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(hitRegions) {
+                .pointerInput(hitRegions, hapticsEnabled) {
                     awaitPointerEventScope {
                         var previousButtons = emptySet<LogicalControl>()
                         var previousAxes = emptyMap<LogicalControl, Float>()
@@ -110,6 +114,17 @@ fun TouchControllerOverlay(
                                 .map { TouchPoint(it.position.x, it.position.y) }
                             val frame = resolveTouchGestureFrame(hitRegions, pointers)
                             visualFrame = frame
+                            if (
+                                hapticsEnabled &&
+                                shouldPerformTouchHaptic(
+                                    previousButtons,
+                                    frame.buttons,
+                                    previousMenuPressed,
+                                    frame.menuPressed,
+                                )
+                            ) {
+                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            }
 
                             (previousButtons - frame.buttons).forEach {
                                 onButtonChange(it, false)
@@ -130,6 +145,7 @@ fun TouchControllerOverlay(
                             event.changes.forEach { if (it.pressed) it.consume() }
                         }
                     }
+
                 },
         )
 
@@ -194,6 +210,14 @@ fun TouchControllerOverlay(
         }
     }
 }
+
+internal fun shouldPerformTouchHaptic(
+    previousButtons: Set<LogicalControl>,
+    currentButtons: Set<LogicalControl>,
+    previousMenuPressed: Boolean,
+    currentMenuPressed: Boolean,
+): Boolean = (currentButtons - previousButtons).isNotEmpty() ||
+    (currentMenuPressed && !previousMenuPressed)
 
 internal data class RenderedTouchSize(val width: Dp, val height: Dp)
 

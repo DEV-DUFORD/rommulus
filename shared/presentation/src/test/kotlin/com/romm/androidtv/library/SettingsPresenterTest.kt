@@ -7,6 +7,8 @@ import com.romm.androidtv.model.HeartbeatResponse
 import com.romm.androidtv.network.HeartbeatCallResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.assertj.core.api.Assertions.assertThat
@@ -51,6 +53,8 @@ class SettingsPresenterTest {
         var loginSuccessInvoked: Boolean = false,
         var verifySha1OnLaunch: Boolean = false,
         var autocleanSavesOnUpload: Boolean = true,
+        var onScreenGameControlsEnabled: Boolean = true,
+        var touchControlHapticsEnabled: Boolean = false,
     )
 
     private fun makePresenter(
@@ -61,6 +65,8 @@ class SettingsPresenterTest {
         loginResult: com.romm.androidtv.network.AuthFlowResult = com.romm.androidtv.network.AuthFlowResult.Failure(
             com.romm.androidtv.network.AuthError.NETWORK_ERROR,
         ),
+        onScreenGameControlsFlow: Flow<Boolean>? = null,
+        touchControlHapticsFlow: Flow<Boolean>? = null,
     ): Pair<SettingsPresenter, TestMocks> {
         val mocks = TestMocks(
             storedOrigin = initialOrigin,
@@ -84,6 +90,12 @@ class SettingsPresenterTest {
             setVerifySha1OnLaunchFn = { verify -> mocks.verifySha1OnLaunch = verify },
             getAutocleanSavesOnUpload = { mocks.autocleanSavesOnUpload },
             setAutocleanSavesOnUploadFn = { enabled -> mocks.autocleanSavesOnUpload = enabled },
+            getOnScreenGameControlsEnabled = { mocks.onScreenGameControlsEnabled },
+            setOnScreenGameControlsEnabledFn = { enabled -> mocks.onScreenGameControlsEnabled = enabled },
+            onScreenGameControlsFlow = onScreenGameControlsFlow,
+            getTouchControlHapticsEnabled = { mocks.touchControlHapticsEnabled },
+            setTouchControlHapticsEnabledFn = { enabled -> mocks.touchControlHapticsEnabled = enabled },
+            touchControlHapticsFlow = touchControlHapticsFlow,
             appVersion = "1.0.0-test",
             buildDefaultOrigin = buildDefault,
         )
@@ -496,5 +508,37 @@ class SettingsPresenterTest {
         presenter.onAutocleanSavesOnUploadChanged(true)
         assertThat(presenter.uiState.value.autocleanSavesOnUpload).isTrue()
         assertThat(mocks.autocleanSavesOnUpload).isTrue()
+    }
+
+    @Test
+    fun `touch control settings persist and update state immediately`() {
+        val (presenter, mocks) = makePresenter()
+
+        assertThat(presenter.uiState.value.onScreenGameControlsEnabled).isTrue()
+        assertThat(presenter.uiState.value.touchControlHapticsEnabled).isFalse()
+
+        presenter.onOnScreenGameControlsChanged(false)
+        presenter.onTouchControlHapticsChanged(true)
+
+        assertThat(presenter.uiState.value.onScreenGameControlsEnabled).isFalse()
+        assertThat(presenter.uiState.value.touchControlHapticsEnabled).isTrue()
+        assertThat(mocks.onScreenGameControlsEnabled).isFalse()
+        assertThat(mocks.touchControlHapticsEnabled).isTrue()
+    }
+
+    @Test
+    fun `external touch control preference updates refresh retained state`() {
+        val controlsFlow = MutableStateFlow(true)
+        val hapticsFlow = MutableStateFlow(false)
+        val (presenter, _) = makePresenter(
+            onScreenGameControlsFlow = controlsFlow,
+            touchControlHapticsFlow = hapticsFlow,
+        )
+
+        controlsFlow.value = false
+        hapticsFlow.value = true
+
+        assertThat(presenter.uiState.value.onScreenGameControlsEnabled).isFalse()
+        assertThat(presenter.uiState.value.touchControlHapticsEnabled).isTrue()
     }
 }

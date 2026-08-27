@@ -29,6 +29,20 @@ class TouchGestureRouterTest {
     }
 
     @Test
+    fun `dpad favors cardinal directions outside narrow diagonal wedge`() {
+        val right = resolveTouchGestureFrame(listOf(dpad), listOf(TouchPoint(140f, 125f)))
+        val diagonal = resolveTouchGestureFrame(listOf(dpad), listOf(TouchPoint(140f, 135f)))
+        val down = resolveTouchGestureFrame(listOf(dpad), listOf(TouchPoint(125f, 140f)))
+
+        assertThat(right.buttons).containsExactly(LogicalControl.DPAD_RIGHT)
+        assertThat(diagonal.buttons).containsExactlyInAnyOrder(
+            LogicalControl.DPAD_RIGHT,
+            LogicalControl.DPAD_DOWN,
+        )
+        assertThat(down.buttons).containsExactly(LogicalControl.DPAD_DOWN)
+    }
+
+    @Test
     fun `one thumb between adjacent face buttons presses both`() {
         val run = TouchHitRegion.Button(
             bounds = TouchBounds(60f, 100f, 50f, 50f),
@@ -97,5 +111,41 @@ class TouchGestureRouterTest {
 
         assertThat(frame.axes[LogicalControl.AXIS_LX]).isEqualTo(.5f)
         assertThat(frame.axes[LogicalControl.AXIS_LY]).isEqualTo(-.5f)
+    }
+
+    @Test
+    fun `haptics fire only for button and menu press edges`() {
+        assertThat(
+            shouldPerformTouchHaptic(
+                previousButtons = emptySet(),
+                currentButtons = setOf(LogicalControl.BUTTON_A),
+                previousMenuPressed = false,
+                currentMenuPressed = false,
+            ),
+        ).isTrue()
+        assertThat(
+            shouldPerformTouchHaptic(
+                previousButtons = setOf(LogicalControl.BUTTON_A),
+                currentButtons = setOf(LogicalControl.BUTTON_A),
+                previousMenuPressed = false,
+                currentMenuPressed = false,
+            ),
+        ).isFalse()
+        assertThat(
+            shouldPerformTouchHaptic(
+                previousButtons = setOf(LogicalControl.BUTTON_A),
+                currentButtons = emptySet(),
+                previousMenuPressed = false,
+                currentMenuPressed = false,
+            ),
+        ).isFalse()
+        assertThat(
+            shouldPerformTouchHaptic(
+                previousButtons = emptySet(),
+                currentButtons = emptySet(),
+                previousMenuPressed = false,
+                currentMenuPressed = true,
+            ),
+        ).isTrue()
     }
 }
