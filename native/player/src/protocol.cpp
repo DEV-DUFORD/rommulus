@@ -472,12 +472,12 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
 
     // controllerBindings is v2's OPTIONAL field: it passes the unknown-field
     // check below but is not part of the required set (absent = defaults).
-    static const std::array<const char*, 16> kFields = {{
+    static const std::array<const char*, 17> kFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
         "corePath",        "contentPath", "contentHash", "systemDir",
         "savePath",        "candidateSavePath", "resultPath",
         "expectedSaveSize", "video", "controllerBindings", "keyboardBindings",
-        "rendererOverride",
+        "rendererOverride", "theme",
     }};
     static const std::array<const char*, 13> kRequiredFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
@@ -556,6 +556,19 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
     r.video.integerScaling = v["integerScaling"].get<bool>();
     r.video.scanlines = v["scanlines"].get<bool>();
     r.video.sharpFilter = v["sharpFilter"].get<bool>();
+
+    if (j.contains("theme")) {
+        if (!j["theme"].is_string())
+            return reject<PlayerRequest>(error, "theme must be a string");
+        const std::string value = j["theme"].get<std::string>();
+        if (value == "RomMulus") r.theme = PlayerTheme::RomMulus;
+        else if (value == "RomM") r.theme = PlayerTheme::RomM;
+        else if (value == "Crimson") r.theme = PlayerTheme::Crimson;
+        else if (value == "Mono") r.theme = PlayerTheme::Mono;
+        else if (value == "Light") r.theme = PlayerTheme::Light;
+        else if (value == "Olive") r.theme = PlayerTheme::Olive;
+        else return reject<PlayerRequest>(error, "unknown theme: " + value);
+    }
 
     // v2 optional field: stored controller bindings to seed the BindingTable
     // at launch. Absent (the common case — no stored overrides) means the
@@ -709,6 +722,14 @@ std::string serializeRequest(const PlayerRequest& r) {
     video["scanlines"] = r.video.scanlines;
     video["sharpFilter"] = r.video.sharpFilter;
     j["video"] = video;
+    switch (r.theme) {
+        case PlayerTheme::RomMulus: j["theme"] = "RomMulus"; break;
+        case PlayerTheme::RomM: j["theme"] = "RomM"; break;
+        case PlayerTheme::Crimson: j["theme"] = "Crimson"; break;
+        case PlayerTheme::Mono: j["theme"] = "Mono"; break;
+        case PlayerTheme::Light: j["theme"] = "Light"; break;
+        case PlayerTheme::Olive: j["theme"] = "Olive"; break;
+    }
 
     // v2 optional field: written only when present (absent = player defaults),
     // so a request with no stored bindings stays byte-identical to the v1

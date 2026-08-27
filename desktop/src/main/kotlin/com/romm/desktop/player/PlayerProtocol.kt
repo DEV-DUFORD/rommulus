@@ -1,5 +1,6 @@
 package com.romm.desktop.player
 
+import com.romm.androidtv.library.RommTheme
 import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.JsonReader
 import com.squareup.moshi.JsonWriter
@@ -146,8 +147,8 @@ enum class PlayerExitKind(val wireName: String) {
 }
 
 /**
- * Launch request v2 (§12.2). Every field except [controllerBindings], [keyboardBindings], and
- * [rendererOverride] is required on the wire;
+ * Launch request v2 (§12.2). Every field except [theme], [controllerBindings],
+ * [keyboardBindings], and [rendererOverride] is required on the wire;
  * [contentHash] may be the empty string (the player then skips hash verification),
  * [expectedSaveSize] may be null, and [controllerBindings] may be absent (the player then
  * keeps its built-in default binding table).
@@ -169,6 +170,8 @@ data class PlayerRequest(
     val resultPath: String,
     val expectedSaveSize: Long? = null,
     val video: VideoSettings = VideoSettings(),
+    /** Active app theme used by the native in-game UI. */
+    val theme: RommTheme = RommTheme.RomMulus,
     /** v2 optional: stored controller bindings to apply from the first frame; null = defaults. */
     val controllerBindings: ControllerBindings? = null,
     /** Optional Linux keyboard bindings; null keeps the player's built-in defaults. */
@@ -259,6 +262,7 @@ object PlayerProtocol {
             var resultPath: String? = null
             var expectedSaveSize: Long? = null
             var video: VideoSettings? = null
+            var theme = RommTheme.RomMulus
             var controllerBindings: ControllerBindings? = null
             var keyboardBindings: KeyboardBindings? = null
             var rendererOverride: RendererOverride? = null
@@ -286,6 +290,11 @@ object PlayerProtocol {
                         else -> readNonNegativeInt64(reader, name)
                     }
                     "video" -> video = readVideo(reader)
+                    "theme" -> {
+                        val value = readString(reader, name)
+                        theme = RommTheme.entries.firstOrNull { it.name == value }
+                            ?: throw ProtocolException("unknown theme: $value")
+                    }
                     // v2 optional field (not in REQUIRED_REQUEST_FIELDS): absent = defaults.
                     "controllerBindings" -> controllerBindings = readControllerBindings(reader)
                     "keyboardBindings" -> keyboardBindings = readKeyboardBindings(reader)
@@ -319,6 +328,7 @@ object PlayerProtocol {
                 resultPath = resultPath!!,
                 expectedSaveSize = expectedSaveSize,
                 video = video!!,
+                theme = theme,
                 controllerBindings = controllerBindings,
                 keyboardBindings = keyboardBindings,
                 rendererOverride = rendererOverride,
@@ -352,6 +362,7 @@ object PlayerProtocol {
             writer.name("scanlines").value(request.video.scanlines)
             writer.name("sharpFilter").value(request.video.sharpFilter)
             writer.endObject()
+            writer.name("theme").value(request.theme.name)
             // v2 optional field: written only when present (absent = player defaults), so a
             // request with no stored bindings stays byte-identical to the v1 layout plus the
             // version bump. Device entries use the sidecar's canonical shape and field order.

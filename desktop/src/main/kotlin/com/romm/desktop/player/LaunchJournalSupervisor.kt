@@ -1,5 +1,6 @@
 package com.romm.desktop.player
 
+import com.romm.androidtv.library.RommTheme
 import com.romm.androidtv.storage.AppPaths
 import java.io.IOException
 import java.nio.channels.FileChannel
@@ -25,6 +26,7 @@ data class PlayerLaunchParams(
     val savePath: Path,
     val expectedSaveSize: Long? = null,
     val video: VideoSettings = VideoSettings(),
+    val theme: RommTheme = RommTheme.RomMulus,
     /** v2 optional: stored controller bindings to apply from the first frame; null = player defaults. */
     val controllerBindings: ControllerBindings? = null,
     /** Optional Linux keyboard bindings to apply from the first frame. */
@@ -352,6 +354,7 @@ class LaunchJournalSupervisor(
             resultPath = resultPath.toString(),
             expectedSaveSize = params.expectedSaveSize,
             video = params.video,
+            theme = params.theme,
             controllerBindings = params.controllerBindings,
             keyboardBindings = params.keyboardBindings,
             rendererOverride = params.rendererOverride,

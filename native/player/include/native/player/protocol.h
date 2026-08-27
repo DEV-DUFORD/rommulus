@@ -77,8 +77,17 @@ enum class RendererOverride {
     SoftwareHw,
 };
 
+enum class PlayerTheme {
+    RomMulus,
+    RomM,
+    Crimson,
+    Mono,
+    Light,
+    Olive,
+};
+
 // Launch request version 2 (LINUX_X64.md section 12.2). Every field except
-// controllerBindings, keyboardBindings, and rendererOverride is required;
+// theme, controllerBindings, keyboardBindings, and rendererOverride is required;
 // contentHash may be the empty string (hash verification is then skipped),
 // expectedSaveSize may be null, and absent optional fields keep player/core
 // defaults.
@@ -99,6 +108,8 @@ struct PlayerRequest {
     // desktop Kotlin side must use Long for this field.
     std::optional<int64_t> expectedSaveSize;
     VideoSettings video;
+    // Optional for compatibility with existing journals; absent means RomMulus.
+    PlayerTheme theme = PlayerTheme::RomMulus;
     // v2: stored controller bindings to apply from the first frame (see
     // ControllerBindings below). Absent = the player keeps its defaults.
     std::optional<ControllerBindings> controllerBindings;

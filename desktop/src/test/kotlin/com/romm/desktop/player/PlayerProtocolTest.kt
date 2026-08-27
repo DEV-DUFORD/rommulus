@@ -1,5 +1,6 @@
 package com.romm.desktop.player
 
+import com.romm.androidtv.library.RommTheme
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.description.TextDescription
 import org.junit.jupiter.api.Test
@@ -92,6 +93,22 @@ class PlayerProtocolTest {
         assertThat(
             PlayerProtocol.parseRequest(
                 json.replace("\"software_hw\"", "\"unknown_renderer\""),
+            ).isFailure,
+        ).isTrue()
+    }
+
+    @Test
+    fun `theme round-trips and rejects unknown values`() {
+        RommTheme.entries.forEach { theme ->
+            val original = sampleRequest().copy(theme = theme)
+            val json = PlayerProtocol.serializeRequest(original)
+            assertThat(json).contains("\"theme\": \"${theme.name}\"")
+            assertThat(PlayerProtocol.parseRequest(json).getOrNull()).isEqualTo(original)
+        }
+        val json = PlayerProtocol.serializeRequest(sampleRequest())
+        assertThat(
+            PlayerProtocol.parseRequest(
+                json.replace("\"RomMulus\"", "\"unknown_theme\""),
             ).isFailure,
         ).isTrue()
     }

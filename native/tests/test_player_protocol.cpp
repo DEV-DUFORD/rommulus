@@ -21,6 +21,7 @@ using romm::player::PadAxis;
 using romm::player::PadButton;
 using romm::player::PlayerRequest;
 using romm::player::PlayerResult;
+using romm::player::PlayerTheme;
 using romm::player::exitKindFromString;
 using romm::player::parseRequest;
 using romm::player::parseResult;
@@ -140,6 +141,7 @@ void checkRoundTripRequest(const PlayerRequest& in) {
     CHECK_EQ(out->video.integerScaling, in.video.integerScaling);
     CHECK_EQ(out->video.scanlines, in.video.scanlines);
     CHECK_EQ(out->video.sharpFilter, in.video.sharpFilter);
+    CHECK(out->theme == in.theme);
     CHECK(out->rendererOverride == in.rendererOverride);
 
     // v2 optional field: presence must round-trip, and every device's
@@ -232,6 +234,13 @@ int main() {
 
     // --- Round-trips -------------------------------------------------
     checkRoundTripRequest(sampleRequest());
+    {
+        PlayerRequest themed = sampleRequest();
+        themed.theme = PlayerTheme::Olive;
+        checkRoundTripRequest(themed);
+        CHECK(serializeRequest(themed).find("\"theme\": \"Olive\"") !=
+              std::string::npos);
+    }
     {
         PlayerRequest software = sampleRequest();
         software.rendererOverride = romm::player::RendererOverride::SoftwareHw;

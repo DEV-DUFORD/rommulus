@@ -1152,7 +1152,8 @@ int main(int argc, char* argv[]) {
                     renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
                     input.keyboardBindings(),
                     captureSecondsLeft,
-                    request.coreId.c_str());
+                    request.coreId.c_str(),
+                    request.theme);
             });
         }
         if (session.diagnostics().coreRequestedShutdown.load()) running = false;

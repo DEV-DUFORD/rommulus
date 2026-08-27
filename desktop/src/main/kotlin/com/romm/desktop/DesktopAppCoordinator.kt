@@ -1397,6 +1397,7 @@ class DesktopAppCoordinator(
                 scanlines = settingsAdapter.scanlinesEnabled(),
                 sharpFilter = settingsAdapter.sharpFilterEnabled(),
             ),
+            theme = settingsAdapter.currentTheme.value,
             // Stored controller overrides (ingested from the previous session's sidecar, §11.9):
             // null when nothing is stored — the player then keeps its built-in defaults.
             controllerBindings = loadLaunchControllerBindings(core.coreId),

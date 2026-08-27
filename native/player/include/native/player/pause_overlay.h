@@ -8,6 +8,7 @@
 
 #include "native/player/binding_table.h"
 #include "native/player/keyboard_binding_table.h"
+#include "native/player/protocol.h"
 
 struct SDL_Renderer;
 
@@ -27,7 +28,8 @@ public:
               const BindingTable& secondaryBindings,
               const KeyboardBindingTable& keyboardBindings,
               int captureSecondsLeft,
-              const char* coreId) const;
+              const char* coreId,
+              PlayerTheme theme) const;
 
     // Public only so the translation unit's shared Material-control helpers
     // can use the same cached typeface renderer.

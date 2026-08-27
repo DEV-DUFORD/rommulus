@@ -39,15 +39,60 @@ struct Color {
     Uint8 a = 255;
 };
 
-// Android's default RomMulus palette.
-constexpr Color kBlack{0, 0, 0};
-constexpr Color kNightLo{15, 31, 33};
-constexpr Color kRomm300{165, 200, 207};
-constexpr Color kRomm500{63, 144, 153};
-constexpr Color kRomm600{40, 97, 106};
-constexpr Color kTextPrimary{255, 255, 255};
-constexpr Color kTextSecondary{179, 198, 202};
+// Active app palette. Rendering runs on the player's main thread, but thread-local
+// storage keeps these helpers safe if another renderer is introduced later.
+thread_local Color kNightHi{10, 23, 25};
+thread_local Color kNightLo{15, 31, 33};
+thread_local Color kStageLo{28, 68, 73};
+thread_local Color kInk{16, 36, 39};
+thread_local Color kRomm300{165, 200, 207};
+thread_local Color kRomm400{111, 169, 179};
+thread_local Color kRomm500{63, 144, 153};
+thread_local Color kRomm600{40, 97, 106};
+thread_local Color kTextPrimary{255, 255, 255};
+thread_local Color kTextSecondary{179, 198, 202};
 constexpr Color kDialogScrim{0, 0, 0, 150};
+
+void applyTheme(PlayerTheme theme) {
+    switch (theme) {
+        case PlayerTheme::RomMulus:
+            kNightHi = {10, 23, 25}; kNightLo = {15, 31, 33}; kStageLo = {28, 68, 73};
+            kInk = {16, 36, 39}; kRomm300 = {165, 200, 207}; kRomm400 = {111, 169, 179};
+            kRomm500 = {63, 144, 153}; kRomm600 = {40, 97, 106};
+            kTextPrimary = {255, 255, 255}; kTextSecondary = {179, 198, 202};
+            break;
+        case PlayerTheme::RomM:
+            kNightHi = {13, 17, 23}; kNightLo = {20, 16, 31}; kStageLo = {36, 26, 69};
+            kInk = {32, 26, 51}; kRomm300 = {164, 148, 235}; kRomm400 = {139, 116, 232};
+            kRomm500 = {114, 89, 209}; kRomm600 = {92, 71, 173};
+            kTextPrimary = {255, 255, 255}; kTextSecondary = {182, 176, 198};
+            break;
+        case PlayerTheme::Crimson:
+            kNightHi = {26, 10, 10}; kNightLo = {34, 16, 16}; kStageLo = {74, 28, 28};
+            kInk = {43, 17, 17}; kRomm300 = {227, 154, 154}; kRomm400 = {209, 105, 105};
+            kRomm500 = {178, 58, 58}; kRomm600 = {142, 44, 44};
+            kTextPrimary = {255, 255, 255}; kTextSecondary = {217, 179, 179};
+            break;
+        case PlayerTheme::Mono:
+            kNightHi = {10, 10, 10}; kNightLo = {20, 20, 20}; kStageLo = {46, 46, 46};
+            kInk = {17, 17, 17}; kRomm300 = {189, 189, 189}; kRomm400 = {158, 158, 158};
+            kRomm500 = {117, 117, 117}; kRomm600 = {97, 97, 97};
+            kTextPrimary = {255, 255, 255}; kTextSecondary = {189, 189, 189};
+            break;
+        case PlayerTheme::Light:
+            kNightHi = {244, 246, 248}; kNightLo = {230, 235, 240}; kStageLo = {201, 217, 230};
+            kInk = {15, 36, 52}; kRomm300 = {175, 206, 227}; kRomm400 = {94, 156, 201};
+            kRomm500 = {47, 125, 180}; kRomm600 = {31, 95, 140};
+            kTextPrimary = {26, 39, 51}; kTextSecondary = {90, 107, 122};
+            break;
+        case PlayerTheme::Olive:
+            kNightHi = {15, 16, 10}; kNightLo = {24, 25, 16}; kStageLo = {52, 53, 27};
+            kInk = {30, 30, 16}; kRomm300 = {189, 185, 127}; kRomm400 = {160, 154, 85};
+            kRomm500 = {124, 120, 54}; kRomm600 = {94, 91, 41};
+            kTextPrimary = {255, 255, 255}; kTextSecondary = {184, 184, 154};
+            break;
+    }
+}
 
 void setColor(SDL_Renderer* renderer, Color color) {
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
@@ -319,12 +364,12 @@ void drawSwitch(
     const float w = 48.0f * scale;
     const float h = 28.0f * scale;
     const float padding = 4.0f * scale;
-    const Color track = checked ? kRomm600 : Color{63, 73, 75};
+    const Color track = checked ? kRomm600 : kStageLo;
     fillRoundedRect(renderer, x, y, w, h, h * 0.5f, track);
     const float thumb = h - padding * 2.0f;
     const float thumbX = checked ? x + w - padding - thumb : x + padding;
     fillRoundedRect(renderer, thumbX, y + padding, thumb, thumb, thumb * 0.5f,
-                    checked ? kTextPrimary : Color{125, 139, 142});
+                    checked ? Color{255, 255, 255} : kTextSecondary);
 }
 
 void drawButton(
@@ -340,9 +385,9 @@ void drawButton(
     bool primary = false
 ) {
     const float radius = h * 0.5f;
-    const Color interior = primary ? kRomm500 : kBlack;
+    const Color interior = primary ? kRomm500 : kNightHi;
     const float stroke = (selected ? 3.0f : 1.0f) * scale;
-    const Color border = selected ? kRomm300 : Color{125, 139, 142};
+    const Color border = selected ? kRomm300 : kRomm400;
     if (primary && !selected) {
         fillRoundedRect(renderer, x, y, w, h, radius, interior);
     } else {
@@ -355,10 +400,10 @@ void drawButton(
         y + (h - textSize) * 0.5f - scale,
         label,
         textSize,
-        kTextPrimary.r,
-        kTextPrimary.g,
-        kTextPrimary.b,
-        kTextPrimary.a
+        primary ? 255 : kTextPrimary.r,
+        primary ? 255 : kTextPrimary.g,
+        primary ? 255 : kTextPrimary.b,
+        255
     );
 }
 
@@ -566,7 +611,7 @@ void drawControllerArtwork(
         SDL_RenderTexture(renderer, texture, nullptr, &destination);
         overlay.drawText(
             renderer, x + 20.0f * scale, y + h - 56.0f * scale, focusedControl,
-            18.0f * scale, 255, 255, 255, 255
+            18.0f * scale, kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255
         );
         overlay.drawText(
             renderer, x + 20.0f * scale, y + h - 30.0f * scale, consoleName,
@@ -579,16 +624,16 @@ void drawControllerArtwork(
     const float bodyH = std::min(h * 0.34f, 150.0f * scale);
     const float bodyX = x + (w - bodyW) * 0.5f;
     const float bodyY = y + (h - bodyH) * 0.52f;
-    const Color outline{125, 151, 156};
+    const Color outline = kRomm400;
     strokeRoundedRect(renderer, bodyX, bodyY, bodyW, bodyH, 34.0f * scale,
-                      std::max(2.0f, 3.0f * scale), outline, Color{20, 45, 49});
+                      std::max(2.0f, 3.0f * scale), outline, kInk);
 
     const float handleW = bodyW * 0.28f;
     const float handleH = bodyH * 0.55f;
     fillRoundedRect(renderer, bodyX + bodyW * 0.06f, bodyY + bodyH * 0.68f,
-                    handleW, handleH, handleW * 0.45f, Color{20, 45, 49});
+                    handleW, handleH, handleW * 0.45f, kInk);
     fillRoundedRect(renderer, bodyX + bodyW * 0.66f, bodyY + bodyH * 0.68f,
-                    handleW, handleH, handleW * 0.45f, Color{20, 45, 49});
+                    handleW, handleH, handleW * 0.45f, kInk);
 
     const float dpadX = bodyX + bodyW * 0.25f;
     const float dpadY = bodyY + bodyH * 0.52f;
@@ -665,9 +710,11 @@ void PauseOverlay::draw(
     const BindingTable& secondaryBindings,
     const KeyboardBindingTable& keyboardBindings,
     int captureSecondsLeft,
-    const char* coreId
+    const char* coreId,
+    PlayerTheme theme
 ) const {
     if (renderer == nullptr || !menu.isOpen()) return;
+    applyTheme(theme);
 
     int width = 0;
     int height = 0;
@@ -684,8 +731,7 @@ void PauseOverlay::draw(
     const float scale = std::max(0.12f, std::min(W / 1280.0f, H / 720.0f));
     const auto dp = [scale](float value) { return value * scale; };
 
-    // Android intentionally replaces the frozen game with an opaque black pause screen.
-    fillRect(renderer, 0.0f, 0.0f, W, H, kBlack);
+    fillRect(renderer, 0.0f, 0.0f, W, H, kNightHi);
 
     if (menu.state() == PauseMenuState::kVideoOptions) {
         const float panelW = std::min(dp(540.0f), W - dp(32.0f));
@@ -693,12 +739,12 @@ void PauseOverlay::draw(
         const float x = (W - panelW) * 0.5f;
         const float y = (H - panelH) * 0.5f;
         strokeRoundedRect(renderer, x, y, panelW, panelH, dp(16), std::max(1.0f, dp(1)),
-                          Color{56, 67, 69}, kNightLo);
+                          kStageLo, kNightLo);
 
         const float titleSize = dp(24);
         const char* title = "Video Options";
         drawText(renderer, x + (panelW - textWidth(title, titleSize)) * 0.5f, y + dp(27),
-                 title, titleSize, 255, 255, 255, 255);
+                 title, titleSize, kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
 
         const float rowX = x + dp(28);
         const float rowW = panelW - dp(56);
@@ -711,7 +757,8 @@ void PauseOverlay::draw(
                                   kRomm300, kNightLo);
             }
             drawText(renderer, rowX + dp(18), rowY + dp(13),
-                     PauseMenu::videoOptionLabel(i), dp(16), 255, 255, 255, 255);
+                     PauseMenu::videoOptionLabel(i), dp(16),
+                     kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
             const auto lines = wrapText(videoDescription(i), dp(12), rowW - dp(100));
             float lineY = rowY + dp(39);
             for (const std::string& line : lines) {
@@ -729,7 +776,7 @@ void PauseOverlay::draw(
     }
 
     if (menu.state() == PauseMenuState::kPhysicalBindings) {
-        fillRect(renderer, 0, 0, W, H, Color{10, 23, 25});
+        fillRect(renderer, 0, 0, W, H, kNightHi);
         const char* consoleName = consoleNameForCore(coreId);
         const float marginX = dp(32);
         const float headerY = dp(24);
@@ -737,7 +784,7 @@ void PauseOverlay::draw(
                    scale, false);
         const std::string title = std::string(consoleName) + " Controller";
         drawText(renderer, (W - textWidth(title.c_str(), dp(24))) * 0.5f, headerY + dp(5),
-                 title.c_str(), dp(24), 255, 255, 255, 255);
+                 title.c_str(), dp(24), kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
         const float clearW = dp(142);
         const float resetW = dp(154);
         const float clearX = W - marginX - clearW;
@@ -752,7 +799,7 @@ void PauseOverlay::draw(
         fillRect(renderer, marginX, tabY + dp(35), W - marginX * 2.0f, dp(3), kRomm300);
         const char* playerTab = "Player 1  |  Active";
         drawText(renderer, marginX + dp(18), tabY + dp(10), playerTab, dp(14),
-                 255, 255, 255, 255);
+                 kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
 
         const float contentY = dp(128);
         const float contentH = H - contentY - dp(46);
@@ -779,7 +826,7 @@ void PauseOverlay::draw(
                  "Secondary", dp(12), kTextSecondary.r, kTextSecondary.g,
                  kTextSecondary.b, 255);
         fillRect(renderer, listX, contentY + headerH - dp(2), listW, dp(1),
-                 Color{56, 67, 69});
+                 kStageLo);
 
         const float gap = dp(5);
         constexpr int kVisibleBindingRows = 8;
@@ -798,7 +845,8 @@ void PauseOverlay::draw(
                 contentY + headerH + static_cast<float>(i - firstRow) * (rowH + gap);
             const bool selected = menu.selection() == i;
             drawText(renderer, listX + dp(16), rowY + (rowH - dp(15)) * 0.5f - dp(1),
-                     controlLabelForCoreSlot(coreId, slot), dp(15), 255, 255, 255, 255);
+                     controlLabelForCoreSlot(coreId, slot), dp(15),
+                     kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
 
             const std::string value = bindings.get(slot).display();
             const std::string secondaryValue = secondaryBindings.get(slot).display();
@@ -809,20 +857,21 @@ void PauseOverlay::draw(
             const float secondaryW = listW - labelW - primaryW - dp(6);
             if (selected && menu.bindingColumn() == 0) {
                 strokeRoundedRect(renderer, primaryX, cellY, primaryW - dp(6), cellH,
-                                  dp(8), dp(2), kRomm300, Color{20, 45, 49});
+                                  dp(8), dp(2), kRomm300, kInk);
             } else {
                 strokeRoundedRect(renderer, primaryX, cellY, primaryW - dp(6), cellH,
-                                  dp(8), dp(1), Color{56, 67, 69}, kNightLo);
+                                  dp(8), dp(1), kStageLo, kNightLo);
             }
             if (selected && menu.bindingColumn() == 1) {
                 strokeRoundedRect(renderer, secondaryX, cellY, secondaryW, cellH,
-                                  dp(8), dp(2), kRomm300, Color{20, 45, 49});
+                                  dp(8), dp(2), kRomm300, kInk);
             } else {
                 strokeRoundedRect(renderer, secondaryX, cellY, secondaryW, cellH,
-                                  dp(8), dp(1), Color{56, 67, 69}, kNightLo);
+                                  dp(8), dp(1), kStageLo, kNightLo);
             }
             drawText(renderer, primaryX + dp(12), cellY + (cellH - dp(12)) * 0.5f - dp(1),
-                     value.c_str(), dp(12), 255, 255, 255, 255);
+                     value.c_str(), dp(12),
+                     kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
             drawText(renderer, secondaryX + dp(12), cellY + (cellH - dp(12)) * 0.5f - dp(1),
                      secondaryValue.c_str(), dp(12), kTextSecondary.r, kTextSecondary.g,
                      kTextSecondary.b, 255);
@@ -843,14 +892,14 @@ void PauseOverlay::draw(
     }
 
     if (menu.state() == PauseMenuState::kKeyboardBindings) {
-        fillRect(renderer, 0, 0, W, H, Color{10, 23, 25});
+        fillRect(renderer, 0, 0, W, H, kNightHi);
         const float marginX = dp(48);
         const float headerY = dp(24);
         drawButton(*this, renderer, marginX, headerY, dp(84), dp(42), "Back",
                    scale, false);
         const char* title = "Keyboard Control Settings";
         drawText(renderer, (W - textWidth(title, dp(24))) * 0.5f, headerY + dp(5),
-                 title, dp(24), 255, 255, 255, 255);
+                 title, dp(24), kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
         const float clearW = dp(142);
         const float resetW = dp(154);
         const float clearX = W - marginX - clearW;
@@ -875,7 +924,7 @@ void PauseOverlay::draw(
                  "Secondary", dp(12), kTextSecondary.r, kTextSecondary.g,
                  kTextSecondary.b, 255);
         fillRect(renderer, listX, listY + headerH - dp(2), listW, dp(1),
-                 Color{56, 67, 69});
+                 kStageLo);
 
         constexpr int kVisibleRows = 10;
         const int firstRow = menu.bindingViewportStart(kVisibleRows);
@@ -901,23 +950,25 @@ void PauseOverlay::draw(
             const float secondaryX = primaryX + primaryW + dp(6);
             const float secondaryW = listW - labelW - primaryW - dp(6);
             drawText(renderer, listX + dp(16), rowY + (rowH - dp(15)) * 0.5f - dp(1),
-                     keyboardControlLabel(coreId, target), dp(15), 255, 255, 255, 255);
+                     keyboardControlLabel(coreId, target), dp(15),
+                     kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
             strokeRoundedRect(
                 renderer, primaryX, cellY, primaryW - dp(6), cellH, dp(8),
                 menu.selection() == row && menu.bindingColumn() == 0 ? dp(2) : dp(1),
                 menu.selection() == row && menu.bindingColumn() == 0
-                    ? kRomm300 : Color{56, 67, 69},
+                    ? kRomm300 : kStageLo,
                 menu.selection() == row && menu.bindingColumn() == 0
-                    ? Color{20, 45, 49} : kNightLo);
+                    ? kInk : kNightLo);
             strokeRoundedRect(
                 renderer, secondaryX, cellY, secondaryW, cellH, dp(8),
                 menu.selection() == row && menu.bindingColumn() == 1 ? dp(2) : dp(1),
                 menu.selection() == row && menu.bindingColumn() == 1
-                    ? kRomm300 : Color{56, 67, 69},
+                    ? kRomm300 : kStageLo,
                 menu.selection() == row && menu.bindingColumn() == 1
-                    ? Color{20, 45, 49} : kNightLo);
+                    ? kInk : kNightLo);
             drawText(renderer, primaryX + dp(12), cellY + (cellH - dp(12)) * 0.5f - dp(1),
-                     primary.c_str(), dp(12), 255, 255, 255, 255);
+                     primary.c_str(), dp(12),
+                     kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
             drawText(renderer, secondaryX + dp(12),
                      cellY + (cellH - dp(12)) * 0.5f - dp(1),
                      secondary.c_str(), dp(12), kTextSecondary.r, kTextSecondary.g,
@@ -943,7 +994,7 @@ void PauseOverlay::draw(
                 coreId,
                 coreBindingSlotAt(coreId != nullptr ? coreId : "", menu.selection()));
         drawText(renderer, x + dp(28), y + dp(28), title.c_str(), dp(24),
-                 255, 255, 255, 255);
+                 kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
         drawText(renderer, x + dp(28), y + dp(82), "Press a button or move an axis.", dp(16),
                  kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
         if (captureSecondsLeft >= 0) {
@@ -970,7 +1021,7 @@ void PauseOverlay::draw(
         const std::string title =
             std::string("Map ") + keyboardControlLabel(coreId, target);
         drawText(renderer, x + dp(28), y + dp(28), title.c_str(), dp(24),
-                 255, 255, 255, 255);
+                 kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
         drawText(renderer, x + dp(28), y + dp(82),
                  "Press a keyboard key.", dp(16),
                  kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
@@ -984,7 +1035,8 @@ void PauseOverlay::draw(
     const float columnH = dp(376);
     const float x = (W - columnW) * 0.5f;
     const float y = (H - columnH) * 0.5f;
-    drawText(renderer, x, y, "Paused", dp(24), 255, 255, 255, 255);
+    drawText(renderer, x, y, "Paused", dp(24),
+             kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
     float buttonY = y + dp(52);
     const int mainMenuSelection = menu.state() == PauseMenuState::kQuitConfirm
         ? PauseMenu::kQuitItem
@@ -1004,7 +1056,7 @@ void PauseOverlay::draw(
     const float dy = (H - dialogH) * 0.5f;
     fillRoundedRect(renderer, dx, dy, dialogW, dialogH, dp(28), kNightLo);
     drawText(renderer, dx + dp(28), dy + dp(28), "Quit game?", dp(24),
-             255, 255, 255, 255);
+             kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
     drawText(renderer, dx + dp(28), dy + dp(78), "Are you sure you want to quit?", dp(14),
              kTextSecondary.r, kTextSecondary.g, kTextSecondary.b, 255);
 
