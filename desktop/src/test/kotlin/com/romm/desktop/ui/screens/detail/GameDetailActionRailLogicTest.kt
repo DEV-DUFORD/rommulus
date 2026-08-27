@@ -46,4 +46,45 @@ class GameDetailActionRailLogicTest {
         assertThat(removing.icon).isSameAs(Icons.Filled.Star)
         assertThat(removing.label).isEqualTo("Removing…")
     }
+
+    @Test
+    fun `rail links down to Play only while Play is composed`() {
+        assertThat(
+            shouldLinkRailToPlay(
+                isAuthExpired = false,
+                playEnabled = true,
+                biosReady = true,
+                isOffline = false,
+                isAvailableOffline = false,
+            ),
+        ).isTrue()
+
+        assertThat(
+            shouldLinkRailToPlay(
+                isAuthExpired = false,
+                playEnabled = true,
+                biosReady = false,
+                isOffline = false,
+                isAvailableOffline = false,
+            ),
+        ).isFalse()
+        assertThat(
+            shouldLinkRailToPlay(
+                isAuthExpired = true,
+                playEnabled = true,
+                biosReady = true,
+                isOffline = false,
+                isAvailableOffline = false,
+            ),
+        ).isFalse()
+        assertThat(
+            shouldLinkRailToPlay(
+                isAuthExpired = false,
+                playEnabled = true,
+                biosReady = true,
+                isOffline = true,
+                isAvailableOffline = false,
+            ),
+        ).isFalse()
+    }
 }

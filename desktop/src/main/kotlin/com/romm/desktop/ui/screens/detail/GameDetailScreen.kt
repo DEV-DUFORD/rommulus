@@ -422,6 +422,13 @@ private fun GameDetailContent(
 
         // ── Fixed action rail overlay ────────────────────────────────────
         if (loadedDetail != null) {
+            val linkRailToPlay = shouldLinkRailToPlay(
+                isAuthExpired = isAuthExpired,
+                playEnabled = coordinator.isPlatformPlayable(loadedDetail.platformSlug),
+                biosReady = biosState is RequiredBiosState.Ready,
+                isOffline = !coordinator.serverReachable,
+                isAvailableOffline = coordinator.isRomDownloaded(romId),
+            )
             GameDetailActionRail(
                 favoriteState = uiState.favorite,
                 onFavoriteClick = presenter::onFavoriteSelected,
@@ -430,7 +437,7 @@ private fun GameDetailContent(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(end = 32.dp, top = 24.dp),
-                downFocusRequester = playFocusRequester,
+                downFocusRequester = playFocusRequester.takeIf { linkRailToPlay },
                 favoriteFocusRequester = headerFocusRequester,
             )
         }
@@ -1325,7 +1332,7 @@ private fun GameDetailActionRail(
     onAddClick: () -> Unit,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
-    downFocusRequester: FocusRequester,
+    downFocusRequester: FocusRequester?,
     favoriteFocusRequester: FocusRequester,
 ) {
     val navigator = LocalFocusNavigator.current
@@ -1341,7 +1348,7 @@ private fun GameDetailActionRail(
             modifier = Modifier
                 .focusRequester(favoriteFocusRequester)
                 .focusProperties {
-                    down = downFocusRequester
+                    if (downFocusRequester != null) down = downFocusRequester
                     left = FocusRequester.Cancel
                 }
                 .focusableItem("detail:favorite", navigator, onFavoriteClick),
@@ -1354,7 +1361,7 @@ private fun GameDetailActionRail(
             onClick = onAddClick,
             modifier = Modifier
                 .focusProperties {
-                    down = downFocusRequester
+                    if (downFocusRequester != null) down = downFocusRequester
                 }
                 .focusableItem("detail:add-collection", navigator, onAddClick),
         ) {
@@ -1366,7 +1373,7 @@ private fun GameDetailActionRail(
             onClick = onBackClick,
             modifier = Modifier
                 .focusProperties {
-                    down = downFocusRequester
+                    if (downFocusRequester != null) down = downFocusRequester
                 }
                 .focusableItem("detail:back", navigator, onBackClick),
         ) {
@@ -1376,6 +1383,17 @@ private fun GameDetailActionRail(
         }
     }
 }
+
+internal fun shouldLinkRailToPlay(
+    isAuthExpired: Boolean,
+    playEnabled: Boolean,
+    biosReady: Boolean,
+    isOffline: Boolean,
+    isAvailableOffline: Boolean,
+): Boolean = !isAuthExpired &&
+    playEnabled &&
+    biosReady &&
+    (!isOffline || isAvailableOffline)
 
 /** The favorite rail button's display: icon + label (desktop port of Android's `FavoriteButtonConfig`). */
 data class FavoriteRailUi(

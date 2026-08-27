@@ -29,6 +29,7 @@ import com.romm.androidtv.library.RomQuery
 import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
 import com.romm.desktop.controller.DesktopControllerRouter
 import com.romm.desktop.controller.FocusAction
+import com.romm.desktop.log.DesktopLogger
 import com.romm.desktop.ui.components.RommulusTheme
 import com.romm.desktop.ui.image.LocalDesktopImageLoader
 import com.romm.desktop.ui.navigation.DesktopFocusScope
@@ -56,6 +57,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withContext
+import java.util.logging.Level
 
 /**
  * The Compose Desktop shell (plans/LINUX_X64.md §8.1): owns the app-wide [RommulusTheme],
@@ -163,10 +165,22 @@ fun RommulusDesktopApp(
                     if (activePlayerSessionId != null) return@collect
                     when (action) {
                         is FocusAction.Move -> {
-                            val moved = focusNavigator.moveSpatialFocus(
-                                action.direction.toComposeDirection(),
-                                focusManager::moveFocus,
-                            )
+                            val moved = try {
+                                focusNavigator.moveSpatialFocus(
+                                    action.direction.toComposeDirection(),
+                                    focusManager::moveFocus,
+                                )
+                            } catch (error: IllegalStateException) {
+                                // A target can leave composition between controller polling and
+                                // Compose focus resolution. Keep the input loop alive; the next
+                                // movement will resolve against the current focus tree.
+                                DesktopLogger.get().log(
+                                    Level.WARNING,
+                                    "Controller focus target detached during navigation",
+                                    error,
+                                )
+                                false
+                            }
                             if (!moved && focusNavigator.focusedIndex() < 0) {
                                 focusNavigator.focusFirst()
                             }
