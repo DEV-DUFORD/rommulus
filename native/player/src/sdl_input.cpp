@@ -274,9 +274,11 @@ void SdlInput::poll() {
 }
 
 void SdlInput::configureForCore(const std::string& coreId) {
+    coreId_ = coreId;
     gameCubeBindings_ = coreId == "dolphin";
     playStationBindings_ = coreId == "pcsx_rearmed" || coreId == "lrps2";
     applyCoreBindingDefaults();
+    keyboardBindings_.resetForCore(coreId_);
 }
 
 void SdlInput::applyCoreBindingDefaults() {

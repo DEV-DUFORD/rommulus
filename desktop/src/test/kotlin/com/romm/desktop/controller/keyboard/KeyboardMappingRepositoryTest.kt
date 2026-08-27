@@ -62,4 +62,18 @@ class KeyboardMappingRepositoryTest {
 
         assertEquals(KEYBOARD_TARGETS, parsed.bindings.map { it.target })
     }
+
+    @Test
+    fun `N64 defaults use keyboard directions for the analog stick and console actions`() {
+        val repository = KeyboardMappingRepository(InMemoryControllerBindingStore())
+        val rows = repository.observe("mupen64plus_next").value.associateBy { it.target }
+
+        assertEquals(26, rows.getValue("left_y_negative").primaryScancode)
+        assertEquals(7, rows.getValue("left_x_positive").primaryScancode)
+        assertEquals(null, rows.getValue("dpad_up").primaryScancode)
+        assertEquals(40, rows.getValue("b").primaryScancode)
+        assertEquals(225, rows.getValue("y").primaryScancode)
+        assertEquals(27, rows.getValue("a").primaryScancode)
+        assertEquals(29, rows.getValue("x").primaryScancode)
+    }
 }

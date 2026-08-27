@@ -59,6 +59,18 @@ void testTargetsAndCoreRows() {
     CHECK_EQ(coreKeyboardTargetAt("dolphin", 19), kKeyboardRightYPositive);
     CHECK(std::string(keyboardTargetLabel(kKeyboardLeftXNegative)) == "Left Stick Left");
     CHECK(std::string(keyboardTargetLabel(kKeyboardRightYPositive)) == "Right Stick Down");
+
+    KeyboardBindingTable n64;
+    n64.resetForCore("mupen64plus_next");
+    CHECK((n64.get(kKeyboardLeftXNegative) == KeyboardBinding{4, 80}));
+    CHECK((n64.get(kKeyboardLeftXPositive) == KeyboardBinding{7, 79}));
+    CHECK((n64.get(kKeyboardLeftYNegative) == KeyboardBinding{26, 82}));
+    CHECK((n64.get(kKeyboardLeftYPositive) == KeyboardBinding{22, 81}));
+    CHECK((n64.get(kKeyboardDpadUp) == KeyboardBinding{}));
+    CHECK((n64.get(kKeyboardB) == KeyboardBinding{40, 44}));
+    CHECK((n64.get(kKeyboardY) == KeyboardBinding{225, 229}));
+    CHECK((n64.get(kKeyboardA) == KeyboardBinding{27, std::nullopt}));
+    CHECK((n64.get(kKeyboardX) == KeyboardBinding{29, std::nullopt}));
 }
 
 void testRuntimeSynthesis() {

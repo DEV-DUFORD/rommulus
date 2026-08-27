@@ -115,6 +115,30 @@ inline KeyboardBinding defaultKeyboardBinding(int target) {
     }
 }
 
+inline KeyboardBinding defaultKeyboardBindingForCore(
+    const std::string& coreId, int target) {
+    if (coreId != "mupen64plus_next") return defaultKeyboardBinding(target);
+    switch (target) {
+        // N64 games primarily use the analog stick. Give both WASD and the
+        // arrow keys to it instead of the console's rarely-used D-pad.
+        case kKeyboardDpadUp:
+        case kKeyboardDpadDown:
+        case kKeyboardDpadLeft:
+        case kKeyboardDpadRight:
+            return {};
+        case kKeyboardLeftXNegative: return {4, 80};   // A, Left
+        case kKeyboardLeftXPositive: return {7, 79};   // D, Right
+        case kKeyboardLeftYNegative: return {26, 82};  // W, Up
+        case kKeyboardLeftYPositive: return {22, 81};  // S, Down
+        // Match console actions rather than raw RetroPad letters.
+        case kKeyboardB: return {40, 44};              // N64 A: Return, Space
+        case kKeyboardY: return {225, 229};            // N64 B: Left/Right Shift
+        case kKeyboardA: return {27, std::nullopt};    // C-Down: X
+        case kKeyboardX: return {29, std::nullopt};    // C-Up: Z
+        default: return defaultKeyboardBinding(target);
+    }
+}
+
 class KeyboardBindingTable {
 public:
     explicit KeyboardBindingTable(bool useDefaults = true) {
@@ -139,6 +163,12 @@ public:
     void reset() {
         for (int target = 0; target < kKeyboardTargetCount; ++target) {
             bindings_[target] = defaultKeyboardBinding(target);
+        }
+    }
+
+    void resetForCore(const std::string& coreId) {
+        for (int target = 0; target < kKeyboardTargetCount; ++target) {
+            bindings_[target] = defaultKeyboardBindingForCore(coreId, target);
         }
     }
 

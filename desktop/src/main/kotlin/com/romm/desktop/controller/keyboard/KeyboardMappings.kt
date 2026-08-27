@@ -48,7 +48,7 @@ class KeyboardMappingRepository(private val store: ControllerBindingStore) {
         if (stored.isEmpty()) return null
         val values = stored.associateBy { it.controlId to it.bindingSlot }
         return KeyboardBindings(KEYBOARD_TARGETS.map { target ->
-            val defaults = defaultScancodes(target)
+            val defaults = defaultScancodes(coreId, target)
             KeyboardBindingEntry(
                 target,
                 effective(values, target, BindingSlot.PRIMARY.index, defaults.first),
@@ -91,7 +91,7 @@ class KeyboardMappingRepository(private val store: ControllerBindingStore) {
         val stored = store.loadForPlayer(coreId, KEYBOARD_PLAYER_INDEX)
             .associateBy { it.controlId to it.bindingSlot }
         return rowsForCore(coreId).map { (target, label) ->
-            val defaults = defaultScancodes(target)
+            val defaults = defaultScancodes(coreId, target)
             KeyboardMappingRow(
                 target = target,
                 label = label,
@@ -163,7 +163,25 @@ fun rowsForCore(coreId: String): List<Pair<String, String>> {
     }.distinctBy { it.first }
 }
 
-private fun defaultScancodes(target: String): Pair<Int?, Int?> = when (target) {
+private fun defaultScancodes(coreId: String, target: String): Pair<Int?, Int?> {
+    if (coreId == "mupen64plus_next") {
+        return when (target) {
+            "dpad_up", "dpad_down", "dpad_left", "dpad_right" -> null to null
+            "left_x_negative" -> 4 to 80
+            "left_x_positive" -> 7 to 79
+            "left_y_negative" -> 26 to 82
+            "left_y_positive" -> 22 to 81
+            "b" -> 40 to 44
+            "y" -> 225 to 229
+            "a" -> 27 to null
+            "x" -> 29 to null
+            else -> genericDefaultScancodes(target)
+        }
+    }
+    return genericDefaultScancodes(target)
+}
+
+private fun genericDefaultScancodes(target: String): Pair<Int?, Int?> = when (target) {
     "dpad_up" -> 26 to 82
     "dpad_down" -> 22 to 81
     "dpad_left" -> 4 to 80

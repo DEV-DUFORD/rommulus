@@ -130,7 +130,7 @@ public:
     void setKeyboardBindings(const KeyboardBindingTable& table) {
         keyboardBindings_ = table;
     }
-    void resetKeyboardBindings() { keyboardBindings_.reset(); }
+    void resetKeyboardBindings() { keyboardBindings_.resetForCore(coreId_); }
     void clearKeyboardBindings() { keyboardBindings_.clear(); }
 
     // Returns the next bindable key-down scancode. Escape is reserved for
@@ -219,6 +219,7 @@ private:
         BindingSource::ofButton(PadButton::kRightStick);
     bool gameCubeBindings_ = false;
     bool playStationBindings_ = false;
+    std::string coreId_;
     KeyboardBindingTable keyboardBindings_{};
 
     // Held physical scancodes. poll() resolves them through the live table,
