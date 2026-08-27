@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.romm.androidtv.library.RommTheme
+import com.romm.desktop.ui.components.DesktopScaledDialogContent
+import com.romm.desktop.ui.components.LocalDesktopUiScale
 import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.RommulusTheme
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
@@ -69,6 +71,7 @@ fun SaveQuarantineDialog(
     onDismiss: () -> Unit,
 ) {
     val acknowledgeFocusRequester = remember { FocusRequester() }
+    val uiScale = LocalDesktopUiScale.current
 
     RommulusTheme(theme = theme) {
         val colors = LocalRommulusColors.current
@@ -77,6 +80,7 @@ fun SaveQuarantineDialog(
             onDismissRequest = onDismiss,
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         ) {
+            DesktopScaledDialogContent(scale = uiScale) {
             val dialogFocusManager = LocalFocusManager.current
             val focusOverrideOwner = remember { Any() }
             DisposableEffect(navigator, dialogFocusManager, focusOverrideOwner) {
@@ -193,6 +197,7 @@ fun SaveQuarantineDialog(
                         onClick = onDismiss,
                         modifier = Modifier.focusRequester(acknowledgeFocusRequester),
                     )
+                }
                 }
             }
         }

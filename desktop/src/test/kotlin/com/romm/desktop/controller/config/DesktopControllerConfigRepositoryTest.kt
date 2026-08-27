@@ -157,6 +157,31 @@ class DesktopControllerConfigRepositoryTest {
     }
 
     @Test
+    fun `default pause chord is retained when only core controls are stored`() = runTest {
+        val n64CoreId = "mupen64plus_next"
+        repo.setBinding(
+            n64CoreId,
+            0,
+            CoreControlId.BUTTON_A,
+            PhysicalBinding.Key(NeutralKey.BUTTON_A.platformCode),
+        )
+
+        val pauseRecords = repo.effectivePauseMenuRecords(n64CoreId, 0)
+        val launch = RetroPadControlMapping.toLaunchBindings(
+            repo.effectiveLaunchRecords(n64CoreId, 0),
+            pauseRecords,
+        )
+
+        assertThat(pauseRecords).allSatisfy {
+            assertThat(it.bindingType).isEqualTo(RetroPadControlMapping.TYPE_KEY)
+        }
+        assertThat(launch!!.pauseMenuBindings).containsExactly(
+            PlayerSlotBinding("primary", PlayerBindingType.BUTTON, button = "left_stick"),
+            PlayerSlotBinding("secondary", PlayerBindingType.BUTTON, button = "right_stick"),
+        )
+    }
+
+    @Test
     fun `N64 RetroPad slots resolve to console control ids`() {
         assertThat(RetroPadControlMapping.coreControlIdForSlot("mupen64plus_next", "b"))
             .isEqualTo(CoreControlId.BUTTON_A)

@@ -45,7 +45,9 @@ import com.romm.androidtv.library.RommTheme
 import com.romm.androidtv.library.SettingsLoginState
 import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.Screen
+import com.romm.desktop.ui.components.DesktopScaledDialogContent
 import com.romm.desktop.ui.components.DesktopTextField
+import com.romm.desktop.ui.components.LocalDesktopUiScale
 import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.RommDesktopPalette
 import com.romm.desktop.ui.components.RommulusTheme
@@ -733,6 +735,7 @@ private fun ThemePickerDialog(
     onDismiss: () -> Unit,
 ) {
     val firstFocusRequester = remember { FocusRequester() }
+    val uiScale = LocalDesktopUiScale.current
 
     // The dialog is a separate desktop window — provide the palette explicitly (nesting
     // RommulusTheme is harmless, same rationale as OnboardingScreen).
@@ -743,6 +746,7 @@ private fun ThemePickerDialog(
             onDismissRequest = onDismiss,
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         ) {
+            DesktopScaledDialogContent(scale = uiScale) {
             val dialogFocusManager = LocalFocusManager.current
             val focusOverrideOwner = remember { Any() }
             DisposableEffect(navigator, dialogFocusManager, focusOverrideOwner) {
@@ -803,6 +807,7 @@ private fun ThemePickerDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                 )
+            }
             }
         }
     }

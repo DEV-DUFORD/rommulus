@@ -41,6 +41,8 @@ import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.controller.keyboard.KeyboardMappingRow
 import com.romm.desktop.controller.keyboard.keyboardKeyFor
 import com.romm.desktop.controller.keyboard.keyboardKeyLabel
+import com.romm.desktop.ui.components.DesktopScaledDialogContent
+import com.romm.desktop.ui.components.LocalDesktopUiScale
 import com.romm.desktop.ui.components.LocalRommulusColors
 
 private data class KeyboardCapture(val target: String, val slot: BindingSlot, val label: String)
@@ -56,6 +58,7 @@ fun KeyboardConfigScreen(
     val rows by repository.observe(coreId).collectAsState()
     var capture by remember { mutableStateOf<KeyboardCapture?>(null) }
     val colors = LocalRommulusColors.current
+    val uiScale = LocalDesktopUiScale.current
     LaunchedEffect(capture) {
         onCaptureActiveChanged(capture != null)
     }
@@ -134,11 +137,12 @@ fun KeyboardConfigScreen(
     capture?.let { pending ->
         DialogWindow(
             onCloseRequest = { capture = null },
-            state = rememberDialogState(size = DpSize(480.dp, 220.dp)),
+            state = rememberDialogState(size = DpSize(480.dp * uiScale, 220.dp * uiScale)),
             title = "Map ${pending.label}",
             resizable = false,
             onPreviewKeyEvent = captureKeyEvent,
         ) {
+            DesktopScaledDialogContent(scale = uiScale) {
             Surface(color = colors.nightLo, modifier = Modifier.fillMaxSize()) {
                 Column(
                     Modifier.padding(28.dp),
@@ -159,6 +163,7 @@ fun KeyboardConfigScreen(
                     ) {
                         Text("Cancel")
                     }
+                }
                 }
             }
         }

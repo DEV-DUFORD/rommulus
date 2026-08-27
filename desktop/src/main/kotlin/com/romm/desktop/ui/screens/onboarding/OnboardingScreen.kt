@@ -112,58 +112,58 @@ fun OnboardingScreen(
 
     // Theming is owned by the shell (RommulusDesktopApp wraps the whole app in RommulusTheme).
     Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            LocalRommulusColors.current.stageHi,
-                            LocalRommulusColors.current.stageLo,
-                        ),
-                        start = Offset.Zero,
-                        end = Offset(1400f, 1400f),
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        LocalRommulusColors.current.stageHi,
+                        LocalRommulusColors.current.stageLo,
                     ),
-                )
-                .keyboardShortcuts(
-                    onBack = {
-                        if (state.step == OnboardingStep.WELCOME) {
-                            // Root of the flow: exit, mirroring Android's "host finishes itself".
-                            coordinator.exitRequested = true
-                        } else {
-                            presenter.onBack()
-                        }
-                    },
-                    onSearch = { /* no search during onboarding */ },
-                    onQuit = { coordinator.exitRequested = true },
+                    start = Offset.Zero,
+                    end = Offset(1400f, 1400f),
                 ),
-            contentAlignment = Alignment.Center,
+            )
+            .keyboardShortcuts(
+                onBack = {
+                    if (state.step == OnboardingStep.WELCOME) {
+                        // Root of the flow: exit, mirroring Android's "host finishes itself".
+                        coordinator.exitRequested = true
+                    } else {
+                        presenter.onBack()
+                    }
+                },
+                onSearch = { /* no search during onboarding */ },
+                onQuit = { coordinator.exitRequested = true },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(if (state.step == OnboardingStep.CREDENTIALS) 960.dp else 640.dp)
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(
-                modifier = Modifier
-                    .width(if (state.step == OnboardingStep.CREDENTIALS) 960.dp else 640.dp)
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                when (state.step) {
-                    OnboardingStep.WELCOME -> WelcomeStep(onContinue = presenter::onContinue)
+            when (state.step) {
+                OnboardingStep.WELCOME -> WelcomeStep(onContinue = presenter::onContinue)
 
-                    OnboardingStep.SERVER -> ServerStep(
-                        state = state,
-                        onServerChanged = presenter::onServerChanged,
-                        onValidateServer = presenter::onValidateServer,
-                    )
+                OnboardingStep.SERVER -> ServerStep(
+                    state = state,
+                    onServerChanged = presenter::onServerChanged,
+                    onValidateServer = presenter::onValidateServer,
+                )
 
-                    OnboardingStep.CREDENTIALS -> CredentialsStep(
-                        state = state,
-                        onUsernameChanged = presenter::onUsernameChanged,
-                        onPasswordChanged = presenter::onPasswordChanged,
-                        onLogin = presenter::onLogin,
-                        onRemoveOldestDeviceAndRetry = presenter::onRemoveOldestDeviceAndRetry,
-                        onRetryQrLogin = presenter::onRetryQrLogin,
-                    )
-                }
+                OnboardingStep.CREDENTIALS -> CredentialsStep(
+                    state = state,
+                    onUsernameChanged = presenter::onUsernameChanged,
+                    onPasswordChanged = presenter::onPasswordChanged,
+                    onLogin = presenter::onLogin,
+                    onRemoveOldestDeviceAndRetry = presenter::onRemoveOldestDeviceAndRetry,
+                    onRetryQrLogin = presenter::onRetryQrLogin,
+                )
             }
         }
+    }
 }
 
 // --------------------------------------------------------------------------- WELCOME

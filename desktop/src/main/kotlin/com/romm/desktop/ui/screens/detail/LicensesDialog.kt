@@ -39,6 +39,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.romm.androidtv.library.LicenseNotice
 import com.romm.desktop.library.DesktopLicensesLoader
+import com.romm.desktop.ui.components.DesktopScaledDialogContent
+import com.romm.desktop.ui.components.LocalDesktopUiScale
 import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.LocalRommulusTheme
 import com.romm.desktop.ui.components.LoadingIndicator
@@ -71,6 +73,7 @@ fun LicensesDialog(
     // Desktop dialogs are separate compositions: locals do not propagate into the dialog
     // window, so the theme value is re-applied explicitly below.
     val theme = LocalRommulusTheme.current
+    val uiScale = LocalDesktopUiScale.current
     val notices by produceState<List<LicenseNotice>?>(initialValue = null) {
         value = withContext(Dispatchers.IO) { DesktopLicensesLoader.load() }
     }
@@ -83,7 +86,8 @@ fun LicensesDialog(
             usePlatformDefaultWidth = false,
         ),
     ) {
-        RommulusTheme(theme = theme) {
+        DesktopScaledDialogContent(scale = uiScale) {
+            RommulusTheme(theme = theme) {
         val dialogFocusManager = LocalFocusManager.current
         val focusOverrideOwner = remember { Any() }
         DisposableEffect(navigator, dialogFocusManager, focusOverrideOwner, onDismiss) {
@@ -157,6 +161,7 @@ fun LicensesDialog(
                 }
             }
         }
+            }
         }
     }
 }

@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -46,6 +47,7 @@
 #include "native/player/keyboard_binding_sidecar.h"
 #include "native/player/pause_menu.h"
 #include "native/player/pause_overlay.h"
+#include "native/player/presentation_dirty_state.h"
 #include "native/player/protocol.h"
 #include "native/player/save_metadata.h"
 #include "native/player/sdl_audio_sink.h"
@@ -78,6 +80,78 @@ void signalHandler(int) { g_signal_flag.store(true, std::memory_order_relaxed); 
 // result is committed before teardown starts, so this process-level timeout
 // can terminate safely without leaving the desktop supervisor waiting.
 void teardownTimeoutHandler(int) { ::_exit(0); }
+
+#ifndef ROMM_STEAM_DECK_PLAYER
+// Rasterizes PauseOverlay off-window into RGBA8888 pixels for hardware-
+// rendering cores (mupen64plus_next/dolphin/lrps2) on normal Linux.
+//
+// A hardware-rendering core's SDL_Window is SDL_WINDOW_OPENGL and its sole
+// GL context/swap owner is SdlHardwareContext; no SDL_Renderer may ever
+// target that window (creating or destroying one there has been observed to
+// invalidate the core's EGL/GL context). SDL_CreateSoftwareRenderer instead
+// draws PauseOverlay into a plain SDL_Surface that owns no window, and the
+// resulting pixels are handed to SdlHardwareContext::setOverlayFrame(),
+// which composites them over the retained game framebuffer the next time
+// its own swapBuffers() runs on the emulation thread.
+class HardwareOverlayRaster {
+public:
+    ~HardwareOverlayRaster() { reset(); }
+
+    // Rasterizes `draw` at outputWidth x outputHeight and stages the result
+    // on `context`. No-op (leaving whatever was previously staged) if the
+    // surface/renderer cannot be (re)allocated at the requested size.
+    void repaint(romm::player::SdlHardwareContext& context, int outputWidth, int outputHeight,
+                 const std::function<void(SDL_Renderer*)>& draw) {
+        if (outputWidth <= 0 || outputHeight <= 0) return;
+        if (surface_ == nullptr || width_ != outputWidth || height_ != outputHeight) {
+            reset();
+            surface_ = SDL_CreateSurface(outputWidth, outputHeight, SDL_PIXELFORMAT_RGBA32);
+            if (surface_ == nullptr) return;
+            renderer_ = SDL_CreateSoftwareRenderer(surface_);
+            if (renderer_ == nullptr) {
+                SDL_DestroySurface(surface_);
+                surface_ = nullptr;
+                return;
+            }
+            width_ = outputWidth;
+            height_ = outputHeight;
+        }
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+        SDL_RenderClear(renderer_);
+        draw(renderer_);
+        SDL_RenderPresent(renderer_);
+        // The overlay fills the whole surface opaquely, so a straight
+        // row-by-row copy (honoring the surface's pitch) is all
+        // SdlHardwareContext needs to upload the frame to its GL texture.
+        if (SDL_LockSurface(surface_)) {
+            context.setOverlayFrame(
+                surface_->pixels, static_cast<unsigned>(surface_->w),
+                static_cast<unsigned>(surface_->h), static_cast<size_t>(surface_->pitch));
+            SDL_UnlockSurface(surface_);
+        }
+    }
+
+    void reset() {
+        if (renderer_ != nullptr) {
+            romm::player::PauseOverlay::releaseRendererResources(renderer_);
+            SDL_DestroyRenderer(renderer_);
+            renderer_ = nullptr;
+        }
+        if (surface_ != nullptr) {
+            SDL_DestroySurface(surface_);
+            surface_ = nullptr;
+        }
+        width_ = 0;
+        height_ = 0;
+    }
+
+private:
+    SDL_Surface* surface_ = nullptr;
+    SDL_Renderer* renderer_ = nullptr;
+    int width_ = 0;
+    int height_ = 0;
+};
+#endif  // !ROMM_STEAM_DECK_PLAYER
 
 // Identity control lists for BindingCaptureCoordinator::sample(): the level
 // arrays in SdlInput::CapturePortSample are indexed by PadButton/PadAxis
@@ -519,24 +593,48 @@ int main(int argc, char* argv[]) {
     videoSink->setSharpFilter(request.video.sharpFilter);
     videoSink->setFullscreen(request.video.fullscreen);
     std::string hardwareRenderSize;
+#ifndef ROMM_STEAM_DECK_PLAYER
+    // Concrete pointer to the hardware render context this player owns (see
+    // sdl_hardware_context.h): the pause overlay is rasterized off-window
+    // and handed to it directly (main loop, below) — a clean typed seam
+    // that avoids widening the platform-neutral romm::gl::HardwareContext
+    // interface for a Linux-desktop-only feature. Stays null for
+    // software-rendering cores AND for useSteamDeckHardwarePath (see
+    // assignment below): the new raster+composite overlay path is strictly
+    // scoped to useHardwareRendering && !useSteamDeckHardwarePath, so every
+    // `hardwareContext != nullptr` check below is sufficient on its own to
+    // keep the Steam Deck's existing attach/detach renderer flow untouched.
+    romm::player::SdlHardwareContext* hardwareContext = nullptr;
+#endif
     if (useHardwareRendering) {
         const bool useOffscreenPresentation = !useSteamDeckHardwarePath;
-        if (useOffscreenPresentation) {
+        if (useOffscreenPresentation && request.coreId == "mupen64plus_next") {
             int outputWidth = 0;
             int outputHeight = 0;
             SDL_GetWindowSizeInPixels(window, &outputWidth, &outputHeight);
-            if (request.coreId == "mupen64plus_next") {
-                const auto renderSize =
-                    romm::player::n64RenderSizeForOutput(outputWidth, outputHeight);
-                hardwareRenderSize =
-                    std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
-            }
-            videoSink->attachWindow(
-                reinterpret_cast<romm::video::NativeWindowHandle>(window));
+            const auto renderSize =
+                romm::player::n64RenderSizeForOutput(outputWidth, outputHeight);
+            hardwareRenderSize =
+                std::to_string(renderSize.first) + "x" + std::to_string(renderSize.second);
         }
-
-        romm::gl::setContext(std::make_unique<romm::player::SdlHardwareContext>(
-            window, useOffscreenPresentation));
+        // No SDL_Renderer is ever created for this window: SdlVideoSink stays
+        // detached for hardware-rendering cores (its window/pause-overlay
+        // behavior is exclusively for software cores). The hardware core's
+        // sole GL context/swap owner is SdlHardwareContext below; the pause
+        // overlay is composited into it instead (see HardwareOverlayRaster
+        // in the main loop).
+        auto ownedHardwareContext = std::make_unique<romm::player::SdlHardwareContext>(
+            window, useOffscreenPresentation);
+#ifndef ROMM_STEAM_DECK_PLAYER
+        // Strictly scoped to normal Linux offscreen presentation: on the
+        // Steam Deck fallback (useSteamDeckHardwarePath true — normally
+        // unreachable in this binary, see openPause() below) hardwareContext
+        // stays null, so the raster+composite overlay path is never taken
+        // and the existing release-context / attach-detach-renderer flow is
+        // used unmodified.
+        if (!useSteamDeckHardwarePath) hardwareContext = ownedHardwareContext.get();
+#endif
+        romm::gl::setContext(std::move(ownedHardwareContext));
         romm::gl::context().setScanlines(
             !useSteamDeckHardwarePath && request.video.scanlines);
         romm::gl::context().setIntegerScaling(request.video.integerScaling);
@@ -562,6 +660,13 @@ int main(int argc, char* argv[]) {
     // 8. Load and start the core.
     romm::EmulationSession session;
 #ifndef ROMM_STEAM_DECK_PLAYER
+    // Only the isolated Steam Deck player's direct-framebuffer path releases
+    // the render context while paused (its window may be reused by the
+    // deck's own presentation between pause/resume). Normal Linux instead
+    // keeps the context bound and re-presents the retained hardware
+    // framebuffer plus the pause overlay every paused frame (see
+    // EmulationSession::runLoop()) — releasing/reacquiring it here caused
+    // resume to fail with EGL_BAD_CONTEXT.
     session.setReleaseHardwareContextWhenPaused(useSteamDeckHardwarePath);
 #endif
     // GLideN64 runs the N64 RDP on the GPU; HLE avoids the much heavier cxd4
@@ -808,6 +913,25 @@ int main(int argc, char* argv[]) {
     pauseMenu.setVideoToggles(request.video.scanlines, request.video.integerScaling,
                               request.video.sharpFilter);
 
+#ifndef ROMM_STEAM_DECK_PLAYER
+    // Off-window rasterization of the pause overlay for hardware-rendering
+    // cores (see HardwareOverlayRaster above). hardwareOverlayDirty mirrors
+    // videoSink's own presentation-dirty gate so a repaint only re-rasterizes
+    // (and re-uploads to the GPU) when the menu state, capture countdown, or
+    // window actually changed — see requestRepaint() below.
+    HardwareOverlayRaster hardwareOverlayRaster;
+    romm::player::PresentationDirtyState hardwareOverlayDirty;
+#endif
+    // Marks both presentation paths dirty: videoSink's own repaint gate
+    // (software cores, plus the coordinate space it retains even when
+    // undrawn) and the hardware-core overlay raster above.
+    const auto requestRepaint = [&]() {
+        videoSink->requestRepaint();
+#ifndef ROMM_STEAM_DECK_PLAYER
+        hardwareOverlayDirty.request();
+#endif
+    };
+
     // Binding editor (Physical Controller Settings): the capture coordinator
     // owns gamepad input while the menu is in kBindingCapture; the devices
     // eligible for the current capture are the ports that had pads when it
@@ -819,12 +943,18 @@ int main(int argc, char* argv[]) {
 
     // Executes one pause-menu effect on the session (main thread).
     auto handlePauseEffect = [&](romm::player::PauseMenuEffect effect) {
-        videoSink->requestRepaint();
+        requestRepaint();
         switch (effect) {
             case romm::player::PauseMenuEffect::kResume:
                 // The menu closed via Resume (or cancel): unfreeze the core.
 #ifndef ROMM_STEAM_DECK_PLAYER
                 if (useSteamDeckHardwarePath) videoSink->detachWindow();
+                // Normal Linux offscreen path only (hardwareContext is null
+                // for useSteamDeckHardwarePath, see its declaration above):
+                // disable GL compositing immediately so gameplay presentation
+                // returns on the very next swapBuffers() rather than racing
+                // the main loop's next iteration.
+                if (hardwareContext != nullptr) hardwareContext->clearOverlay();
 #endif
                 session.setPaused(false);
                 break;
@@ -833,6 +963,7 @@ int main(int argc, char* argv[]) {
                 // which checkpoints and reports exitKind=completed.
 #ifndef ROMM_STEAM_DECK_PLAYER
                 if (useSteamDeckHardwarePath) videoSink->detachWindow();
+                if (hardwareContext != nullptr) hardwareContext->clearOverlay();
 #endif
                 running = false;
                 break;
@@ -922,9 +1053,17 @@ int main(int argc, char* argv[]) {
         input.reset();
         session.setPaused(true);
         pauseMenu.open();
-        videoSink->requestRepaint();
+        requestRepaint();
         takeCheckpoint(session, request);
 #ifndef ROMM_STEAM_DECK_PLAYER
+        // Only the Steam Deck direct-framebuffer path releases the hardware
+        // render context on pause (see setReleaseHardwareContextWhenPaused()
+        // above); normal Linux keeps it bound and composites the overlay
+        // into it instead (main loop, below), so there is nothing to wait
+        // for here. This branch is a defensive fallback for the (normally
+        // unreachable — the player re-execs into rommulus-player-deck
+        // before this point) case where useSteamDeckHardwarePath is true in
+        // this binary.
         if (useSteamDeckHardwarePath) {
             const auto deadline =
                 std::chrono::steady_clock::now() + std::chrono::seconds(1);
@@ -938,7 +1077,7 @@ int main(int argc, char* argv[]) {
             } else {
                 std::fprintf(
                     stderr,
-                    "error: timed out waiting for the N64 render context to pause\n");
+                    "error: timed out waiting for the hardware render context to pause\n");
             }
         }
 #endif
@@ -987,7 +1126,7 @@ int main(int argc, char* argv[]) {
                             persistKeyboardBindings();
                             pauseMenu.exitKeyboardCapture();
                             input.resetMenuEdges();
-                            videoSink->requestRepaint();
+                            requestRepaint();
                         }
                     } else if (pauseMenu.isOpen()) {
                         // The overlay owns keyboard input: arrows navigate,
@@ -1039,7 +1178,7 @@ int main(int argc, char* argv[]) {
                 case SDL_EVENT_WINDOW_EXPOSED:
                 case SDL_EVENT_WINDOW_RESIZED:
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                    videoSink->requestRepaint();
+                    requestRepaint();
                     input.handleEvent(event);
                     break;
                 default:
@@ -1097,7 +1236,7 @@ int main(int argc, char* argv[]) {
                             persistControllerBindings();
                         }
                         pauseMenu.exitCapture();
-                        videoSink->requestRepaint();
+                        requestRepaint();
                         break;
                     }
                     case romm::player::CaptureState::kCleared:
@@ -1111,7 +1250,7 @@ int main(int argc, char* argv[]) {
                         controllerBindingsDirty = true;
                         persistControllerBindings();
                         pauseMenu.exitCapture();
-                        videoSink->requestRepaint();
+                        requestRepaint();
                         break;
                     case romm::player::CaptureState::kCancelled:
                     case romm::player::CaptureState::kTimedOut:
@@ -1119,7 +1258,7 @@ int main(int argc, char* argv[]) {
                         // Quick Back / 15 s timeout / no controller: back to
                         // the slot list, nothing saved.
                         pauseMenu.exitCapture();
-                        videoSink->requestRepaint();
+                        requestRepaint();
                         break;
                     default:
                         break;  // still capturing (or idle)
@@ -1144,17 +1283,44 @@ int main(int argc, char* argv[]) {
             : -1;
         if (captureSecondsLeft != lastCaptureSecondsLeft) {
             lastCaptureSecondsLeft = captureSecondsLeft;
-            videoSink->requestRepaint();
+            requestRepaint();
         }
-        if (!useHardwareRendering || pauseMenu.isOpen()) {
-            videoSink->present([&](SDL_Renderer* renderer) {
-                pauseOverlay.draw(
-                    renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
-                    input.keyboardBindings(),
-                    captureSecondsLeft,
-                    request.coreId.c_str(),
-                    request.theme);
-            });
+        // Draws the current menu/capture state in output-pixel coordinates.
+        // Shared by every presentation path below so software cores, the
+        // Steam Deck fallback, and the hardware-core raster overlay all stay
+        // in sync with the same PauseOverlay/PauseMenu/binding state.
+        const auto drawOverlay = [&](SDL_Renderer* renderer) {
+            pauseOverlay.draw(
+                renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
+                input.keyboardBindings(), captureSecondsLeft, request.coreId.c_str(),
+                request.theme);
+        };
+        if (!useHardwareRendering) {
+            // Software cores: unchanged — SdlVideoSink owns the window's
+            // SDL_Renderer and presents the core frame plus (while paused)
+            // the overlay every loop iteration.
+            videoSink->present(drawOverlay);
+#ifndef ROMM_STEAM_DECK_PLAYER
+        } else if (useSteamDeckHardwarePath) {
+            // Defensive fallback only (see openPause()/handlePauseEffect):
+            // unreachable in this binary in practice, since a real Steam
+            // Deck re-execs into rommulus-player-deck before this point. If
+            // ever reached, the render context was released for pause, so
+            // the reattached window renderer presents the overlay exactly
+            // as it did before this fix.
+            if (pauseMenu.isOpen()) videoSink->present(drawOverlay);
+        } else if (pauseMenu.isOpen() && hardwareContext != nullptr &&
+                   hardwareOverlayDirty.consume()) {
+            // Normal Linux hardware rendering: no SDL_Renderer ever targets
+            // this window. Rasterize the overlay off-window and hand the
+            // RGBA frame to SdlHardwareContext, whose swapBuffers() (driven
+            // by the emulation thread while paused, see runLoop()) composites
+            // it over the retained game framebuffer.
+            int outputWidth = 0;
+            int outputHeight = 0;
+            SDL_GetWindowSizeInPixels(window, &outputWidth, &outputHeight);
+            hardwareOverlayRaster.repaint(*hardwareContext, outputWidth, outputHeight, drawOverlay);
+#endif
         }
         if (session.diagnostics().coreRequestedShutdown.load()) running = false;
         if (g_signal_flag.load()) running = false;  // SIGTERM/SIGINT

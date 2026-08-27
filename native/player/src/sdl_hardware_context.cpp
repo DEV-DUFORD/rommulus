@@ -1,5 +1,7 @@
 #include "native/player/sdl_hardware_context.h"
 
+#include "native/player/overlay_pixels.h"
+
 #include <SDL3/SDL.h>
 #include <GLES3/gl3.h>
 
@@ -258,7 +260,25 @@ bool SdlHardwareContext::swapBuffers() {
             g_diagLastLogFrame = g_diagFrameCount;
         }
     }
-    if (framebuffer_ != 0 && bufferWidth_ > 0 && bufferHeight_ > 0 &&
+    if (overlayEnabled_) {
+        // Pause-menu overlay: opaque and sized to the window's output
+        // pixels, so it is composited alone (no need to also blit the game
+        // FBO underneath). uploadOverlayTextureLocked() is a no-op unless
+        // the main thread staged a new frame via setOverlayFrame().
+        uploadOverlayTextureLocked();
+        if (overlayFramebuffer_ != 0 && overlayWidth_ > 0 && overlayHeight_ > 0 &&
+            outputWidth > 0 && outputHeight > 0) {
+            glDisable(GL_SCISSOR_TEST);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glViewport(0, 0, outputWidth, outputHeight);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, overlayFramebuffer_);
+            glBlitFramebuffer(
+                0, static_cast<GLint>(overlayHeight_),
+                static_cast<GLint>(overlayWidth_), 0,
+                0, 0, outputWidth, outputHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        }
+    } else if (framebuffer_ != 0 && bufferWidth_ > 0 && bufferHeight_ > 0 &&
         outputWidth > 0 && outputHeight > 0) {
         // A core may render only a native-resolution region at the top-left of
         // the offscreen buffer instead of filling it (e.g. lrps2 reports a
@@ -343,7 +363,7 @@ bool SdlHardwareContext::swapBuffers() {
                 kPresentDiagTag, nonBlack, srcW, srcH);
         }
     }
-    if (scanlinesEnabled_.load() && outputWidth > 0 && outputHeight > 0) {
+    if (!overlayEnabled_ && scanlinesEnabled_.load() && outputWidth > 0 && outputHeight > 0) {
         drawScanlinesLocked(outputWidth, outputHeight);
     }
     if (!SDL_GL_SwapWindow(window_)) {
@@ -361,9 +381,14 @@ void SdlHardwareContext::destroyContext() {
     if (context_ != nullptr) {
         if (window_ != nullptr && SDL_GL_MakeCurrent(window_, context_)) {
             destroyFramebufferLocked();
+            destroyOverlayResourcesLocked();
             if (scanlineProgram_ != 0) {
                 glDeleteProgram(scanlineProgram_);
                 scanlineProgram_ = 0;
+            }
+            if (scanlineVertexArray_ != 0) {
+                glDeleteVertexArrays(1, &scanlineVertexArray_);
+                scanlineVertexArray_ = 0;
             }
         }
         if (window_ != nullptr) SDL_GL_MakeCurrent(window_, nullptr);
@@ -373,6 +398,10 @@ void SdlHardwareContext::destroyContext() {
     pendingWindow_ = nullptr;
     windowUpdatePending_ = false;
     surfaceAttached_ = false;
+    overlayEnabled_ = false;
+    overlayDirty_ = false;
+    overlayStaging_.clear();
+    overlayStaging_.shrink_to_fit();
 }
 
 void* SdlHardwareContext::currentContext() const {
@@ -441,8 +470,88 @@ void SdlHardwareContext::destroyFramebufferLocked() {
     colorTexture_ = 0;
 }
 
+void SdlHardwareContext::setOverlayFrame(
+    const void* rgba, unsigned width, unsigned height, size_t pitch) {
+    if (rgba == nullptr || width == 0 || height == 0) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    overlayStaging_.resize(static_cast<size_t>(width) * 4 * height);
+    // Row-by-row copy: `pitch` is the source buffer's stride (e.g. an
+    // SDL_Surface's row alignment) and may exceed width * 4, while
+    // overlayStaging_ is always tightly packed for glTexSubImage2D.
+    copyPackedRgbaRows(overlayStaging_.data(), rgba, width, height, pitch);
+    overlayWidth_ = width;
+    overlayHeight_ = height;
+    overlayEnabled_ = true;
+    overlayDirty_ = true;
+}
+
+void SdlHardwareContext::clearOverlay() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    overlayEnabled_ = false;
+}
+
+bool SdlHardwareContext::createOverlayResourcesLocked() {
+    destroyOverlayResourcesLocked();
+    if (overlayWidth_ == 0 || overlayHeight_ == 0) return false;
+
+    glGenTextures(1, &overlayTexture_);
+    glBindTexture(GL_TEXTURE_2D, overlayTexture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(overlayWidth_),
+        static_cast<GLsizei>(overlayHeight_), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    glGenFramebuffers(1, &overlayFramebuffer_);
+    glBindFramebuffer(GL_FRAMEBUFFER, overlayFramebuffer_);
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, overlayTexture_, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        romm::log::sink().log(
+            romm::log::Severity::Error, kTag, "overlay framebuffer is incomplete");
+        destroyOverlayResourcesLocked();
+        return false;
+    }
+    overlayTextureWidth_ = overlayWidth_;
+    overlayTextureHeight_ = overlayHeight_;
+    return true;
+}
+
+void SdlHardwareContext::destroyOverlayResourcesLocked() {
+    if (overlayFramebuffer_ != 0) glDeleteFramebuffers(1, &overlayFramebuffer_);
+    if (overlayTexture_ != 0) glDeleteTextures(1, &overlayTexture_);
+    overlayFramebuffer_ = 0;
+    overlayTexture_ = 0;
+    overlayTextureWidth_ = 0;
+    overlayTextureHeight_ = 0;
+}
+
+void SdlHardwareContext::uploadOverlayTextureLocked() {
+    if (!overlayDirty_) return;
+    if (overlayTexture_ == 0 || overlayTextureWidth_ != overlayWidth_ ||
+        overlayTextureHeight_ != overlayHeight_) {
+        if (!createOverlayResourcesLocked()) {
+            overlayDirty_ = false;
+            return;
+        }
+    }
+    glBindTexture(GL_TEXTURE_2D, overlayTexture_);
+    // The staged buffer is always tightly packed (setOverlayFrame() copies
+    // out of the caller's possibly-wider pitch), so alignment 1 is both
+    // correct and required for arbitrary widths.
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(
+        GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(overlayWidth_),
+        static_cast<GLsizei>(overlayHeight_), GL_RGBA, GL_UNSIGNED_BYTE,
+        overlayStaging_.data());
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    overlayDirty_ = false;
+}
+
 bool SdlHardwareContext::createScanlineProgramLocked() {
-    static constexpr const char* kVertexShader = R"(
+    static constexpr const char* kEsVertexShader = R"(
         #version 300 es
         const vec2 positions[3] = vec2[3](
             vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
@@ -451,7 +560,7 @@ bool SdlHardwareContext::createScanlineProgramLocked() {
             gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
         }
     )";
-    static constexpr const char* kFragmentShader = R"(
+    static constexpr const char* kEsFragmentShader = R"(
         #version 300 es
         precision mediump float;
         uniform float rowHeight;
@@ -461,6 +570,30 @@ bool SdlHardwareContext::createScanlineProgramLocked() {
             color = vec4(0.0, 0.0, 0.0, 0.375);
         }
     )";
+    static constexpr const char* kDesktopVertexShader = R"(
+        #version 330 core
+        const vec2 positions[3] = vec2[3](
+            vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
+        );
+        void main() {
+            gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+        }
+    )";
+    static constexpr const char* kDesktopFragmentShader = R"(
+        #version 330 core
+        uniform float rowHeight;
+        out vec4 color;
+        void main() {
+            if ((int(floor(gl_FragCoord.y / rowHeight)) & 1) == 0) discard;
+            color = vec4(0.0, 0.0, 0.0, 0.375);
+        }
+    )";
+
+    int profile = 0;
+    SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &profile);
+    const bool isEs = profile == SDL_GL_CONTEXT_PROFILE_ES;
+    const char* vertexSource = isEs ? kEsVertexShader : kDesktopVertexShader;
+    const char* fragmentSource = isEs ? kEsFragmentShader : kDesktopFragmentShader;
 
     const auto compile = [](GLenum type, const char* source) {
         const GLuint shader = glCreateShader(type);
@@ -475,8 +608,8 @@ bool SdlHardwareContext::createScanlineProgramLocked() {
         return shader;
     };
 
-    const GLuint vertexShader = compile(GL_VERTEX_SHADER, kVertexShader);
-    const GLuint fragmentShader = compile(GL_FRAGMENT_SHADER, kFragmentShader);
+    const GLuint vertexShader = compile(GL_VERTEX_SHADER, vertexSource);
+    const GLuint fragmentShader = compile(GL_FRAGMENT_SHADER, fragmentSource);
     if (vertexShader == 0 || fragmentShader == 0) {
         if (vertexShader != 0) glDeleteShader(vertexShader);
         if (fragmentShader != 0) glDeleteShader(fragmentShader);
@@ -500,6 +633,7 @@ bool SdlHardwareContext::createScanlineProgramLocked() {
             romm::log::Severity::Warn, kTag, "failed to link scanline shader");
         return false;
     }
+    glGenVertexArrays(1, &scanlineVertexArray_);
     return true;
 }
 
@@ -555,7 +689,7 @@ void SdlHardwareContext::drawScanlinesLocked(int outputWidth, int outputHeight) 
             rowHeight,
             std::max(1.0f, std::floor(outputHeight / 240.0f)));
     }
-    glBindVertexArray(0);
+    glBindVertexArray(scanlineVertexArray_);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     glBindVertexArray(previousVertexArray);

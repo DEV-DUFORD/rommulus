@@ -37,6 +37,10 @@ public:
     void drawText(SDL_Renderer* renderer, float x, float y, const char* text,
                   float size, unsigned r, unsigned g, unsigned b,
                   unsigned a) const;
+
+    // Releases textures cached for a renderer before that renderer is
+    // destroyed or replaced.
+    static void releaseRendererResources(SDL_Renderer* renderer);
 };
 
 }  // namespace romm::player

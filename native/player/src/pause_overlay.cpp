@@ -553,8 +553,16 @@ std::vector<std::filesystem::path> artworkCandidates(const char* fileName) {
     return paths;
 }
 
+using ControllerTextureCache =
+    std::unordered_map<SDL_Renderer*, std::unordered_map<std::string, SDL_Texture*>>;
+
+ControllerTextureCache& controllerTextureCache() {
+    static ControllerTextureCache cache;
+    return cache;
+}
+
 SDL_Texture* controllerTexture(SDL_Renderer* renderer, const char* coreId) {
-    static std::unordered_map<std::string, SDL_Texture*> textures;
+    auto& textures = controllerTextureCache()[renderer];
     const std::string name = artworkNameForCore(coreId);
     if (const auto found = textures.find(name); found != textures.end()) {
         return found->second;
@@ -656,6 +664,16 @@ void drawControllerArtwork(
 }
 
 }  // namespace
+
+void PauseOverlay::releaseRendererResources(SDL_Renderer* renderer) {
+    auto& cache = controllerTextureCache();
+    const auto found = cache.find(renderer);
+    if (found == cache.end()) return;
+    for (const auto& entry : found->second) {
+        SDL_DestroyTexture(entry.second);
+    }
+    cache.erase(found);
+}
 
 void PauseOverlay::drawText(
     SDL_Renderer* renderer,

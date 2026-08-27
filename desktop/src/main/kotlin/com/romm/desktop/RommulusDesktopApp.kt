@@ -30,6 +30,7 @@ import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
 import com.romm.desktop.controller.DesktopControllerRouter
 import com.romm.desktop.controller.FocusAction
 import com.romm.desktop.log.DesktopLogger
+import com.romm.desktop.ui.components.DesktopScaledContent
 import com.romm.desktop.ui.components.RommulusTheme
 import com.romm.desktop.ui.image.LocalDesktopImageLoader
 import com.romm.desktop.ui.navigation.DesktopFocusScope
@@ -140,8 +141,9 @@ fun RommulusDesktopApp(
     }
 
     RommulusTheme(theme = theme) {
-        CompositionLocalProvider(LocalDesktopImageLoader provides coordinator.imageLoader) {
-            DesktopFocusScope(navigator = focusNavigator) {
+        DesktopScaledContent {
+            CompositionLocalProvider(LocalDesktopImageLoader provides coordinator.imageLoader) {
+                DesktopFocusScope(navigator = focusNavigator) {
             val focusManager = LocalFocusManager.current
             val handleBack = {
                 if (!focusNavigator.handleBack()) {
@@ -287,6 +289,7 @@ fun RommulusDesktopApp(
                             // AppMode gate owns that state).
                             Screen.ONBOARDING -> OnboardingScreen(coordinator)
                         }
+                    }
                     }
                     }
                 }

@@ -330,11 +330,40 @@ void EmulationSession::runLoop() {
         }
 
         if (paused_.load()) {
-            if (hwRender && releaseHardwareContextWhenPaused_.load() &&
-                !contextReleasedForPause) {
-                romm::gl::context().unmakeCurrent();
-                contextReleasedForPause = true;
-                hardwareContextReleasedForPause_.store(true);
+            if (hwRender && releaseHardwareContextWhenPaused_.load()) {
+                // Steam Deck path only: the player sets
+                // releaseHardwareContextWhenPaused_ true exclusively for
+                // useSteamDeckHardwarePath (see main.cpp). This behavior is
+                // unchanged by the normal-Linux overlay work below — the
+                // context is released once and left released until resume
+                // reacquires it (below); presentation while paused is
+                // entirely owned by the platform's existing attach/detach
+                // renderer flow, not by this loop.
+                if (!contextReleasedForPause) {
+                    romm::gl::context().unmakeCurrent();
+                    contextReleasedForPause = true;
+                    hardwareContextReleasedForPause_.store(true);
+                }
+            } else if (hwRender && romm::gl::context().currentFramebuffer() != 0) {
+                // Normal Linux only (releaseHardwareContextWhenPaused_ is
+                // false here, i.e. NOT the Steam Deck path): keep the render
+                // context bound while paused instead of releasing/
+                // reacquiring it — doing so around a pause menu was found to
+                // invalidate the context on resume. With the context still
+                // current, re-present the retained offscreen game
+                // framebuffer plus whatever pause-menu overlay the main
+                // thread has staged (see
+                // SdlHardwareContext::setOverlayFrame()) so the window does
+                // not go dark while retro_run() is skipped. Gated on
+                // currentFramebuffer() != 0 (an offscreen FBO exists) so a
+                // platform that presents directly to the default framebuffer
+                // (no retained image; e.g. the isolated Steam Deck player,
+                // which never reaches this branch anyway since it takes the
+                // release branch above) is unaffected and keeps its prior
+                // frozen-front-buffer pause behavior.
+                if (!romm::gl::context().swapBuffers()) {
+                    LOGE("HW render: swapBuffers failed while paused");
+                }
             }
             // Skip retro_run() entirely: the core never advances, so the last
             // presented video frame stays on screen and no new audio samples
