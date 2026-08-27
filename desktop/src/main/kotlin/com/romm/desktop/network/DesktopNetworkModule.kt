@@ -82,6 +82,7 @@ class DesktopNetworkModule(
             tokenStorage = clientTokenStorage,
             identityStore = deviceIdentityStorage,
             deviceName = deviceName,
+            platform = "linux",
             clientVersion = clientVersion,
         )
     }

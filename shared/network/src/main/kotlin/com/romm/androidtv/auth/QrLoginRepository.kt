@@ -17,6 +17,7 @@ class QrLoginRepository(
     private val tokenStorage: ClientTokenStorage,
     private val identityStore: DeviceIdentityStorage,
     private val deviceName: String,
+    private val platform: String,
     private val clientVersion: String,
 ) {
     private val qrClient = client.newBuilder()
@@ -36,7 +37,7 @@ class QrLoginRepository(
                     clientDeviceIdentifier = installationId,
                     name = deviceName.take(255),
                     client = "rommulus",
-                    platform = "android-tv",
+                    platform = platform,
                     clientVersion = clientVersion.take(50),
                     requestedScopes = RommClientTokenScopes.FOREGROUND_NATIVE,
                 ),

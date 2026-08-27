@@ -34,6 +34,7 @@ class QrLoginRepositoryTest {
             tokenStorage = tokenStorage,
             identityStore = AndroidDeviceIdentityStorage(identityStore),
             deviceName = "Google TV Streamer",
+            platform = "android",
             clientVersion = "0.1.0",
         )
     }
@@ -70,6 +71,15 @@ class QrLoginRepositoryTest {
         assertThat(result).isEqualTo(QrLoginPollResult.InsufficientScopes)
         assertThat(sessionStore.current()).isNull()
         assertThat(tokenStorage.tokens).isEmpty()
+    }
+
+    @Test
+    fun `pairing identifies the Android build platform`() = runBlocking {
+        enqueueInit()
+
+        repository.start(origin())
+
+        assertThat(server.takeRequest().body.readUtf8()).contains(""""platform":"android"""")
     }
 
     private fun enqueueInit() {

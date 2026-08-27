@@ -301,6 +301,7 @@ class MainActivity : ComponentActivity() {
             tokenStorage = clientTokenStore,
             identityStore = AndroidDeviceIdentityStorage(deviceIdentityStore),
             deviceName = deviceName,
+            platform = "android",
             clientVersion = BuildConfig.VERSION_NAME,
         )
     }
