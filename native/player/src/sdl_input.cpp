@@ -275,13 +275,20 @@ void SdlInput::poll() {
 
 void SdlInput::configureForCore(const std::string& coreId) {
     gameCubeBindings_ = coreId == "dolphin";
+    playStationBindings_ = coreId == "pcsx_rearmed" || coreId == "lrps2";
     applyCoreBindingDefaults();
 }
 
 void SdlInput::applyCoreBindingDefaults() {
-    if (!gameCubeBindings_) return;
-    for (int slot : {kSlotSelect, kSlotLeftShoulder, kSlotLeftStick, kSlotRightStick}) {
-        bindings_.set(slot, gameCubeAnalogSourceForSlot(slot));
+    if (gameCubeBindings_) {
+        for (int slot : {kSlotSelect, kSlotLeftShoulder, kSlotLeftStick, kSlotRightStick}) {
+            bindings_.set(slot, gameCubeAnalogSourceForSlot(slot));
+        }
+    }
+    if (playStationBindings_) {
+        for (int slot : {kSlotA, kSlotB, kSlotX, kSlotY}) {
+            bindings_.set(slot, playStationSourceForSlot(slot));
+        }
     }
 }
 

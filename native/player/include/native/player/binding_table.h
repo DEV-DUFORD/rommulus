@@ -457,6 +457,19 @@ inline BindingSource defaultSourceForSlot(int slot) {
     }
 }
 
+// PlayStation cores use the conventional libretro semantic slots
+// Cross=B, Circle=A, Triangle=X, Square=Y. Bind those slots by physical
+// position so standard south/east/north/west controllers match the console.
+inline BindingSource playStationSourceForSlot(int slot) {
+    switch (slot) {
+        case kSlotB: return BindingSource::ofButton(PadButton::kSouth);
+        case kSlotA: return BindingSource::ofButton(PadButton::kEast);
+        case kSlotX: return BindingSource::ofButton(PadButton::kNorth);
+        case kSlotY: return BindingSource::ofButton(PadButton::kWest);
+        default: return defaultSourceForSlot(slot);
+    }
+}
+
 // The 16-slot table SdlInput::poll() consults. GameCube reuses four controls
 // it does not expose as full-axis targets; other cores retain the RetroPad defaults.
 class BindingTable {

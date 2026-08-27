@@ -1355,7 +1355,6 @@ private fun GameDetailActionRail(
             modifier = Modifier
                 .focusProperties {
                     down = downFocusRequester
-                    left = FocusRequester.Cancel
                 }
                 .focusableItem("detail:add-collection", navigator, onAddClick),
         ) {
@@ -1368,7 +1367,6 @@ private fun GameDetailActionRail(
             modifier = Modifier
                 .focusProperties {
                     down = downFocusRequester
-                    left = FocusRequester.Cancel
                 }
                 .focusableItem("detail:back", navigator, onBackClick),
         ) {

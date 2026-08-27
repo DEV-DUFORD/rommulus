@@ -288,6 +288,21 @@ class CoreControllerProfilesTest {
     }
 
     @Test
+    fun `PlayStation defaults bind face controls by physical position`() {
+        for (coreId in listOf("pcsx_rearmed", "lrps2")) {
+            val defaults = CoreControllerProfiles.byCoreId(coreId)!!.defaults.getValue(0)
+            assertThat(defaults.get(CoreControlId.BUTTON_B, BindingSlot.PRIMARY))
+                .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_A.platformCode))
+            assertThat(defaults.get(CoreControlId.BUTTON_A, BindingSlot.PRIMARY))
+                .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_B.platformCode))
+            assertThat(defaults.get(CoreControlId.BUTTON_X, BindingSlot.PRIMARY))
+                .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_Y.platformCode))
+            assertThat(defaults.get(CoreControlId.BUTTON_Y, BindingSlot.PRIMARY))
+                .isEqualTo(PhysicalBinding.Key(NeutralKey.BUTTON_X.platformCode))
+        }
+    }
+
+    @Test
     fun `dolphin maps GameCube controls to their RetroPad targets`() {
         val p = CoreControllerProfiles.byCoreId("dolphin")!!
         assertThat(targetFor(p, CoreControlId.BUTTON_A)).isEqualTo(LogicalControl.BUTTON_A)

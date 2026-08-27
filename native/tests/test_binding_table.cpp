@@ -78,6 +78,17 @@ void testDefaultMapping() {
           BindingSource::ofButton(PadButton::kLeftStick));
     CHECK(table.get(romm::player::kSlotRightStick) ==
           BindingSource::ofButton(PadButton::kRightStick));
+
+    CHECK(romm::player::playStationSourceForSlot(romm::player::kSlotB) ==
+          BindingSource::ofButton(PadButton::kSouth));
+    CHECK(romm::player::playStationSourceForSlot(romm::player::kSlotA) ==
+          BindingSource::ofButton(PadButton::kEast));
+    CHECK(romm::player::playStationSourceForSlot(romm::player::kSlotX) ==
+          BindingSource::ofButton(PadButton::kNorth));
+    CHECK(romm::player::playStationSourceForSlot(romm::player::kSlotY) ==
+          BindingSource::ofButton(PadButton::kWest));
+    CHECK(romm::player::playStationSourceForSlot(romm::player::kSlotStart) ==
+          romm::player::defaultSourceForSlot(romm::player::kSlotStart));
 }
 
 void testSetGetReset() {

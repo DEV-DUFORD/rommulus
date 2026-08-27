@@ -49,10 +49,15 @@ class DesktopControllerRouterTest {
         var buttons: Set<NeutralKey> = emptySet(),
         var axes: Map<NeutralAxis, Float> = emptyMap(),
     ) : JInputController {
+        var pollCount: Int = 0
+
         override val signature: DeviceSignature =
             DeviceSignature(descriptor = "fake:$id", vendorId = 0, productId = 0, name = id)
 
-        override fun poll(): JInputControllerState = JInputControllerState(buttons, axes)
+        override fun poll(): JInputControllerState {
+            pollCount++
+            return JInputControllerState(buttons, axes)
+        }
     }
 
     // ---------------------------------------------------------------- slot assignment
@@ -202,6 +207,69 @@ class DesktopControllerRouterTest {
         assertThat(slot.connectionState).isEqualTo(SlotConnectionState.CONNECTED)
         assertThat(slot.preferredSignature?.descriptor).isEqualTo("fake:pad-1")
         assertThat(router.slots.value[1].connectionState).isEqualTo(SlotConnectionState.UNASSIGNED)
+    }
+
+    @Test
+    fun `rescan adopts replacement wrapper with same id`() = runBlocking {
+        val source = FakeJInputSource()
+        val router = DesktopControllerRouter(source, this)
+        val actions = mutableListOf<FocusAction>()
+        val collector = launch { router.focusActions.collect { actions += it } }
+        yield()
+
+        val stale = source.addController(id = "steam-deck")
+        router.tick()
+        val replacement = FakeJInputController(
+            id = "steam-deck",
+            buttons = setOf(NeutralKey.DPAD_UP),
+        )
+        source.controllers[0] = replacement
+
+        router.tick()
+        yield()
+
+        collector.cancel()
+        assertThat(stale.pollCount).isEqualTo(1)
+        assertThat(replacement.pollCount).isEqualTo(1)
+        assertThat(actions).containsExactly(FocusAction.Move(FocusAction.Direction.UP))
+        assertThat(router.slots.value[0].connectionState).isEqualTo(SlotConnectionState.CONNECTED)
+    }
+
+    @Test
+    fun `global rescan refreshes built in and external wrappers without changing slots`() = runBlocking {
+        val source = FakeJInputSource()
+        val router = DesktopControllerRouter(source, this)
+        val actions = mutableListOf<FocusAction>()
+        val collector = launch { router.focusActions.collect { actions += it } }
+        yield()
+
+        val staleBuiltIn = source.addController(id = "steam-deck")
+        val staleExternal = source.addController(id = "external-pad")
+        router.tick()
+
+        val builtInReplacement = FakeJInputController(
+            id = "steam-deck",
+            buttons = setOf(NeutralKey.DPAD_LEFT),
+        )
+        val externalReplacement = FakeJInputController(id = "external-pad")
+        source.controllers[0] = builtInReplacement
+        source.controllers[1] = externalReplacement
+
+        router.tick()
+        yield()
+
+        collector.cancel()
+        assertThat(staleBuiltIn.pollCount).isEqualTo(1)
+        assertThat(staleExternal.pollCount).isEqualTo(1)
+        assertThat(builtInReplacement.pollCount).isEqualTo(1)
+        assertThat(externalReplacement.pollCount).isEqualTo(1)
+        assertThat(actions).containsExactly(FocusAction.Move(FocusAction.Direction.LEFT))
+        assertThat(router.slots.value.map { it.connectionState }).startsWith(
+            SlotConnectionState.CONNECTED,
+            SlotConnectionState.CONNECTED,
+        )
+        assertThat(router.slots.value[0].preferredSignature?.descriptor).isEqualTo("fake:steam-deck")
+        assertThat(router.slots.value[1].preferredSignature?.descriptor).isEqualTo("fake:external-pad")
     }
 
     // ---------------------------------------------------------------- focus actions

@@ -255,6 +255,7 @@ object CoreControllerProfiles {
         consoleSubtitle = null,
         playerCount = 2,
         artwork = artistProvidedArt("controller_outline_ps1"),
+        defaultPrimaryBindings = playStationFaceDefaults(),
         controls = dpad(0.288f, 0.454f, 0.075f) + listOf(
             desc(CoreControlId.BUTTON_B, "Cross", LogicalControl.BUTTON_B, InputKind.BUTTON, circle("button_b", 0.675f, 0.475f, 0.07f)),
             desc(CoreControlId.BUTTON_A, "Circle", LogicalControl.BUTTON_A, InputKind.BUTTON, circle("button_a", 0.731f, 0.419f, 0.07f)),
@@ -325,6 +326,7 @@ object CoreControllerProfiles {
         consoleSubtitle = null,
         playerCount = 2,
         artwork = artistProvidedArt("controller_outline_playstation2"),
+        defaultPrimaryBindings = playStationFaceDefaults(),
         // DualShock 2 keeps the DualShock layout (the core exposes no named input
         // descriptors), so this mirrors the pcsx_rearmed geometry and RetroPad targets.
         controls = dpad(0.288f, 0.454f, 0.075f) + listOf(
@@ -357,6 +359,7 @@ object CoreControllerProfiles {
         consoleSubtitle: String?,
         playerCount: Int,
         artwork: ControllerArtwork,
+        defaultPrimaryBindings: Map<CoreControlId, PhysicalBinding> = emptyMap(),
         controls: List<CoreControlDescriptor>,
     ): CoreControllerProfile {
         val allControls = controls + desc(
@@ -372,7 +375,7 @@ object CoreControllerProfiles {
                 primary = if (descriptor.id.isPauseMenuControl) {
                     PhysicalBinding.Key(NeutralKey.BUTTON_THUMBL.platformCode)
                 } else {
-                    defaultBinding(descriptor.target)
+                    defaultPrimaryBindings[descriptor.id] ?: defaultBinding(descriptor.target)
                 },
                 secondary = if (descriptor.id.isPauseMenuControl) {
                     PhysicalBinding.Key(NeutralKey.BUTTON_THUMBR.platformCode)
@@ -383,6 +386,7 @@ object CoreControllerProfiles {
                 },
             )
         }
+
         val defaults = (0 until playerCount).associateWith { PlayerControllerConfig(bindings) }
         return CoreControllerProfile(
             coreId = coreId,
@@ -394,6 +398,13 @@ object CoreControllerProfiles {
             defaults = defaults,
         )
     }
+
+    private fun playStationFaceDefaults(): Map<CoreControlId, PhysicalBinding> = mapOf(
+        CoreControlId.BUTTON_B to PhysicalBinding.Key(NeutralKey.BUTTON_A.platformCode),
+        CoreControlId.BUTTON_A to PhysicalBinding.Key(NeutralKey.BUTTON_B.platformCode),
+        CoreControlId.BUTTON_X to PhysicalBinding.Key(NeutralKey.BUTTON_Y.platformCode),
+        CoreControlId.BUTTON_Y to PhysicalBinding.Key(NeutralKey.BUTTON_X.platformCode),
+    )
 
     /**
      * Shared D-pad controls with identical geometry across every profile.

@@ -45,8 +45,9 @@ private val BUTTON_TO_NEUTRAL: Map<Component.Identifier.Button, NeutralKey> = ma
     Component.Identifier.Button._9 to NeutralKey.BUTTON_THUMBR,
     Component.Identifier.Button.A to NeutralKey.BUTTON_A,
     Component.Identifier.Button.B to NeutralKey.BUTTON_B,
-    Component.Identifier.Button.X to NeutralKey.BUTTON_X,
-    Component.Identifier.Button.Y to NeutralKey.BUTTON_Y,
+    // Linux evdev exposes BTN_NORTH as JInput X and BTN_WEST as JInput Y.
+    Component.Identifier.Button.X to NeutralKey.BUTTON_Y,
+    Component.Identifier.Button.Y to NeutralKey.BUTTON_X,
     Component.Identifier.Button.SELECT to NeutralKey.BUTTON_SELECT,
     Component.Identifier.Button.START to NeutralKey.BUTTON_START,
     Component.Identifier.Button.LEFT_THUMB to NeutralKey.BUTTON_L1,

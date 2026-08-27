@@ -218,6 +218,7 @@ private:
     BindingSource pauseMenuSecondary_ =
         BindingSource::ofButton(PadButton::kRightStick);
     bool gameCubeBindings_ = false;
+    bool playStationBindings_ = false;
     KeyboardBindingTable keyboardBindings_{};
 
     // Held physical scancodes. poll() resolves them through the live table,

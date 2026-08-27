@@ -209,6 +209,12 @@ class DesktopControllerRouter(
                 )
                 t = TrackedController(controller, slotIndex, GamepadSnapshot.EMPTY)
                 tracked[controller.id] = t
+            } else if (t.controller !== controller) {
+                // A JInput rescan recreates every native controller wrapper, including
+                // devices that never disconnected. Keep the existing player slot but
+                // immediately adopt the live wrapper and reset edge/repeat state.
+                t = TrackedController(controller, t.slotIndex, GamepadSnapshot.EMPTY)
+                tracked[controller.id] = t
             }
 
             val state = controller.poll()

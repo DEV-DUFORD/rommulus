@@ -55,8 +55,9 @@ import androidx.compose.ui.unit.dp
  * - The wrapping [Box] receives D-pad focus and shows a highlighted border while
  *   focused-but-not-editing — this is what callers should attach their
  *   [Modifier.focusRequester] to via [modifier].
- * - Pressing DPAD_CENTER/Enter while the box is focused hands focus to the real
- *   [TextField] and shows the keyboard — this is the only path that opens it.
+ * - Pressing DPAD_CENTER/Enter or a gamepad's A button while the box is focused
+ *   hands focus to the real [TextField] and shows the keyboard — this is the only
+ *   path that opens it.
  * - Back while editing hides the keyboard, exits editing, and returns focus to the
  *   wrapping box, consuming the key so it doesn't also pop the screen/activity back
  *   stack.
@@ -115,7 +116,12 @@ fun ControllerFriendlyTextField(
             .focusable(enabled = !isEditing)
             .onPreviewKeyEvent { event ->
                 if (isEditing || event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                if (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter) {
+                if (
+                    event.key == Key.DirectionCenter ||
+                    event.key == Key.Enter ||
+                    event.key == Key.NumPadEnter ||
+                    event.key == Key.ButtonA
+                ) {
                     isEditing = true
                     true
                 } else {

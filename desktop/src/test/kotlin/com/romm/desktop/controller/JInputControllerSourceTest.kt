@@ -73,6 +73,22 @@ class JInputControllerSourceTest {
     }
 
     @Test
+    fun `Linux named face buttons normalize by physical position`() {
+        val expectations = mapOf(
+            Component.Identifier.Button.A to NeutralKey.BUTTON_A,
+            Component.Identifier.Button.B to NeutralKey.BUTTON_B,
+            Component.Identifier.Button.X to NeutralKey.BUTTON_Y,
+            Component.Identifier.Button.Y to NeutralKey.BUTTON_X,
+        )
+        for ((identifier, expected) in expectations) {
+            val state = LiveJInputController(
+                controller(arrayOf(component(identifier) { 1f })),
+            ).poll()
+            assertThat(state.buttons).containsExactly(expected)
+        }
+    }
+
+    @Test
     fun `slider axes are not mistaken for dpad input`() {
         val slider = component(Component.Identifier.Axis.SLIDER) { 1f }
 
