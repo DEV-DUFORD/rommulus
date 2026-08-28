@@ -102,7 +102,12 @@ bool SdlHardwareContext::createContext() {
     if (useOffscreenPresentation_ && !createFramebufferLocked()) {
         return false;
     }
-    if (!SDL_GL_SetSwapInterval(1)) {
+    // The emulation thread is already paced to the core's reported refresh
+    // rate by FrameScheduler. Blocking here on the display's separate vblank
+    // clock can drift out of phase (notably with Dolphin's fractional rates)
+    // and repeatedly miss a vblank, effectively dropping emulation to half
+    // speed until pause/resume re-anchors the scheduler.
+    if (!SDL_GL_SetSwapInterval(0)) {
         romm::log::sink().log(
                 romm::log::Severity::Warn, kTag,
                 std::string("SDL_GL_SetSwapInterval failed: ") + SDL_GetError());

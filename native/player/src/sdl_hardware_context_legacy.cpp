@@ -67,7 +67,10 @@ bool SdlHardwareContext::createContext() {
         logSdlError("SDL_GL_MakeCurrent");
         return false;
     }
-    if (!SDL_GL_SetSwapInterval(1)) {
+    // FrameScheduler is the sole emulation clock. A second, display-rate
+    // throttle here can drift against Dolphin's fractional frame rate and
+    // make SDL_GL_SwapWindow block for an extra vblank on every frame.
+    if (!SDL_GL_SetSwapInterval(0)) {
         romm::log::sink().log(
             romm::log::Severity::Warn, kTag,
             std::string("SDL_GL_SetSwapInterval failed: ") + SDL_GetError());
