@@ -2,6 +2,7 @@ package com.romm.androidtv.romm.save
 
 import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.config.FakeSharedPreferences
+import com.romm.androidtv.network.AndroidDeviceIdentityStorage
 import com.romm.androidtv.romm.DeviceIdentityStore
 import com.romm.androidtv.romm.DeviceRepositoryImpl
 import com.romm.androidtv.romm.RommApiError
@@ -37,7 +38,7 @@ class RecordPlaySessionTest {
         client = okhttp3.OkHttpClient.Builder().build()
         sessionStore = SessionStore(FakeSharedPreferences())
         sessionStore.save(baseUrl(), "alice")
-        deviceRepository = DeviceRepositoryImpl(client, DeviceIdentityStore(FakeSharedPreferences()))
+        deviceRepository = DeviceRepositoryImpl(client, AndroidDeviceIdentityStorage(DeviceIdentityStore(FakeSharedPreferences())))
         saveReplicaDao = FakeSaveReplicaDao()
         pendingOperationDao = FakePendingOperationDao()
         saveContentStore = FakeSaveContentStore()

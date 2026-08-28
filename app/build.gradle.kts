@@ -90,7 +90,7 @@ android {
 
     externalNativeBuild {
         cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
+            path = file("../native/CMakeLists.txt")
             version = "3.22.1"
         }
     }
@@ -152,6 +152,13 @@ android {
 }
 
 dependencies {
+    // Shared domain (Linux port Phase 1)
+    implementation(project(":shared:domain"))
+    implementation(project(":shared:network"))
+    implementation(project(":shared:storage-api"))
+    // Shared presenters (Linux port Phase 4)
+    implementation(project(":shared:presentation"))
+
     // Compose BOM pins all androidx.compose.* versions
     implementation(platform("androidx.compose:compose-bom:2025.02.00"))
     implementation("androidx.compose.ui:ui")

@@ -183,7 +183,7 @@ void GBIInfo::setHWLSupported(bool _supported)
 
 void GBIInfo::_flushCommands()
 {
-	std::fill(std::begin(cmd), std::end(cmd), GBI_Unknown);
+	std::fill(std::begin(cmd), std::end(cmd), static_cast<GBIFunc>(&GBI_Unknown));
 }
 
 void GBIInfo::_makeCurrent(MicrocodeInfo * _pCurrent)

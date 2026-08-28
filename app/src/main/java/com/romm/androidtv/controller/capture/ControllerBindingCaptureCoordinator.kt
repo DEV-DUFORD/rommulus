@@ -4,6 +4,7 @@ import android.hardware.input.InputManager
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import com.romm.androidtv.controller.adapters.AndroidControllerInputProfiles
 import com.romm.androidtv.controller.config.PhysicalBinding
 import com.romm.androidtv.controller.policy.SourceFilterPolicy
 import com.romm.androidtv.controller.util.AxisNormalizer
@@ -50,20 +51,6 @@ sealed interface ControllerBindingCaptureState {
 }
 
 /**
- * What kind of physical input the caller wants to capture.
- *
- * - [Digital]: a face-button press yields a [PhysicalBinding.Key]; a stick
- *   deflection yields a [PhysicalBinding.AxisDirection] (axis + polarity).
- * - [Analog]: a stick or trigger deflection yields a full
- *   [PhysicalBinding.Axis]. Trigger axes are inherently unidirectional and
- *   are captured as a full `Axis` regardless.
- */
-sealed interface CaptureTarget {
-    data object Digital : CaptureTarget
-    data object Analog : CaptureTarget
-}
-
-/**
  * Captures a raw controller input for a single player port, following the
  * CONTROLLER_SETTINGS.md "Capture dialog" rules:
  *
@@ -103,9 +90,9 @@ class ControllerBindingCaptureCoordinator(
     private var target: CaptureTarget = CaptureTarget.Digital
 
     /**
-     * True once a key press has been observed during a Digital (button-row)
-     * capture. When set, stick deflections are ignored so a button row can never
-     * be silently captured by a stick; the intended key press takes priority.
+     * True once a key press has been observed during a capture target that
+     * accepts keys. When set, axis deflections are ignored so the intended key
+     * press takes priority.
      */
     private var keyPressedDuringCapture = false
 
@@ -213,7 +200,8 @@ class ControllerBindingCaptureCoordinator(
         if (deviceId !in eligibleDeviceIds) return null
         if (!isGamepadSource(sourceProvider(deviceId))) return null
 
-        val ranges = InputDevice.getDevice(deviceId)?.motionRanges.orEmpty()
+        val device = InputDevice.getDevice(deviceId)
+        val ranges = device?.motionRanges.orEmpty()
         for (h in 0 until event.historySize) {
             onAxisSamples(
                 deviceId,
@@ -224,6 +212,8 @@ class ControllerBindingCaptureCoordinator(
                         range.min,
                         range.max,
                         range.flat,
+                        device?.vendorId ?: 0,
+                        device?.productId ?: 0,
                     )
                 },
             )
@@ -237,6 +227,8 @@ class ControllerBindingCaptureCoordinator(
                     range.min,
                     range.max,
                     range.flat,
+                    device?.vendorId ?: 0,
+                    device?.productId ?: 0,
                 )
             },
         )
@@ -279,7 +271,7 @@ class ControllerBindingCaptureCoordinator(
         }
 
         // Capturing phase.
-        if (target == CaptureTarget.Analog || samples.size <= 1) {
+        if (target != CaptureTarget.Digital || samples.size <= 1) {
             for ((axis, value) in samples) {
                 onAxisSample(deviceId, axis, value)
             }
@@ -324,7 +316,7 @@ class ControllerBindingCaptureCoordinator(
                         pressedKeys.add(deviceId to keyCode)
                         // An armed button press indicates the user intends a button;
                         // stick deflections must not capture this button row instead.
-                        if (target == CaptureTarget.Digital) keyPressedDuringCapture = true
+                        if (target.acceptsKeys) keyPressedDuringCapture = true
                     }
                     // A held button keeps us non-neutral; never capture it here.
                     return true
@@ -338,7 +330,7 @@ class ControllerBindingCaptureCoordinator(
         }
 
         // Capturing phase.
-        if (action == KeyEvent.ACTION_DOWN && repeatCount == 0 && target == CaptureTarget.Digital) {
+        if (action == KeyEvent.ACTION_DOWN && repeatCount == 0 && target.acceptsKeys) {
             finishWith(PhysicalBinding.Key(keyCode))
         }
         return true
@@ -371,10 +363,10 @@ class ControllerBindingCaptureCoordinator(
         // the capture, the user intends to press a button, so a stick deflection
         // must not silently capture the row. Stick-to-button binding is still
         // allowed when no key press has been seen (see digitalStickPolarity).
-        if (target == CaptureTarget.Digital && keyPressedDuringCapture) return true
+        if (target.acceptsKeys && keyPressedDuringCapture) return true
 
         val binding = when (target) {
-            CaptureTarget.Analog -> PhysicalBinding.Axis(axis)
+            CaptureTarget.Analog, CaptureTarget.Trigger -> PhysicalBinding.Axis(axis)
             CaptureTarget.Digital -> PhysicalBinding.AxisDirection(
                 axis = axis,
                 polarity = if (value > 0f) 1 else -1
@@ -427,10 +419,20 @@ class ControllerBindingCaptureCoordinator(
         min: Float,
         max: Float,
         flat: Float,
-    ): Float = if (axis in TRIGGER_AXES) {
-        AxisNormalizer.normalizeTrigger(rawValue, min, max, flat)
-    } else {
-        AxisNormalizer.normalize(rawValue, min, max, flat)
+        vendorId: Int,
+        productId: Int,
+    ): Float {
+        val normalized = if (axis in TRIGGER_AXES) {
+            AxisNormalizer.normalizeTrigger(rawValue, min, max, flat)
+        } else {
+            AxisNormalizer.normalize(rawValue, min, max, flat)
+        }
+        return AndroidControllerInputProfiles.applyDeadzone(
+            vendorId = vendorId,
+            productId = productId,
+            axis = axis,
+            normalizedValue = normalized,
+        )
     }
 
     /**
@@ -446,6 +448,9 @@ class ControllerBindingCaptureCoordinator(
         SourceFilterPolicy.isControllerSource(sources) &&
             ((sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
                 (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)
+
+    private val CaptureTarget.acceptsKeys: Boolean
+        get() = this == CaptureTarget.Digital || this == CaptureTarget.Trigger
 
     companion object {
         /** Axis magnitude at or below which the axis counts as "neutral". */

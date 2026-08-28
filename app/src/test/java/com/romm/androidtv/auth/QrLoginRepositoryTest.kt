@@ -1,6 +1,8 @@
 package com.romm.androidtv.auth
 
 import com.romm.androidtv.config.FakeSharedPreferences
+import com.romm.androidtv.network.AndroidDeviceIdentityStorage
+import com.romm.androidtv.network.AndroidSessionStorage
 import com.romm.androidtv.romm.ClientToken
 import com.romm.androidtv.romm.DeviceIdentityStore
 import kotlinx.coroutines.runBlocking
@@ -28,10 +30,11 @@ class QrLoginRepositoryTest {
         identityStore = DeviceIdentityStore(FakeSharedPreferences())
         repository = QrLoginRepository(
             client = OkHttpClient(),
-            sessionStore = sessionStore,
+            sessionStore = AndroidSessionStorage(sessionStore),
             tokenStorage = tokenStorage,
-            identityStore = identityStore,
+            identityStore = AndroidDeviceIdentityStorage(identityStore),
             deviceName = "Google TV Streamer",
+            platform = "android",
             clientVersion = "0.1.0",
         )
     }
@@ -68,6 +71,15 @@ class QrLoginRepositoryTest {
         assertThat(result).isEqualTo(QrLoginPollResult.InsufficientScopes)
         assertThat(sessionStore.current()).isNull()
         assertThat(tokenStorage.tokens).isEmpty()
+    }
+
+    @Test
+    fun `pairing identifies the Android build platform`() = runBlocking {
+        enqueueInit()
+
+        repository.start(origin())
+
+        assertThat(server.takeRequest().body.readUtf8()).contains(""""platform":"android"""")
     }
 
     private fun enqueueInit() {

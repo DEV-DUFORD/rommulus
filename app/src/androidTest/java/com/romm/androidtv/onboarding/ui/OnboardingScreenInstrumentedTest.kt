@@ -148,6 +148,17 @@ class OnboardingScreenInstrumentedTest {
     }
 
     @Test
+    fun serverStep_gamepadAEntersEditMode() {
+        setContent(OnboardingUiState(step = OnboardingStep.SERVER))
+
+        composeTestRule.onNodeWithTag("onboarding_server_field", useUnmergedTree = true)
+            .performKeyInput { pressKey(Key.ButtonA) }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsFocused()
+    }
+
+    @Test
     fun serverStep_backWhileEditingDoesNotFireStepBack() {
         val cb = setContent(OnboardingUiState(step = OnboardingStep.SERVER))
 

@@ -1,0 +1,7 @@
+[submodule "third_party/cores/dolphin"]
+	path = third_party/cores/dolphin
+	url = https://github.com/libretro/dolphin.git
+[submodule "third_party/cores/lrps2"]
+	path = third_party/cores/lrps2
+	url = https://github.com/libretro/ps2.git
+	branch = libretroization

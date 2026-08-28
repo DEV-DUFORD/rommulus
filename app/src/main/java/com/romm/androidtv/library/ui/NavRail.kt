@@ -55,6 +55,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -65,6 +66,7 @@ enum class NavDestination(val label: String) {
     HOME("Home"),
     PLATFORMS("Platforms"),
     COLLECTIONS("Collections"),
+    DOWNLOADED("Downloaded Games"),
     SEARCH("Search"),
     SETTINGS("Settings"),
 }
@@ -73,6 +75,7 @@ private val navIcons: Map<NavDestination, ImageVector> = mapOf(
     NavDestination.HOME to Icons.Filled.Home,
     NavDestination.PLATFORMS to Icons.Filled.Apps,
     NavDestination.COLLECTIONS to Icons.Filled.Collections,
+    NavDestination.DOWNLOADED to Icons.Filled.Download,
     NavDestination.SEARCH to Icons.Filled.Search,
     NavDestination.SETTINGS to Icons.Filled.Settings,
 )

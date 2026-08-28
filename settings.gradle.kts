@@ -16,3 +16,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "romm-android-tv"
 include(":app")
+include(":shared:domain")
+include(":shared:network")
+include(":shared:storage-api")
+include(":shared:presentation")
+include(":shared:ui")
+include(":desktop")

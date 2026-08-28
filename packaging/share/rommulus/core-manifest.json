@@ -1,0 +1,611 @@
+{
+  "schemaVersion": 1,
+  "name": "rommulus-linux-core-manifest",
+  "platform": "linux-x86_64",
+  "spec": "plans/LINUX_X64.md §13.1 (Linux build identity) and §16.1 (initial artifact)",
+  "generatedFrom": {
+    "coreManifest": "shared/domain/src/main/kotlin/com/romm/androidtv/emulation/model/CoreManifest.kt",
+    "linuxSupportManifest": "docs/linux-support-manifest.md"
+  },
+  "notes": [
+    "One entry per Linux-enabled core (14 total: test_core + 13 production cores). 'enabled' and 'linuxGateStatus' are copied from docs/linux-support-manifest.md; provenance fields (upstream, commit, license, systems/extensions/firmware, ABIs) are copied from CoreManifest.kt.",
+    "binaryChecksums records the Android ABI checksums pinned in CoreManifest.kt. The linux-x86_64 entry is null until Phase 14 pins Linux .so checksums; at package time packaging/build-tarball.sh computes and asserts every shipped file against share/rommulus/PACKAGE.sha256.",
+    "Per §13.1, Android checksums and build commands are never overwritten by the Linux build identity."
+  ],
+  "cores": [
+    {
+      "coreId": "test_core",
+      "coreName": "RomM Synthetic Test Core",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — Phase 8 desktop E2E passed on Ubuntu",
+      "gateNotes": "",
+      "coreLibraryFile": "libtest_core.so",
+      "upstreamRepository": "https://github.com/romm-android-tv/rommulus",
+      "commitSha": "0000000000000000000000000000000000000000",
+      "releaseTag": "1",
+      "vendorSourceSubset": ["native/player"],
+      "vendoringDoc": null,
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; synthetic core target defined directly in native/player/CMakeLists.txt (add_library(test_core SHARED ...))",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target test_core in native/player/CMakeLists.txt)",
+      "license": {
+        "summary": "Synthetic test core, project-owned",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": true,
+        "reviewedBy": "romm-android-tv",
+        "reviewedOn": "2026-08-17"
+      },
+      "supportedSystems": ["synthetic"],
+      "supportedExtensions": [],
+      "requiredFirmware": [],
+      "supportedAbis": ["linux-x86_64"],
+      "renderer": "software (synthetic test core — proves process, video, audio, input, crash, and protocol without product content)",
+      "binaryChecksums": {},
+      "notes": "commitSha is a zero placeholder required by the CoreManifest data class for approved entries; releaseTag '1' is the revision pin emitted in ROMM_PLAYER_ALLOWED_CORES (test_core=1)."
+    },
+    {
+      "coreId": "gambatte",
+      "coreName": "gambatte",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 per-core gate completed on the Ubuntu box",
+      "gateNotes": "",
+      "coreLibraryFile": "libgambatte_core.so",
+      "upstreamRepository": "https://github.com/libretro/gambatte-libretro",
+      "commitSha": "96174369b3c30d9fc57c926fa3379c273dc6a9a5",
+      "releaseTag": "",
+      "vendorSourceSubset": [
+        "third_party/cores/gambatte/libretro",
+        "third_party/cores/gambatte/src",
+        "third_party/cores/gambatte/libretro-common"
+      ],
+      "vendoringDoc": "third_party/cores/gambatte/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang, -O2 -DNDEBUG, -std=c++11, upstream link.T version script (exports only the retro_* Libretro ABI)",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target gambatte_core via native/cmake/cores/gambatte-linux.cmake, included by native/player/CMakeLists.txt)",
+      "license": {
+        "summary": "GPL-2.0-only (root COPYING, Sindre Aamås, 'either version 2 of the License'). No non-commercial/no-sale restriction anywhere in the core. Mixed licensing with GPLv3 cc_resampler.c compiled unconditionally per Makefile.common SOURCES_C; FSF v2/v3 incompatibility noted but resolved under the project's separately-.so dynamically-loaded posture (each core loaded as an independently licensed shared object). Owner legal clearance recorded 2026-08-01 in third_party/cores/gambatte/VENDORING.md. Vendored subcomponents: blipper.c (MIT), libretro-common subtree (MIT). Only the files this core's Android libretro build actually compiles are vendored (no network code, no intl scripts, no CI/docs). Scope is cartridge-only: gb/gbc .gb/.gbc; .dmg advertised by upstream but not used by this app. See third_party/cores/gambatte/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-08-01"
+      },
+      "supportedSystems": ["gb", "gbc"],
+      "supportedExtensions": [".gb", ".gbc"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software, RGB565 (XRGB8888 fallback)",
+      "binaryChecksums": {
+        "armeabi-v7a": "c9f9b61b8522fbf73a2121ac8768f4d1f4241333bef1c4eab090f6e8253ddcf4",
+        "arm64-v8a": "b1bc8d892f12c3adccf7c01c8552ed13bbd4de2624b796b14453cd894fb4159e",
+        "linux-x86_64": null
+      },
+      "notes": "Frame geometry 160x144 @ 59.73 fps; audio ~32768 Hz int16 stereo; saves via SRAM (RETRO_MEMORY_SAVE_RAM); valid_extensions gb|gbc|dmg; no no-game boot. ASan/UBSan gate passed on Ubuntu/clang-18 via the -shared-libasan workaround (see docs/linux-support-manifest.md)."
+    },
+    {
+      "coreId": "fceumm",
+      "coreName": "FCEUmm",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libfceumm_core.so",
+      "upstreamRepository": "https://github.com/libretro/libretro-fceumm",
+      "commitSha": "b5e3566515c27dc66c9c20572171673126532e06",
+      "releaseTag": "",
+      "vendorSourceSubset": ["third_party/cores/fceumm/src"],
+      "vendoringDoc": "third_party/cores/fceumm/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/fceumm-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target fceumm_core via native/cmake/cores/fceumm-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-or-later (root Copying file, and every source header: 'either version 2 of the License, or (at your option) any later version'). No non-commercial/no-sale/'personal use only' restriction anywhere in the core. Vendored subcomponents carry their own separate, permissive/copyleft-compatible licenses that add no further restriction: the vendored libretro-common subtree (src/drivers/libretro/libretro-common/) is MIT; Blargg's NTSC filter (src/ntsc/nes_ntsc.c, src/ntsc/license.txt) is LGPL-2.1-or-later; the YM2413 emulator (src/boards/emu2413.c) is covered by the core's own GPL-2.0-or-later. Upstream's bundled zlib is deliberately NOT compiled (HAVE_ZLIB is undefined; the build uses libretro-common's clean-room DEFLATE codec instead). Only the files this core's Android libretro build actually compiles are vendored (no top-level Makefiles, no .github/ CI, no intl/ scripts, no docs). Scope is cartridge-only: nes/famicom .nes and .unf; FDS (.fds, disksys.rom firmware) is excluded. See third_party/cores/fceumm/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-07-31"
+      },
+      "supportedSystems": ["nes"],
+      "supportedExtensions": [".nes", ".unf"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "ef64ee0e5ad2ab7550d853b6f1e286ad83c48c0f2e5762b338a706ec1b4f884a",
+        "arm64-v8a": "3a89042bd09d51d0ae5bf21e8dca4f442a1cc2c1ba0def63d07b47fd451b5a5f",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "prosystem",
+      "coreName": "ProSystem",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libprosystem_core.so",
+      "upstreamRepository": "https://github.com/libretro/prosystem-libretro",
+      "commitSha": "363b6dfbd3e240762e022c2b4897b4fe55722be3",
+      "releaseTag": "",
+      "vendorSourceSubset": [
+        "third_party/cores/prosystem/core",
+        "third_party/cores/prosystem/bupboop",
+        "third_party/cores/prosystem/libretro-common"
+      ],
+      "vendoringDoc": "third_party/cores/prosystem/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/prosystem-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target prosystem_core via native/cmake/cores/prosystem-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-or-later effective (core emulator code), bupboop audio library zlib, libretro-common subtree MIT; effective license GPL-2.0-or-later (GPL-3-compatible); no non-commercial/no-sale restriction anywhere; BIOS-free — optional HLE fallback; scope is Atari 7800 only; extensions .a78/.bin/.cdf; only the files this core's Android libretro build compiles are vendored (Makefiles and link.T preserved as build record; CI, docs, and desktop-only files excluded)",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "PROJECT-OWNER",
+        "reviewedOn": "2026-08-02"
+      },
+      "supportedSystems": ["atari7800"],
+      "supportedExtensions": [".a78", ".bin", ".cdf"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "718a17cfbcf96f923eb2e03cd6cb12ad61b426a6dfeb87f1305900508cc3baf5",
+        "arm64-v8a": "894cdbd1f779d5e764db88065a6fe2c40c379ca5294fbabae13bac61d4d1bb1b",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "handy",
+      "coreName": "Handy",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libhandy_core.so",
+      "upstreamRepository": "https://github.com/libretro/libretro-handy",
+      "commitSha": "bc55d462f0b2d6b073ea93dc552ebd73cec60fd1",
+      "releaseTag": "",
+      "vendorSourceSubset": [
+        "third_party/cores/handy/libretro",
+        "third_party/cores/handy/lynx",
+        "third_party/cores/handy/blip",
+        "third_party/cores/handy/libretro-common"
+      ],
+      "vendoringDoc": "third_party/cores/handy/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/handy-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target handy_core via native/cmake/cores/handy-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-or-later effective (core emulator code is zlib/libpng-style permissive per lynx/license.txt — commercial use explicitly permitted), blip/Blip_Buffer.cpp LGPL-2.1-or-later (Shay Green), blip/Stereo_Buffer.cpp/.h GPL-2.0-or-later, libretro-common subtree MIT; effective license GPL-2.0-or-later (GPL-3-compatible); no non-commercial/no-sale restriction anywhere; BIOS-free — lynxboot.img is optional (HLE fallback, used only if found with CRC 0xD973C9D); scope is Atari Lynx cartridge only (lynx); extensions .lnx/.lyx/.o; only the files this core's Android libretro build compiles are vendored (no desktop code, no Makefiles/CI/docs); see third_party/cores/handy/VENDORING.md for the complete file-by-file vendoring rationale.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "PROJECT-OWNER",
+        "reviewedOn": "2026-08-01"
+      },
+      "supportedSystems": ["lynx"],
+      "supportedExtensions": [".lnx", ".lyx", ".o"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "5382a30ef80671b5b949b8c0e36699966b92d4c29e1c4351760a897ddd9f70cc",
+        "arm64-v8a": "ab7a28fbed62be8483af91aa92bd1207e99b1ba95cb2d53716644bdbea460cd9",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "mednafen_ngp",
+      "coreName": "Beetle NeoPop",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libmednafen_ngp_core.so",
+      "upstreamRepository": "https://github.com/libretro/beetle-ngp-libretro",
+      "commitSha": "a50d5ac288a81f2104ddf43195a4efdd15c72227",
+      "releaseTag": "",
+      "vendorSourceSubset": [
+        "third_party/cores/mednafen_ngp/libretro.c",
+        "third_party/cores/mednafen_ngp/mednafen",
+        "third_party/cores/mednafen_ngp/libretro-common"
+      ],
+      "vendoringDoc": "third_party/cores/mednafen_ngp/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/mednafen_ngp-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target mednafen_ngp_core via native/cmake/cores/mednafen_ngp-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-or-later (root COPYING and source headers carry the 'or later' clause, making this core GPL-3-compatible). No non-commercial/no-sale restriction anywhere in the core. Original Neopop emulator code Copyright (c) 2001-2002 by neopop_uk. Vendored subcomponents: Blip_Buffer.cpp (LGPL-2.1-or-later, Shay Green), Stereo_Buffer.cpp (GPL-2.0-or-later), z80-fuse CPU emulator (GPL-2.0-or-later, Philip Kendall), libretro-common subtree (MIT). Only the files this core's Android libretro build actually compiles are vendored (no desktop GUI, no network code, no CI/docs). Scope is cartridge-only: neo-geo-pocket and neo-geo-pocket-color; content launches without external BIOS via built-in HLE implementation. See third_party/cores/mednafen_ngp/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "PROJECT-OWNER",
+        "reviewedOn": "2026-08-01"
+      },
+      "supportedSystems": ["neo-geo-pocket", "neo-geo-pocket-color"],
+      "supportedExtensions": [".ngp", ".ngc", ".ngpc", ".npc"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "9cdd4f0bd6fc74de04e4e293dfb595c420e63f7479cc29473242cdc7918aa6f6",
+        "arm64-v8a": "2b7dd03031850e447decb3772f0e30df4b8d24651331a3813b3ffaef16fbc512",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "mednafen_wswan",
+      "coreName": "Beetle WonderSwan",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libmednafen_wswan_core.so",
+      "upstreamRepository": "https://github.com/libretro/beetle-wswan-libretro",
+      "commitSha": "4b01295838ea89e3f1355bbe4cb5cf98aa6108cd",
+      "releaseTag": "",
+      "vendorSourceSubset": [
+        "third_party/cores/mednafen_wswan/libretro.c",
+        "third_party/cores/mednafen_wswan/mednafen",
+        "third_party/cores/mednafen_wswan/libretro-common"
+      ],
+      "vendoringDoc": "third_party/cores/mednafen_wswan/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/mednafen_wswan-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target mednafen_wswan_core via native/cmake/cores/mednafen_wswan-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-or-later (root COPYING and source headers carry the 'or later' clause, making this core GPL-3-compatible). No non-commercial/no-sale restriction anywhere in the core. Vendored subcomponents: mednafen/wswan/v30mz.c (permissive custom license — Cygne project, Bryan McPhail; commercial use allowed with attribution), mednafen/sound/Blip_Buffer.c (LGPL-2.1-or-later, Shay Green), libretro-common subtree (MIT). Only the files this core's Android libretro build actually compiles are vendored (no desktop GUI, no network code, no CI/docs). Scope is BIOS-free cartridge-only: wonderswan and wonderswan-color; content launches directly from frontend memory buffer without external boot ROM. See third_party/cores/mednafen_wswan/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "PROJECT-OWNER",
+        "reviewedOn": "2026-08-01"
+      },
+      "supportedSystems": ["wonderswan", "wonderswan-color"],
+      "supportedExtensions": [".ws", ".wsc", ".pc2"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "3a009628d9f21896442f214d6489c0e5ea620b85a23368a5b11094001718745c",
+        "arm64-v8a": "995233d8d0b9354a01dbc9e37b5121659bfb7e06f9e1a66e5607ef0314d6452f",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "stella",
+      "coreName": "Stella",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libstella_core.so",
+      "upstreamRepository": "https://github.com/stella-emu/stella",
+      "commitSha": "d55b1aec0d067a4c901a6dcdf81cb8f579685659",
+      "releaseTag": "7.0",
+      "vendorSourceSubset": ["third_party/cores/stella"],
+      "vendoringDoc": "third_party/cores/stella/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/stella-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target stella_core via native/cmake/cores/stella-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-only (root License.txt, version 2 without 'or later' clause). No non-commercial/no-sale restriction anywhere in the core. Vendored subcomponents: nlohmann/json (MIT), NanoJPEG (MIT). GPL-2.0-only is NOT GPL-3-compatible; this core ships as a separately-licensed dynamically-loaded .so behind the plugin-boundary model.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-08-01"
+      },
+      "supportedSystems": ["atari2600"],
+      "supportedExtensions": [".a26", ".bin"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "29a5d2bdff2f532b0948b83f9e295ae9de74c263bcebd85ff1113991b47acc94",
+        "arm64-v8a": "54c37d1015a47741da7048ac69a33548566691a94712ff5a7214bcde9c31bab6",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "beetle_pce_fast",
+      "coreName": "Beetle PCE Fast",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libbeetle_pce_fast_core.so",
+      "upstreamRepository": "https://github.com/libretro/beetle-pce-fast-libretro",
+      "commitSha": "b211204c7026dff6e86e79b00185512e2421fff8",
+      "releaseTag": "",
+      "vendorSourceSubset": [
+        "third_party/cores/beetle_pce_fast/libretro.c",
+        "third_party/cores/beetle_pce_fast/mednafen",
+        "third_party/cores/beetle_pce_fast/libretro-common"
+      ],
+      "vendoringDoc": "third_party/cores/beetle_pce_fast/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/beetle_pce_fast-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target beetle_pce_fast_core via native/cmake/cores/beetle_pce_fast-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-or-later (root COPYING). No non-commercial/no-sale restriction anywhere in the core. Vendored subcomponents: libretro-common subtree (MIT). Only the files this core's Android libretro build actually compiles are vendored (no desktop GUI, no network code, no CI/docs). Scope is cartridge-only: tg16 .pce; Super System Card (.sgx) and CD-ROM (.ccd/.cue) excluded. See third_party/cores/beetle_pce_fast/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "PROJECT-OWNER",
+        "reviewedOn": "2026-07-31"
+      },
+      "supportedSystems": ["tg16"],
+      "supportedExtensions": [".pce"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "b9e8e6d4675fb90fde61cd7c807de7f5cf3111d722da017e41ca07858d9415c0",
+        "arm64-v8a": "d53bfbb0ddbdc62b08fa4e9afa3dc685877fe663c76615e07e231cf6bc8db9dd",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "mgba",
+      "coreName": "mGBA",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libmgba_core.so",
+      "upstreamRepository": "https://github.com/libretro/mgba",
+      "commitSha": "32de792178a3662cd0402c8568fccfaad4a764a1",
+      "releaseTag": "",
+      "vendorSourceSubset": ["third_party/cores/mgba"],
+      "vendoringDoc": "third_party/cores/mgba/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/mgba-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target mgba_core via native/cmake/cores/mgba-linux.cmake)",
+      "license": {
+        "summary": "The core is licensed under MPL-2.0 (file-level weak copyleft, no non-commercial restriction). Vendored subcomponents in the compiled subset: inih (BSD-3-Clause), crc32 by Gary S. Brown (Public Domain), MurmurHash3 by Austin Appleby (Public Domain). Two data-only files (hle-bios.c, gbk-table.c) carry no per-file license header and are covered by the project-level MPL-2.0 LICENSE. No GPL-incompatible or non-commercial-restricted components found in the compiled subset. GBA content launches without external BIOS via built-in HLE implementation; GB/GBC boot without BIOS (no hardware BIOS exists for those platforms).",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": false,
+        "attributionSatisfied": false,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-07-31"
+      },
+      "supportedSystems": ["gba"],
+      "supportedExtensions": [".gba", ".agb"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "bf9a821990caf8a1ca51b5a6912947eb2f4b2bd35a49f10b9ac84f5c11febb9d",
+        "arm64-v8a": "945b570253d26ed16b997d56fda94ce7aa43794b6cabbf25b5225e11b18f7d88",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "snes9x",
+      "coreName": "Snes9x",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libsnes9x_core.so",
+      "upstreamRepository": "https://github.com/snes9xgit/snes9x",
+      "commitSha": "921f9f7b83660eb44ad263022a57a4a029057c37",
+      "releaseTag": "1.63",
+      "vendorSourceSubset": [
+        "third_party/cores/snes9x/core",
+        "third_party/cores/snes9x/libretro"
+      ],
+      "vendoringDoc": "third_party/cores/snes9x/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/snes9x-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "license": {
+        "summary": "The project's own non-commercial redistribution license (many named contributors 1996-2023; the libretro port itself additionally copyrighted 2011-2017 by Hans-Kristian Arntzen and Daniel De Matteis \"under no circumstances will commercial rights be given\") covering the core and all enhancement-chip emulation, explicitly \"freeware for PERSONAL USE only\" (upstream LICENSE, verbatim). This is an additional restriction under GPLv3 section 10 (see docs/PHASE0_DECISIONS.md); this core relies on the owner's dated risk-acceptance recorded below and in HANDOFF.md's Phase 7 entries, not on a GPLv3-compatibility finding. One vendored subcomponent carries its own separate, copyleft-compatible license that adds no further restriction: snes_ntsc (core/filter/snes_ntsc.c, LGPL-2.1). Only the files this core's libretro/Android build actually compiles are vendored (no GTK+/Win32/macOS/Qt desktop GUI, no Vulkan renderer or its vendored third-party libraries, no netplay, no JMA/ZIP ROM-archive readers, no interactive debugger). See third_party/cores/snes9x/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+        "commercialUseFinding": "NON_COMMERCIAL_RESTRICTED",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-07-31",
+        "ownerRiskAcceptedBy": "PROJECT-OWNER",
+        "ownerRiskAcceptedOn": "2026-07-31"
+      },
+      "supportedSystems": ["snes", "sfc"],
+      "supportedExtensions": [".sfc", ".smc"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "a03aa51d30713ea6374541f7f08329892097928c50c6af785928ba57dcd1760e",
+        "arm64-v8a": "cd3bda8613969b9263e9a899d98f727e8895ef0bddeb88695611a11196391fef",
+        "linux-x86_64": null
+      },
+      "notes": ""
+    },
+    {
+      "coreId": "genesis_plus_gx",
+      "coreName": "Genesis Plus GX",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libgenesis_plus_gx_core.so",
+      "upstreamRepository": "https://github.com/libretro/Genesis-Plus-GX",
+      "commitSha": "ca93fec870378f3bff65931bcd828d5e756cce75",
+      "releaseTag": "",
+      "vendorSourceSubset": [
+        "third_party/cores/genesis_plus_gx/core",
+        "third_party/cores/genesis_plus_gx/libretro"
+      ],
+      "vendoringDoc": "third_party/cores/genesis_plus_gx/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/genesis_plus_gx-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target genesis_plus_gx_core via native/cmake/cores/genesis_plus_gx-linux.cmake)",
+      "license": {
+        "summary": "Custom BSD-style redistribution license (Charles MacDonald 1998-2003, Eke-Eke 2007-2026, portions Nicola Salmoria/MAME team) covering the core code itself, adding a no-sale/no-commercial-use condition and a modified-source-offer condition beyond a plain BSD license (upstream LICENSE.txt, verbatim). This is an additional restriction under GPLv3 section 10 (see docs/PHASE0_DECISIONS.md); this core relies on the owner's dated risk-acceptance recorded below and in HANDOFF.md's 2026-07-31 Phase 7 entry, not on a GPLv3-compatibility finding. Vendored subcomponents carry their own separate, permissive/copyleft-compatible licenses that add no further restriction: Nuked OPN2 (ym3438.c, LGPL-2.1-or-later), Tremor (core/sound/tremor, BSD-style/Xiph), minimp3 (core/sound/minimp3, CC0 1.0), zlib 1.2.11 (zlib license), and the vendored libretro-common helper sources (each individually MIT-licensed per its own file header). Sega CD CHD support reuses the core's own pinned dependency stack: libchdr (zlib license), LZMA SDK (public domain), and zstd (BSD-2-Clause). Only files used by the Android build are compiled; Gamecube/Wii/PSP2/UWP build files remain excluded. See third_party/cores/genesis_plus_gx/VENDORING.md for the complete file-by-file vendoring rationale and exclusions.",
+        "commercialUseFinding": "NON_COMMERCIAL_RESTRICTED",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-07-31",
+        "ownerRiskAcceptedBy": "PROJECT-OWNER",
+        "ownerRiskAcceptedOn": "2026-07-31"
+      },
+      "supportedSystems": ["genesis", "megadrive", "sms", "gamegear", "segacd"],
+      "supportedExtensions": [".md", ".gen", ".bin", ".sms", ".gg", ".cue", ".iso", ".chd"],
+      "requiredFirmware": ["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software",
+      "binaryChecksums": {
+        "armeabi-v7a": "cae8ad226dcb8d89953fa8ae0e12c26632fff6edd286072a83f5b2eb77445ac6",
+        "arm64-v8a": "c12fed0455c94f57b5d5370d72e41add6bda6063fcd2d783cfa449f2f7a3433b",
+        "linux-x86_64": null
+      },
+      "notes": "Sega CD (BIOS + CHD) is qualified separately from cartridge systems per plans/LINUX_X64.md Phase 11."
+    },
+    {
+      "coreId": "pcsx_rearmed",
+      "coreName": "PCSX-ReARMed",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box; Lightrec x86_64 dynarec (criterion 9 deferred — see note)",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libpcsx_rearmed_core.so",
+      "upstreamRepository": "https://github.com/libretro/pcsx_rearmed",
+      "commitSha": "da2cb8ecd17fd0932ab6d94774c0522beebce6e3",
+      "releaseTag": "",
+      "vendorSourceSubset": ["third_party/cores/pcsx_rearmed"],
+      "vendoringDoc": "third_party/cores/pcsx_rearmed/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/pcsx_rearmed-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target pcsx_rearmed_core via native/cmake/cores/pcsx_rearmed-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-or-later effective: the PCSX engine, libretro frontend, ari64 dynarec, and NEON renderer compiled here all grant GPL version 2 or later; commercial redistribution is permitted subject to GPL corresponding-source and notice obligations. Dual GPL-2.0-or-later/LGPL-2.1-or-later glue files are used under GPL. Compiled dependencies are libretro-common (MIT), libchdr (BSD-3-Clause), LZMA SDK 25.01 (public domain), and the zstd 1.5.7 decoder (BSD-style option selected). The Linux build additionally uses Lightrec (LGPL-2.1-or-later) and GNU Lightning (LGPL-3.0-or-later); the combined Linux core uses PCSX-ReARMed's GPL later-version option. No non-commercial/no-sale restriction was found. The Android ARM/ARM64 closure and Linux x86_64 Lightrec closure are vendored; see third_party/cores/pcsx_rearmed/VENDORING.md. Memory-card slot 1 is forced to Libretro's 128 KiB RETRO_MEMORY_SAVE_RAM and therefore uses per-ROM save sync; slot 2 is disabled because upstream exposes only unsynchronized serial/shared file modes for it.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-08-02"
+      },
+      "supportedSystems": ["psx"],
+      "supportedExtensions": [".bin", ".cue", ".img", ".mdf", ".pbp", ".toc", ".cbn", ".m3u", ".chd", ".iso", ".exe"],
+      "requiredFirmware": [
+        "scph5500.bin",
+        "scph5501.bin",
+        "scph5502.bin",
+        "psxonpsp660.bin",
+        "scph101.bin",
+        "scph7001.bin",
+        "scph1001.bin"
+      ],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "software frames (player is software-frames-only per plans/LINUX_X64.md §13.4 amendment 2026-08-18); Lightrec x86_64 dynarec for CPU execution",
+      "binaryChecksums": {
+        "armeabi-v7a": "26002854a47547d4c638d8ca0a63ced9a71c3e1c9acf724f98d8fa77bcd18051",
+        "arm64-v8a": "2004b2c61a04e3c2be97ba056750b45cd5aa7d4094e63d1d2f8fc5bc3fb8a144",
+        "linux-x86_64": null
+      },
+      "notes": "Lightrec (commit 505ad11d) is vendored as a pinned Linux dependency, not a patch to upstream PCSX-ReARMed. PSX BIOS files are user-supplied (requiredFirmware above); they are never bundled."
+    },
+    {
+      "coreId": "mupen64plus_next",
+      "coreName": "Mupen64Plus",
+      "enabled": true,
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box; x86 dynarec (criterion 9 deferred — see note); GLideN64 desktop OpenGL acceleration validated on Ubuntu",
+      "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
+      "coreLibraryFile": "libmupen64plus_next_core.so",
+      "upstreamRepository": "https://github.com/libretro/mupen64plus-libretro-nx",
+      "commitSha": "98c1b0d877542b01314b3b04272282ba223b65b3",
+      "releaseTag": "",
+      "vendorSourceSubset": ["third_party/cores/mupen64plus_next"],
+      "vendoringDoc": "third_party/cores/mupen64plus_next/VENDORING.md",
+      "localPatches": [],
+      "compilerBuild": "standard Linux Clang (clang-18 on Ubuntu 24.04), CMake Release build; core fragment native/cmake/cores/mupen64plus_next-linux.cmake included by native/player/CMakeLists.txt; upstream link.T export allowlist",
+      "buildCommand": "cmake -S native/player -B build/player && cmake --build build/player (target mupen64plus_next_core via native/cmake/cores/mupen64plus_next-linux.cmake)",
+      "license": {
+        "summary": "GPL-2.0-or-later effective: mupen64plus-core, GLideN64, rsp-hle, and the Angrylion renderer are GPL-2.0; the rsp-cxd4 plugin is CC0 1.0, the paraLLEl RSP is dual MIT/LGPL-3.0 (built under the MIT option), parallel-rdp is MIT, libretro-common is MIT, xxHash is CC0, and the bundled libpng/zlib carry their own permissive licenses — all add no further restriction on top of the effective GPL-2.0-or-later, which is compatible with a GPLv3 application. No non-commercial/no-sale restriction found anywhere in the compiled closure. The core runs PIF HLE, so no external firmware/BIOS is required. Only the files this core's Android and Linux libretro builds compile are vendored; see third_party/cores/mupen64plus_next/VENDORING.md.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": false,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-08-02"
+      },
+      "supportedSystems": ["n64"],
+      "supportedExtensions": [".n64", ".z64", ".v64", ".bin", ".u1"],
+      "requiredFirmware": [],
+      "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
+      "renderer": "GPU-accelerated GLideN64 desktop OpenGL RDP + HLE RSP on Linux; GLES3 on Android; x86_64 new_dynarec for CPU execution; software Angrylion remains compiled as a fallback",
+      "binaryChecksums": {
+        "armeabi-v7a": "c00c2cd1f2eafc2d950ebaf273f2c962f4fd3daf8becaf4736efa8c2549a2de7",
+        "arm64-v8a": "de7395a403e38ad37cd066ac22fc2eb08c9d1a11e6566bbe30c88de3d971b519",
+        "linux-x86_64": null
+      },
+      "notes": "The Linux player provides GLideN64 with an SDL3 desktop OpenGL 3.3 context; Android retains OpenGL ES 3. paraLLEl-RDP/Vulkan and Android hardware-buffer code are not compiled into the Linux core. No BIOS required — PIF HLE; IPL3 is read from the ROM at offset 0x40."
+    },
+    {
+      "coreId": "dolphin",
+      "coreName": "Dolphin",
+      "enabled": true,
+      "linuxGateStatus": "BUILD-INTEGRATED — physical Ubuntu and Steam Deck gameplay validation pending",
+      "gateNotes": "Linux-only core. Android ABIs are intentionally absent. Dolphin file-based memory cards persist under the per-game save directory; the core does not expose them as Libretro SAVE_RAM.",
+      "coreLibraryFile": "libdolphin_core.so",
+      "upstreamRepository": "https://github.com/libretro/dolphin",
+      "commitSha": "841bacadb5d5c3f9acba0dc652d306ecd77a7bbf",
+      "releaseTag": "",
+      "vendorSourceSubset": ["third_party/cores/dolphin (recursive git submodule)"],
+      "vendoringDoc": "third_party/cores/dolphin/COPYING",
+      "localPatches": [],
+      "compilerBuild": "Linux GCC C++23 Release build in an isolated ExternalProject; LIBRETRO=ON; desktop OpenGL hardware rendering; Vulkan, X11, EGL, standalone UI, analytics, updater, RetroAchievements, and platform audio/input backends disabled",
+      "buildCommand": "git submodule update --init --recursive && cmake -S native/player -B build/player && cmake --build build/player (target dolphin_core via native/cmake/cores/dolphin-linux.cmake)",
+      "license": {
+        "summary": "Dolphin original source is GPL-2.0-or-later. Upstream declares the aggregate repository, including its pinned dependencies, GPLv3-compatible; per-file SPDX licenses are retained in third_party/cores/dolphin/LICENSES/.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": true,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-08-23"
+      },
+      "supportedSystems": ["ngc", "gc"],
+      "supportedExtensions": [".elf", ".dol", ".gcm", ".iso", ".tgc", ".wbfs", ".ciso", ".gcz", ".wia", ".rvz", ".m3u"],
+      "requiredFirmware": [],
+      "supportedAbis": ["linux-x86_64"],
+      "renderer": "GPU-accelerated Dolphin OpenGL backend through the player's SDL3 desktop OpenGL 4.5 context; x86_64 JIT64 CPU core",
+      "binaryChecksums": {
+        "linux-x86_64": null
+      },
+      "notes": "Dolphin's Data/Sys runtime files ship under share/rommulus/dolphin-emu/Sys. Ubuntu uses the offscreen compositor path; Steam Deck uses the isolated direct-framebuffer player path."
+    },
+    {
+      "coreId": "lrps2",
+      "coreName": "PS2 (PCSX2 fork)",
+      "enabled": true,
+      "linuxGateStatus": "BUILD-INTEGRATED — physical Ubuntu and Steam Deck gameplay validation pending; PS2 BIOS required",
+      "gateNotes": "Linux-only core. Android ABIs are intentionally absent. A user-supplied PS2 BIOS image (bios_PS2.bin) is required in the core's BIOS directory; the core auto-detects it by content.",
+      "coreLibraryFile": "liblrps2_core.so",
+      "upstreamRepository": "https://github.com/libretro/ps2",
+      "commitSha": "0cd22a097b38c710befd60868c2a34a02e3f5360",
+      "releaseTag": "",
+      "vendorSourceSubset": ["third_party/cores/lrps2 (recursive git submodule)"],
+      "vendoringDoc": "third_party/cores/lrps2/COPYING.GPLv3",
+      "localPatches": [],
+      "compilerBuild": "Linux GCC C++17 build of the core's own Makefile in an isolated ExternalProject (make platform=unix); OpenGL hardware rendering; Vulkan disabled; CHD enabled",
+      "buildCommand": "git submodule update --init --recursive && cmake -S native/player -B build/player && cmake --build build/player (target lrps2_core via native/cmake/cores/lrps2-linux.cmake)",
+      "license": {
+        "summary": "lrps2 is a PCSX2 fork and inherits PCSX2's GPL/LGPL licensing (COPYING.GPLv3); the complete dependency closure is vendored under 3rdparty/ with per-file licenses retained in the source headers.",
+        "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
+        "sourceOfferSatisfied": true,
+        "attributionSatisfied": true,
+        "reviewedBy": "DEV-DUFORD",
+        "reviewedOn": "2026-08-24"
+      },
+      "supportedSystems": ["ps2"],
+      "supportedExtensions": [".iso", ".chd", ".cso", ".ciso", ".gz", ".bin", ".mdf", ".nrg", ".img", ".dump", ".elf", ".m3u"],
+      "requiredFirmware": ["bios_PS2.bin"],
+      "supportedAbis": ["linux-x86_64"],
+      "renderer": "GPU-accelerated PCSX2 OpenGL backend through the player's SDL3 OpenGL ES 3 context; x86_64 native recompiler CPU core",
+      "binaryChecksums": {
+        "linux-x86_64": null
+      },
+      "notes": "PS2 BIOS required: a user-supplied BIOS image (bios_PS2.bin) must be present in the core's BIOS directory; the core auto-detects it by content. GameIndex.yaml ships under share/rommulus/lrps2/resources."
+    }
+  ]
+}

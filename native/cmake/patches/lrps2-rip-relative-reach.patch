@@ -1,0 +1,117 @@
+diff --git a/pcsx2/Memory.cpp b/pcsx2/Memory.cpp
+index 1d5eba2be..60a97a980 100644
+--- a/pcsx2/Memory.cpp
++++ b/pcsx2/Memory.cpp
+@@ -79,6 +79,33 @@ static VirtualMemoryManagerPtr AllocateVirtualMemory(const char* name, size_t si
+ 		if (mgr->IsOk())
+ 			return mgr;
+ 	}
++#endif
++#if defined(__x86_64__) && !defined(_WIN32)
++	// The code arena is the one whose placement matters: the x86 recompilers
++	// emit signed 32-bit RIP-relative operands to module globals, so the arena
++	// must sit within +-2GB of this module's data. ASLR places the module and
++	// an mmap'd arena independently, so an OS-chosen base lands out of reach on
++	// some first launches. Walk page-aligned address hints near this module's
++	// own data, retrying until a reservation whose entire span is reachable
++	// succeeds. If none does, fall back to an OS-chosen base and let the
++	// hardened CheckRipRelativeReach abort rather than corrupt memory.
++	if (!name)
++	{
++		static u8 anchor;            // module data anchor, same .so as module globals
++		const uptr mod  = (uptr)&anchor;
++		const uptr step = 1 << 21;   // 2MB candidate granularity, page-aligned
++		for (int i = 0; i < 768; i++) // walk outward to ~1.5GB; 305MB arena keeps span < 2GB
++		{
++			const uptr delta = ((uptr)((i + 1) / 2)) * step;
++			uptr base = (i & 1) ? mod - delta : mod + delta;
++			base &= ~(uptr)(__pagesize - 1);
++			if ((sptr)base < 0 || (sptr)(base + size - 1) < 0)
++				continue;
++			VirtualMemoryManagerPtr mgr = std::make_shared<VirtualMemoryManager>(name, base, size, /*upper_bounds=*/0, /*strict=*/true);
++			if (mgr->IsOk())
++				return mgr;
++		}
++	}
+ #endif
+ 	return std::make_shared<VirtualMemoryManager>(name, 0, size);
+ }
+diff --git a/pcsx2/VirtualMemory.cpp b/pcsx2/VirtualMemory.cpp
+index 64110884b..581155761 100644
+--- a/pcsx2/VirtualMemory.cpp
++++ b/pcsx2/VirtualMemory.cpp
+@@ -21,6 +21,7 @@
+ #include "../common/Console.h"
+ 
+ #include <cinttypes>
++#include <cstdlib>
+ 
+ // --------------------------------------------------------------------------------------
+ //  VirtualMemoryManager  (implementations)
+@@ -293,8 +294,10 @@ static u8 s_module_data_anchor;
+ // is thousands of memory operands quietly reading and writing near address
+ // zero, which presents as arbitrary corruption rather than as an error.
+ //
+-// One comparison at reservation time turns that into a message.
+-static void CheckRipRelativeReach(const char* what, const u8* base, size_t size)
++// One comparison at reservation time turns that into a hard failure instead
++// of silently-truncated operands. Returns true when the reservation is fully
++// reachable via RIP-relative addressing; the caller aborts otherwise.
++static bool CheckRipRelativeReach(const char* what, const u8* base, size_t size)
+ {
+ 	const sptr anchor = (sptr)&s_module_data_anchor;
+ 	const sptr lo = (sptr)base;
+@@ -303,13 +306,14 @@ static void CheckRipRelativeReach(const char* what, const u8* base, size_t size)
+ 	const sptr d_hi = hi - anchor;
+ 
+ 	if (d_lo == (sptr)(s32)d_lo && d_hi == (sptr)(s32)d_hi)
+-		return;
++		return true;
+ 
+ 	Console.Error("(%s) Code reservation at %p-%p is more than 2GB from this "
+ 	              "module's data at %p. RIP-relative operands to module "
+-	              "globals cannot be encoded and will be silently truncated; "
+-	              "expect memory corruption.",
++	              "globals cannot be encoded. Aborting launch instead of "
++	              "silently truncating addresses and corrupting memory.",
+ 	              what, (void*)lo, (void*)hi, (void*)anchor);
++	return false;
+ }
+ 
+ void code_reserve_init(struct CodeReserve* r)
+@@ -330,9 +334,14 @@ void code_reserve_assign(struct CodeReserve* r, const VirtualMemoryManager* allo
+ 	 * map, this should never fail. */
+ 	base = allocator->Alloc(offset, size);
+ 	if (!base)
+-		Console.Error("(CodeReserve) Failed to allocate %zu bytes at offset %zu", size, offset);
+-	else
+-		CheckRipRelativeReach("CodeReserve", base, size);
++	{
++		Console.Error("(CodeReserve) Failed to allocate %zu bytes at offset %zu; aborting", size, offset);
++		std::abort();
++	}
++	else if (!CheckRipRelativeReach("CodeReserve", base, size))
++	{
++		std::abort();
++	}
+ 
+ 	r->baseptr   = base;
+ 	r->size      = size;
+@@ -376,9 +385,14 @@ void RecompiledCodeReserve::Assign(VirtualMemoryManagerPtr allocator, size_t off
+ 	// Since the memory has already been allocated as part of the main memory map, this should never fail.
+ 	u8* base = allocator->Alloc(offset, size);
+ 	if (!base)
+-		Console.Error("(RecompiledCodeReserve) Failed to allocate %zu bytes at offset %zu", size, offset);
+-	else
+-		CheckRipRelativeReach("RecompiledCodeReserve", base, size);
++	{
++		Console.Error("(RecompiledCodeReserve) Failed to allocate %zu bytes at offset %zu; aborting", size, offset);
++		std::abort();
++	}
++	else if (!CheckRipRelativeReach("RecompiledCodeReserve", base, size))
++	{
++		std::abort();
++	}
+ 
+ 	VirtualMemoryReserve::Assign(std::move(allocator), base, size);
+ }

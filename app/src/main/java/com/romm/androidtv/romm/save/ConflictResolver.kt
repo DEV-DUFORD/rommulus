@@ -384,7 +384,8 @@ class ConflictResolverImpl(
                 reason = "invalid-action: expected CONFLICT, got ${operation.action}",
             )
         }
-        if (operation.saveId == null || operation.saveId <= 0) {
+        val operationSaveId = operation.saveId
+        if (operationSaveId == null || operationSaveId <= 0) {
             return ConflictResolutionResult.Failure(
                 RommApiError.PARSE_ERROR,
                 reason = "missing-saveId: conflict operation must carry a valid saveId",

@@ -120,7 +120,11 @@ fun QrLoginPanel(
                     QrLoginError.NETWORK -> stringResource(R.string.onboarding_qr_network_error)
                     QrLoginError.INSUFFICIENT_SCOPES -> stringResource(R.string.onboarding_qr_scope_error)
                     QrLoginError.VERIFICATION -> stringResource(R.string.onboarding_qr_verification_error)
-                    QrLoginError.PERSISTENCE -> stringResource(R.string.onboarding_qr_persistence_error)
+                    QrLoginError.TOKEN_PERSISTENCE,
+                    QrLoginError.TOKEN_VERIFICATION,
+                    QrLoginError.DEVICE_IDENTITY_PERSISTENCE,
+                    QrLoginError.SESSION_PERSISTENCE ->
+                        stringResource(R.string.onboarding_qr_persistence_error)
                 },
                 onRetry = onRetry,
             )

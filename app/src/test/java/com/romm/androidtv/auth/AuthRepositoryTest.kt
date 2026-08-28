@@ -3,6 +3,8 @@ package com.romm.androidtv.auth
 import com.romm.androidtv.config.FakeSharedPreferences
 import com.romm.androidtv.network.AuthError
 import com.romm.androidtv.network.AuthFlowResult
+import com.romm.androidtv.network.AndroidSessionCookieSync
+import com.romm.androidtv.network.AndroidSessionStorage
 import com.romm.androidtv.network.HeartbeatCallResult
 import com.romm.androidtv.network.RomMCookieSync
 import com.romm.androidtv.romm.ClientToken
@@ -33,7 +35,11 @@ class AuthRepositoryTest {
         client = okhttp3.OkHttpClient.Builder().build()
         val cookieSync = RomMCookieSync(CookieManager(null, CookiePolicy.ACCEPT_ALL))
         sessionStore = SessionStore(FakeSharedPreferences())
-        repository = AuthRepository(client, cookieSync, sessionStore)
+        repository = AuthRepository(
+            client,
+            AndroidSessionCookieSync(cookieSync),
+            AndroidSessionStorage(sessionStore),
+        )
     }
 
     @AfterEach
@@ -149,7 +155,12 @@ class AuthRepositoryTest {
             val cookieSync = RomMCookieSync(CookieManager(null, CookiePolicy.ACCEPT_ALL))
             sessionStore = SessionStore(FakeSharedPreferences())
             tokenStorage = FakeClientTokenStorage()
-            repoWithTokens = AuthRepository(client, cookieSync, sessionStore, tokenStorage)
+            repoWithTokens = AuthRepository(
+                client,
+                AndroidSessionCookieSync(cookieSync),
+                AndroidSessionStorage(sessionStore),
+                tokenStorage,
+            )
         }
 
         @Test
@@ -640,7 +651,12 @@ class AuthRepositoryTest {
             tokenStorage = FakeClientTokenStorage()
             val cookieSync = RomMCookieSync(CookieManager(null, CookiePolicy.ACCEPT_ALL))
             sessionStore = SessionStore(FakeSharedPreferences())
-            repo = AuthRepository(client, cookieSync, sessionStore, tokenStorage)
+            repo = AuthRepository(
+                client,
+                AndroidSessionCookieSync(cookieSync),
+                AndroidSessionStorage(sessionStore),
+                tokenStorage,
+            )
         }
 
         private fun enqueueAuthSuccess() {

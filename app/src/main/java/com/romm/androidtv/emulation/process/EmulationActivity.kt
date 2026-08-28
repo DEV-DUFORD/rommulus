@@ -108,7 +108,7 @@ import com.romm.androidtv.library.ui.TvButton
 import com.romm.androidtv.library.ui.TvOutlinedButton
 import com.romm.androidtv.library.ui.RommTvColors
 import com.romm.androidtv.library.ui.RommTvTheme
-import com.romm.androidtv.library.ui.RommTheme
+import com.romm.androidtv.library.RommTheme
 import com.romm.androidtv.library.ui.applyTheme
 import com.romm.androidtv.platform.rememberDeviceProfile
 import kotlinx.coroutines.delay
@@ -149,6 +149,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class EmulationActivity : ComponentActivity() {
 
     private val host = NativeLibretroHost()
+    private var ownsSessionGuard = false
     private var sessionStarted = false
     private var savePath: String? = null
     private var sessionIdForJournal: String? = null
@@ -255,13 +256,16 @@ class EmulationActivity : ComponentActivity() {
     }
 
     /** Global on-screen-controls preference, observed live by the in-session touch overlay. */
-    private val onScreenControlsEnabled by lazy {
-        MutableStateFlow(settingsRepository.onScreenGameControlsEnabled())
-    }
+    private val onScreenControlsEnabled by lazy { settingsRepository.onScreenGameControlsFlow }
 
     private fun setOnScreenControlsEnabled(enabled: Boolean) {
         settingsRepository.setOnScreenGameControlsEnabled(enabled)
-        onScreenControlsEnabled.value = enabled
+    }
+
+    private val touchControlHapticsEnabled by lazy { settingsRepository.touchControlHapticsFlow }
+
+    private fun setTouchControlHapticsEnabled(enabled: Boolean) {
+        settingsRepository.setTouchControlHapticsEnabled(enabled)
     }
 
     private val touchLayoutRepository by lazy {
@@ -332,8 +336,13 @@ class EmulationActivity : ComponentActivity() {
         const val EXTRA_CONTENT_PATH = "com.romm.androidtv.emulation.EXTRA_CONTENT_PATH"
         const val EXTRA_SAVE_PATH = "com.romm.androidtv.emulation.EXTRA_SAVE_PATH"
         const val EXTRA_ROM_ID = "com.romm.androidtv.emulation.EXTRA_ROM_ID"
+        const val EXTRA_ON_SCREEN_CONTROLS_ENABLED =
+            "com.romm.androidtv.emulation.EXTRA_ON_SCREEN_CONTROLS_ENABLED"
+        const val EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED =
+            "com.romm.androidtv.emulation.EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED"
         /** Authoritative app launch session ID (UUID string from LaunchSpec.sessionId). Required for journal/result correlation. */
         const val EXTRA_APP_SESSION_ID = "com.romm.androidtv.emulation.EXTRA_APP_SESSION_ID"
+        private const val SRAM_CHECKPOINT_INTERVAL_SECONDS = 30L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -357,10 +366,11 @@ class EmulationActivity : ComponentActivity() {
             reportPlayerBusyAndFinish()
             return
         }
+        ownsSessionGuard = true
 
         if (!NativeLibretroHost.ensureLoaded()) {
             Log.e(TAG, "Native library failed to load: ${NativeLibretroHost.lastLoadError()}")
-            isSessionActive.set(false)
+            releaseSessionGuard()
             finish()
             return
         }
@@ -374,6 +384,16 @@ class EmulationActivity : ComponentActivity() {
         val coreId = intent.getStringExtra(EXTRA_CORE_ID)
         val requestedContentPath = intent.getStringExtra(EXTRA_CONTENT_PATH)
         val requestedSavePath = intent.getStringExtra(EXTRA_SAVE_PATH)
+        if (intent.hasExtra(EXTRA_ON_SCREEN_CONTROLS_ENABLED)) {
+            setOnScreenControlsEnabled(
+                intent.getBooleanExtra(EXTRA_ON_SCREEN_CONTROLS_ENABLED, true),
+            )
+        }
+        if (intent.hasExtra(EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED)) {
+            setTouchControlHapticsEnabled(
+                intent.getBooleanExtra(EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED, false),
+            )
+        }
 
         // Phase B: extract optional candidate metadata from AwaitingCoreValidation.
         this.candidateMetadata = CandidateExtras.extractFromIntent(intent)
@@ -420,7 +440,7 @@ class EmulationActivity : ComponentActivity() {
             val resolvedCorePath = NativeLibretroHost.resolveBundledCorePathForCoreId(applicationContext, coreId)
             if (resolvedCorePath == null) {
                 Log.e(TAG, "onCreate: no bundled core for coreId=$coreId")
-                isSessionActive.set(false)
+                releaseSessionGuard()
                 finish()
                 return
             }
@@ -436,7 +456,7 @@ class EmulationActivity : ComponentActivity() {
                 if (validation.isFailure) {
                     Log.e(TAG, "onCreate: candidate path validation failed: ${validation.exceptionOrNull()}")
                     try { journal.advance(this.sessionIdForJournal!!, DescriptorState.REJECTED, SessionDescriptorPatch(errorDetail = "candidate path escaped app-private dir")) } catch (_: Exception) {}
-                    isSessionActive.set(false)
+                    releaseSessionGuard()
                     finish()
                     return
                 }
@@ -573,6 +593,7 @@ class EmulationActivity : ComponentActivity() {
                 val restored = host.nativeRestoreSaveRam(savePath)
                 Log.d(TAG, "restore-on-launch: restored=$restored path=$savePath")
             }
+            host.nativeConfigureAutosave(savePath, SRAM_CHECKPOINT_INTERVAL_SECONDS)
 
             val inputManager = getSystemService(INPUT_SERVICE) as InputManager
             inputManager.registerInputDeviceListener(controllerRouter, null)
@@ -671,6 +692,7 @@ class EmulationActivity : ComponentActivity() {
                             sharpFilterEnabled = sharpFilterEnabled,
                             hasTouchscreen = hasTouchscreen,
                             onScreenControlsEnabled = onScreenControlsEnabled,
+                            touchControlHapticsEnabled = touchControlHapticsEnabled,
                             touchCoordinator = touchCoordinator,
                             touchLayoutOverride = coreIdForMapping?.let(touchLayoutRepository::load),
                             touchLayoutRepository = touchLayoutRepository,
@@ -678,6 +700,7 @@ class EmulationActivity : ComponentActivity() {
                             onSetIntegerScalingEnabled = ::setIntegerScalingEnabled,
                             onSetSharpFilterEnabled = ::setSharpFilterEnabled,
                             onSetOnScreenControlsEnabled = ::setOnScreenControlsEnabled,
+                            onSetTouchControlHapticsEnabled = ::setTouchControlHapticsEnabled,
                             onStop = { finishAndDeliverResult() },
                             onQuitAnywayAfterSaveFailure = { finishAndDeliverResult(forceQuitOnSaveFailure = true) },
                             onSetNativePaused = { paused -> host.nativeSetPaused(paused) },
@@ -926,8 +949,14 @@ class EmulationActivity : ComponentActivity() {
             sessionStarted = false
         }
 
-        isSessionActive.set(false)
+        releaseSessionGuard()
         super.onDestroy()
+    }
+
+    private fun releaseSessionGuard() {
+        if (!ownsSessionGuard) return
+        ownsSessionGuard = false
+        isSessionActive.compareAndSet(true, false)
     }
 
     /**
@@ -942,6 +971,8 @@ class EmulationActivity : ComponentActivity() {
             result.checkpointedSaveHash?.let { putExtra("checkpointed_save_hash", it) }
             if (stageRomId > 0L) putExtra("rom_id", stageRomId)
             if (stageRomHash.isNotBlank()) putExtra("rom_hash", stageRomHash)
+            putExtra(EXTRA_ON_SCREEN_CONTROLS_ENABLED, onScreenControlsEnabled.value)
+            putExtra(EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED, touchControlHapticsEnabled.value)
         }
     }
 
@@ -1166,6 +1197,7 @@ private fun EmulationScreen(
     sharpFilterEnabled: StateFlow<Boolean>,
     hasTouchscreen: Boolean,
     onScreenControlsEnabled: StateFlow<Boolean>,
+    touchControlHapticsEnabled: StateFlow<Boolean>,
     touchCoordinator: TouchInputCoordinator,
     touchLayoutOverride: com.romm.androidtv.emulation.touch.TouchLayoutOverrideDocument?,
     touchLayoutRepository: com.romm.androidtv.emulation.touch.TouchLayoutRepository,
@@ -1173,6 +1205,7 @@ private fun EmulationScreen(
     onSetIntegerScalingEnabled: (Boolean) -> Boolean,
     onSetSharpFilterEnabled: (Boolean) -> Boolean,
     onSetOnScreenControlsEnabled: (Boolean) -> Unit,
+    onSetTouchControlHapticsEnabled: (Boolean) -> Unit,
     onStop: () -> Unit,
     onQuitAnywayAfterSaveFailure: () -> Unit,
     onSetNativePaused: (Boolean) -> Unit,
@@ -1196,6 +1229,7 @@ private fun EmulationScreen(
     val integerScalingOn by integerScalingEnabled.collectAsState()
     val sharpFilterOn by sharpFilterEnabled.collectAsState()
     val onScreenControlsOn by onScreenControlsEnabled.collectAsState()
+    val touchControlHapticsOn by touchControlHapticsEnabled.collectAsState()
     val touchControlsEnabled = hasTouchscreen && onScreenControlsOn
     var persistenceError by remember { mutableStateOf(false) }
     var pauseMenuFocusTarget by remember { mutableStateOf(PauseMenuFocusTarget.RESUME) }
@@ -1315,6 +1349,7 @@ private fun EmulationScreen(
                     onButtonChange = touchCoordinator::onTouchButton,
                     onAxisChange = touchCoordinator::onTouchAxis,
                     onPause = { pauseOverlay.value = PauseOverlay.MENU },
+                    hapticsEnabled = touchControlHapticsOn,
                     layoutOverride = activeTouchLayoutOverride,
                 )
             }
@@ -1380,6 +1415,8 @@ private fun EmulationScreen(
                 ControllerSettingsMenu(
                     onScreenControlsEnabled = onScreenControlsOn,
                     onSetOnScreenControlsEnabled = onSetOnScreenControlsEnabled,
+                    touchControlHapticsEnabled = touchControlHapticsOn,
+                    onSetTouchControlHapticsEnabled = onSetTouchControlHapticsEnabled,
                     onOpenPhysicalControllerSettings = {
                         pauseOverlay.value = PauseOverlay.CONTROLLER_SETTINGS
                     },
@@ -1691,6 +1728,8 @@ private fun PauseMenuOverlay(
 private fun ControllerSettingsMenu(
     onScreenControlsEnabled: Boolean,
     onSetOnScreenControlsEnabled: (Boolean) -> Unit,
+    touchControlHapticsEnabled: Boolean,
+    onSetTouchControlHapticsEnabled: (Boolean) -> Unit,
     onOpenPhysicalControllerSettings: () -> Unit,
     onOpenOnScreenControllerSettings: () -> Unit,
     onBack: () -> Unit,
@@ -1698,6 +1737,8 @@ private fun ControllerSettingsMenu(
     val physicalSettingsFocusRequester = remember { FocusRequester() }
     val onScreenControlsInteractionSource = remember { MutableInteractionSource() }
     val onScreenControlsFocused by onScreenControlsInteractionSource.collectIsFocusedAsState()
+    val hapticsInteractionSource = remember { MutableInteractionSource() }
+    val hapticsFocused by hapticsInteractionSource.collectIsFocusedAsState()
     val scrollState = rememberScrollState()
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.7f
     LaunchedEffect(Unit) {
@@ -1777,6 +1818,38 @@ private fun ControllerSettingsMenu(
                     )
                     Switch(
                         checked = onScreenControlsEnabled,
+                        onCheckedChange = null,
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = touchControlHapticsEnabled,
+                            interactionSource = hapticsInteractionSource,
+                            indication = null,
+                            role = Role.Switch,
+                            onValueChange = onSetTouchControlHapticsEnabled,
+                        )
+                        .border(
+                            BorderStroke(
+                                3.dp,
+                                if (hapticsFocused) RommTvColors.Romm300 else Color.Transparent,
+                            ),
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = stringResource(R.string.pause_menu_touch_control_haptics),
+                        color = RommTvColors.TextPrimary,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Switch(
+                        checked = touchControlHapticsEnabled,
                         onCheckedChange = null,
                     )
                 }

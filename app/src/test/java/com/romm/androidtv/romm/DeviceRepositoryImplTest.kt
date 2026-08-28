@@ -1,6 +1,7 @@
 package com.romm.androidtv.romm
 
 import com.romm.androidtv.config.FakeSharedPreferences
+import com.romm.androidtv.network.AndroidDeviceIdentityStorage
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -22,7 +23,7 @@ class DeviceRepositoryImplTest {
         server.start(0)
         client = okhttp3.OkHttpClient.Builder().build()
         identityStore = DeviceIdentityStore(FakeSharedPreferences())
-        repository = DeviceRepositoryImpl(client, identityStore)
+        repository = DeviceRepositoryImpl(client, AndroidDeviceIdentityStorage(identityStore))
     }
 
     @AfterEach

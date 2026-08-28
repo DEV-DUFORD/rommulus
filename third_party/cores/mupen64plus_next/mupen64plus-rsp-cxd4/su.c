@@ -29,8 +29,13 @@ typedef VECTOR_OPERATION(*p_vector_func)(v16, v16);
 pu8 DRAM;
 
 // NOTE: Links against GLideN64\src\N64.cpp due to conflicts and maintenance efforts
+#ifdef M64P_ANGRYLION_ONLY
+pu8 DMEM;
+pu8 IMEM;
+#else
 extern pu8 DMEM;
 extern pu8 IMEM;
+#endif
 
 NOINLINE void res_S(void)
 {

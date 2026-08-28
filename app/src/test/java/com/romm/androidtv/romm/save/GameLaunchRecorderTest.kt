@@ -23,7 +23,7 @@ class GameLaunchRecorderTest {
             PlaySessionRecordRequest(
                 romId = 42L,
                 slot = "autosave",
-                startEpochMs = 999L,
+                startEpochMs = 0L,
                 endEpochMs = 1_000L,
             )
         )

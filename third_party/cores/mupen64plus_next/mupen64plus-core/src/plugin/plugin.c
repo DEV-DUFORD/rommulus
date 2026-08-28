@@ -93,7 +93,9 @@ void ResizeVideoOutput(int width, int height){
         X##FBGetFrameBufferInfo \
     }
 
+#ifndef M64P_ANGRYLION_ONLY
 DEFINE_GFX(gln64);
+#endif
 #if defined(HAVE_THR_AL)
 DEFINE_GFX(angrylion);
 #endif
@@ -401,6 +403,10 @@ void plugin_connect_rdp_api(enum rdp_plugin_type type)
    switch (type)
    {
       case RDP_PLUGIN_GLIDEN64:
+#ifdef M64P_ANGRYLION_ONLY
+         current_rdp_type = RDP_PLUGIN_ANGRYLION;
+         break;
+#endif
       case RDP_PLUGIN_ANGRYLION:
       case RDP_PLUGIN_PARALLEL:
          current_rdp_type = type;
@@ -442,7 +448,11 @@ void plugin_connect_all()
 #endif
           break;
        case RDP_PLUGIN_GLIDEN64:
+#ifndef M64P_ANGRYLION_ONLY
           gfx = gfx_gln64;
+#elif defined(HAVE_THR_AL)
+          gfx = gfx_angrylion;
+#endif
           break;
       case RDP_PLUGIN_NONE:
       default:
@@ -504,4 +514,3 @@ void plugin_connect_all()
     plugin_start_input();
 }
 #endif
-

@@ -1,5 +1,6 @@
 package com.romm.androidtv.library.ui
 
+import com.romm.androidtv.library.RommTheme
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
@@ -99,6 +100,7 @@ fun SettingsScreen(
     val verifySha1FocusRequester = remember { FocusRequester() }
     val autocleanFocusRequester = remember { FocusRequester() }
     val onScreenControlsFocusRequester = remember { FocusRequester() }
+    val touchControlHapticsFocusRequester = remember { FocusRequester() }
     val themeFocusRequester = remember { FocusRequester() }
     val licensesFocusRequester = remember { FocusRequester() }
     val privacyFocusRequester = remember { FocusRequester() }
@@ -643,6 +645,33 @@ fun SettingsScreen(
                         .focusRequester(onScreenControlsFocusRequester)
                         .focusProperties {
                             up = autocleanFocusRequester
+                            down = touchControlHapticsFocusRequester
+                        },
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Touch control vibration", color = RommTvColors.TextPrimary)
+                    Text(
+                        text = "Provide light vibration feedback when an on-screen control is pressed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RommTvColors.TextSecondary,
+                    )
+                }
+                TvSwitch(
+                    checked = uiState.touchControlHapticsEnabled,
+                    onCheckedChange = viewModel::onTouchControlHapticsChanged,
+                    modifier = Modifier
+                        .focusRequester(touchControlHapticsFocusRequester)
+                        .focusProperties {
+                            up = onScreenControlsFocusRequester
                             down = licensesFocusRequester
                         },
                 )
@@ -675,7 +704,7 @@ fun SettingsScreen(
                     .focusRequester(licensesFocusRequester)
                     .focusProperties {
                         up = if (profile.hasTouchscreen) {
-                            onScreenControlsFocusRequester
+                            touchControlHapticsFocusRequester
                         } else {
                             autocleanFocusRequester
                         }

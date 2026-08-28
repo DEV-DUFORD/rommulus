@@ -3,6 +3,8 @@ package com.romm.androidtv.controller.config
 import com.romm.androidtv.controller.model.AxisDirection
 import com.romm.androidtv.controller.model.ControllerMapping
 import com.romm.androidtv.controller.model.LogicalControl
+import com.romm.androidtv.controller.model.NeutralAxis
+import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.controller.model.PauseMenuCombination
 import com.romm.androidtv.controller.model.PhysicalControl
 
@@ -29,8 +31,8 @@ fun CoreControllerConfig.toRouterMappings(profile: CoreControllerProfile): Map<I
 
     return buildMap {
         for ((playerIndex, playerConfig) in players) {
-            val buttons = mutableMapOf<Int, LogicalControl>()
-            val axes = mutableMapOf<Int, LogicalControl>()
+            val buttons = mutableMapOf<NeutralKey, LogicalControl>()
+            val axes = mutableMapOf<NeutralAxis, LogicalControl>()
             val axisDirections = mutableMapOf<AxisDirection, LogicalControl>()
 
             for ((controlId, controlBindings) in playerConfig.bindings) {
@@ -38,16 +40,24 @@ fun CoreControllerConfig.toRouterMappings(profile: CoreControllerProfile): Map<I
                 val target = descriptorByControlId[controlId]?.target ?: continue
                 for ((_, binding) in controlBindings.entries()) {
                     when (binding) {
-                        is PhysicalBinding.Key -> buttons[binding.keyCode] = target
+                        is PhysicalBinding.Key -> NeutralKey.fromPlatform(binding.keyCode)?.let {
+                            buttons[it] = target
+                        }
                         is PhysicalBinding.Axis -> {
-                            if (target.type == LogicalControl.Type.BUTTON) {
-                                axisDirections[AxisDirection(binding.axis, 1)] = target
+                            val neutralAxis = NeutralAxis.fromPlatform(binding.axis)
+                            if (neutralAxis == null) {
+                                // Unknown platform axis: skip (cannot be represented neutrally).
+                            } else if (target.type == LogicalControl.Type.BUTTON) {
+                                axisDirections[AxisDirection(neutralAxis, 1)] = target
                             } else {
-                                axes[binding.axis] = target
+                                axes[neutralAxis] = target
                             }
                         }
-                        is PhysicalBinding.AxisDirection ->
-                            axisDirections[AxisDirection(binding.axis, binding.polarity)] = target
+                        is PhysicalBinding.AxisDirection -> {
+                            NeutralAxis.fromPlatform(binding.axis)?.let {
+                                axisDirections[AxisDirection(it, binding.polarity)] = target
+                            }
+                        }
                     }
                 }
             }

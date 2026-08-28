@@ -1,0 +1,1102 @@
+@file:OptIn(ExperimentalStdlibApi::class)
+
+package com.romm.androidtv.romm
+
+import com.romm.androidtv.network.RommLog
+import com.romm.androidtv.network.RommOrigin
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
+import com.squareup.moshi.KotlinJsonAdapterFactory
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.adapter
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+import java.time.Instant
+
+/** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
+private const val TAG = "RommAuthDx"
+
+/** Safe diagnostic logger: routes to [RommLog], which no-ops when no sink is wired (JVM unit tests). */
+private fun diagLog(priority: Int, message: String) {
+    RommLog.log(priority, TAG, message)
+}
+
+/**
+ * Typed models and network calls for RomM's device-registration and
+ * negotiated-save-sync endpoints (LIBRETRO_REFACTOR.md section 11.2/11.3).
+ *
+ * This contract was audited directly against the pinned reference backend
+ * (RomM commit `ce498d6c3e012faaab0ae388860d1950f8be66ca`,
+ * `backend/endpoints/device.py`, `backend/endpoints/sync.py`,
+ * `backend/endpoints/saves.py`, and their `responses/` schemas) — not
+ * guessed from the plan text alone. Follows [RommApi]'s existing convention:
+ * pure JSON-parsing functions are separated from the network call functions
+ * so parsing logic is unit-testable without a live/mock server, and errors
+ * are classified into the shared [RommApiError] enum.
+ */
+
+// ---- Device registration (POST /api/devices) ----
+
+data class DeviceRegisterRequest(
+    val name: String? = null,
+    val platform: String? = null,
+    val client: String? = null,
+    val clientVersion: String? = null,
+    val clientDeviceIdentifier: String? = null,
+    val allowExisting: Boolean = true,
+    val allowDuplicate: Boolean = false,
+)
+
+data class DeviceRegisterInfo(
+    val deviceId: String,
+    val name: String?,
+    val createdAt: Instant?,
+)
+
+sealed interface DeviceRegisterResult {
+    /** The [alreadyExisted] flag distinguishes HTTP 200 (reused) from 201 (newly created). */
+    data class Success(val device: DeviceRegisterInfo, val alreadyExisted: Boolean) : DeviceRegisterResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : DeviceRegisterResult
+}
+
+@JsonClass(generateAdapter = false)
+internal data class DeviceCreatePayloadJson(
+    val name: String? = null,
+    val platform: String? = null,
+    val client: String? = null,
+    val client_version: String? = null,
+    val client_device_identifier: String? = null,
+    val allow_existing: Boolean = true,
+    val allow_duplicate: Boolean = false,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class DeviceCreateResponseJson(
+    val device_id: String = "",
+    val name: String? = null,
+    val created_at: String? = null,
+)
+
+// ---- Negotiated sync (POST /api/sync/negotiate, POST /api/sync/sessions/{id}/complete) ----
+
+/** Mirrors the backend's `ClientSaveState` (`endpoints/sync.py`). */
+data class ClientSaveState(
+    val romId: Long,
+    val fileName: String,
+    /** Stable slot name (e.g. "autosave"). Null means an archival, never-paired manual upload. */
+    val slot: String?,
+    val emulator: String?,
+    val contentHash: String?,
+    val updatedAt: Instant,
+    val fileSizeBytes: Long,
+)
+
+data class SyncNegotiateRequest(
+    val deviceId: String,
+    val saves: List<ClientSaveState>,
+)
+
+enum class SyncAction { UPLOAD, DOWNLOAD, CONFLICT, NO_OP }
+
+data class SyncOperation(
+    val action: SyncAction,
+    val romId: Long,
+    val saveId: Long?,
+    val fileName: String,
+    val slot: String?,
+    val emulator: String?,
+    val reason: String,
+    val serverUpdatedAt: Instant?,
+    val serverContentHash: String?,
+)
+
+data class SyncNegotiateInfo(
+    val sessionId: Long,
+    val operations: List<SyncOperation>,
+)
+
+sealed interface SyncNegotiateResult {
+    data class Success(val negotiation: SyncNegotiateInfo) : SyncNegotiateResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : SyncNegotiateResult
+}
+
+data class SyncCompleteRequest(
+    val operationsCompleted: Int,
+    val operationsFailed: Int,
+)
+
+sealed interface SyncCompleteResult {
+    data class Success(val sessionStatus: String) : SyncCompleteResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : SyncCompleteResult
+}
+
+// ---- Play-session ingestion (POST /api/play-sessions) ----
+// Drives the server's `rom_user.last_played`/`now_playing` fields (backend/handler/play_session_handler.py),
+// which is what the RomM Home screen's "Continue Playing" row is actually sourced from
+// (`last_played=true&order_by=last_played` — see LibraryApi.kt's RomQuery.ContinuePlaying). Native
+// play reports a minimal session when launch succeeds so titles played through the native library
+// appear in the row immediately.
+
+/** Mirrors the backend's `PlaySessionEntry` (`endpoints/play_sessions.py`). */
+data class PlaySessionEntry(
+    val romId: Long,
+    /** Stable slot name (e.g. "autosave"), or null for an untracked/manual session. */
+    val saveSlot: String?,
+    val startTime: Instant,
+    val endTime: Instant,
+    val durationMs: Long,
+)
+
+data class PlaySessionIngestRequest(
+    val deviceId: String?,
+    val sessions: List<PlaySessionEntry>,
+)
+
+sealed interface PlaySessionIngestResult {
+    data class Success(val createdCount: Int, val skippedCount: Int) : PlaySessionIngestResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : PlaySessionIngestResult
+}
+
+@JsonClass(generateAdapter = false)
+internal data class PlaySessionEntryJson(
+    val rom_id: Long,
+    val save_slot: String? = null,
+    val start_time: String,
+    val end_time: String,
+    val duration_ms: Long,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class PlaySessionIngestPayloadJson(
+    val device_id: String? = null,
+    val sessions: List<PlaySessionEntryJson>,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class PlaySessionIngestResultJson(
+    val index: Int = 0,
+    val status: String = "",
+    val id: Long? = null,
+    val detail: String? = null,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class PlaySessionIngestResponseJson(
+    val results: List<PlaySessionIngestResultJson> = emptyList(),
+    val created_count: Int = 0,
+    val skipped_count: Int = 0,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class ClientSaveStateJson(
+    val rom_id: Long,
+    val file_name: String,
+    val slot: String?,
+    val emulator: String?,
+    val content_hash: String?,
+    val updated_at: String,
+    val file_size_bytes: Long,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class SyncNegotiatePayloadJson(
+    val device_id: String?,
+    val saves: List<ClientSaveStateJson>,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class SyncOperationJson(
+    val action: String = "no_op",
+    val rom_id: Long = 0,
+    val save_id: Long? = null,
+    val file_name: String = "",
+    val slot: String? = null,
+    val emulator: String? = null,
+    val reason: String = "",
+    val server_updated_at: String? = null,
+    val server_content_hash: String? = null,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class SyncNegotiateResponseJson(
+    val session_id: Long = 0,
+    val operations: List<SyncOperationJson> = emptyList(),
+    val total_upload: Int = 0,
+    val total_download: Int = 0,
+    val total_conflict: Int = 0,
+    val total_no_op: Int = 0,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class SyncCompletePayloadJson(
+    val operations_completed: Int = 0,
+    val operations_failed: Int = 0,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class SyncSessionJson(
+    val id: Long = 0,
+    val status: String = "",
+)
+
+@JsonClass(generateAdapter = false)
+internal data class SyncCompleteResponseJson(
+    val session: SyncSessionJson = SyncSessionJson(),
+)
+
+// ---- Save upload/download/confirmation (POST /api/saves, GET .../content, POST .../downloaded) ----
+
+data class SaveUploadRequest(
+    val romId: Long,
+    val slot: String?,
+    val emulator: String?,
+    val deviceId: String,
+    val sessionId: Long?,
+    /** Server rejects with 409 (mapped to [RommApiError.SERVER_ERROR]... see [RommApiError.CONFLICT]) if false and a newer save exists. */
+    val overwrite: Boolean,
+    val fileName: String,
+    val bytes: ByteArray,
+    /**
+     * When true (with [slot] set), the server deletes older saves in that slot beyond
+     * [autocleanupLimit] right after this upload succeeds (`add_save`'s `autocleanup`/
+     * `autocleanup_limit` query params). Used so this device's own uploads into the
+     * "autosave" slot never accumulate more than [autocleanupLimit] file(s) server-side,
+     * even though the server still mints a new timestamped filename per upload.
+     */
+    val autocleanup: Boolean = false,
+    val autocleanupLimit: Int = 10,
+)
+
+data class ServerSaveInfo(
+    val saveId: Long,
+    val romId: Long,
+    val fileName: String,
+    val slot: String?,
+    val emulator: String?,
+    /**
+     * Opaque RomM save fingerprint. The pinned backend currently emits a 32-character MD5-based
+     * value (with deterministic per-entry hashing for ZIP saves); clients must not assume SHA-256.
+     */
+    val contentHash: String?,
+    val updatedAt: Instant?,
+    val fileSizeBytes: Long,
+)
+
+sealed interface SaveUploadResult {
+    data class Success(val save: ServerSaveInfo) : SaveUploadResult
+    /** The server reports a newer save already exists for this slot/rom (HTTP 409) — do not retry blindly; renegotiate. */
+    data class Conflict(val httpCode: Int) : SaveUploadResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : SaveUploadResult
+}
+
+sealed interface SaveDownloadResult {
+    data class Success(val bytes: ByteArray) : SaveDownloadResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : SaveDownloadResult
+}
+
+sealed interface SaveConfirmResult {
+    data object Success : SaveConfirmResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : SaveConfirmResult
+}
+
+sealed interface SaveListResult {
+    data class Success(val saves: List<ServerSaveInfo>) : SaveListResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : SaveListResult
+}
+
+@JsonClass(generateAdapter = false)
+internal data class SaveSchemaJson(
+    val id: Long = 0,
+    val rom_id: Long = 0,
+    val file_name: String = "",
+    val slot: String? = null,
+    val emulator: String? = null,
+    val content_hash: String? = null,
+    val updated_at: String? = null,
+    val file_size_bytes: Long = 0,
+)
+
+data class ClientToken(val raw: String) {
+    init { require(raw.isNotBlank()) { "ClientToken.raw must not be blank" } }
+}
+
+data class ClientTokenInfo(
+    val token: ClientToken,
+    val expiresAtEpochSeconds: Long?,
+    /** Server-side token id (0 when the response omitted it); used for best-effort revocation. */
+    val id: Long = 0,
+)
+
+sealed interface ClientTokenAcquireResult {
+    data class Success(val info: ClientTokenInfo) : ClientTokenAcquireResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : ClientTokenAcquireResult
+    /**
+     * The server rejected creation specifically because the user has reached
+     * its cap on active client tokens (backend: `MAX_TOKENS_PER_USER`, HTTP 400
+     * with a "Maximum of N tokens..." detail). Kept distinct from generic
+     * [Failure] so callers can show an accurate, actionable message instead of
+     * a generic "server/device error".
+     */
+    data class TokenLimitReached(val detail: String?) : ClientTokenAcquireResult
+}
+
+/** A single entry from `GET /api/client-tokens`, trimmed to what callers need. */
+data class ClientTokenSummary(
+    val id: Long,
+    val name: String,
+    val createdAtEpochSeconds: Long?,
+)
+
+sealed interface ClientTokenListResult {
+    data class Success(val tokens: List<ClientTokenSummary>) : ClientTokenListResult
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : ClientTokenListResult
+}
+
+@JsonClass(generateAdapter = false)
+internal data class ClientTokenPayloadJson(
+    val name: String = "romm-android-tv",
+    val scopes: List<String> = emptyList(),
+    val expires_in: String? = null,
+)
+
+@JsonClass(generateAdapter = false)
+internal data class ClientTokenResponseJson(
+    val id: Long = 0,
+    val name: String = "",
+    val scopes: List<String> = emptyList(),
+    val raw_token: String = "",
+    val expires_at: String? = null,
+    val created_at: String? = null,
+)
+
+/** FastAPI's default HTTPException error shape: `{"detail": "..."}`. */
+@JsonClass(generateAdapter = false)
+internal data class ApiErrorDetailJson(
+    val detail: String? = null,
+)
+
+/** A single entry of `GET /api/client-tokens`'s response array. */
+@JsonClass(generateAdapter = false)
+internal data class ClientTokenListEntryJson(
+    val id: Long = 0,
+    val name: String = "",
+    val created_at: String? = null,
+)
+
+object RommSyncApi {
+
+    private val moshi = Moshi.Builder()
+        .addLast(KotlinJsonAdapterFactory())
+        .build()
+    private val deviceCreatePayloadAdapter = moshi.adapter<DeviceCreatePayloadJson>()
+    private val deviceCreateResponseAdapter = moshi.adapter<DeviceCreateResponseJson>()
+    private val syncNegotiatePayloadAdapter = moshi.adapter<SyncNegotiatePayloadJson>()
+    private val syncNegotiateResponseAdapter = moshi.adapter<SyncNegotiateResponseJson>()
+    private val syncCompletePayloadAdapter = moshi.adapter<SyncCompletePayloadJson>()
+    private val syncCompleteResponseAdapter = moshi.adapter<SyncCompleteResponseJson>()
+    private val playSessionIngestPayloadAdapter = moshi.adapter<PlaySessionIngestPayloadJson>()
+    private val playSessionIngestResponseAdapter = moshi.adapter<PlaySessionIngestResponseJson>()
+    private val saveSchemaAdapter = moshi.adapter<SaveSchemaJson>()
+    private val saveSchemaListAdapter = moshi.adapter<List<SaveSchemaJson>>(
+        com.squareup.moshi.Types.newParameterizedType(List::class.java, SaveSchemaJson::class.java)
+    )
+    private val clientTokenPayloadAdapter = moshi.adapter<ClientTokenPayloadJson>()
+    private val clientTokenResponseAdapter = moshi.adapter<ClientTokenResponseJson>()
+    private val apiErrorDetailAdapter = moshi.adapter<ApiErrorDetailJson>()
+    private val clientTokenListAdapter = moshi.adapter<List<ClientTokenListEntryJson>>(
+        com.squareup.moshi.Types.newParameterizedType(List::class.java, ClientTokenListEntryJson::class.java)
+    )
+
+    // ---- Pure parse functions (unit-testable without a server) ----
+
+    fun parseDeviceCreateResponse(body: String): DeviceRegisterInfo? = try {
+        val json = deviceCreateResponseAdapter.fromJson(body.trim())
+        if (json == null || json.device_id.isBlank()) null
+        else DeviceRegisterInfo(
+            deviceId = json.device_id,
+            name = json.name,
+            createdAt = json.created_at?.let(::parseInstantOrNull),
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+    fun parseSyncNegotiateResponse(body: String): SyncNegotiateInfo? = try {
+        val json = syncNegotiateResponseAdapter.fromJson(body.trim())
+        if (json == null) null
+        else SyncNegotiateInfo(
+            sessionId = json.session_id,
+            operations = json.operations.mapNotNull { op ->
+                val action = when (op.action) {
+                    "upload" -> SyncAction.UPLOAD
+                    "download" -> SyncAction.DOWNLOAD
+                    "conflict" -> SyncAction.CONFLICT
+                    "no_op" -> SyncAction.NO_OP
+                    else -> return@mapNotNull null
+                }
+                SyncOperation(
+                    action = action,
+                    romId = op.rom_id,
+                    saveId = op.save_id,
+                    fileName = op.file_name,
+                    slot = op.slot,
+                    emulator = op.emulator,
+                    reason = op.reason,
+                    serverUpdatedAt = op.server_updated_at?.let(::parseInstantOrNull),
+                    serverContentHash = op.server_content_hash,
+                )
+            },
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+    fun parseSyncCompleteResponse(body: String): String? = try {
+        syncCompleteResponseAdapter.fromJson(body.trim())?.session?.status?.ifBlank { null }
+    } catch (_: Exception) {
+        null
+    }
+
+    fun parsePlaySessionIngestResponse(body: String): Pair<Int, Int>? = try {
+        val json = playSessionIngestResponseAdapter.fromJson(body.trim())
+        json?.let { it.created_count to it.skipped_count }
+    } catch (_: Exception) {
+        null
+    }
+
+    fun parseSaveSchema(body: String): ServerSaveInfo? = try {
+        val json = saveSchemaAdapter.fromJson(body.trim())
+        if (json == null || json.id <= 0) null
+        else ServerSaveInfo(
+            saveId = json.id,
+            romId = json.rom_id,
+            fileName = json.file_name,
+            slot = json.slot,
+            emulator = json.emulator,
+            contentHash = json.content_hash,
+            updatedAt = json.updated_at?.let(::parseInstantOrNull),
+            fileSizeBytes = json.file_size_bytes,
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Parses a `GET /api/saves` list response body (a bare JSON array of save schemas). */
+    fun parseSaveSchemaList(body: String): List<ServerSaveInfo>? = try {
+        val json = saveSchemaListAdapter.fromJson(body.trim())
+        json?.filter { it.id > 0 }?.map { j ->
+            ServerSaveInfo(
+                saveId = j.id,
+                romId = j.rom_id,
+                fileName = j.file_name,
+                slot = j.slot,
+                emulator = j.emulator,
+                contentHash = j.content_hash,
+                updatedAt = j.updated_at?.let(::parseInstantOrNull),
+                fileSizeBytes = j.file_size_bytes,
+            )
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun parseInstantOrNull(raw: String): Instant? = try {
+        Instant.parse(raw)
+    } catch (_: Exception) {
+        null
+    }
+
+    fun parseClientTokenResponse(body: String): ClientTokenInfo? = try {
+        val json = clientTokenResponseAdapter.fromJson(body.trim())
+        if (json == null || json.raw_token.isBlank()) null
+        else ClientTokenInfo(
+            token = ClientToken(json.raw_token),
+            expiresAtEpochSeconds = json.expires_at?.let { Instant.parse(it).epochSecond },
+            id = json.id,
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+    // ---- Network calls ----
+
+    /** `POST /api/devices`. */
+    fun registerDevice(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        request: DeviceRegisterRequest,
+    ): DeviceRegisterResult {
+        if (origin.isBlank()) return DeviceRegisterResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "devices") ?: return DeviceRegisterResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val payloadJson = deviceCreatePayloadAdapter.toJson(
+            DeviceCreatePayloadJson(
+                name = request.name,
+                platform = request.platform,
+                client = request.client,
+                client_version = request.clientVersion,
+                client_device_identifier = request.clientDeviceIdentifier,
+                allow_existing = request.allowExisting,
+                allow_duplicate = request.allowDuplicate,
+            )
+        )
+        val body = payloadJson.toRequestBody("application/json".toMediaType())
+        val httpRequest = okhttp3.Request.Builder().url(url).post(body).build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.registerDevice: failure error=${classification.name} httpCode=${response.code}")
+                    return DeviceRegisterResult.Failure(classification, response.code)
+                }
+                val responseBody = response.body?.string()
+                val info = responseBody?.let(::parseDeviceCreateResponse)
+                if (info == null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.registerDevice: parseFailed httpCode=${response.code}")
+                    DeviceRegisterResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    val alreadyExisted = response.code == 200
+                    diagLog(RommLog.DEBUG, "RommSyncApi.registerDevice: success status=${if (alreadyExisted) "reused" else "created"}")
+                    DeviceRegisterResult.Success(info, alreadyExisted = alreadyExisted)
+                }
+            }
+        } catch (e: IOException) {
+            val error = classifyIOException(e)
+            diagLog(RommLog.WARN, "RommSyncApi.registerDevice: ioError $error")
+            DeviceRegisterResult.Failure(error)
+        }
+    }
+
+    /**
+     * `POST /api/client-tokens` — acquire a durable ClientToken for this user.
+     * Called from the foreground authenticated login/session-verification lifecycle
+     * (cookie-authenticated client). The returned raw token is persisted via
+     * [ClientTokenStore] for later Bearer-only worker execution.
+     */
+    fun acquireClientToken(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        scopes: List<String>,
+    ): ClientTokenAcquireResult {
+        if (origin.isBlank()) return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val httpRequest: okhttp3.Request = try {
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase urlConstruction")
+            val url = apiUrl(origin, "client-tokens") ?: return ClientTokenAcquireResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase payloadSerialization")
+            val payloadJson = clientTokenPayloadAdapter.toJson(
+                ClientTokenPayloadJson(
+                    name = "romm-android-tv",
+                    scopes = scopes,
+                ),
+            )
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase requestBody")
+            val body = payloadJson.toRequestBody("application/json".toMediaType())
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase requestBuilder")
+            val builder = okhttp3.Request.Builder().url(url).post(body)
+            // Cookie-authenticated POST /api/client-tokens is CSRF-protected: the matching
+            // romm_csrftoken cookie value must also be sent as X-CSRFToken. Presence-only diag.
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase csrfHeader")
+            val csrfToken = csrfTokenFor(client, url)
+            if (csrfToken != null) {
+                builder.header("X-CSRFToken", csrfToken)
+            }
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: csrfTokenPresent=${csrfToken != null}")
+            builder.build()
+        } catch (e: Exception) {
+            diagLog(RommLog.WARN, "RommSyncApi.acquireClientToken: constructionFailed ${e.javaClass.simpleName}")
+            return ClientTokenAcquireResult.Failure(RommApiError.NETWORK_ERROR)
+        }
+
+        return try {
+            diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: phase executeStart")
+            client.newCall(httpRequest).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: failure error=${classification.name} httpCode=${response.code}")
+                    // A 400 from this endpoint is most commonly the backend's
+                    // `MAX_TOKENS_PER_USER` cap (see client_tokens.py:
+                    // "Maximum of N tokens per user reached"), NOT a local
+                    // device/persistence problem. Surface it distinctly so the
+                    // UI can point the user at the actual, actionable cause
+                    // instead of a generic "device could not save" message.
+                    if (response.code == 400) {
+                        val detail = readErrorDetail(response)
+                        if (detail != null && detail.contains("tokens per user", ignoreCase = true)) {
+                            return ClientTokenAcquireResult.TokenLimitReached(detail)
+                        }
+                    }
+                    return ClientTokenAcquireResult.Failure(classification, response.code)
+                }
+                val responseBody = response.body?.string()
+                val info = responseBody?.let(::parseClientTokenResponse)
+                if (info == null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: parseFailed httpCode=${response.code}")
+                    ClientTokenAcquireResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.acquireClientToken: success scopes=$scopes")
+                    ClientTokenAcquireResult.Success(info)
+                }
+            }
+        } catch (e: IOException) {
+            val error = classifyIOException(e)
+            diagLog(RommLog.WARN, "RommSyncApi.acquireClientToken: ioError $error")
+            ClientTokenAcquireResult.Failure(error)
+        }
+    }
+
+    /**
+     * `GET /api/users/me` authenticated with `Authorization: Bearer <token>`.
+     * Returns true only when the server answers 200 with a parseable user — used
+     * to confirm a freshly-persisted client token actually works before onboarding
+     * returns success. Failure is boolean (no OkHttp/Throwable leaks upward).
+     */
+    fun verifyBearerToken(client: okhttp3.OkHttpClient, origin: String, token: ClientToken): Boolean {
+        if (origin.isBlank()) return false
+        val url = apiUrl(origin, "users/me") ?: return false
+        val request = okhttp3.Request.Builder().url(url)
+            .header("Authorization", "Bearer ${token.raw}")
+            .get()
+            .build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful && parseVerifiedUserOrNull(response.body?.string()) != null
+            }
+        } catch (e: IOException) {
+            false
+        }
+    }
+
+    /**
+     * Best-effort server-side revocation of a client token (`DELETE /api/client-tokens/{id}`).
+     * Returns whether the server confirmed the deletion (2xx); callers that only use this
+     * for cleanup (e.g. onboarding failure paths) may ignore the result, but callers acting
+     * on it (e.g. "remove oldest token to free a slot") must check it before proceeding.
+     *
+     * Like [acquireClientToken], this is a cookie-authenticated mutating request and must
+     * carry the `X-CSRFToken` header or the server rejects it with 403.
+     */
+    fun revokeClientToken(client: okhttp3.OkHttpClient, origin: String, tokenId: Long): Boolean {
+        if (origin.isBlank() || tokenId <= 0) return false
+        val url = apiUrl(origin, "client-tokens/$tokenId") ?: return false
+        val builder = okhttp3.Request.Builder().url(url).delete()
+        csrfTokenFor(client, url)?.let { builder.header("X-CSRFToken", it) }
+        return try {
+            client.newCall(builder.build()).execute().use { it.isSuccessful }
+        } catch (e: IOException) {
+            diagLog(RommLog.WARN, "RommSyncApi.revokeClientToken: failed ${e.javaClass.simpleName}")
+            false
+        }
+    }
+
+    /** `GET /api/client-tokens` — lists this user's active client tokens, oldest-first is NOT guaranteed by the server. */
+    fun listClientTokens(client: okhttp3.OkHttpClient, origin: String): ClientTokenListResult {
+        if (origin.isBlank()) return ClientTokenListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "client-tokens") ?: return ClientTokenListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val request = okhttp3.Request.Builder().url(url).get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    return ClientTokenListResult.Failure(classification, response.code)
+                }
+                val body = response.body?.string()
+                val entries = body?.let { runCatching { clientTokenListAdapter.fromJson(it) }.getOrNull() }
+                if (entries == null) {
+                    ClientTokenListResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    ClientTokenListResult.Success(
+                        entries.map {
+                            ClientTokenSummary(
+                                id = it.id,
+                                name = it.name,
+                                createdAtEpochSeconds = it.created_at?.let(::parseInstantOrNull)?.epochSecond,
+                            )
+                        },
+                    )
+                }
+            }
+        } catch (e: IOException) {
+            ClientTokenListResult.Failure(classifyIOException(e))
+        }
+    }
+
+    private fun parseVerifiedUserOrNull(body: String?): com.romm.androidtv.network.VerifiedUser? {
+        if (body == null || body.isBlank()) return null
+        return com.romm.androidtv.network.parseVerifiedUser(body)
+    }
+
+    /** `POST /api/sync/negotiate`. */
+    fun negotiateSync(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        request: SyncNegotiateRequest,
+    ): SyncNegotiateResult {
+        if (origin.isBlank()) return SyncNegotiateResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "sync/negotiate") ?: return SyncNegotiateResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val payloadJson = syncNegotiatePayloadAdapter.toJson(
+            SyncNegotiatePayloadJson(
+                device_id = request.deviceId,
+                saves = request.saves.map { s ->
+                    ClientSaveStateJson(
+                        rom_id = s.romId,
+                        file_name = s.fileName,
+                        slot = s.slot,
+                        emulator = s.emulator,
+                        content_hash = s.contentHash,
+                        updated_at = s.updatedAt.toString(),
+                        file_size_bytes = s.fileSizeBytes,
+                    )
+                },
+            )
+        )
+        val body = payloadJson.toRequestBody("application/json".toMediaType())
+        val httpRequest = okhttp3.Request.Builder().url(url).post(body).build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.negotiate: failure error=${classification.name} httpCode=${response.code}")
+                    return SyncNegotiateResult.Failure(classification, response.code)
+                }
+                val responseBody = response.body?.string()
+                val info = responseBody?.let(::parseSyncNegotiateResponse)
+                if (info == null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.negotiate: parseFailed httpCode=${response.code}")
+                    SyncNegotiateResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    val opCount = info.operations.size
+                    diagLog(RommLog.DEBUG, "RommSyncApi.negotiate: success ops=$opCount")
+                    SyncNegotiateResult.Success(info)
+                }
+            }
+        } catch (e: IOException) {
+            val error = classifyIOException(e)
+            diagLog(RommLog.WARN, "RommSyncApi.negotiate: ioError $error")
+            SyncNegotiateResult.Failure(error)
+        }
+    }
+
+    /** `POST /api/sync/sessions/{sessionId}/complete`. */
+    fun completeSyncSession(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        sessionId: Long,
+        request: SyncCompleteRequest,
+    ): SyncCompleteResult {
+        if (origin.isBlank()) return SyncCompleteResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "sync/sessions/$sessionId/complete")
+            ?: return SyncCompleteResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val payloadJson = syncCompletePayloadAdapter.toJson(
+            SyncCompletePayloadJson(
+                operations_completed = request.operationsCompleted,
+                operations_failed = request.operationsFailed,
+            )
+        )
+        val body = payloadJson.toRequestBody("application/json".toMediaType())
+        val httpRequest = okhttp3.Request.Builder().url(url).post(body).build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                classifyResponse(response)?.let { return SyncCompleteResult.Failure(it, response.code) }
+                val responseBody = response.body?.string()
+                val status = responseBody?.let(::parseSyncCompleteResponse)
+                if (status == null) SyncCompleteResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                else SyncCompleteResult.Success(status)
+            }
+        } catch (e: IOException) {
+            SyncCompleteResult.Failure(classifyIOException(e))
+        }
+    }
+
+    /**
+     * `POST /api/play-sessions`. Reports completed gameplay so the server can advance
+     * `rom_user.last_played`/`now_playing` — this is what makes a title appear in the RomM Home
+     * screen's "Continue Playing" row (see `RomQuery.ContinuePlaying` in `LibraryApi.kt`).
+     * Best-effort by design: a failure here must never block save-sync or gameplay.
+     */
+    fun ingestPlaySessions(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        request: PlaySessionIngestRequest,
+    ): PlaySessionIngestResult {
+        if (origin.isBlank()) return PlaySessionIngestResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "play-sessions") ?: return PlaySessionIngestResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val payloadJson = playSessionIngestPayloadAdapter.toJson(
+            PlaySessionIngestPayloadJson(
+                device_id = request.deviceId,
+                sessions = request.sessions.map { s ->
+                    PlaySessionEntryJson(
+                        rom_id = s.romId,
+                        save_slot = s.saveSlot,
+                        start_time = s.startTime.toString(),
+                        end_time = s.endTime.toString(),
+                        duration_ms = s.durationMs,
+                    )
+                },
+            )
+        )
+        val body = payloadJson.toRequestBody("application/json".toMediaType())
+        val httpRequest = okhttp3.Request.Builder().url(url).post(body).build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.ingestPlaySessions: failure error=${classification.name} httpCode=${response.code}")
+                    return PlaySessionIngestResult.Failure(classification, response.code)
+                }
+                val responseBody = response.body?.string()
+                val counts = responseBody?.let(::parsePlaySessionIngestResponse)
+                if (counts == null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.ingestPlaySessions: parseFailed httpCode=${response.code}")
+                    PlaySessionIngestResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.ingestPlaySessions: success created=${counts.first} skipped=${counts.second}")
+                    PlaySessionIngestResult.Success(counts.first, counts.second)
+                }
+            }
+        } catch (e: IOException) {
+            val error = classifyIOException(e)
+            diagLog(RommLog.WARN, "RommSyncApi.ingestPlaySessions: ioError $error")
+            PlaySessionIngestResult.Failure(error)
+        }
+    }
+
+    /** `POST /api/saves` (multipart, matches `add_save`'s query params + `saveFile` part). */
+    fun uploadSave(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        request: SaveUploadRequest,
+    ): SaveUploadResult {
+        if (origin.isBlank()) return SaveUploadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val base = apiUrl(origin, "saves") ?: return SaveUploadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val urlBuilder = base.toHttpUrlOrNull()?.newBuilder()
+            ?: return SaveUploadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        urlBuilder.addQueryParameter("rom_id", request.romId.toString())
+        request.emulator?.let { urlBuilder.addQueryParameter("emulator", it) }
+        request.slot?.let { urlBuilder.addQueryParameter("slot", it) }
+        urlBuilder.addQueryParameter("device_id", request.deviceId)
+        request.sessionId?.let { urlBuilder.addQueryParameter("session_id", it.toString()) }
+        urlBuilder.addQueryParameter("overwrite", request.overwrite.toString())
+        if (request.autocleanup) {
+            urlBuilder.addQueryParameter("autocleanup", "true")
+            urlBuilder.addQueryParameter("autocleanup_limit", request.autocleanupLimit.toString())
+        }
+
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart(
+                "saveFile",
+                request.fileName,
+                request.bytes.toRequestBody("application/octet-stream".toMediaType()),
+            )
+            .build()
+
+        val httpRequest = okhttp3.Request.Builder().url(urlBuilder.build()).post(multipart).build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                if (response.code == 409) return SaveUploadResult.Conflict(response.code)
+                classifyResponse(response)?.let { return SaveUploadResult.Failure(it, response.code) }
+                val responseBody = response.body?.string()
+                val save = responseBody?.let(::parseSaveSchema)
+                if (save == null) SaveUploadResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                else SaveUploadResult.Success(save)
+            }
+        } catch (e: IOException) {
+            SaveUploadResult.Failure(classifyIOException(e))
+        }
+    }
+
+    /** `GET /api/saves/{id}/content`. */
+    fun downloadSaveContent(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        saveId: Long,
+        deviceId: String,
+        sessionId: Long? = null,
+    ): SaveDownloadResult {
+        if (origin.isBlank()) return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val base = apiUrl(origin, "saves/$saveId/content") ?: return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val urlBuilder = base.toHttpUrlOrNull()?.newBuilder()
+            ?: return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        urlBuilder.addQueryParameter("device_id", deviceId)
+        sessionId?.let { urlBuilder.addQueryParameter("session_id", it.toString()) }
+
+        val httpRequest = okhttp3.Request.Builder().url(urlBuilder.build()).get().build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                classifyResponse(response)?.let { return SaveDownloadResult.Failure(it, response.code) }
+                val bytes = response.body?.bytes()
+                if (bytes == null) SaveDownloadResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                else SaveDownloadResult.Success(bytes)
+            }
+        } catch (e: IOException) {
+            SaveDownloadResult.Failure(classifyIOException(e))
+        }
+    }
+
+    /**
+     * `GET /api/saves/{id}/content` with `optimistic=false` and no `session_id`.
+     *
+     * Used for keep-local backup reads during conflict resolution: downloads the
+     * server's current save bytes without mutating device-sync bookkeeping or
+     * incrementing session completion counters. Grounded in the pinned endpoint
+     * query schema (`optimistic: bool = True`, `session_id: int | None = None`).
+     */
+    fun downloadSaveContentBackup(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        saveId: Long,
+        deviceId: String,
+    ): SaveDownloadResult {
+        if (origin.isBlank()) return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val base = apiUrl(origin, "saves/$saveId/content") ?: return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val urlBuilder = base.toHttpUrlOrNull()?.newBuilder()
+            ?: return SaveDownloadResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        urlBuilder.addQueryParameter("device_id", deviceId)
+        urlBuilder.addQueryParameter("optimistic", "false")
+        // Deliberately omit session_id — avoids session operation counting.
+
+        val httpRequest = okhttp3.Request.Builder().url(urlBuilder.build()).get().build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                classifyResponse(response)?.let { return SaveDownloadResult.Failure(it, response.code) }
+                val bytes = response.body?.bytes()
+                if (bytes == null) SaveDownloadResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                else SaveDownloadResult.Success(bytes)
+            }
+        } catch (e: IOException) {
+            SaveDownloadResult.Failure(classifyIOException(e))
+        }
+    }
+
+    /**
+     * `GET /api/saves?rom_id=X&device_id=Y` — lists every save the user owns for a ROM,
+     * across every slot/device (mirrors RomM's own web UI "All Saves" list). Used by the
+     * native save picker (section 13 follow-up) so the user can choose an existing server
+     * save to download-and-adopt before launch, instead of the app always negotiating its
+     * own single "autosave" slot. [deviceId] is optional: when supplied, the response
+     * includes this device's own sync status per save, but omitting it still returns the
+     * full list (device-agnostic read, matches `get_saves`'s `device_id: str | None`).
+     */
+    fun listSaves(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        romId: Long,
+        deviceId: String? = null,
+    ): SaveListResult {
+        if (origin.isBlank()) return SaveListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val base = apiUrl(origin, "saves") ?: return SaveListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val urlBuilder = base.toHttpUrlOrNull()?.newBuilder()
+            ?: return SaveListResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        urlBuilder.addQueryParameter("rom_id", romId.toString())
+        deviceId?.let { urlBuilder.addQueryParameter("device_id", it) }
+
+        val httpRequest = okhttp3.Request.Builder().url(urlBuilder.build()).get().build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.listSaves: failure error=${classification.name} httpCode=${response.code}")
+                    return SaveListResult.Failure(classification, response.code)
+                }
+                val responseBody = response.body?.string()
+                val saves = responseBody?.let(::parseSaveSchemaList)
+                if (saves == null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.listSaves: parseFailed httpCode=${response.code}")
+                    SaveListResult.Failure(RommApiError.PARSE_ERROR, response.code)
+                } else {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.listSaves: success count=${saves.size}")
+                    SaveListResult.Success(saves)
+                }
+            }
+        } catch (e: IOException) {
+            val error = classifyIOException(e)
+            diagLog(RommLog.WARN, "RommSyncApi.listSaves: ioError $error")
+            SaveListResult.Failure(error)
+        }
+    }
+
+    /** `POST /api/saves/{id}/downloaded` — durable download confirmation (section 11.3). */
+    fun confirmDownload(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        saveId: Long,
+        deviceId: String,
+    ): SaveConfirmResult {
+        if (origin.isBlank()) return SaveConfirmResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "saves/$saveId/downloaded") ?: return SaveConfirmResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+
+        val json = "{\"device_id\":${jsonQuote(deviceId)}}"
+        val body = json.toRequestBody("application/json".toMediaType())
+        val httpRequest = okhttp3.Request.Builder().url(url).post(body).build()
+
+        return try {
+            client.newCall(httpRequest).execute().use { response ->
+                classifyResponse(response)?.let { return SaveConfirmResult.Failure(it, response.code) }
+                SaveConfirmResult.Success
+            }
+        } catch (e: IOException) {
+            SaveConfirmResult.Failure(classifyIOException(e))
+        }
+    }
+
+    private fun jsonQuote(s: String): String =
+        "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+    private fun apiUrl(origin: String, path: String): String? {
+        val normalizedOrigin = RommOrigin.parse(origin)?.toUrl() ?: origin.removeSuffix("/")
+        return "$normalizedOrigin/api/$path"
+    }
+
+    private fun classifyResponse(response: okhttp3.Response): RommApiError? {
+        return when {
+            response.isSuccessful -> null
+            response.code == 401 || response.code == 403 -> RommApiError.AUTH_EXPIRED
+            response.code == 404 -> RommApiError.NOT_FOUND
+            else -> RommApiError.SERVER_ERROR
+        }
+    }
+
+    /** Best-effort extraction of FastAPI's `{"detail": "..."}` error body. Never throws. */
+    private fun readErrorDetail(response: okhttp3.Response): String? = try {
+        response.peekBody(4096).string().let(apiErrorDetailAdapter::fromJson)?.detail
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Reads the `romm_csrftoken` cookie value for [url] out of [client]'s cookie jar, if
+     * present. Cookie-authenticated mutating requests (POST/DELETE/etc.) require this
+     * value echoed back as the `X-CSRFToken` header or the server rejects them with 403.
+     */
+    private fun csrfTokenFor(client: okhttp3.OkHttpClient, url: String): String? =
+        url.toHttpUrlOrNull()
+            ?.let { client.cookieJar.loadForRequest(it) }
+            ?.firstOrNull { it.name == "romm_csrftoken" }
+            ?.value
+
+    private fun classifyIOException(e: IOException): RommApiError {
+        val cause = e.cause ?: e
+        return if (cause is javax.net.ssl.SSLException ||
+            cause.javaClass.name.contains("SSL", ignoreCase = true)
+        ) {
+            RommApiError.TLS_ERROR
+        } else {
+            RommApiError.NETWORK_ERROR
+        }
+    }
+}

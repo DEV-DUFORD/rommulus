@@ -120,6 +120,13 @@ class NativeLibretroHost {
     external fun nativeCheckpointSaveRam(savePath: String): Boolean
 
     /**
+     * Enables changed-only atomic SRAM checkpoints from the emulation thread.
+     * This applies to every core exposing Libretro save memory and avoids
+     * racing the core or pausing gameplay to take the snapshot.
+     */
+    external fun nativeConfigureAutosave(savePath: String, intervalSeconds: Long)
+
+    /**
      * Restores RETRO_MEMORY_SAVE_RAM from [savePath] if it exists and is
      * exactly the size the core currently reports. Returns false (leaving
      * SRAM untouched) if the file is missing or its size doesn't match —

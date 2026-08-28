@@ -73,12 +73,14 @@ class FakePendingOperationDao : PendingOperationDao {
         slot: String,
         operationType: PendingOperationType,
         olderThanLocalGenerationEpochMs: Long,
-    ) {
+    ): Int {
+        val before = rows.size
         rows.removeAll {
             scopeMatches(it, serverKey, userKey, romId, romHash, slot, operationType) &&
                 !isTerminal(it.status) &&
                 it.localGenerationEpochMs < olderThanLocalGenerationEpochMs
         }
+        return before - rows.size
     }
 
     fun allRows(): List<PendingOperationEntity> = rows.toList()

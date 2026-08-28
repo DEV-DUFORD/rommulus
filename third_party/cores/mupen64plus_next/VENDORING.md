@@ -3,9 +3,11 @@
 Upstream: https://github.com/libretro/mupen64plus-libretro-nx
 Pinned top-level commit: `98c1b0d877542b01314b3b04272282ba223b65b3` (libretro/mupen64plus-libretro-nx, branch `develop`)
 
-Built exclusively for `armeabi-v7a` and `arm64-v8a`. Both ABIs enable the
-ARM/ARM64 dynarec (NEW_DYNAREC=3/4), the paraLLEl RSP/RDP plugins, LLE (low-level
-emulation), the Angrylion renderer, and NEON on armeabi-v7a.
+The Android build remains exclusive to `armeabi-v7a` and `arm64-v8a`. Both
+Android ABIs enable the ARM/ARM64 dynarec (NEW_DYNAREC=3/4), the paraLLEl
+RSP/RDP plugins, LLE (low-level emulation), the Angrylion renderer, and NEON
+on armeabi-v7a. The independent Linux x86_64 fragment uses the vendored x86
+dynarec, CXD4 RSP, and software Angrylion renderer without EGL, GLES, or Vulkan.
 
 ## Component pins (git-subrepo)
 
@@ -193,3 +195,10 @@ and makes these CMake-side adaptations:
   GL commands on the EGL-owning frontend thread. The pending swap limit is
   reduced from two to one, and its cross-thread counter is atomic, to cap the
   renderer's additional frame queue latency.
+
+The Linux target in `native/cmake/cores/mupen64plus_next-linux.cmake` is
+separate from that Android target. It defines `M64P_ANGRYLION_ONLY`, which
+removes GLideN64 and hardware-context references while retaining the x86_64
+dynarec, CXD4 LLE RSP, Angrylion framebuffer output, save states, and libretro
+audio/input integration. The desktop host forces
+`mupen64plus-rdp-plugin=angrylion` and `mupen64plus-rsp-plugin=cxd4`.

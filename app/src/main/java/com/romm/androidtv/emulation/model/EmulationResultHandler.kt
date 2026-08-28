@@ -397,14 +397,17 @@ class EmulationResultHandler(
         journal: LaunchSessionJournal,
         descriptor: SessionDescriptor,
     ) {
-        if (descriptor.checkpointedHash != null && descriptor.canonicalSavePath != null && descriptor.romId != null) {
+        val cpHash = descriptor.checkpointedHash
+        val cpPath = descriptor.canonicalSavePath
+        val cpRomId = descriptor.romId
+        if (cpHash != null && cpPath != null && cpRomId != null) {
             Log.i(logTag, "recoverPendingSessions: syncing checkpoint from non-ADOPTED descriptor ${descriptor.sessionId}")
             try {
                 syncPostPlayAwaited(
                     descriptor.sessionId,
-                    descriptor.canonicalSavePath,
-                    descriptor.checkpointedHash,
-                    descriptor.romId,
+                    cpPath,
+                    cpHash,
+                    cpRomId,
                 )
                 journal.remove(descriptor.sessionId)
             } catch (e: Exception) {

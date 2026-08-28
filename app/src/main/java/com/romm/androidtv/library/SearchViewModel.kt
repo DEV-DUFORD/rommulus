@@ -3,238 +3,57 @@ package com.romm.androidtv.library
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.romm.androidtv.romm.RommApiError
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
-
-/** Page size for search pagination. */
-private const val SEARCH_PAGE_SIZE = 40
-/** Debounce interval in milliseconds before auto-firing a search. */
-private const val DEBOUNCE_MS = 300L
-
-/** UI state emitted by [SearchViewModel]. */
-data class SearchUiState(
-    /** The current query text shown in the input field — always preserves exactly what the user typed, including trailing/leading spaces. */
-    val query: String = "",
-    /** Whether a network request is currently in flight. */
-    val isLoading: Boolean = false,
-    /** Accumulated (possibly filtered) search results across pages. */
-    val roms: List<LibraryRom> = emptyList(),
-    /** Total number of matching ROMs on the server (0 until first page loads). */
-    val total: Int = 0,
-    /** Error from the last failed request, or null if no error occurred. */
-    val error: RommApiError? = null,
-    /** Normalized (trimmed) term used for API calls and pagination. Null when idle. Decouples display text from request term so leading/trailing spaces are never lost in the TextField. */
-    val activeQuery: String? = null,
-    /** Cumulative count of unfiltered items received from the server across all pages.
-     * Used exclusively for computing the correct server offset and termination;
-     * does not change when [roms] is filtered by the hide-unsupported toggle. */
-    val rawFetchedCount: Int = 0,
-    /** Whether the hide-unsupported-systems filter was active during the most recent fetch.
-     * Snapshotted once per operation so filtering and UI state stay consistent.
-     * When true the result-count label always shows visible count; when false it shows server total. */
-    val hideUnsupportedSystems: Boolean = true,
-)
 
 /**
- * Drives the native Search screen. Accepts free-text queries, debounces rapid
- * input ([DEBOUNCE_MS] ms), and paginates results through [LibraryRepository.fetchRomsPage].
- * Each new query cancels any in-flight request from a prior query.
+ * Thin lifecycle wrapper around the platform-neutral [SearchPresenter]
+ * (Linux port Phase 4). All state-machine behavior lives in
+ * `:shared:presentation`; this class only binds it to the lifecycle owner's
+ * scope and forwards the public API so existing call sites (factory,
+ * MainActivity, SearchScreen) compile unchanged.
  *
  * @param testScope Optional [CoroutineScope] for JVM unit tests (avoids
  *   Dispatchers.Main dependency). Production code should pass null to use
  *   the standard [viewModelScope].
  */
 class SearchViewModel(
-    private val repository: LibraryRepository,
+    repository: LibraryRepository,
     testScope: CoroutineScope? = null,
-    private val hideUnsupportedSystems: () -> Boolean = { true },
+    hideUnsupportedSystems: () -> Boolean = { true },
     hideUnsupportedSystemsFlow: Flow<Boolean>? = null,
     refreshEvents: Flow<Unit>? = null,
 ) : ViewModel() {
 
-    /** Internal scope: uses injected [testScope] in tests, [viewModelScope] in production. */
-    private val scope: CoroutineScope = testScope ?: viewModelScope
+    private val presenter = SearchPresenter(
+        scope = testScope ?: viewModelScope,
+        repository = repository,
+        hideUnsupportedSystems = hideUnsupportedSystems,
+        hideUnsupportedSystemsFlow = hideUnsupportedSystemsFlow,
+        refreshEvents = refreshEvents,
+    )
 
-    private val _uiState = MutableStateFlow(SearchUiState())
-    val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
+    val uiState: StateFlow<SearchUiState> = presenter.uiState
 
-    private var searchJob: Job? = null
-    private var debounceJob: Job? = null
-    /** Monotonically increasing token; bumped on every new search or blank-query reset so that
-     * stale in-flight pagination responses for an older generation are discarded. */
-    @Volatile private var generation: Int = 0
-
-    init {
-        // React to preference changes from Settings: re-execute the current search
-        // when the hide-unsupported-systems toggle flips. The initial emission is
-        // dropped because there's no active query at construction time.
-        hideUnsupportedSystemsFlow?.let { flow ->
-            scope.launch {
-                flow.drop(1).collect { refresh() }
-            }
-        }
-        refreshEvents?.let { events ->
-            scope.launch {
-                events.collect { refresh() }
-            }
-        }
-    }
-
-    /** Re-execute the current search from scratch, resetting pagination state.
-     * No-op if there is no active query (idle state). */
-    fun refresh() {
-        val activeTerm = _uiState.value.activeQuery ?: return
-        val raw = _uiState.value.query
-        executeSearch(raw, activeTerm)
-    }
-
-    /** Update the search query text (e.g. from TextField [onValueChange]).
-     * Auto-fires a debounced search after [DEBOUNCE_MS] ms of inactivity. */
     fun onQueryChanged(newQuery: String) {
-        _uiState.value = _uiState.value.copy(query = newQuery)
-
-        debounceJob?.cancel()
-        debounceJob = null
-
-        if (newQuery.isNotBlank()) {
-            debounceJob = scope.launch {
-                delay(DEBOUNCE_MS)
-                executeSearch(newQuery, newQuery.trim())
-            }
-        } else {
-            // Cancel any pending/in-flight search so stale results cannot overwrite idle state.
-            searchJob?.cancel()
-            searchJob = null
-            generation++
-            _uiState.value = SearchUiState(query = "")
-        }
+        presenter.onQueryChanged(newQuery)
     }
 
-    /** Explicitly submit the current query now (bypasses debounce). */
     fun submitQuery() {
-        debounceJob?.cancel()
-        val raw = _uiState.value.query
-        val term = raw.trim()
-        if (term.isNotBlank()) {
-            executeSearch(raw, term)
-        }
+        presenter.submitQuery()
     }
 
-    /** Load the next page of results for the current query. */
+    fun refresh() {
+        presenter.refresh()
+    }
+
     fun loadMore() {
-        val current = _uiState.value
-        if (current.isLoading || current.rawFetchedCount >= current.total) return
-
-        val activeTerm = current.activeQuery ?: return
-
-        // Capture the generation at call time so a stale response from an older generation is dropped.
-        val capturedGeneration = generation
-
-        searchJob = scope.launch {
-            val isHidingUnsupported = hideUnsupportedSystems() // Snapshot once for this operation.
-            _uiState.value = current.copy(isLoading = true, hideUnsupportedSystems = isHidingUnsupported)
-            when (val result = repository.fetchRomsPage(
-                RomQuery.Search(activeTerm),
-                SEARCH_PAGE_SIZE,
-                offset = current.rawFetchedCount,
-            )) {
-                is LibraryResult.Success -> {
-                    // Discard if the generation changed while we were fetching (query changed or cleared).
-                    if (generation == capturedGeneration) {
-                        // De-duped by id: group_by_meta_id can shift which sibling rom represents
-                        // a group across a page boundary, occasionally repeating an id across two
-                        // consecutive pages. Undeduped, SearchScreen's `items(..., key = { it.id })`
-                        // would crash with a duplicate-key exception as soon as that page renders.
-                        _uiState.value = _uiState.value.copy(
-                            roms = (current.roms + result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported))
-                                .distinctBy { it.id },
-                            rawFetchedCount = current.rawFetchedCount + result.data.roms.size,
-                            total = result.data.total,
-                            isLoading = false,
-                        )
-                    } else {
-                        _uiState.value = _uiState.value.copy(isLoading = false)
-                    }
-                }
-                is LibraryResult.Failure -> {
-                    if (generation == capturedGeneration) {
-                        _uiState.value = _uiState.value.copy(
-                            error = result.error,
-                            isLoading = false,
-                        )
-                    } else {
-                        // A newer generation owns the loading state; do not corrupt it.
-                    }
-                }
-            }
-        }
+        presenter.loadMore()
     }
 
-    /** Retry the last failed search (re-uses current active query). */
     fun retry() {
-        val activeTerm = _uiState.value.activeQuery ?: return
-        val raw = _uiState.value.query
-        executeSearch(raw, activeTerm)
-    }
-
-    // ---- Internal ----
-
-    /** @param rawQuery  Exact user input for the TextField (preserves leading/trailing whitespace).
-     *  @param normalizedTerm Trimmed term sent to the API. */
-    private fun executeSearch(rawQuery: String, normalizedTerm: String) {
-        searchJob?.cancel()
-        debounceJob?.cancel()
-        debounceJob = null
-        generation++ // New generation invalidates any stale in-flight loadMore.
-        val capturedGeneration = generation
-
-        searchJob = scope.launch {
-            val isHidingUnsupported = hideUnsupportedSystems() // Snapshot once for this operation.
-            _uiState.value = SearchUiState(
-                query = rawQuery,
-                activeQuery = normalizedTerm,
-                isLoading = true,
-                hideUnsupportedSystems = isHidingUnsupported,
-            )
-            when (val result = repository.fetchRomsPage(
-                RomQuery.Search(normalizedTerm),
-                SEARCH_PAGE_SIZE,
-                offset = 0,
-            )) {
-                is LibraryResult.Success -> {
-                    // Guard against non-cooperative repos that return after cancellation.
-                    if (generation == capturedGeneration) {
-                        _uiState.value = _uiState.value.copy(
-                            roms = result.data.roms.filterUnsupportedIfHidden(isHidingUnsupported),
-                            rawFetchedCount = result.data.roms.size,
-                            total = result.data.total,
-                            isLoading = false,
-                        )
-                    } else {
-                        // A newer search has begun; clear loading state to avoid stale spinner.
-                        _uiState.value = _uiState.value.copy(isLoading = false)
-                    }
-                }
-                is LibraryResult.Failure -> {
-                    if (generation == capturedGeneration) {
-                        _uiState.value = _uiState.value.copy(
-                            error = result.error,
-                            isLoading = false,
-                        )
-                    } else {
-                        _uiState.value = _uiState.value.copy(isLoading = false)
-                    }
-                }
-            }
-        }
+        presenter.retry()
     }
 
     /** Factory — used by [com.romm.androidtv.library.ui.SearchScreen] to construct the ViewModel. */

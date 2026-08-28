@@ -9,10 +9,10 @@ class PsxMemoryCardIntegrationTest {
     fun `frontend keeps card 1 in synchronized save RAM and disables upstream shared card 2`() {
         val repositoryRoot = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
             .takeWhile { it.exists() }
-            .first { File(it, "app/src/main/cpp/libretro_host/emulation_session.cpp").isFile }
+            .first { File(it, "native/engine/src/emulation_session.cpp").isFile }
         val hostSource = File(
             repositoryRoot,
-            "app/src/main/cpp/libretro_host/emulation_session.cpp",
+            "native/engine/src/emulation_session.cpp",
         ).readText()
         val coreSource = File(
             repositoryRoot,
@@ -31,10 +31,10 @@ class PsxMemoryCardIntegrationTest {
     fun `full path cores do not duplicate disc bytes into frontend memory`() {
         val repositoryRoot = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
             .takeWhile { it.exists() }
-            .first { File(it, "app/src/main/cpp/libretro_host/emulation_session.cpp").isFile }
+            .first { File(it, "native/engine/src/emulation_session.cpp").isFile }
         val hostSource = File(
             repositoryRoot,
-            "app/src/main/cpp/libretro_host/emulation_session.cpp",
+            "native/engine/src/emulation_session.cpp",
         ).readText()
 
         assertThat(hostSource).contains("info.data = systemInfo.need_fullpath ? nullptr")

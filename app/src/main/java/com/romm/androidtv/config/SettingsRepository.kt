@@ -169,8 +169,23 @@ class SettingsRepository(
      */
     fun onScreenGameControlsEnabled(): Boolean = prefs.getBoolean(KEY_ON_SCREEN_GAME_CONTROLS, true)
 
+    private val _onScreenGameControlsFlow = MutableStateFlow(onScreenGameControlsEnabled())
+    val onScreenGameControlsFlow: StateFlow<Boolean> = _onScreenGameControlsFlow.asStateFlow()
+
     fun setOnScreenGameControlsEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_ON_SCREEN_GAME_CONTROLS, enabled).apply()
+        _onScreenGameControlsFlow.value = enabled
+    }
+
+    /** Optional light vibration for touch-control press edges. Off by default. */
+    fun touchControlHapticsEnabled(): Boolean = prefs.getBoolean(KEY_TOUCH_CONTROL_HAPTICS, false)
+
+    private val _touchControlHapticsFlow = MutableStateFlow(touchControlHapticsEnabled())
+    val touchControlHapticsFlow: StateFlow<Boolean> = _touchControlHapticsFlow.asStateFlow()
+
+    fun setTouchControlHapticsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_TOUCH_CONTROL_HAPTICS, enabled).apply()
+        _touchControlHapticsFlow.value = enabled
     }
 
     /**
@@ -247,6 +262,7 @@ class SettingsRepository(
         private const val KEY_INTEGER_SCALING_ENABLED = "video_integer_scaling_enabled"
         private const val KEY_SHARP_FILTER_ENABLED = "video_sharp_filter_enabled"
         private const val KEY_ON_SCREEN_GAME_CONTROLS = "on_screen_game_controls"
+        private const val KEY_TOUCH_CONTROL_HAPTICS = "touch_control_haptics"
         private const val KEY_SEGACD_BIOS_ID = "segacd_bios_id"
         private const val KEY_SEGACD_BIOS_FILE_NAME = "segacd_bios_file_name"
         private const val KEY_PSX_BIOS_ID = "psx_bios_id"

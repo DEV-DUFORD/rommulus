@@ -39,4 +39,5 @@
   Android vector drawables.
 - **Assets covered**: Genesis six-button controller, PlayStation DualShock, GBA,
   Game Boy / Game Boy Color, TurboGrafx-16, Neo Geo Pocket, WonderSwan,
-  Atari Lynx, Atari 2600-style joystick, Atari 7800.
+  Atari Lynx, Atari 2600-style joystick, Atari 7800, and the Linux-only
+  GameCube controller.

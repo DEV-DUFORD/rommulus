@@ -288,7 +288,9 @@ static void inputGetKeys_reuse(int16_t analogX, int16_t analogY, int Control, BU
    analogY = input_cb(Control, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
 
    // Convert cartesian coordinate analog stick to polar coordinates
-   radius = sqrt(analogX * analogX + analogY * analogY);
+   // Two full negative axes are both -32768; squaring and adding them as
+   // promoted 32-bit ints overflows by one and turns Up+Left into neutral.
+   radius = sqrt((double)analogX * analogX + (double)analogY * analogY);
    angle = atan2(analogY, analogX);
 
    if (radius > astick_deadzone)

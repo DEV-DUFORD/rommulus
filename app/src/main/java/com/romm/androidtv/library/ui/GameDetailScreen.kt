@@ -144,6 +144,8 @@ fun GameDetailScreen(
     errorMessage: String? = null,
     onDismissError: () -> Unit = {},
     isAuthExpired: Boolean = false,
+    isOffline: Boolean = false,
+    isAvailableOffline: Boolean = false,
     onLogin: () -> Unit = {},
     onChooseSave: (Long) -> Unit = {},
     onChooseVersion: (Long) -> Unit = {},
@@ -152,7 +154,7 @@ fun GameDetailScreen(
     onOpenScreenshot: (List<String>, Int) -> Unit = { _, _ -> },
     onBack: () -> Unit,
 ) {
-    val state: RomDetailUiState by viewModel.state.collectAsState()
+    val state: RomDetailUiState by viewModel.uiState.collectAsState()
 
     // Shared focus requesters for the rail ↔ Play focus link.
     val playButtonFocusRequester = remember { FocusRequester() }
@@ -230,6 +232,8 @@ fun GameDetailScreen(
                 errorMessage = errorMessage,
                 onDismissError = onDismissError,
                 isAuthExpired = isAuthExpired,
+                isOffline = isOffline,
+                isAvailableOffline = isAvailableOffline,
                 onLogin = onLogin,
                 onChooseSave = onChooseSave,
                 onChooseVersion = onChooseVersion,
@@ -325,6 +329,8 @@ private fun GameDetailContent(
     errorMessage: String?,
     onDismissError: () -> Unit,
     isAuthExpired: Boolean,
+    isOffline: Boolean,
+    isAvailableOffline: Boolean,
     onLogin: () -> Unit,
     onChooseSave: (Long) -> Unit,
     onChooseVersion: (Long) -> Unit,
@@ -393,9 +399,10 @@ private fun GameDetailContent(
                         )
                     }
                     MetadataChips(rom)
-                    if (rom.summary != null) {
+                    val summaryText = rom.summary
+                    if (summaryText != null) {
                         Text(
-                            text = rom.summary,
+                            text = summaryText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = RommTvColors.TextSecondary,
                             modifier = Modifier.padding(top = 16.dp),
@@ -411,6 +418,14 @@ private fun GameDetailContent(
                         UnsupportedSystemState(platformDisplayName = rom.platformDisplayName)
                     } else if (rom.platformSlug == "segacd" && biosState !is RequiredBiosState.Ready) {
                         RequiredBiosUnavailableState(biosState)
+                    } else if (isOffline && !isAvailableOffline) {
+                        DisabledPlayButton()
+                        Text(
+                            text = "Offline - download this game before playing.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = RommTvColors.TextSecondary,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
                     } else {
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -426,6 +441,15 @@ private fun GameDetailContent(
                             if (rom.siblingRoms.isNotEmpty()) {
                                 ChooseVersionButton(onClick = { onChooseVersion(rom.id) }, enabled = !isStaging)
                             }
+                        }
+
+                        if (isOffline) {
+                            Text(
+                                text = "Save: Offline - progress is checkpointed locally",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RommTvColors.Romm300,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
                         }
 
                         if (errorMessage != null) {

@@ -8,6 +8,7 @@ import com.romm.androidtv.RommApplication
 import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.romm.ClientTokenStore
 import com.romm.androidtv.romm.DeviceIdentityStore
+import com.romm.androidtv.network.AndroidDeviceIdentityStorage
 import com.romm.androidtv.network.RommOkHttpClient
 import com.romm.androidtv.network.RommServerAddress
 import com.romm.androidtv.network.ServerAddressResult
@@ -100,7 +101,10 @@ class RommWorkerFactory(
                 },
             )
 
-            val deviceRepo: DeviceRepository = DeviceRepositoryImpl(workerClient, deviceIdentityStore)
+            val deviceRepo: DeviceRepository = DeviceRepositoryImpl(
+                workerClient,
+                AndroidDeviceIdentityStorage(deviceIdentityStore),
+            )
 
             val saveUploadCaller = SaveUploadCaller { origin: String, request: com.romm.androidtv.romm.SaveUploadRequest ->
                 RommSyncApi.uploadSave(workerClient, origin, request)

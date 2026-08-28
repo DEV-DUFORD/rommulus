@@ -140,7 +140,7 @@ fun TouchControlDefinition.referencedControlIds(): Set<CoreControlId> = when (th
     is TouchControlDefinition.Button -> setOf(controlId)
     is TouchControlDefinition.Dpad -> setOf(up, down, left, right)
     is TouchControlDefinition.Stick -> setOf(xAxis, yAxis)
-    is TouchControlDefinition.Menu -> emptySet()
+    is TouchControlDefinition.Menu -> setOf(CoreControlId.PAUSE_MENU)
 }
 
 fun TouchControlDefinition.resolve(profile: CoreControllerProfile): ResolvedTouchControl {

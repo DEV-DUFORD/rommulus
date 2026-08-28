@@ -1,11 +1,8 @@
 package com.romm.androidtv.emulation.model
 
 import android.util.Log
-import com.romm.androidtv.library.ui.ConflictResolutionMapper
-import com.romm.androidtv.romm.RommApiError
-import com.romm.androidtv.romm.StagingOutcome
+import com.romm.androidtv.romm.SyncOperation
 import com.romm.androidtv.romm.save.SaveSyncCoordinator
-import com.romm.androidtv.romm.save.SaveSyncOutcome
 import com.romm.androidtv.romm.save.SaveSyncRequest
 
 /** Stable tag for all auth-loop boundary diagnostics (logcat -s RommAuthDx). */
@@ -21,6 +18,14 @@ private fun diagLog(priority: Int, message: String) {
  * Eliminates duplicated sync-outcome handling between [MainActivity.launchStagedRom]
  * and [MainActivity.launchStagedRomNativeLibrary].
  *
+ * Thin platform delegator: the pure outcome-to-presentation mapping lives in
+ * [LaunchPreparationDecision] (`:shared:presentation`, canonical type
+ * [com.romm.androidtv.emulation.model.PreparationResult]), which is shared with the desktop
+ * port. This class only (1) resolves the authoritative core build revision from
+ * CoreManifest, (2) invokes the injected [SaveSyncCoordinator], (3) converts the shared
+ * result into the app-local nested [PreparationResult] below, and (4) bridges platform
+ * logging into the decision unit.
+ *
  * Presentation policies are injected via [PreLaunchPresentationPolicy]:
  * - Debug builds can report failure as a generic error string.
  * - Native Library routes conflict/quarantine into overlay state (conflictModel/quarantineModel).
@@ -29,6 +34,47 @@ class SaveLaunchOrchestrator(
     private val coordinator: SaveSyncCoordinator,
     private val logTag: String = "SaveLaunchOrch",
 ) {
+
+    /**
+     * App-local mirror of the canonical shared [com.romm.androidtv.emulation.model.PreparationResult]
+     * (same variants, same fields). Kotlin does not support nested type aliases, so this
+     * declaration exists purely for source compatibility with existing
+     * `SaveLaunchOrchestrator.PreparationResult.*` references in MainActivity and tests.
+     * Delete once those callers migrate to the shared top-level type.
+     */
+    sealed interface PreparationResult {
+        /** Ready to launch EmulationActivity; candidate metadata may be null. */
+        data class Ready(val candidateMetadata: CandidateSaveMetadata?) : PreparationResult
+
+        /** Conflict detected; caller must show conflict-resolution overlay and await user choice. */
+        data class Conflict(
+            val sessionId: Long,
+            val operation: SyncOperation,
+        ) : PreparationResult
+
+        /** Quarantined download; caller may show quarantine overlay. */
+        data class Quarantined(val reason: String, val quarantinedPath: String) : PreparationResult
+
+        /** Bearer-authenticated sync returned AUTH_EXPIRED (401/403). Caller should reconcile or prompt login. */
+        data object AuthExpired : PreparationResult
+
+        /**
+         * Pre-launch sync failed with a transient server outage but a valid durable local save
+         * exists. Caller should launch the game with the local copy (the pending save remains
+         * queued for later upload). [reason] is the underlying error name, informational only.
+         */
+        data class OfflineLocal(val reason: String) : PreparationResult
+
+        /** Launch blocked with an actionable error message (non-auth failure). */
+        data class Failed(val reason: String) : PreparationResult
+    }
+
+    private val decision = LaunchPreparationDecision(
+        logger = LaunchLogger { priority, tag, message ->
+            try { android.util.Log.println(priority, tag, message) } catch (_: Exception) { /* JVM test env */ }
+        },
+        logTag = logTag,
+    )
 
     /**
      * Runs pre-launch sync negotiation and returns a [PreparationResult].
@@ -68,7 +114,7 @@ class SaveLaunchOrchestrator(
             return PreparationResult.Failed("Save sync error: ${e.message ?: "unknown"}")
         }
 
-        val result = mapSyncOutcome(syncOutcome, romId, romHash, coreId, resolvedCoreBuildRevision)
+        val result = toAppResult(decision.mapSyncOutcome(syncOutcome, romId, romHash, coreId, resolvedCoreBuildRevision))
         diagLog(android.util.Log.DEBUG, "SaveLaunchOrch.prepare: result=${result.javaClass.simpleName}")
         return result
     }
@@ -77,9 +123,10 @@ class SaveLaunchOrchestrator(
      * Native save-picker variant of [prepare]: the user has already chosen a specific server
      * save (from [com.romm.androidtv.romm.RommSyncApi.listSaves]) rather than letting negotiate
      * decide. Calls [SaveSyncCoordinator.adoptChosenSave] instead of
-     * [SaveSyncCoordinator.syncBeforeLaunch] and reuses the exact same [mapSyncOutcome] mapping,
-     * so downstream callers (MainActivity's `dispatchPreparationResult`) need no special-casing —
-     * a mismatch still surfaces as [PreparationResult.Quarantined], never a silent overwrite.
+     * [SaveSyncCoordinator.syncBeforeLaunch] and reuses the exact same shared mapping
+     * ([LaunchPreparationDecision.mapSyncOutcome]), so downstream callers (MainActivity's
+     * `dispatchPreparationResult`) need no special-casing — a mismatch still surfaces as
+     * [PreparationResult.Quarantined], never a silent overwrite.
      */
     suspend fun prepareWithChosenSave(
         romId: Long,
@@ -116,74 +163,9 @@ class SaveLaunchOrchestrator(
             return PreparationResult.Failed("Save adopt error: ${e.message ?: "unknown"}")
         }
 
-        val result = mapSyncOutcome(syncOutcome, romId, romHash, coreId, resolvedCoreBuildRevision)
+        val result = toAppResult(decision.mapSyncOutcome(syncOutcome, romId, romHash, coreId, resolvedCoreBuildRevision))
         diagLog(android.util.Log.DEBUG, "SaveLaunchOrch.prepareWithChosenSave: result=${result.javaClass.simpleName}")
         return result
-    }
-
-    private suspend fun mapSyncOutcome(
-        outcome: SaveSyncOutcome,
-        romId: Long,
-        romHash: String,
-        coreId: String,
-        coreBuildRevision: String,
-    ): PreparationResult {
-        return when (outcome) {
-        is SaveSyncOutcome.AwaitingCoreValidation -> {
-            val candidateMetadata = CandidateSaveMetadata(
-                rommSessionId = outcome.sessionId,
-                rommSaveId = outcome.rommSaveId,
-                candidatePath = outcome.quarantinedPath,
-                downloadedSizeBytes = outcome.downloadedSizeBytes,
-                serverContentHash = outcome.serverContentHash,
-                emulator = outcome.emulator,
-                romId = romId,
-                romHash = romHash,
-                coreId = coreId,
-                coreBuildRevision = coreBuildRevision,
-            )
-            Log.i(logTag, "prepare: AwaitingCoreValidation candidate prepared")
-            PreparationResult.Ready(candidateMetadata)
-        }
-        is SaveSyncOutcome.Downloaded -> {
-            Log.d(logTag, "prepare: sync downloaded server save")
-            PreparationResult.Ready(null)
-        }
-        is SaveSyncOutcome.NoOpSynced -> {
-            Log.d(logTag, "prepare: no-op sync")
-            PreparationResult.Ready(null)
-        }
-        is SaveSyncOutcome.UploadQueued -> {
-            Log.d(logTag, "prepare: upload queued for post-play")
-            PreparationResult.Ready(null)
-        }
-        is SaveSyncOutcome.ConflictRequiresResolution -> {
-            Log.w(logTag, "prepare: conflict requires resolution")
-            PreparationResult.Conflict(
-                sessionId = outcome.sessionId,
-                operation = outcome.operation,
-            )
-        }
-        is SaveSyncOutcome.Quarantined -> {
-            Log.w(logTag, "prepare: download quarantined (${outcome.reason})")
-            PreparationResult.Quarantined(
-                reason = outcome.reason,
-                quarantinedPath = outcome.quarantinedPath,
-            )
-        }
-        is SaveSyncOutcome.PlayOfflineLocal -> {
-            Log.w(logTag, "prepare: sync offline, launching with local save (${outcome.error})")
-            PreparationResult.OfflineLocal(outcome.error.name)
-        }
-        is SaveSyncOutcome.Failure -> {
-            Log.w(logTag, "prepare: pre-launch sync failed (${outcome.error})")
-            // Preserve typed AUTH_EXPIRED so caller can attempt reconciliation.
-            if (outcome.error == RommApiError.AUTH_EXPIRED) {
-                return PreparationResult.AuthExpired
-            }
-            PreparationResult.Failed("Save sync failed: ${outcome.error.name}")
-        }
-        }
     }
 
     /**
@@ -200,10 +182,10 @@ class SaveLaunchOrchestrator(
         romHash: String,
         coreId: String,
         coreBuildRevision: String,
-    ): CandidateSaveMetadata = CandidateSaveMetadata(
+    ): CandidateSaveMetadata = decision.buildCandidateMetadata(
         rommSessionId = rommSessionId,
         rommSaveId = rommSaveId,
-        candidatePath = quarantinedPath,
+        quarantinedPath = quarantinedPath,
         downloadedSizeBytes = downloadedSizeBytes,
         serverContentHash = serverContentHash,
         emulator = emulator,
@@ -214,33 +196,22 @@ class SaveLaunchOrchestrator(
     )
 
     /**
-     * Sealed result of [prepare]. Each branch carries only the data the caller
-     * needs for its presentation policy. The orchestrator does NOT mutate UI state.
+     * Converts the canonical shared result into the app-local mirror type (identical shape).
      */
-    sealed interface PreparationResult {
-        /** Ready to launch EmulationActivity; candidate metadata may be null. */
-        data class Ready(val candidateMetadata: CandidateSaveMetadata?) : PreparationResult
-
-        /** Conflict detected; caller must show conflict-resolution overlay and await user choice. */
-        data class Conflict(
-            val sessionId: Long,
-            val operation: com.romm.androidtv.romm.SyncOperation,
-        ) : PreparationResult
-
-        /** Quarantined download; caller may show quarantine overlay. */
-        data class Quarantined(val reason: String, val quarantinedPath: String) : PreparationResult
-
-        /** Bearer-authenticated sync returned AUTH_EXPIRED (401/403). Caller should reconcile or prompt login. */
-        data object AuthExpired : PreparationResult
-
-        /**
-         * Pre-launch sync failed with a transient server outage but a valid durable local save
-         * exists. Caller should launch the game with the local copy (the pending save remains
-         * queued for later upload). [reason] is the underlying error name, informational only.
-         */
-        data class OfflineLocal(val reason: String) : PreparationResult
-
-        /** Launch blocked with an actionable error message (non-auth failure). */
-        data class Failed(val reason: String) : PreparationResult
+    private fun toAppResult(
+        result: com.romm.androidtv.emulation.model.PreparationResult,
+    ): PreparationResult = when (result) {
+        is com.romm.androidtv.emulation.model.PreparationResult.Ready ->
+            PreparationResult.Ready(result.candidateMetadata)
+        is com.romm.androidtv.emulation.model.PreparationResult.Conflict ->
+            PreparationResult.Conflict(result.sessionId, result.operation)
+        is com.romm.androidtv.emulation.model.PreparationResult.Quarantined ->
+            PreparationResult.Quarantined(result.reason, result.quarantinedPath)
+        is com.romm.androidtv.emulation.model.PreparationResult.AuthExpired ->
+            PreparationResult.AuthExpired
+        is com.romm.androidtv.emulation.model.PreparationResult.OfflineLocal ->
+            PreparationResult.OfflineLocal(result.reason)
+        is com.romm.androidtv.emulation.model.PreparationResult.Failed ->
+            PreparationResult.Failed(result.reason)
     }
 }

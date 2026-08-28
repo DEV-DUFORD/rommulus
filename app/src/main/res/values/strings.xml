@@ -104,6 +104,7 @@
     <string name="pause_menu_controller_settings">Controller Settings</string>
     <string name="pause_menu_physical_controller_settings">Physical Controller Settings</string>
     <string name="pause_menu_on_screen_controls">On-Screen Controls</string>
+    <string name="pause_menu_touch_control_haptics">Touch Control Vibration</string>
     <string name="pause_menu_on_screen_controller_settings">On-Screen Controller Settings</string>
     <string name="pause_menu_quit">Quit</string>
 
