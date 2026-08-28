@@ -5,6 +5,7 @@
 #include <native/engine/LogSink.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -122,6 +123,7 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         std::strcmp(systemInfo.library_name, "dolphin-emu") == 0;
     const bool isLrps2 = systemInfo.library_name != nullptr &&
         std::strcmp(systemInfo.library_name, "LRPS2") == 0;
+    dynamicTimingEnabled_ = isDolphin;
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     catchUpAfterStall_ = isDolphin || isLrps2;
     if (isDolphin) {
@@ -435,6 +437,25 @@ void EmulationSession::runLoop() {
         }
         const auto frameWorkDuration = std::chrono::steady_clock::now() - frameWorkStarted;
         scheduler.reportFrameWorkDuration(frameWorkDuration);
+        if (dynamicTimingEnabled_) {
+            // Dolphin boots lazily in its first retro_run(), so the AV info
+            // queried during start() still contains the pre-boot fallback
+            // rate. Games can also reprogram the VI while running (Sonic
+            // Heroes switches between 59.94 and 119.88 VPS). Keep frontend
+            // pacing aligned with the initialized VI instead of permanently
+            // running a 119.88 Hz mode at the 59.94 Hz fallback rate.
+            struct retro_system_av_info currentAv {};
+            {
+                std::lock_guard<std::mutex> lock(coreExecutionMutex_);
+                core_.functions().retro_get_system_av_info(&currentAv);
+            }
+            if (currentAv.timing.fps > 1.0 &&
+                std::abs(currentAv.timing.fps - scheduler.fps()) > 0.001) {
+                LOGI("core frame rate changed: %.4f Hz -> %.4f Hz",
+                     scheduler.fps(), currentAv.timing.fps);
+                scheduler.setFps(currentAv.timing.fps);
+            }
+        }
         if (adaptiveFrameSkipEnabled_) {
             frameSkip.reportFrameWorkDuration(frameWorkDuration, videoEnabled);
             if (!videoEnabled) {

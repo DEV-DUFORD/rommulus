@@ -67,9 +67,9 @@ bool SdlHardwareContext::createContext() {
         logSdlError("SDL_GL_MakeCurrent");
         return false;
     }
-    // FrameScheduler is the sole emulation clock. A second, display-rate
-    // throttle here can drift against Dolphin's fractional frame rate and
-    // make SDL_GL_SwapWindow block for an extra vblank on every frame.
+    // Dolphin can require frontend runs above the panel refresh rate. The
+    // frame scheduler supplies that pacing; waiting for display vblank here
+    // would cap emulation speed to the panel rate.
     if (!SDL_GL_SetSwapInterval(0)) {
         romm::log::sink().log(
             romm::log::Severity::Warn, kTag,

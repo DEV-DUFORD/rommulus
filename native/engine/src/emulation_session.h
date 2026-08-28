@@ -222,6 +222,7 @@ private:
     InputState inputState_;
     double avFps_ = 60.0;
     double avSampleRate_ = 44100.0;
+    bool dynamicTimingEnabled_ = false;
     bool adaptiveFrameSkipEnabled_ = false;
     bool catchUpAfterStall_ = false;
     std::atomic<bool> presentVideoFrame_{true};
