@@ -2,11 +2,6 @@ name: Build Android verification APK
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - zd/linux-build
-    paths:
-      - .github/workflows/android-verification.yml
 
 permissions:
   contents: read

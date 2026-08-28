@@ -1,10 +1,10 @@
-name: Release Android build
+name: Release builds
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version (for example, 1.2.3)
+        description: Release version (for example, 0.3.0)
         required: true
         type: string
 
@@ -16,13 +16,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and publish
+  prepare:
+    name: Validate release
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      INPUT_VERSION: ${{ inputs.version }}
-      RELEASE_STORE_FILE: ${{ github.workspace }}/rommulus-release.jks
+    outputs:
+      source_sha: ${{ steps.version.outputs.source_sha }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      version_code: ${{ steps.version.outputs.version_code }}
 
     steps:
       - name: Check out main
@@ -31,22 +32,10 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Set up Java
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
-
-      - name: Install Android build tools
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
-
-      - name: Validate and apply version
+      - name: Validate version
         id: version
-        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           if [[ ! "$INPUT_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
@@ -78,16 +67,51 @@ jobs:
             exit 1
           fi
 
-          sed -i -E \
-            "s/^([[:space:]]*)versionCode = [0-9]+$/\\1versionCode = $version_code/" \
-            app/build.gradle.kts
-          sed -i -E \
-            "s/^([[:space:]]*)versionName = \"[^\"]+\"$/\\1versionName = \"$INPUT_VERSION\"/" \
-            app/build.gradle.kts
-
-          grep -q "versionCode = $version_code" app/build.gradle.kts
-          grep -q "versionName = \"$INPUT_VERSION\"" app/build.gradle.kts
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Build signed Android release
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RELEASE_STORE_FILE: ${{ github.workspace }}/rommulus-release.jks
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERSION_CODE: ${{ needs.prepare.outputs.version_code }}
+
+    steps:
+      - name: Check out release revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Apply release version
+        run: |
+          set -euo pipefail
+          sed -i -E \
+            "s/^([[:space:]]*)versionCode = [0-9]+$/\1versionCode = $VERSION_CODE/" \
+            app/build.gradle.kts
+          sed -i -E \
+            "s/^([[:space:]]*)versionName = \"[^\"]+\"$/\1versionName = \"$VERSION\"/" \
+            app/build.gradle.kts
+          grep -q "versionCode = $VERSION_CODE" app/build.gradle.kts
+          grep -q "versionName = \"$VERSION\"" app/build.gradle.kts
 
       - name: Restore release keystore
         env:
@@ -100,42 +124,244 @@ jobs:
           fi
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RELEASE_STORE_FILE"
 
-      - name: Build signed release artifacts
+      - name: Build signed Android artifacts
         env:
           RELEASE_STORE_PASSWORD: ${{ secrets.ROMMULUS_RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.ROMMULUS_RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.ROMMULUS_RELEASE_KEY_PASSWORD }}
         run: ./gradlew --no-daemon :app:bundleRelease :app:assembleRelease
 
-      - name: Prepare release artifacts
+      - name: Prepare Android artifacts
         run: |
           set -euo pipefail
           apk="app/build/outputs/apk/release/app-release.apk"
           aab="app/build/outputs/bundle/release/app-release.aab"
-          if [[ ! -f "$apk" ]]; then
-            echo "::error::Signed release APK was not produced at $apk."
-            exit 1
-          fi
-          if [[ ! -f "$aab" ]]; then
-            echo "::error::Signed release AAB was not produced at $aab."
-            exit 1
-          fi
-          cp "$apk" "rommulus-$INPUT_VERSION-arm.apk"
-          cp "$aab" "rommulus-$INPUT_VERSION-arm.aab"
+          [ -f "$apk" ] || { echo "::error::Signed release APK was not produced."; exit 1; }
+          [ -f "$aab" ] || { echo "::error::Signed release AAB was not produced."; exit 1; }
+          mkdir -p dist
+          cp "$apk" "dist/rommulus-$VERSION-arm.apk"
+          cp "$aab" "dist/rommulus-$VERSION-arm.aab"
 
-      - name: Commit and tag release
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-release
+          path: |
+            dist/*.apk
+            dist/*.aab
+          if-no-files-found: error
+          retention-days: 3
+
+  linux-x86_64:
+    name: Build Linux AppImage
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      SDL_VERSION: 3.4.14
+      VERSION: ${{ needs.prepare.outputs.version }}
+
+    steps:
+      - name: Check out release revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          submodules: recursive
+
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install Linux build dependencies
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-18 g++ cmake ninja-build nasm pkg-config wget zstd xvfb \
+            libsqlite3-dev \
+            libasound2-dev libaudio-dev libdbus-1-dev libdecor-0-dev \
+            libdrm-dev libegl1-mesa-dev libfribidi-dev libgbm-dev \
+            libgl1-mesa-dev libgles2-mesa-dev libibus-1.0-dev libjack-dev \
+            libpipewire-0.3-dev libsndio-dev libthai-dev libudev-dev \
+            liburing-dev libusb-1.0-0-dev libwayland-dev libx11-dev \
+            libxcursor-dev libxext-dev libxfixes-dev libxi-dev \
+            libxinerama-dev libxkbcommon-dev libxrandr-dev libxss-dev \
+            libxtst-dev
+
+      - name: Restore SDL3
+        id: sdl-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/sdl-install
+          key: sdl3-${{ env.SDL_VERSION }}-${{ runner.os }}-${{ runner.arch }}-clang18-static-v1
+
+      - name: Build SDL3
+        if: steps.sdl-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p deps/sdl3
+          wget -qO- \
+            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-${SDL_VERSION}.tar.gz" \
+            | tar -xz -C deps/sdl3 --strip-components=1
+          cmake -S deps/sdl3 -B build/sdl -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/sdl-install" \
+            -DSDL_SHARED=OFF \
+            -DSDL_STATIC=ON
+          cmake --build build/sdl
+          cmake --install build/sdl
+
+      - name: Build player and cores
+        run: |
+          set -euo pipefail
+          cmake -S native/player -B build/player -G Ninja \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install"
+          cmake --build build/player
+
+      - name: Apply desktop release version
+        run: |
+          set -euo pipefail
+          sed -i -E \
+            "s/private const val APP_VERSION = \"[^\"]+\"/private const val APP_VERSION = \"$VERSION\"/" \
+            desktop/src/main/kotlin/com/romm/desktop/Main.kt
+          grep -q "APP_VERSION = \"$VERSION\"" desktop/src/main/kotlin/com/romm/desktop/Main.kt
+
+      - name: Build desktop application and runtime
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --configure-on-demand \
+            :desktop:jar :desktop:copyRuntimeClasspath
+          jlink \
+            --add-modules java.base,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.sql,java.xml,jdk.crypto.ec,jdk.unsupported \
+            --output build/runtime \
+            --strip-debug \
+            --no-header-files \
+            --no-man-pages
+
+      - name: Assemble AppImage
+        run: |
+          set -euo pipefail
+          packaging/build-tarball.sh "$VERSION"
+
+          tool="$GITHUB_WORKSPACE/build/appimagetool-1.9.1-x86_64.AppImage"
+          runtime="$GITHUB_WORKSPACE/build/appimage-runtime-20251108-x86_64"
+          wget -q \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage \
+            -O "$tool"
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $tool" \
+            | sha256sum --check
+          chmod +x "$tool"
+          wget -q \
+            https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64 \
+            -O "$runtime"
+          echo "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d  $runtime" \
+            | sha256sum --check
+
+          APPIMAGETOOL="$tool" APPIMAGE_RUNTIME="$runtime" \
+            packaging/build-appimage.sh "$VERSION"
+          (
+            cd dist
+            appimage="rommulus-$VERSION-linux-x86_64.AppImage"
+            sha256sum "$appimage" > "$appimage.sha256"
+          )
+
+      - name: Verify AppImage
+        run: |
+          set -euo pipefail
+          appimage="dist/rommulus-$VERSION-linux-x86_64.AppImage"
+          [ -x "$appimage" ] \
+            || { echo "::error::Executable AppImage is missing."; exit 1; }
+          [ "$(stat -c%s "$appimage")" -gt 5242880 ] \
+            || { echo "::error::AppImage is smaller than 5 MiB."; exit 1; }
+          extract="$(mktemp -d)"
+          trap 'rm -rf "$extract"' EXIT
+          (
+            cd "$extract"
+            "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
+          )
+          [ -L "$extract/squashfs-root/AppRun" ]
+          [ -x "$extract/squashfs-root/bin/rommulus-player" ]
+          [ -x "$extract/squashfs-root/bin/rommulus-player-deck" ]
+          [ -x "$extract/squashfs-root/lib/runtime/bin/java" ]
+          [ -f "$extract/squashfs-root/lib/rommulus/app.jar" ]
+          find "$extract/squashfs-root/lib/rommulus/lib" -name 'kotlin-stdlib-*.jar' \
+            | grep -q .
+
+      - name: Smoke test AppImage
+        run: |
+          set +e
+          timeout 30 xvfb-run -a "dist/rommulus-$VERSION-linux-x86_64.AppImage"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 124 ]; then
+            echo "::error::AppImage exited before its desktop window smoke timeout (rc=$rc)."
+            exit 1
+          fi
+
+      - name: Upload AppImage artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-appimage-release
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  publish:
+    name: Publish release
+    needs:
+      - prepare
+      - android
+      - linux-x86_64
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERSION_CODE: ${{ needs.prepare.outputs.version_code }}
+
+    steps:
+      - name: Check out release revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Apply and commit release version
+        run: |
+          set -euo pipefail
+          sed -i -E \
+            "s/^([[:space:]]*)versionCode = [0-9]+$/\1versionCode = $VERSION_CODE/" \
+            app/build.gradle.kts
+          sed -i -E \
+            "s/^([[:space:]]*)versionName = \"[^\"]+\"$/\1versionName = \"$VERSION\"/" \
+            app/build.gradle.kts
+          sed -i -E \
+            "s/private const val APP_VERSION = \"[^\"]+\"/private const val APP_VERSION = \"$VERSION\"/" \
+            desktop/src/main/kotlin/com/romm/desktop/Main.kt
+          grep -q "versionCode = $VERSION_CODE" app/build.gradle.kts
+          grep -q "versionName = \"$VERSION\"" app/build.gradle.kts
+          grep -q "APP_VERSION = \"$VERSION\"" desktop/src/main/kotlin/com/romm/desktop/Main.kt
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # If the version is already applied in main (e.g. it was committed
-          # ahead of the workflow run), there is no diff to commit — just tag.
-          if git diff --quiet -- app/build.gradle.kts; then
+          if git diff --quiet -- app/build.gradle.kts desktop/src/main/kotlin/com/romm/desktop/Main.kt; then
             echo "Version already applied on main; skipping commit."
           else
-            git add app/build.gradle.kts
+            git add app/build.gradle.kts desktop/src/main/kotlin/com/romm/desktop/Main.kt
             git commit -m "Release $TAG"
           fi
           git tag --annotate "$TAG" --message "RomMulus $TAG"
@@ -144,11 +370,18 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
         run: |
+          set -euo pipefail
+          apk="release-artifacts/rommulus-$VERSION-arm.apk"
+          aab="release-artifacts/rommulus-$VERSION-arm.aab"
+          appimage="release-artifacts/rommulus-$VERSION-linux-x86_64.AppImage"
+          checksum="$appimage.sha256"
+          [ -f "$apk" ] && [ -f "$aab" ] && [ -f "$appimage" ] && [ -f "$checksum" ]
           gh release create "$TAG" \
-            "rommulus-$INPUT_VERSION-arm.apk" \
-            "rommulus-$INPUT_VERSION-arm.aab" \
+            "$apk" \
+            "$aab" \
+            "$appimage" \
+            "$checksum" \
             --title "RomMulus $TAG" \
             --generate-notes \
             --verify-tag
