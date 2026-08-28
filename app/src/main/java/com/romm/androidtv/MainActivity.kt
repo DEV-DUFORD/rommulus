@@ -617,6 +617,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (shouldFinishDuplicateLauncherActivity(
+                isTaskRoot = isTaskRoot,
+                action = intent.action,
+                categories = intent.categories,
+            )
+        ) {
+            Log.i(TAG, "onCreate: discarding duplicate launcher activity above retained task")
+            finish()
+            return
+        }
         lifecycleScope.launch {
             while (true) {
                 val session = sessionStore.current()
@@ -630,6 +640,7 @@ class MainActivity : ComponentActivity() {
                 kotlinx.coroutines.delay(SERVER_REACHABILITY_INTERVAL_MS)
             }
         }
+
         enableEdgeToEdge()
 
         // Initialize controller router and register device listener
@@ -2476,4 +2487,14 @@ class MainActivity : ComponentActivity() {
         }
         super.onDestroy()
     }
+}
+
+internal fun shouldFinishDuplicateLauncherActivity(
+    isTaskRoot: Boolean,
+    action: String?,
+    categories: Set<String>?,
+): Boolean {
+    if (isTaskRoot || action != Intent.ACTION_MAIN) return false
+    return categories?.contains(Intent.CATEGORY_LAUNCHER) == true ||
+        categories?.contains(Intent.CATEGORY_LEANBACK_LAUNCHER) == true
 }

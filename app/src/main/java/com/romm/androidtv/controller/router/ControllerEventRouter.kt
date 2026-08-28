@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import com.romm.androidtv.controller.adapters.AndroidControllerInputProfiles
 import com.romm.androidtv.controller.adapters.AndroidDeviceSignatureAdapter
 import com.romm.androidtv.controller.isAndroidTvVirtualController
 import com.romm.androidtv.controller.model.*
@@ -605,7 +606,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         if (range == null) return AxisNormalizer.normalizeFallback(rawValue)
 
         val neutralAxis = NeutralAxis.fromPlatform(axisConstant)
-        return if (
+        val normalized = if (
             neutralAxis == NeutralAxis.LTRIGGER ||
             neutralAxis == NeutralAxis.RTRIGGER ||
             neutralAxis == NeutralAxis.BRAKE ||
@@ -617,6 +618,12 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         } else {
             AxisNormalizer.normalize(rawValue, range.min, range.max, range.flat)
         }
+        return AndroidControllerInputProfiles.applyDeadzone(
+            vendorId = device.vendorId,
+            productId = device.productId,
+            axis = axisConstant,
+            normalizedValue = normalized,
+        )
     }
 
     private fun resolveAxes(

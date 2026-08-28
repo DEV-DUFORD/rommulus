@@ -45,9 +45,9 @@ size_t sourceIndex(size_t canonicalIndex, ByteOrder order) {
     return canonicalIndex;
 }
 
-bool headerIsDonkeyKong64(const uint8_t* header) {
+std::string readInternalName(const uint8_t* header) {
     ByteOrder order = ByteOrder::kBigEndian;
-    if (!detectByteOrder(header, order)) return false;
+    if (!detectByteOrder(header, order)) return {};
 
     std::string internalName;
     internalName.reserve(kInternalNameSize);
@@ -59,21 +59,30 @@ bool headerIsDonkeyKong64(const uint8_t* header) {
            (internalName.back() == ' ' || internalName.back() == '\0')) {
         internalName.pop_back();
     }
-    return internalName == "DONKEY KONG 64";
+    return internalName;
 }
 
-}  // namespace
-
-bool isDonkeyKong64Rom(const std::vector<uint8_t>& content, const std::string& contentPath) {
+bool isRomNamed(const std::vector<uint8_t>& content, const std::string& contentPath,
+                const char* expectedName) {
     if (content.size() >= kN64HeaderSize) {
-        return headerIsDonkeyKong64(content.data());
+        return readInternalName(content.data()) == expectedName;
     }
     if (contentPath.empty()) return false;
 
     std::array<uint8_t, kN64HeaderSize> header{};
     std::ifstream stream(contentPath, std::ios::binary);
     if (!stream.read(reinterpret_cast<char*>(header.data()), header.size())) return false;
-    return headerIsDonkeyKong64(header.data());
+    return readInternalName(header.data()) == expectedName;
+}
+
+}  // namespace
+
+bool isDonkeyKong64Rom(const std::vector<uint8_t>& content, const std::string& contentPath) {
+    return isRomNamed(content, contentPath, "DONKEY KONG 64");
+}
+
+bool isSnowboardKids2Rom(const std::vector<uint8_t>& content, const std::string& contentPath) {
+    return isRomNamed(content, contentPath, "SNOWBOARD KIDS2");
 }
 
 }  // namespace romm

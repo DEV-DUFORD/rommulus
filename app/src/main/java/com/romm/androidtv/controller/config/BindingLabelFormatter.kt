@@ -14,8 +14,10 @@ object BindingLabelFormatter {
     private val KEY_LABELS: Map<Int, String> = mapOf(
         android.view.KeyEvent.KEYCODE_BUTTON_A to "Button A",
         android.view.KeyEvent.KEYCODE_BUTTON_B to "Button B",
+        android.view.KeyEvent.KEYCODE_BUTTON_C to "Button C",
         android.view.KeyEvent.KEYCODE_BUTTON_X to "Button X",
         android.view.KeyEvent.KEYCODE_BUTTON_Y to "Button Y",
+        android.view.KeyEvent.KEYCODE_BUTTON_Z to "Button Z",
         android.view.KeyEvent.KEYCODE_BUTTON_L1 to "L1",
         android.view.KeyEvent.KEYCODE_BUTTON_R1 to "R1",
         android.view.KeyEvent.KEYCODE_BUTTON_L2 to "L2",
@@ -45,6 +47,8 @@ object BindingLabelFormatter {
         android.view.MotionEvent.AXIS_RTRIGGER to "Right Trigger",
         android.view.MotionEvent.AXIS_BRAKE to "Left Trigger",
         android.view.MotionEvent.AXIS_GAS to "Right Trigger",
+        android.view.MotionEvent.AXIS_HAT_X to "D-Pad X",
+        android.view.MotionEvent.AXIS_HAT_Y to "D-Pad Y",
     )
 
     @Suppress("MagicNumber")
@@ -72,6 +76,14 @@ object BindingLabelFormatter {
         android.view.MotionEvent.AXIS_RZ to mapOf(
             1 to "Right Stick Down",
             -1 to "Right Stick Up",
+        ),
+        android.view.MotionEvent.AXIS_HAT_X to mapOf(
+            1 to "D-Pad Right",
+            -1 to "D-Pad Left",
+        ),
+        android.view.MotionEvent.AXIS_HAT_Y to mapOf(
+            1 to "D-Pad Down",
+            -1 to "D-Pad Up",
         ),
     )
 

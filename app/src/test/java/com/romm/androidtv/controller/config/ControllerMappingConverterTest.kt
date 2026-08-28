@@ -177,6 +177,39 @@ class ControllerMappingConverterTest {
     }
 
     @Test
+    fun `N64 Z button and hat axes survive conversion`() {
+        val n64Profile = CoreControllerProfiles.byCoreId("mupen64plus_next")!!
+        val n64Config = CoreControllerConfig(
+            coreId = "mupen64plus_next",
+            players = mapOf(
+                0 to PlayerControllerConfig(
+                    mapOf(
+                        CoreControlId.Z to ControlBindings(
+                            primary = PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_Z),
+                        ),
+                        CoreControlId.D_PAD_LEFT to ControlBindings(
+                            primary = PhysicalBinding.AxisDirection(
+                                android.view.MotionEvent.AXIS_HAT_X,
+                                -1,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val mapping = n64Config.toRouterMappings(n64Profile).getValue(0)
+
+        assertThat(mapping.buttons)
+            .containsEntry(NeutralKey.BUTTON_Z, LogicalControl.BUTTON_LT)
+        assertThat(mapping.axisDirections)
+            .containsEntry(
+                AxisDirection(NeutralAxis.HAT_X, -1),
+                LogicalControl.DPAD_LEFT,
+            )
+    }
+
+    @Test
     fun `pause menu bindings stay out of core input and become a two-button shortcut`() {
         val config = CoreControllerConfig(
             coreId = "snes9x",

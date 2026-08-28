@@ -18,14 +18,17 @@ class EventConsumptionPolicyTest {
         // Android KeyEvent key codes (platform constants).
         const val KEYCODE_BUTTON_A = 96
         const val KEYCODE_BUTTON_B = 97
+        const val KEYCODE_BUTTON_C = 98
         const val KEYCODE_BUTTON_X = 99
         const val KEYCODE_BUTTON_Y = 100
+        const val KEYCODE_BUTTON_Z = 101
         const val KEYCODE_BUTTON_L1 = 102
         const val KEYCODE_BUTTON_R1 = 103
         const val KEYCODE_BUTTON_L2 = 104
         const val KEYCODE_BUTTON_R2 = 105
         const val KEYCODE_BUTTON_SELECT = 109
         const val KEYCODE_BUTTON_START = 108
+        const val KEYCODE_BUTTON_MODE = 110
         const val KEYCODE_BUTTON_THUMBL = 106
         const val KEYCODE_BUTTON_THUMBR = 107
         const val KEYCODE_DPAD_UP = 19
@@ -53,6 +56,13 @@ class EventConsumptionPolicyTest {
         @DisplayName("KEYCODE_BUTTON_B is consumed")
         fun `button b`() {
             assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(KEYCODE_BUTTON_B)).isTrue()
+        }
+
+        @Test
+        fun `custom mappable controller buttons are consumed`() {
+            assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(KEYCODE_BUTTON_C)).isTrue()
+            assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(KEYCODE_BUTTON_Z)).isTrue()
+            assertThat(EventConsumptionPolicy.shouldConsumeKeyEvent(KEYCODE_BUTTON_MODE)).isTrue()
         }
 
         @Test

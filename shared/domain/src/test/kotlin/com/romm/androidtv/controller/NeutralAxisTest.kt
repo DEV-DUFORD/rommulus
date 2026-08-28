@@ -14,6 +14,8 @@ class NeutralAxisTest {
         assertThat(NeutralAxis.fromPlatform(NeutralAxis.Y.platformCode)).isEqualTo(NeutralAxis.Y)
         assertThat(NeutralAxis.fromPlatform(NeutralAxis.RX.platformCode)).isEqualTo(NeutralAxis.RX)
         assertThat(NeutralAxis.fromPlatform(NeutralAxis.RZ.platformCode)).isEqualTo(NeutralAxis.RZ)
+        assertThat(NeutralAxis.fromPlatform(NeutralAxis.HAT_X.platformCode)).isEqualTo(NeutralAxis.HAT_X)
+        assertThat(NeutralAxis.fromPlatform(NeutralAxis.HAT_Y.platformCode)).isEqualTo(NeutralAxis.HAT_Y)
         assertThat(NeutralAxis.fromPlatform(NeutralAxis.LTRIGGER.platformCode)).isEqualTo(NeutralAxis.LTRIGGER)
         assertThat(NeutralAxis.fromPlatform(NeutralAxis.GAS.platformCode)).isEqualTo(NeutralAxis.GAS)
     }
@@ -24,6 +26,8 @@ class NeutralAxisTest {
         assertThat(NeutralAxis.fromPlatform(0)).isEqualTo(NeutralAxis.X)
         assertThat(NeutralAxis.fromPlatform(1)).isEqualTo(NeutralAxis.Y)
         assertThat(NeutralAxis.fromPlatform(12)).isEqualTo(NeutralAxis.RX)
+        assertThat(NeutralAxis.fromPlatform(15)).isEqualTo(NeutralAxis.HAT_X)
+        assertThat(NeutralAxis.fromPlatform(16)).isEqualTo(NeutralAxis.HAT_Y)
         assertThat(NeutralAxis.fromPlatform(22)).isEqualTo(NeutralAxis.GAS)
     }
 

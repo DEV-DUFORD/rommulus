@@ -299,8 +299,8 @@ class ControllerSettingsViewModel(
             deviceIds = devices.mapTo(mutableSetOf()) { it.deviceId },
             target = when (descriptor.inputKind) {
                 InputKind.BUTTON, InputKind.DPAD -> com.romm.androidtv.controller.capture.CaptureTarget.Digital
-                InputKind.ANALOG_STICK, InputKind.TRIGGER ->
-                    com.romm.androidtv.controller.capture.CaptureTarget.Analog
+                InputKind.ANALOG_STICK -> com.romm.androidtv.controller.capture.CaptureTarget.Analog
+                InputKind.TRIGGER -> com.romm.androidtv.controller.capture.CaptureTarget.Trigger
             },
         )
     }

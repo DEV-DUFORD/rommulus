@@ -139,22 +139,29 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // toggle, so user mappings would fire the wrong control.
         environment_.setCoreOptionOverride("mupen64plus-alt-map", "True");
         environment_.setCoreOptionOverride("mupen64plus-ThreadedRenderer", "True");
-#ifdef ROMM_STEAM_DECK_PLAYER
-        // Preview 19's Deck path configured GLideN64 at its native size.
-        // The Ubuntu compositor path sizes rendering from the desktop output.
+#if defined(__ANDROID__) || defined(ROMM_STEAM_DECK_PLAYER)
+        // Android TV and the isolated Deck path need GLideN64's native size.
+        // The normal Linux player supplies a size derived from its output.
         environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
 #endif
         environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");
+        if (isSnowboardKids2Rom(contentBuffer, contentPath)) {
+            // The emulator sustains the original VI rate in split-screen, but
+            // the game itself misses internal render updates under its emulated
+            // CPU budget. CountPerOp=1 gives it more R4300 instructions per VI
+            // without changing frontend pacing or disabling visual effects.
+            environment_.setCoreOptionOverride("mupen64plus-CountPerOp", "1");
+        }
         if (isDonkeyKong64Rom(contentBuffer, contentPath)) {
-            // DK64 needs framebuffer emulation plus software depth readback.
-            // Its embedded GLideN64 profile otherwise selects FromMem after
-            // core options, causing periodic camera recentering on GLES.
+            // Apply the embedded profile before these overrides so its
+            // FromMem depth-copy setting cannot cause camera recentering on
+            // GLES. Software depth and synchronous color readback are too
+            // expensive for Android TV and are not needed for this fix.
             environment_.setCoreOptionOverride("mupen64plus-GLideN64IniBehaviour", "early");
             environment_.setCoreOptionOverride("mupen64plus-EnableFBEmulation", "True");
-            environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "True");
-            environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Sync");
-            environment_.setCoreOptionOverride(
-                "mupen64plus-EnableCopyDepthToRDRAM", "Software");
+            environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");
+            environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Off");
+            environment_.setCoreOptionOverride("mupen64plus-EnableCopyDepthToRDRAM", "Off");
         } else {
             // Preserve the Android TV performance profile for all other games.
             environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");

@@ -135,6 +135,22 @@ class ControllerBindingCaptureCoordinatorTest {
         }
 
         @Test
+        @DisplayName("trigger targets accept a digital shoulder button")
+        fun `triggerTargetCapturesDigitalButton`() = runTest {
+            val c = coordinator()
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Trigger)
+            runCurrent()
+
+            c.onKeySample(gamepadDevice, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_L1)
+
+            assertThat(c.state.value).isEqualTo(
+                ControllerBindingCaptureState.Result(
+                    PhysicalBinding.Key(KeyEvent.KEYCODE_BUTTON_L1),
+                ),
+            )
+        }
+
+        @Test
         @DisplayName("repeats are suppressed and never captured")
         fun `repeatsSuppressed`() = runTest {
             val c = coordinator()
@@ -367,7 +383,7 @@ class ControllerBindingCaptureCoordinatorTest {
         @DisplayName("trigger axis captures as a full unidirectional Axis")
         fun `triggerCapturesAsUnidirectionalAxis`() = runTest {
             val c = coordinator()
-            c.beginCapture(0, gamepadDevice, CaptureTarget.Analog)
+            c.beginCapture(0, gamepadDevice, CaptureTarget.Trigger)
             val trigger = android.view.MotionEvent.AXIS_LTRIGGER
 
             c.onAxisSample(gamepadDevice, trigger, 0.0f) // neutral rest

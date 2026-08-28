@@ -18,6 +18,8 @@ enum class NeutralAxis(val platformCode: Int) {
     RX(12),
     RY(13),
     RZ(14),
+    HAT_X(15),
+    HAT_Y(16),
     LTRIGGER(17),
     RTRIGGER(18),
     GAS(22),

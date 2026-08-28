@@ -149,6 +149,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class EmulationActivity : ComponentActivity() {
 
     private val host = NativeLibretroHost()
+    private var ownsSessionGuard = false
     private var sessionStarted = false
     private var savePath: String? = null
     private var sessionIdForJournal: String? = null
@@ -365,10 +366,11 @@ class EmulationActivity : ComponentActivity() {
             reportPlayerBusyAndFinish()
             return
         }
+        ownsSessionGuard = true
 
         if (!NativeLibretroHost.ensureLoaded()) {
             Log.e(TAG, "Native library failed to load: ${NativeLibretroHost.lastLoadError()}")
-            isSessionActive.set(false)
+            releaseSessionGuard()
             finish()
             return
         }
@@ -438,7 +440,7 @@ class EmulationActivity : ComponentActivity() {
             val resolvedCorePath = NativeLibretroHost.resolveBundledCorePathForCoreId(applicationContext, coreId)
             if (resolvedCorePath == null) {
                 Log.e(TAG, "onCreate: no bundled core for coreId=$coreId")
-                isSessionActive.set(false)
+                releaseSessionGuard()
                 finish()
                 return
             }
@@ -454,7 +456,7 @@ class EmulationActivity : ComponentActivity() {
                 if (validation.isFailure) {
                     Log.e(TAG, "onCreate: candidate path validation failed: ${validation.exceptionOrNull()}")
                     try { journal.advance(this.sessionIdForJournal!!, DescriptorState.REJECTED, SessionDescriptorPatch(errorDetail = "candidate path escaped app-private dir")) } catch (_: Exception) {}
-                    isSessionActive.set(false)
+                    releaseSessionGuard()
                     finish()
                     return
                 }
@@ -947,8 +949,14 @@ class EmulationActivity : ComponentActivity() {
             sessionStarted = false
         }
 
-        isSessionActive.set(false)
+        releaseSessionGuard()
         super.onDestroy()
+    }
+
+    private fun releaseSessionGuard() {
+        if (!ownsSessionGuard) return
+        ownsSessionGuard = false
+        isSessionActive.compareAndSet(true, false)
     }
 
     /**

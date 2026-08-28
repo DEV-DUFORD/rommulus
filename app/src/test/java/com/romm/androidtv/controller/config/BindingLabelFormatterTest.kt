@@ -24,6 +24,12 @@ class BindingLabelFormatterTest {
         }
 
         @Test
+        fun `BUTTON_Z produces a named label`() {
+            assertThat(BindingLabelFormatter.label(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_BUTTON_Z)))
+                .isEqualTo("Button Z")
+        }
+
+        @Test
         fun `DPAD_UP produces 'D-Pad Up'`() {
             assertThat(BindingLabelFormatter.label(PhysicalBinding.Key(android.view.KeyEvent.KEYCODE_DPAD_UP)))
                 .isEqualTo("D-Pad Up")
@@ -109,6 +115,17 @@ class BindingLabelFormatterTest {
         fun `AXIS_RTRIGGER produces 'Right Trigger'`() {
             assertThat(BindingLabelFormatter.label(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_RTRIGGER)))
                 .isEqualTo("Right Trigger")
+        }
+
+        @Test
+        fun `hat axes produce d-pad labels`() {
+            assertThat(BindingLabelFormatter.label(PhysicalBinding.Axis(android.view.MotionEvent.AXIS_HAT_X)))
+                .isEqualTo("D-Pad X")
+            assertThat(
+                BindingLabelFormatter.label(
+                    PhysicalBinding.AxisDirection(android.view.MotionEvent.AXIS_HAT_Y, -1),
+                ),
+            ).isEqualTo("D-Pad Up")
         }
     }
 

@@ -12,6 +12,9 @@ class NeutralKeyTest {
     fun `round-trips Android key codes through fromPlatform`() {
         assertThat(NeutralKey.fromPlatform(NeutralKey.BUTTON_A.platformCode)).isEqualTo(NeutralKey.BUTTON_A)
         assertThat(NeutralKey.fromPlatform(NeutralKey.BUTTON_B.platformCode)).isEqualTo(NeutralKey.BUTTON_B)
+        assertThat(NeutralKey.fromPlatform(NeutralKey.BUTTON_C.platformCode)).isEqualTo(NeutralKey.BUTTON_C)
+        assertThat(NeutralKey.fromPlatform(NeutralKey.BUTTON_Z.platformCode)).isEqualTo(NeutralKey.BUTTON_Z)
+        assertThat(NeutralKey.fromPlatform(NeutralKey.BUTTON_MODE.platformCode)).isEqualTo(NeutralKey.BUTTON_MODE)
         assertThat(NeutralKey.fromPlatform(NeutralKey.BUTTON_X.platformCode)).isEqualTo(NeutralKey.BUTTON_X)
         assertThat(NeutralKey.fromPlatform(NeutralKey.BUTTON_Y.platformCode)).isEqualTo(NeutralKey.BUTTON_Y)
         assertThat(NeutralKey.fromPlatform(NeutralKey.DPAD_UP.platformCode)).isEqualTo(NeutralKey.DPAD_UP)
