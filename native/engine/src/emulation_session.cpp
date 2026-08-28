@@ -187,17 +187,12 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // precision timing on every platform, not only battery-powered ones.
         environment_.setCoreOptionOverride("dolphin_precision_frame_timing", "enabled");
 
-        // Dolphin's libretro GLContext cannot create the shared worker
-        // contexts required by its asynchronous shader compiler.
-#if !defined(__ANDROID__) && !defined(ROMM_STEAM_DECK_PLAYER)
-        // The normal Linux player has enough GPU headroom for exclusive
-        // UberShaders. Precompile their bounded shader set at startup so new
-        // specialized pipelines cannot cause prolonged stalls during gameplay.
-        environment_.setCoreOptionOverride("dolphin_shader_compilation_mode", "1");
-#else
-        // Keep the lower-GPU-cost specialized path on Android TV and Deck.
+        // The libretro GL context cannot create the shared worker contexts
+        // needed for asynchronous compilation. Use specialized synchronous
+        // shaders on every host: the shared Linux offscreen player also runs
+        // on Steam Deck and lower-power laptops, where exclusive UberShaders
+        // eventually saturate the GPU and collapse sustained frame rate.
         environment_.setCoreOptionOverride("dolphin_shader_compilation_mode", "0");
-#endif
         environment_.setCoreOptionOverride("dolphin_wait_for_shaders", "enabled");
     }
 
