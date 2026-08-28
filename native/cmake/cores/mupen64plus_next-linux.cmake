@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Mupen64Plus-Next: Linux x86_64 GLES3 build of the vendored libretro core.
+# Mupen64Plus-Next: Linux x86_64 desktop OpenGL build of the vendored libretro core.
 # GLideN64 is the default GPU renderer; Angrylion remains compiled as a
 # fallback. The CPU core continues to use the x86_64 new dynarec.
 # ---------------------------------------------------------------------------
@@ -59,10 +59,8 @@ set(M64_LINUX_DEFINES
     ARCH_MIN_SSE2
     NEW_DYNAREC=2
     DYNAREC
-    EGL
-    HAVE_OPENGLES
-    HAVE_OPENGLES3
-    GLES3
+    CORE
+    HAVE_OPENGL
     GIT_VERSION=" 98c1b0d"
 )
 
@@ -190,7 +188,7 @@ set(M64_SOURCES_C
     ${M64_COMM_DIR}/compat/fopen_utf8.c
     ${MUPEN64_DIR}/custom/mupen64plus-core/api/vidext_libretro.c
     ${M64_COMM_DIR}/glsm/glsm.c
-    ${M64_COMM_DIR}/glsym/glsym_es3.c
+    ${M64_COMM_DIR}/glsym/glsym_gl.c
     ${M64_COMM_DIR}/glsym/rglgen.c
     ${M64_ANGRYLION_DIR}/interface.c
     ${M64_ANGRYLION_DIR}/n64video.c
@@ -416,9 +414,9 @@ target_link_options(mupen64plus_next_core PRIVATE
 )
 endif()
 
+find_package(OpenGL REQUIRED)
 target_link_libraries(mupen64plus_next_core PRIVATE
-    EGL
-    GLESv2
+    OpenGL::GL
     m
     dl
     pthread

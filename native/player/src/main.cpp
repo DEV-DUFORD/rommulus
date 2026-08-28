@@ -548,10 +548,11 @@ int main(int argc, char* argv[]) {
 #endif
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (useHardwareRendering) {
-        // N64 (GLideN64) renders on OpenGL ES 3.0. Dolphin uses desktop GL
-        // 4.5 so its backend can use buffer-storage and other capabilities
-        // unavailable in the ES 3.0 path. lrps2's GS OpenGL renderer
-        // hard-requires desktop OpenGL 3.3: its feature gate
+        // N64 (GLideN64) and lrps2 use desktop OpenGL 3.3 on Linux. GLideN64's
+        // GLES path targets mobile GPUs and produces incorrect depth ordering
+        // on desktop drivers. Dolphin uses desktop GL 4.5 so its backend can
+        // use buffer-storage and other capabilities unavailable in GL 3.3.
+        // lrps2's GS OpenGL renderer hard-requires desktop OpenGL 3.3: its feature gate
         // (GSDeviceOGL::CheckFeatures) accepts only GLAD_GL_VERSION_3_3 or
         // GLAD_GL_ES_VERSION_3_1, and this core build always loads glad's
         // DESKTOP loader (GLContext::m_version is never set, so IsGLES() is
@@ -563,7 +564,8 @@ int main(int argc, char* argv[]) {
         // OPENGL_CORE through the environment handler.
         const bool useDolphinDesktopGl = request.coreId == "dolphin";
         const bool useDesktopGlProfile =
-            useDolphinDesktopGl || request.coreId == "lrps2";
+            useDolphinDesktopGl || request.coreId == "lrps2" ||
+            request.coreId == "mupen64plus_next";
         SDL_GL_SetAttribute(
             SDL_GL_CONTEXT_PROFILE_MASK,
             useDesktopGlProfile ? SDL_GL_CONTEXT_PROFILE_CORE

@@ -510,7 +510,7 @@
       "coreId": "mupen64plus_next",
       "coreName": "Mupen64Plus",
       "enabled": true,
-      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box; x86 dynarec (criterion 9 deferred — see note); GLideN64 GLES3 acceleration pending physical Steam Deck validation",
+      "linuxGateStatus": "PASSED — §13.2 gate on Ubuntu box; x86 dynarec (criterion 9 deferred — see note); GLideN64 desktop OpenGL acceleration validated on Ubuntu",
       "gateNotes": "criterion 9 (SRAM/file-save round trip) DEFERRED pending the Linux desktop saves UI — see docs/linux-support-manifest.md",
       "coreLibraryFile": "libmupen64plus_next_core.so",
       "upstreamRepository": "https://github.com/libretro/mupen64plus-libretro-nx",
@@ -533,13 +533,13 @@
       "supportedExtensions": [".n64", ".z64", ".v64", ".bin", ".u1"],
       "requiredFirmware": [],
       "supportedAbis": ["armeabi-v7a", "arm64-v8a", "linux-x86_64"],
-      "renderer": "GPU-accelerated GLideN64 GLES3 RDP + HLE RSP; x86_64 new_dynarec for CPU execution; software Angrylion remains compiled as a fallback",
+      "renderer": "GPU-accelerated GLideN64 desktop OpenGL RDP + HLE RSP on Linux; GLES3 on Android; x86_64 new_dynarec for CPU execution; software Angrylion remains compiled as a fallback",
       "binaryChecksums": {
         "armeabi-v7a": "c00c2cd1f2eafc2d950ebaf273f2c962f4fd3daf8becaf4736efa8c2549a2de7",
         "arm64-v8a": "de7395a403e38ad37cd066ac22fc2eb08c9d1a11e6566bbe30c88de3d971b519",
         "linux-x86_64": null
       },
-      "notes": "The Linux player provides GLideN64 with an SDL3 OpenGL ES 3 context. paraLLEl-RDP/Vulkan and Android hardware-buffer code are not compiled. No BIOS required — PIF HLE; IPL3 is read from the ROM at offset 0x40."
+      "notes": "The Linux player provides GLideN64 with an SDL3 desktop OpenGL 3.3 context; Android retains OpenGL ES 3. paraLLEl-RDP/Vulkan and Android hardware-buffer code are not compiled into the Linux core. No BIOS required — PIF HLE; IPL3 is read from the ROM at offset 0x40."
     },
     {
       "coreId": "dolphin",

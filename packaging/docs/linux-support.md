@@ -35,11 +35,11 @@ again, only Ubuntu 24.04 has been exercised so far.
 - The player (`bin/rommulus-player`) runs a separate SDL3 window. For software-rendered cores it uses
   the **software frame path** (`plans/LINUX_X64.md` §11.6): each frame produced by the core is
   converted and uploaded to a reusable SDL texture; there is no Vulkan for software presentation.
-- **N64 hardware rendering:** Mupen64Plus-Next uses GLideN64 through an SDL3-managed OpenGL ES 3
-  context, with the x86_64 new dynarec and HLE RSP. This is the same GPU renderer used by the
-  Android build and is the default on Linux, including Steam Deck. The package intentionally uses
-  the host's OpenGL ES/EGL dispatch libraries so they remain compatible with the installed GPU
-  driver rather than bundling the Ubuntu build machine's graphics stack.
+- **N64 hardware rendering:** Mupen64Plus-Next uses GLideN64 through an SDL3-managed desktop
+  OpenGL 3.3 context, with the x86_64 new dynarec and HLE RSP. Android and the isolated Steam Deck
+  player retain their GLES paths. The package uses the host's OpenGL dispatch libraries so they
+  remain compatible with the installed GPU driver rather than bundling the Ubuntu build machine's
+  graphics stack.
 - **GameCube hardware rendering:** Dolphin uses an SDL3-managed desktop OpenGL 4.5 context,
   giving its backend access to capabilities unavailable on the former OpenGL ES 3 path.
   Ubuntu uses the offscreen compositor path; Steam Deck uses the isolated direct-framebuffer
@@ -149,5 +149,5 @@ reconciled from the journal/candidate files (§8.3). When reporting a crash, att
 - **No Windows, macOS, ARM64 Linux, or musl Linux builds** (§4 non-goals).
 - **No save UI.** Saves are checkpointed on disk, but there is no Linux desktop saves screen yet;
   per-core criterion 9 round-trip verification is deferred (see above).
-- **No Vulkan negotiation.** N64 uses OpenGL ES 3; GameCube and PS2 use desktop OpenGL.
+- **No Vulkan negotiation.** N64, GameCube, and PS2 use desktop OpenGL on Linux.
 - **No save states, rewind, netplay, or shaders** — explicitly out of scope (§4 non-goals).

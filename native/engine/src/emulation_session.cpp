@@ -143,13 +143,6 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // Android TV and the isolated Deck path need GLideN64's native size.
         // The normal Linux player supplies a size derived from its output.
         environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
-#elif defined(__linux__)
-        // The Linux core uses GLES for portability, which makes upstream
-        // select its mobile default and disable fragment depth writes. Desktop
-        // GPUs support them, and GLideN64 needs the emulated per-fragment Z
-        // value to keep overlapping N64 model geometry correctly occluded.
-        environment_.setCoreOptionOverride(
-            "mupen64plus-EnableFragmentDepthWrite", "True");
 #endif
         environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");
         if (isSnowboardKids2Rom(contentBuffer, contentPath)) {
