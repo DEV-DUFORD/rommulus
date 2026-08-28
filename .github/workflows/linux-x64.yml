@@ -42,8 +42,6 @@ on:
     branches: [main, zd/linux-build]
   pull_request:
     branches: [main, zd/linux-build]
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -1136,36 +1134,3 @@ jobs:
           echo "  • core SHA and provenance match — pin binaryChecksums.\"linux-x86_64\" into core-manifest.json"
           echo "  • exported symbols match allowlist — no symbol-allowlist artifact exists yet"
           echo "  • desktop bundle starts with bundled runtime — needs a display; covered by desktop-tests"
-
-  publish-linux-release:
-    name: Publish Linux release package
-    if: github.event_name == 'release'
-    runs-on: ubuntu-24.04
-    needs: [package-tarball, license-and-provenance-audit]
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download validated tarball
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: rommulus-linux-x86_64-tarball
-          path: dist
-
-      - name: Attach package and checksum to GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-          tarball="$(find dist -maxdepth 1 -name 'rommulus-*-linux-x86_64.tar.zst' -print -quit)"
-          appimage="$(find dist -maxdepth 1 -name 'rommulus-*-linux-x86_64.AppImage' -print -quit)"
-          [ -n "$tarball" ] || { echo "::error::Validated Linux tarball is missing"; exit 1; }
-          [ -n "$appimage" ] || { echo "::error::Validated Linux AppImage is missing"; exit 1; }
-          sha256sum "$tarball" > "${tarball}.sha256"
-          sha256sum "$appimage" > "${appimage}.sha256"
-          gh release upload "$RELEASE_TAG" \
-            "$tarball" "${tarball}.sha256" \
-            "$appimage" "${appimage}.sha256" \
-            --clobber
