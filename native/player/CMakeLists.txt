@@ -60,6 +60,7 @@ set(ROMM_PLAYER_COMMON_SOURCES
     ${ROMM_ENGINE_SRC}/core_library.cpp
     ${ROMM_ENGINE_SRC}/environment.cpp
     ${ROMM_ENGINE_SRC}/emulation_session.cpp
+    ${ROMM_ENGINE_SRC}/n64_rom.cpp
     ${ROMM_ENGINE_SRC}/atomic_file_store.cpp
     ${ROMM_ENGINE_SRC}/log.cpp
     ${ROMM_ENGINE_SRC}/dynamic_library.cpp

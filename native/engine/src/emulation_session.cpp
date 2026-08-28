@@ -1,5 +1,6 @@
 #include "emulation_session.h"
 #include "atomic_file_store.h"
+#include "n64_rom.h"
 
 #include <native/engine/LogSink.h>
 
@@ -144,9 +145,22 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         environment_.setCoreOptionOverride("mupen64plus-43screensize", "320x240");
 #endif
         environment_.setCoreOptionOverride("mupen64plus-HybridFilter", "False");
-        environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");
-        environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Off");
-        environment_.setCoreOptionOverride("mupen64plus-EnableCopyDepthToRDRAM", "Off");
+        if (isDonkeyKong64Rom(contentBuffer, contentPath)) {
+            // DK64 needs framebuffer emulation plus software depth readback.
+            // Its embedded GLideN64 profile otherwise selects FromMem after
+            // core options, causing periodic camera recentering on GLES.
+            environment_.setCoreOptionOverride("mupen64plus-GLideN64IniBehaviour", "early");
+            environment_.setCoreOptionOverride("mupen64plus-EnableFBEmulation", "True");
+            environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "True");
+            environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Sync");
+            environment_.setCoreOptionOverride(
+                "mupen64plus-EnableCopyDepthToRDRAM", "Software");
+        } else {
+            // Preserve the Android TV performance profile for all other games.
+            environment_.setCoreOptionOverride("mupen64plus-EnableLODEmulation", "False");
+            environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Off");
+            environment_.setCoreOptionOverride("mupen64plus-EnableCopyDepthToRDRAM", "Off");
+        }
     }
     if (isLrps2) {
         // lrps2 embeds a GameIndex.yaml compatibility database in the core

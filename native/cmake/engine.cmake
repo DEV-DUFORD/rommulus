@@ -10,6 +10,7 @@ add_library(romm_libretro_host SHARED
     ${ROMM_NATIVE_ROOT}/engine/src/emulation_session.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/atomic_file_store.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/log.cpp
+    ${ROMM_NATIVE_ROOT}/engine/src/n64_rom.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/dynamic_library.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/audio_sink.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/video_sink.cpp

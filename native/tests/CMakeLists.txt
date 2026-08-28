@@ -42,6 +42,7 @@ add_library(romm_engine_under_test STATIC
     ${ROMM_ENGINE_SRC}/core_library.cpp
     ${ROMM_ENGINE_SRC}/dynamic_library.cpp
     ${ROMM_ENGINE_SRC}/log.cpp
+    ${ROMM_ENGINE_SRC}/n64_rom.cpp
     ${ROMM_ENGINE_SRC}/pixel_format.cpp
 )
 target_include_directories(romm_engine_under_test PUBLIC
@@ -85,6 +86,7 @@ romm_add_engine_test(test_input_state)
 romm_add_engine_test(test_atomic_file_store)
 romm_add_engine_test(test_pixel_format)
 romm_add_engine_test(test_core_library)
+romm_add_engine_test(test_n64_rom)
 
 function(romm_add_player_test name)
     add_executable(${name} ${name}.cpp)
