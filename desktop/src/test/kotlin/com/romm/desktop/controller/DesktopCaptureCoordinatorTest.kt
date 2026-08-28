@@ -156,6 +156,25 @@ class DesktopCaptureCoordinatorTest {
         }
 
         @Test
+        fun `trigger target captures either a key or full axis binding`() = runTest {
+            val keyCapture = coordinator()
+            keyCapture.beginCapture(0, padA, CaptureTarget.Trigger)
+            keyCapture.onPoll(padA, state())
+            keyCapture.onPoll(padA, state(buttons = setOf(NeutralKey.BUTTON_L1)))
+            assertThat(keyCapture.state.value).isEqualTo(
+                DesktopCaptureState.Result(PhysicalBinding.Key(NeutralKey.BUTTON_L1.platformCode)),
+            )
+
+            val axisCapture = coordinator()
+            axisCapture.beginCapture(0, padA, CaptureTarget.Trigger)
+            axisCapture.onPoll(padA, state(axes = mapOf(NeutralAxis.LTRIGGER to 0.0f)))
+            axisCapture.onPoll(padA, state(axes = mapOf(NeutralAxis.LTRIGGER to 0.9f)))
+            assertThat(axisCapture.state.value).isEqualTo(
+                DesktopCaptureState.Result(PhysicalBinding.Axis(NeutralAxis.LTRIGGER.platformCode)),
+            )
+        }
+
+        @Test
         fun `digital multi-axis poll captures only the dominant deflection`() = runTest {
             val c = coordinator()
             c.beginCapture(0, padA, CaptureTarget.Digital)

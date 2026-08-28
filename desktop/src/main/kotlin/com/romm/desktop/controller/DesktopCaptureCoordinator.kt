@@ -189,14 +189,16 @@ class DesktopCaptureCoordinator(
         if (_state.value == DesktopCaptureState.AwaitingNeutral) {
             // A fresh button press indicates the user intends a button; stick deflections
             // must not capture this button row instead.
-            if (target == CaptureTarget.Digital && rising.isNotEmpty()) keyPressedDuringCapture = true
+            if (target != CaptureTarget.Analog && rising.isNotEmpty()) {
+                keyPressedDuringCapture = true
+            }
             checkNeutralAndAdvance()
             return true
         }
 
         // Capturing phase: buttons first — a rising edge wins over any stick deflection in
         // the same poll, and the first press across controllers wins overall.
-        if (target == CaptureTarget.Digital) {
+        if (target != CaptureTarget.Analog) {
             for (key in rising.sortedBy { it.ordinal }) {
                 finishWith(PhysicalBinding.Key(key.platformCode))
                 return true
@@ -204,7 +206,7 @@ class DesktopCaptureCoordinator(
         }
 
         val ordered = snapshot.axes.entries.sortedBy { it.key.ordinal }
-        if (target == CaptureTarget.Analog || ordered.size <= 1) {
+        if (target != CaptureTarget.Digital || ordered.size <= 1) {
             for ((axis, value) in ordered) {
                 onAxisSample(controllerId, axis, value)
             }
@@ -240,7 +242,9 @@ class DesktopCaptureCoordinator(
         if (target == CaptureTarget.Digital && keyPressedDuringCapture) return
 
         val binding = when (target) {
-            CaptureTarget.Analog -> PhysicalBinding.Axis(axis.platformCode)
+            CaptureTarget.Analog,
+            CaptureTarget.Trigger,
+            -> PhysicalBinding.Axis(axis.platformCode)
             CaptureTarget.Digital -> PhysicalBinding.AxisDirection(
                 axis = axis.platformCode,
                 polarity = if (value > 0f) 1 else -1,

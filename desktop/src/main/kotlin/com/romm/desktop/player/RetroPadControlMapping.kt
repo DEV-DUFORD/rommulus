@@ -263,6 +263,7 @@ object RetroPadControlMapping {
         NeutralAxis.RY, NeutralAxis.RZ -> "right_y"
         NeutralAxis.LTRIGGER, NeutralAxis.BRAKE -> "left_trigger"
         NeutralAxis.RTRIGGER, NeutralAxis.GAS -> "right_trigger"
+        NeutralAxis.HAT_X, NeutralAxis.HAT_Y -> null
         null -> null
     }
 }

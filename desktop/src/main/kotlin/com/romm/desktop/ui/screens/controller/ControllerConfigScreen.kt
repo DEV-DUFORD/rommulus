@@ -232,10 +232,10 @@ fun ControllerConfigScreen(
         captureCoordinator.beginCapture(
             slotIndex = selectedPlayer,
             deviceId = selectedDevice?.id,
-            target = if (descriptor.inputKind == InputKind.ANALOG_STICK) {
-                CaptureTarget.Analog
-            } else {
-                CaptureTarget.Digital
+            target = when (descriptor.inputKind) {
+                InputKind.ANALOG_STICK -> CaptureTarget.Analog
+                InputKind.TRIGGER -> CaptureTarget.Trigger
+                else -> CaptureTarget.Digital
             },
         )
         pendingCapture = PendingCapture(selectedPlayer, descriptor, slot)
