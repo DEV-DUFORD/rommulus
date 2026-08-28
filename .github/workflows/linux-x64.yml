@@ -963,7 +963,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libegl1 libgles2 zstd
+          sudo apt-get install -y libegl1 libgles2 libopengl0 zstd
 
       - name: Extract tarball for inspection
         run: |
