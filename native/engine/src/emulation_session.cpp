@@ -188,11 +188,24 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         environment_.setCoreOptionOverride("dolphin_precision_frame_timing", "enabled");
 
         // The libretro GL context cannot create the shared worker contexts
-        // needed for asynchronous compilation. Use specialized synchronous
-        // shaders on every host: the shared Linux offscreen player also runs
-        // on Steam Deck and lower-power laptops, where exclusive UberShaders
-        // eventually saturate the GPU and collapse sustained frame rate.
-        environment_.setCoreOptionOverride("dolphin_shader_compilation_mode", "0");
+        // needed for asynchronous shader compilation (Dolphin logs "Failed
+        // to create shared context for shader compiling" on this offscreen
+        // path). That leaves two real options, not a free choice: mode 0
+        // (Synchronous specialized) compiles each newly-seen pipeline inline
+        // on the emulation thread, blocking it for the compile's duration;
+        // FrameScheduler's stall catch-up only recovers up to 200ms
+        // (kShaderStallMaxCatchUpDebt) of that per stall, so on weaker/
+        // integrated GPUs (Steam Deck, older laptops) where GLSL compiles
+        // are slow, gameplay through varied content repeatedly blows past
+        // that budget and accumulates into sustained, uncapped slow motion
+        // that only clears once the current area's pipelines are fully
+        // warmed. Mode 1 (Synchronous UberShaders) precompiles a bounded
+        // shader set at startup instead, trading constant extra GPU load for
+        // eliminating that mid-gameplay stall entirely. Use mode 1
+        // everywhere until the shared-context bug above is fixed and an
+        // async mode (2/3) can be used without blocking the emulation
+        // thread.
+        environment_.setCoreOptionOverride("dolphin_shader_compilation_mode", "1");
         environment_.setCoreOptionOverride("dolphin_wait_for_shaders", "enabled");
     }
 
