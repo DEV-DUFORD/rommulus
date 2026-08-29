@@ -32,7 +32,24 @@ std::atomic<EmulationSession*> g_active_session{nullptr};
 
 constexpr int kMaxDrainWaitMs = 500;
 constexpr int kDrainPollIntervalMs = 5;
-constexpr auto kShaderStallMaxCatchUpDebt = std::chrono::milliseconds(200);
+// Ceiling on how much pacing debt a stalled Dolphin/lrps2 emulation thread is
+// allowed to carry before waitForNextFrame() snaps the schedule forward and
+// discards the remainder. This was originally sized (200ms) around one-off
+// shader-compile stalls, but the same debt tracking also covers ordinary
+// CPU-bound overruns (e.g. a demanding gameplay scene the core can't finish
+// within one frame period in real time). Those overruns can persist for many
+// seconds, and once accumulated debt exceeds the cap it is permanently lost:
+// each subsequent retro_run() call still only advances the console's
+// internal clock by one VI period regardless of real elapsed time, so the
+// game keeps running in sustained slow motion even after the load eases and
+// the CPU thread has ample idle headroom to repay the backlog (observed
+// sitting at ~40-50% CPU during "calm" stretches on Steam Deck while still
+// stuck slow). Raising the cap lets the scheduler actually spend that spare
+// headroom paying off the backlog instead of discarding it, so speed self-
+// corrects once the load eases rather than requiring a pause/resume to
+// reset. Kept well below "unbounded" so a truly long stall (e.g. a stuck
+// loading screen) can't cause a multi-minute fast-forward burst on resume.
+constexpr auto kStallMaxCatchUpDebt = std::chrono::seconds(5);
 constexpr unsigned kPcsxRearmedDualShockDevice =
     RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1);
 constexpr unsigned kPlayStationControllerPorts = 2;
@@ -193,13 +210,11 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // path). That leaves two real options, not a free choice: mode 0
         // (Synchronous specialized) compiles each newly-seen pipeline inline
         // on the emulation thread, blocking it for the compile's duration;
-        // FrameScheduler's stall catch-up only recovers up to 200ms
-        // (kShaderStallMaxCatchUpDebt) of that per stall, so on weaker/
-        // integrated GPUs (Steam Deck, older laptops) where GLSL compiles
-        // are slow, gameplay through varied content repeatedly blows past
-        // that budget and accumulates into sustained, uncapped slow motion
-        // that only clears once the current area's pipelines are fully
-        // warmed. Mode 1 (Synchronous UberShaders) precompiles a bounded
+        // even with FrameScheduler's stall catch-up (kStallMaxCatchUpDebt)
+        // raised to give it room to repay backlog, repeated inline compiles
+        // on weaker/integrated GPUs (Steam Deck, older laptops) where GLSL
+        // compiles are slow still cost real frame time better spent on
+        // gameplay. Mode 1 (Synchronous UberShaders) precompiles a bounded
         // shader set at startup instead, trading constant extra GPU load for
         // eliminating that mid-gameplay stall entirely. Use mode 1
         // everywhere until the shared-context bug above is fixed and an
@@ -429,12 +444,14 @@ void EmulationSession::runLoop() {
         // emulation back up. Resetting the schedule here would pace cheap
         // skipped runs as new frames and preserve the slowdown we are trying
         // to recover from.
-        // Preserve bounded pacing debt across temporary shader stalls so
-        // subsequent frames refill the audio queue without allowing a long
-        // stall to cause prolonged fast-forward.
+        // Preserve bounded pacing debt across temporary stalls (shader
+        // compiles, CPU-bound scenes, etc.) so subsequent frames refill the
+        // audio queue and repay backlog using any spare CPU headroom,
+        // without allowing a truly stuck stall to cause an unbounded
+        // fast-forward.
         scheduler.waitForNextFrame(
             videoEnabled && !catchUpAfterStall_,
-            catchUpAfterStall_ ? kShaderStallMaxCatchUpDebt
+            catchUpAfterStall_ ? kStallMaxCatchUpDebt
                                : std::chrono::steady_clock::duration::zero());
         presentVideoFrame_.store(videoEnabled, std::memory_order_relaxed);
         environment_.setVideoEnabled(videoEnabled);
