@@ -120,6 +120,59 @@ class JInputControllerSourceTest {
         assertThat(controller(emptyArray(), type = Controller.Type.MOUSE).isGameController()).isFalse()
     }
 
+    @Test
+    fun `Steam Input virtual pads replace duplicate raw controllers`() {
+        val steamPad = controller(
+            emptyArray(),
+            name = "Microsoft X-Box 360 pad 0",
+        )
+        val rawPad = controller(emptyArray(), name = "Wireless Controller")
+        val keyboard = controller(
+            emptyArray(),
+            type = Controller.Type.KEYBOARD,
+            name = "Keyboard",
+        )
+
+        assertThat(selectGameplayControllers(listOf(steamPad, rawPad, keyboard)).map { it.name })
+            .containsExactly("Microsoft X-Box 360 pad 0")
+    }
+
+    @Test
+    fun `raw controllers remain available without Steam Input virtual pads`() {
+        val rawPad = controller(emptyArray(), name = "Wireless Controller")
+
+        assertThat(selectGameplayControllers(listOf(rawPad)).map { it.name })
+            .containsExactly("Wireless Controller")
+    }
+
+    @Test
+    fun `Steam Input pads receive player-order display names`() {
+        assertThat(controllerDisplayName("Microsoft X-Box 360 pad 0"))
+            .isEqualTo("Steam Input Controller 1")
+        assertThat(controllerDisplayName("Microsoft X-Box 360 pad 1"))
+            .isEqualTo("Steam Input Controller 2")
+        assertThat(controllerDisplayName("Wireless Controller"))
+            .isEqualTo("Wireless Controller")
+    }
+
+    @Test
+    fun `input topology tracker detects controller node changes after its baseline`() {
+        val tracker = InputDeviceTopologyTracker()
+
+        assertThat(tracker.changed(setOf("event4", "js0"))).isFalse()
+        assertThat(tracker.changed(setOf("event4", "js0"))).isFalse()
+        assertThat(tracker.changed(setOf("event14", "js2"))).isTrue()
+    }
+
+    @Test
+    fun `unavailable input topology does not erase the last baseline`() {
+        val tracker = InputDeviceTopologyTracker()
+
+        assertThat(tracker.changed(setOf("event4", "js0"))).isFalse()
+        assertThat(tracker.changed(null)).isFalse()
+        assertThat(tracker.changed(setOf("event14", "js2"))).isTrue()
+    }
+
     private fun component(
         identifier: Component.Identifier,
         pollData: () -> Float,
@@ -137,11 +190,14 @@ class JInputControllerSourceTest {
     private fun controller(
         components: Array<Component>,
         type: Controller.Type = Controller.Type.GAMEPAD,
+        name: String = "Test pad",
         poll: () -> Boolean = { true },
     ): Controller = proxy { method ->
         when (method.name) {
-            "getName" -> "Test pad"
+            "getName" -> name
             "getType" -> type
+            "getPortType" -> Controller.PortType.UNKNOWN
+            "getPortNumber" -> 0
             "getComponents" -> components
             "poll" -> poll()
             else -> error("Unexpected Controller method: ${method.name}")

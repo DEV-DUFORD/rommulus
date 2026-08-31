@@ -43,7 +43,9 @@ public:
 
     // Opens every currently-connected gamepad and assigns it to ports 0..3
     // in SDL enumeration order. Requires SDL_INIT_GAMEPAD to be active.
-    SdlInput();
+    explicit SdlInput(
+        const std::optional<std::array<std::optional<std::string>, kPorts>>&
+            controllerSlots = std::nullopt);
     ~SdlInput();
 
     SdlInput(const SdlInput&) = delete;
@@ -206,6 +208,7 @@ private:
 
     std::array<PortState, kPorts> ports_{};
     std::array<GamepadSlot, kPorts> gamepads_{};
+    std::optional<std::array<std::optional<std::string>, kPorts>> controllerSlots_;
     Uint64 lastGamepadRefreshMs_ = 0;
 
     // The RetroPad slot -> physical control table poll() consults. Owned by

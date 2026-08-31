@@ -48,6 +48,8 @@ PlayerRequest sampleRequest() {
     r.video.integerScaling = false;
     r.video.scanlines = true;
     r.video.sharpFilter = true;
+    r.controllerSlots = std::array<std::optional<std::string>, 4>{
+        "Steam Deck", std::nullopt, "Wireless Controller", std::nullopt};
     return r;
 }
 
@@ -143,6 +145,7 @@ void checkRoundTripRequest(const PlayerRequest& in) {
     CHECK_EQ(out->video.sharpFilter, in.video.sharpFilter);
     CHECK(out->theme == in.theme);
     CHECK(out->rendererOverride == in.rendererOverride);
+    CHECK(out->controllerSlots == in.controllerSlots);
 
     // v2 optional field: presence must round-trip, and every device's
     // guid/identity/table must be byte-equal.

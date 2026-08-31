@@ -86,6 +86,21 @@ class PlayerProtocolTest {
     }
 
     @Test
+    fun `controller slots round-trip with explicit empty players`() {
+        val original = sampleRequest().copy(
+            controllerSlots = listOf("Steam Deck", null, "Wireless Controller", null),
+        )
+        val json = PlayerProtocol.serializeRequest(original)
+
+        assertThat(json).contains(
+            "\"controllerSlots\": [",
+            "\"Steam Deck\"",
+            "\"Wireless Controller\"",
+        )
+        assertThat(PlayerProtocol.parseRequest(json).getOrNull()).isEqualTo(original)
+    }
+
+    @Test
     fun `software renderer override round-trips and rejects unknown values`() {
         val original = sampleRequest().copy(rendererOverride = RendererOverride.SOFTWARE_HW)
         val json = PlayerProtocol.serializeRequest(original)

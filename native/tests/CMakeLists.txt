@@ -107,6 +107,7 @@ romm_add_player_test(test_pause_menu)
 # header-only, so they compile straight into the test executables through
 # the include paths above — no SDL involved.
 romm_add_player_test(test_controller_capture)
+romm_add_player_test(test_controller_slot_match)
 romm_add_player_test(test_binding_table)
 romm_add_player_test(test_keyboard_binding_table)
 romm_add_player_test(test_display_geometry)

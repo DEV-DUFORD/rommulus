@@ -113,6 +113,8 @@ struct PlayerRequest {
     // v2: stored controller bindings to apply from the first frame (see
     // ControllerBindings below). Absent = the player keeps its defaults.
     std::optional<ControllerBindings> controllerBindings;
+    // Optional SDL controller names in player-port order; null means an empty port.
+    std::optional<std::array<std::optional<std::string>, 4>> controllerSlots;
     // Optional and backward-compatible; absent keeps the built-in keyboard
     // defaults.
     std::optional<KeyboardBindings> keyboardBindings;

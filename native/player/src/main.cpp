@@ -841,7 +841,7 @@ int main(int argc, char* argv[]) {
     bool windowHasFocus = true;
     bool pausedForFocusLoss = false;
     auto nextHealthLog = std::chrono::steady_clock::now() + std::chrono::minutes(1);
-    romm::player::SdlInput input;
+    romm::player::SdlInput input(request.controllerSlots);
     input.configureForCore(request.coreId);
     // v2: apply the stored controller bindings from the launch request so
     // they are active from the FIRST FRAME (the desktop supervisor ingests

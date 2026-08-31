@@ -174,6 +174,8 @@ data class PlayerRequest(
     val theme: RommTheme = RommTheme.RomMulus,
     /** v2 optional: stored controller bindings to apply from the first frame; null = defaults. */
     val controllerBindings: ControllerBindings? = null,
+    /** Optional controller names in player-slot order; null entries are empty slots. */
+    val controllerSlots: List<String?>? = null,
     /** Optional Linux keyboard bindings; null keeps the player's built-in defaults. */
     val keyboardBindings: KeyboardBindings? = null,
     /** Optional curated compatibility override; absent keeps the core's renderer default. */
@@ -264,6 +266,7 @@ object PlayerProtocol {
             var video: VideoSettings? = null
             var theme = RommTheme.RomMulus
             var controllerBindings: ControllerBindings? = null
+            var controllerSlots: List<String?>? = null
             var keyboardBindings: KeyboardBindings? = null
             var rendererOverride: RendererOverride? = null
 
@@ -297,6 +300,7 @@ object PlayerProtocol {
                     }
                     // v2 optional field (not in REQUIRED_REQUEST_FIELDS): absent = defaults.
                     "controllerBindings" -> controllerBindings = readControllerBindings(reader)
+                    "controllerSlots" -> controllerSlots = readControllerSlots(reader)
                     "keyboardBindings" -> keyboardBindings = readKeyboardBindings(reader)
                     "rendererOverride" -> {
                         val value = readString(reader, name)
@@ -330,6 +334,7 @@ object PlayerProtocol {
                 video = video!!,
                 theme = theme,
                 controllerBindings = controllerBindings,
+                controllerSlots = controllerSlots,
                 keyboardBindings = keyboardBindings,
                 rendererOverride = rendererOverride,
             )
@@ -373,6 +378,13 @@ object PlayerProtocol {
                     writeSlotBindings(writer, "pauseMenuBindings", it)
                 }
                 writer.endObject()
+            }
+            request.controllerSlots?.let { slots ->
+                writer.name("controllerSlots").beginArray()
+                slots.forEach { name ->
+                    if (name == null) writer.nullValue() else writer.value(name)
+                }
+                writer.endArray()
             }
             request.keyboardBindings?.let { keyboard ->
                 writer.name("keyboardBindings").beginObject()
@@ -423,6 +435,7 @@ object PlayerProtocol {
                                         primarySeen = true
                                         primary = readNullableScancode(reader, field)
                                     }
+
                                     "secondaryScancode" -> {
                                         secondarySeen = true
                                         secondary = readNullableScancode(reader, field)
@@ -449,6 +462,27 @@ object PlayerProtocol {
                 throw ProtocolException("keyboard bindings must contain every target exactly once in order")
             }
             return KeyboardBindings(result)
+        }
+
+        private fun readControllerSlots(reader: JsonReader): List<String?> {
+            if (reader.peek() != JsonReader.Token.BEGIN_ARRAY) {
+                throw ProtocolException("controllerSlots must be an array")
+            }
+            val slots = mutableListOf<String?>()
+            reader.beginArray()
+            while (reader.peek() != JsonReader.Token.END_ARRAY) {
+                if (slots.size >= 4) {
+                    throw ProtocolException("controllerSlots must contain at most 4 entries")
+                }
+                slots += if (reader.peek() == JsonReader.Token.NULL) {
+                    reader.nextNull<Unit>()
+                    null
+                } else {
+                    readString(reader, "controllerSlots")
+                }
+            }
+            reader.endArray()
+            return slots
         }
 
         private fun readNullableScancode(reader: JsonReader, name: String): Int? =

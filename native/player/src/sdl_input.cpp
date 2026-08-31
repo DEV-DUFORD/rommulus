@@ -10,10 +10,13 @@
 #include <libretro.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <vector>
 
 #include "emulation_session.h"
+#include "native/player/controller_slot_match.h"
 #include "native/player/pause_chord.h"
 
 namespace romm::player {
@@ -83,15 +86,46 @@ static_assert(kJoypadBitR3 == RETRO_DEVICE_ID_JOYPAD_R3, "slot bits drifted from
 
 }  // namespace
 
-SdlInput::SdlInput() {
+SdlInput::SdlInput(
+    const std::optional<std::array<std::optional<std::string>, kPorts>>& controllerSlots
+) : controllerSlots_(controllerSlots) {
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
     if (ids != nullptr) {
-        for (int i = 0; i < count; ++i) {
-            const int port = findFreePort();
-            if (port < 0) break;  // all four ports busy; ignore the rest
-            if (!SDL_IsGamepad(ids[i])) continue;
-            openGamepad(port, ids[i]);
+        std::vector<bool> used(static_cast<std::size_t>(count), false);
+        if (controllerSlots.has_value()) {
+            for (int port = 0; port < kPorts; ++port) {
+                const auto& requested = (*controllerSlots)[port];
+                if (!requested.has_value()) continue;
+                int gamepadOrdinal = -1;
+                for (int i = 0; i < count; ++i) {
+                    if (used[static_cast<std::size_t>(i)] || !SDL_IsGamepad(ids[i])) continue;
+                    ++gamepadOrdinal;
+                    const char* gamepadName = SDL_GetGamepadNameForID(ids[i]);
+                    const char* joystickName = SDL_GetJoystickNameForID(ids[i]);
+                    if (controllerSlotNameMatches(
+                            *requested,
+                            gamepadName != nullptr ? gamepadName : "",
+                            joystickName != nullptr ? joystickName : "",
+                            gamepadOrdinal)) {
+                        openGamepad(port, ids[i]);
+                        used[static_cast<std::size_t>(i)] = gamepads_[port].gamepad != nullptr;
+                        break;
+                    }
+                }
+                if (gamepads_[port].gamepad == nullptr) {
+                    std::fprintf(
+                        stderr, "warning: requested controller '%s' did not match an SDL gamepad\n",
+                        requested->c_str());
+                }
+            }
+        } else {
+            for (int i = 0; i < count; ++i) {
+                const int port = findFreePort();
+                if (port < 0) break;
+                if (!SDL_IsGamepad(ids[i])) continue;
+                openGamepad(port, ids[i]);
+            }
         }
         SDL_free(ids);
     }
@@ -116,9 +150,15 @@ void SdlInput::openGamepad(int port, SDL_JoystickID instanceId) {
     if (gamepad == nullptr) {
         // The device vanished between enumeration and open — leave the
         // slot free and move on.
+        std::fprintf(
+            stderr, "warning: SDL_OpenGamepad failed for port %d: %s\n",
+            port + 1, SDL_GetError());
         return;
     }
     gamepads_[port].gamepad = gamepad;
+    std::fprintf(
+        stderr, "info: assigned SDL gamepad '%s' to player %d\n",
+        SDL_GetGamepadName(gamepad), port + 1);
 }
 
 void SdlInput::closeGamepad(int port) {
@@ -140,8 +180,12 @@ int16_t SdlInput::applyDeadzone(Sint16 value) {
 void SdlInput::handleEvent(const SDL_Event& event) {
     switch (event.type) {
         case SDL_EVENT_GAMEPAD_ADDED: {
-            const int port = findFreePort();
-            if (port >= 0) openGamepad(port, event.gdevice.which);
+            if (controllerSlots_.has_value()) {
+                refreshGamepads();
+            } else {
+                const int port = findFreePort();
+                if (port >= 0) openGamepad(port, event.gdevice.which);
+            }
             break;
         }
         case SDL_EVENT_GAMEPAD_REMOVED: {
@@ -179,20 +223,53 @@ void SdlInput::refreshGamepads() {
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
     if (ids == nullptr) return;
-    for (int i = 0; i < count; ++i) {
-        if (!SDL_IsGamepad(ids[i])) continue;
-        bool alreadyOpen = false;
+    if (controllerSlots_.has_value()) {
         for (int port = 0; port < kPorts; ++port) {
-            if (gamepads_[port].gamepad != nullptr &&
-                SDL_GetGamepadID(gamepads_[port].gamepad) == ids[i]) {
-                alreadyOpen = true;
-                break;
+            if (gamepads_[port].gamepad != nullptr ||
+                !(*controllerSlots_)[port].has_value()) {
+                continue;
+            }
+            int gamepadOrdinal = -1;
+            for (int i = 0; i < count; ++i) {
+                if (!SDL_IsGamepad(ids[i])) continue;
+                ++gamepadOrdinal;
+                bool alreadyOpen = false;
+                for (const auto& slot : gamepads_) {
+                    if (slot.gamepad != nullptr &&
+                        SDL_GetGamepadID(slot.gamepad) == ids[i]) {
+                        alreadyOpen = true;
+                        break;
+                    }
+                }
+                const char* gamepadName = SDL_GetGamepadNameForID(ids[i]);
+                const char* joystickName = SDL_GetJoystickNameForID(ids[i]);
+                const bool nameMatches = controllerSlotNameMatches(
+                    *(*controllerSlots_)[port],
+                    gamepadName != nullptr ? gamepadName : "",
+                    joystickName != nullptr ? joystickName : "",
+                    gamepadOrdinal);
+                if (!alreadyOpen && nameMatches) {
+                    openGamepad(port, ids[i]);
+                    break;
+                }
             }
         }
-        if (alreadyOpen) continue;
-        const int port = findFreePort();
-        if (port < 0) break;
-        openGamepad(port, ids[i]);
+    } else {
+        for (int i = 0; i < count; ++i) {
+            if (!SDL_IsGamepad(ids[i])) continue;
+            bool alreadyOpen = false;
+            for (int port = 0; port < kPorts; ++port) {
+                if (gamepads_[port].gamepad != nullptr &&
+                    SDL_GetGamepadID(gamepads_[port].gamepad) == ids[i]) {
+                    alreadyOpen = true;
+                    break;
+                }
+            }
+            if (alreadyOpen) continue;
+            const int port = findFreePort();
+            if (port < 0) break;
+            openGamepad(port, ids[i]);
+        }
     }
     SDL_free(ids);
 }

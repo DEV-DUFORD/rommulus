@@ -2,6 +2,7 @@ package com.romm.desktop.player
 
 import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.storage.AppPaths
+import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -199,7 +200,9 @@ class ProcessBuilderPlayerLauncher(
             playerBinaryPath: Path = Path.of("rommulus_player"),
         ): ProcessBuilderPlayerLauncher {
             val resolvedPlayer = if (playerBinaryPath == Path.of("rommulus_player")) {
-                findDevelopmentPlayer() ?: playerBinaryPath
+                findExecutableOnPath(playerBinaryPath.fileName.toString())
+                    ?: findDevelopmentPlayer()
+                    ?: playerBinaryPath
             } else {
                 playerBinaryPath
             }
@@ -215,4 +218,16 @@ class ProcessBuilderPlayerLauncher(
             }
         }
     }
+}
+
+internal fun findExecutableOnPath(
+    executableName: String,
+    pathValue: String? = System.getenv("PATH"),
+): Path? {
+    if (pathValue.isNullOrBlank()) return null
+    return pathValue.split(File.pathSeparatorChar)
+        .asSequence()
+        .filter { it.isNotBlank() }
+        .map { Path.of(it).toAbsolutePath().normalize().resolve(executableName) }
+        .firstOrNull { Files.isRegularFile(it) && Files.isExecutable(it) }
 }

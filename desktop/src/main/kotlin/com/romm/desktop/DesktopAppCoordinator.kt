@@ -896,6 +896,13 @@ class DesktopAppCoordinator(
         null
     }
 
+    @Volatile
+    private var controllerSlotOverrides: List<String?>? = null
+
+    fun setControllerSlotOverrides(assignments: List<String?>) {
+        controllerSlotOverrides = assignments.take(4) + List((4 - assignments.size).coerceAtLeast(0)) { null }
+    }
+
     /**
      * Per-session launch metadata captured by [launchPlayer] for the post-play enqueue hook:
      * the ROM/core identity that is NOT recoverable from disk after reconciliation deletes the
@@ -1401,6 +1408,7 @@ class DesktopAppCoordinator(
             // Stored controller overrides (ingested from the previous session's sidecar, §11.9):
             // null when nothing is stored — the player then keeps its built-in defaults.
             controllerBindings = loadLaunchControllerBindings(core.coreId),
+            controllerSlots = controllerSlotOverrides,
             keyboardBindings = keyboardMappingRepository.launchBindings(core.coreId),
             rendererOverride = Ps2CompatibilityOverrides.rendererFor(
                 detail.platformSlug,

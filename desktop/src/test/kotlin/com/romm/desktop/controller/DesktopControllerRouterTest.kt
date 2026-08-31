@@ -391,7 +391,7 @@ class DesktopControllerRouterTest {
     }
 
     @Test
-    fun `only the first active slot drives focus`() = runBlocking {
+    fun `every connected controller drives focus`() = runBlocking {
         val source = FakeJInputSource()
         val router = DesktopControllerRouter(source, this)
         val actions = mutableListOf<FocusAction>()
@@ -409,7 +409,83 @@ class DesktopControllerRouterTest {
         yield()
 
         collector.cancel()
-        assertThat(actions).isEmpty()
+        assertThat(actions).containsExactly(FocusAction.Move(FocusAction.Direction.UP))
+    }
+
+    @Test
+    fun `duplicate actions from physical and virtual controllers are coalesced`() = runBlocking {
+        val source = FakeJInputSource()
+        val router = DesktopControllerRouter(source, this)
+        val actions = mutableListOf<FocusAction>()
+        val collector = launch { router.focusActions.collect { actions += it } }
+        yield()
+
+        source.addController(id = "ps4", buttons = setOf(NeutralKey.DPAD_RIGHT))
+        source.addController(id = "steam-virtual", buttons = setOf(NeutralKey.DPAD_RIGHT))
+        router.tick()
+        yield()
+
+        collector.cancel()
+        assertThat(actions).containsExactly(
+            FocusAction.Move(FocusAction.Direction.RIGHT),
+        )
+    }
+
+    @Test
+    fun `manual assignment moves controller and leaves old slot empty`() {
+        val source = FakeJInputSource()
+        val router = DesktopControllerRouter(source, scope())
+        source.addController(id = "deck")
+        source.addController(id = "ps4")
+        router.tick()
+
+        assertThat(router.assignController(0, "ps4")).isTrue()
+
+        assertThat(router.assignedControllerNames())
+            .containsExactly("ps4", null, null, null)
+        assertThat(router.connectedControllers.value.single { it.id == "ps4" }.slotIndex)
+            .isEqualTo(0)
+        assertThat(router.connectedControllers.value.single { it.id == "deck" }.slotIndex)
+            .isNull()
+        assertThat(router.slots.value[1].connectionState)
+            .isEqualTo(SlotConnectionState.UNASSIGNED)
+    }
+
+    @Test
+    fun `no controller keeps slot empty on later polls`() {
+        val source = FakeJInputSource()
+        val router = DesktopControllerRouter(source, scope())
+        source.addController(id = "deck")
+        router.tick()
+
+        assertThat(router.assignController(0, null)).isTrue()
+        router.tick()
+
+        assertThat(router.slots.value[0].connectionState)
+            .isEqualTo(SlotConnectionState.UNASSIGNED)
+        assertThat(router.connectedControllers.value.single().slotIndex).isNull()
+    }
+
+    @Test
+    fun `controller removed from gameplay slot still drives UI`() = runBlocking {
+        val source = FakeJInputSource()
+        val router = DesktopControllerRouter(source, this)
+        val actions = mutableListOf<FocusAction>()
+        val collector = launch { router.focusActions.collect { actions += it } }
+        yield()
+        val deck = source.addController(id = "deck")
+        source.addController(id = "ps4")
+        router.tick()
+
+        router.assignController(0, "ps4")
+        deck.buttons = setOf(NeutralKey.DPAD_DOWN)
+        router.tick()
+        yield()
+
+        collector.cancel()
+        assertThat(actions).containsExactly(
+            FocusAction.Move(FocusAction.Direction.DOWN),
+        )
     }
 
     // ---------------------------------------------------------------- lifecycle
