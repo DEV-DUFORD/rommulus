@@ -152,7 +152,14 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
             // without changing frontend pacing or disabling visual effects.
             environment_.setCoreOptionOverride("mupen64plus-CountPerOp", "1");
         }
-        if (isDonkeyKong64Rom(contentBuffer, contentPath)) {
+        if (isMarioKart64Rom(contentBuffer, contentPath)) {
+            // Mario Kart's item panels are CPU-visible framebuffer effects.
+            // Synchronous color readback keeps them valid on threaded GLES.
+            environment_.setCoreOptionOverride("mupen64plus-GLideN64IniBehaviour", "early");
+            environment_.setCoreOptionOverride("mupen64plus-EnableFBEmulation", "True");
+            environment_.setCoreOptionOverride("mupen64plus-EnableCopyColorToRDRAM", "Sync");
+            environment_.setCoreOptionOverride("mupen64plus-EnableCopyDepthToRDRAM", "Off");
+        } else if (isDonkeyKong64Rom(contentBuffer, contentPath)) {
             // Apply the embedded profile before these overrides so its
             // FromMem depth-copy setting cannot cause camera recentering on
             // GLES. Software depth and synchronous color readback are too
