@@ -1197,11 +1197,12 @@ class MainActivity : ComponentActivity() {
                                                     repository = controllerConfigRepository,
                                                     captureCoordinator = captureCoordinator,
                                                     connectedDevicesProvider = {
-                                                        controllerRouter.connectedPhysicalDeviceIds().map { deviceId ->
+                                                        controllerRouter.connectedPhysicalDeviceAssignments().map { (deviceId, slotIndex) ->
                                                             val device = InputDevice.getDevice(deviceId)
                                                             com.romm.androidtv.controller.ui.ConnectedControllerInfo(
                                                                 deviceId = deviceId,
                                                                 name = device?.name,
+                                                                slotIndex = slotIndex,
                                                             )
                                                         }
                                                     },
@@ -1226,6 +1227,10 @@ class MainActivity : ComponentActivity() {
                                                 state = uiState,
                                                 onBack = { currentScreen = Screen.NATIVE_CONTROLLER_LIST },
                                                 onSelectTab = controllerViewModel::selectTab,
+                                                onAssignController = { playerIndex, deviceId ->
+                                                    controllerRouter.assignControllerToSlot(playerIndex, deviceId)
+                                                    controllerViewModel.refreshConnectedDevices()
+                                                },
                                                 onRowFocused = controllerViewModel::onRowFocused,
                                                 onRowSelected = controllerViewModel::onRowSelected,
                                                 onCaptureDialogDismiss = controllerViewModel::dismissCaptureDialog,
@@ -1528,6 +1533,10 @@ class MainActivity : ComponentActivity() {
                 putExtra(
                     com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED,
                     settingsRepository.touchControlHapticsEnabled(),
+                )
+                putExtra(
+                    com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_CONTROLLER_DEVICE_IDS,
+                    controllerRouter.assignedPhysicalDeviceIds(),
                 )
                 candidateMetadata?.let { CandidateExtras.putIntoIntent(this, it) }
             }

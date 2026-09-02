@@ -82,6 +82,7 @@ fun ControllerConfigScreen(
     state: ControllerConfigUiState,
     onBack: () -> Unit,
     onSelectTab: (playerIndex: Int) -> Unit,
+    onAssignController: (playerIndex: Int, deviceId: Int?) -> Unit,
     onRowFocused: (controlId: CoreControlId) -> Unit,
     onRowSelected: (controlId: CoreControlId, bindingSlot: BindingSlot) -> Unit,
     onCaptureDialogDismiss: () -> Unit,
@@ -143,6 +144,7 @@ fun ControllerConfigScreen(
     // When the capture dialog closes after a successful mapping, restore focus to the
     // row/slot that was just remapped instead of letting Compose fall back to row 0.
     var wasCapturing by remember { mutableStateOf(false) }
+    var controllerPickerPlayer by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(state.capture) {
         if (state.capture == null && wasCapturing) {
             val requester = rowFocusRequesters[
@@ -208,8 +210,11 @@ fun ControllerConfigScreen(
             activePlayerIndex = state.activePlayerIndex,
             selectedIndex = currentPlayer,
             tabFocusRequesters = tabFocusRequesters,
-            onFocused = { playerIndex -> focusedTabIndex.value = playerIndex },
-            onSelectTab = currentOnSelectTab,
+            onFocused = { playerIndex ->
+                focusedTabIndex.value = playerIndex
+                currentOnSelectTab(playerIndex)
+            },
+            onSelectTab = { controllerPickerPlayer = it },
         )
 
         Row(
@@ -301,6 +306,18 @@ fun ControllerConfigScreen(
             onSwap = { onConflictResolution(ConflictResolution.SWAP) },
             onReplace = { onConflictResolution(ConflictResolution.REPLACE) },
             onCancel = { onConflictResolution(ConflictResolution.CANCEL) },
+        )
+    }
+
+    controllerPickerPlayer?.let { playerIndex ->
+        ControllerSlotPickerDialog(
+            playerIndex = playerIndex,
+            controllers = state.connectedControllers,
+            onSelect = { deviceId ->
+                onAssignController(playerIndex, deviceId)
+                controllerPickerPlayer = null
+            },
+            onDismiss = { controllerPickerPlayer = null },
         )
     }
 
@@ -445,6 +462,58 @@ private fun PlayerTabRow(
             )
         }
     }
+}
+
+@Composable
+private fun ControllerSlotPickerDialog(
+    playerIndex: Int,
+    controllers: List<ConnectedControllerInfo>,
+    onSelect: (Int?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val options = listOf<ConnectedControllerInfo?>(null) + controllers
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(stringResource(R.string.controller_port_picker_title, playerIndex + 1))
+        },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(options, key = { it?.deviceId ?: Int.MIN_VALUE }) { controller ->
+                    TextButton(
+                        onClick = { onSelect(controller?.deviceId) },
+                        modifier = Modifier.fillMaxWidth().tvButtonFocus(),
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.Start,
+                        ) {
+                            Text(
+                                controller?.name?.takeIf(String::isNotBlank)
+                                    ?: stringResource(R.string.controller_port_picker_none),
+                            )
+                            controller?.slotIndex?.let { currentSlot ->
+                                Text(
+                                    stringResource(
+                                        R.string.controller_port_picker_current_port,
+                                        currentSlot + 1,
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = RommTvColors.TextSecondary,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.tvButtonFocus()) {
+                Text(stringResource(R.string.controller_config_reset_all_cancel))
+            }
+        },
+    )
 }
 
 @Composable

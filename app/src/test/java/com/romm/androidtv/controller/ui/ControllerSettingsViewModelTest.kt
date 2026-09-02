@@ -95,8 +95,8 @@ class ControllerSettingsViewModelTest {
     fun `duplicate controller names are numbered in player order`() {
         val labels = playerControllerLabels(
             devices = listOf(
-                ConnectedControllerInfo(18, "Xbox Wireless Controller"),
-                ConnectedControllerInfo(19, "Xbox Wireless Controller"),
+                ConnectedControllerInfo(18, "Xbox Wireless Controller", 0),
+                ConnectedControllerInfo(19, "Xbox Wireless Controller", 1),
             ),
             playerCount = 4,
         )
@@ -113,8 +113,8 @@ class ControllerSettingsViewModelTest {
     fun `different controller names remain unchanged`() {
         val labels = playerControllerLabels(
             devices = listOf(
-                ConnectedControllerInfo(18, "Xbox Wireless Controller"),
-                ConnectedControllerInfo(19, "DualSense Wireless Controller"),
+                ConnectedControllerInfo(18, "Xbox Wireless Controller", 0),
+                ConnectedControllerInfo(19, "DualSense Wireless Controller", 1),
             ),
             playerCount = 2,
         )
@@ -122,6 +122,25 @@ class ControllerSettingsViewModelTest {
         assertThat(labels).containsExactly(
             "Xbox Wireless Controller",
             "DualSense Wireless Controller",
+        )
+    }
+
+    @Test
+    fun `controller labels follow assigned ports rather than device list order`() {
+        val labels = playerControllerLabels(
+            devices = listOf(
+                ConnectedControllerInfo(18, "Xbox Wireless Controller", 1),
+                ConnectedControllerInfo(19, "DualSense Wireless Controller", 0),
+                ConnectedControllerInfo(20, "Unassigned Controller", null),
+            ),
+            playerCount = 4,
+        )
+
+        assertThat(labels).containsExactly(
+            "DualSense Wireless Controller",
+            "Xbox Wireless Controller",
+            null,
+            null,
         )
     }
 }

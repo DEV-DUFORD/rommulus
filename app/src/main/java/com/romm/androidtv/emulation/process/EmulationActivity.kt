@@ -340,6 +340,8 @@ class EmulationActivity : ComponentActivity() {
             "com.romm.androidtv.emulation.EXTRA_ON_SCREEN_CONTROLS_ENABLED"
         const val EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED =
             "com.romm.androidtv.emulation.EXTRA_TOUCH_CONTROL_HAPTICS_ENABLED"
+        const val EXTRA_CONTROLLER_DEVICE_IDS =
+            "com.romm.androidtv.emulation.EXTRA_CONTROLLER_DEVICE_IDS"
         /** Authoritative app launch session ID (UUID string from LaunchSpec.sessionId). Required for journal/result correlation. */
         const val EXTRA_APP_SESSION_ID = "com.romm.androidtv.emulation.EXTRA_APP_SESSION_ID"
         private const val SRAM_CHECKPOINT_INTERVAL_SECONDS = 30L
@@ -602,6 +604,14 @@ class EmulationActivity : ComponentActivity() {
             inputManager.registerInputDeviceListener(captureCoordinator, null)
             controllerRouter.attachLifecycle(this)
             controllerRouter.enumerateExistingDevices(inputManager)
+            intent.getIntArrayExtra(EXTRA_CONTROLLER_DEVICE_IDS)
+                ?.take(ControllerSlot.SLOT_COUNT)
+                ?.forEachIndexed { slotIndex, deviceId ->
+                    controllerRouter.assignControllerToSlot(
+                        slotIndex,
+                        deviceId.takeIf { it >= 0 },
+                    )
+                }
             lifecycle.addObserver(LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_START) {
                     controllerRouter.enumerateExistingDevices(inputManager)
@@ -1892,11 +1902,12 @@ private fun ControllerSettingsSubpage(
         repository = repository,
         captureCoordinator = captureCoordinator,
         connectedDevicesProvider = {
-            controllerRouter.connectedPhysicalDeviceIds().map { deviceId ->
+            controllerRouter.connectedPhysicalDeviceAssignments().map { (deviceId, slotIndex) ->
                 val device = InputDevice.getDevice(deviceId)
                 com.romm.androidtv.controller.ui.ConnectedControllerInfo(
                     deviceId = deviceId,
                     name = device?.name,
+                    slotIndex = slotIndex,
                 )
             }
         },
@@ -1919,6 +1930,10 @@ private fun ControllerSettingsSubpage(
         state = uiState,
         onBack = onBack,
         onSelectTab = viewModel::selectTab,
+        onAssignController = { playerIndex, deviceId ->
+            controllerRouter.assignControllerToSlot(playerIndex, deviceId)
+            viewModel.refreshConnectedDevices()
+        },
         onRowFocused = viewModel::onRowFocused,
         onRowSelected = viewModel::onRowSelected,
         onCaptureDialogDismiss = viewModel::dismissCaptureDialog,

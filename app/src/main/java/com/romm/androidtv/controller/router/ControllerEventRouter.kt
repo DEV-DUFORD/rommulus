@@ -74,6 +74,9 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     /** Device signatures observed this session. */
     private val deviceIdToSignature = mutableMapOf<Int, DeviceSignature>()
 
+    /** User-selected controller layout, retained across this router's STOP/START cycle. */
+    private var manualSlotAssignments: List<DeviceSignature?>? = null
+
     private val virtualRemoteDeviceId = Int.MIN_VALUE
 
     /**
@@ -95,6 +98,76 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         deviceSignatures = deviceIdToSignature,
         virtualRemoteDeviceId = virtualRemoteDeviceId,
     )
+
+    /** All connected physical gamepads and their current player slot, if assigned. */
+    fun connectedPhysicalDeviceAssignments(): List<Pair<Int, Int?>> =
+        deviceIdToSignature.keys
+            .asSequence()
+            .filter { deviceId ->
+                deviceId != virtualRemoteDeviceId &&
+                    !deviceIdToSignature[deviceId].isAndroidTvVirtualController()
+            }
+            .sortedWith(
+                compareBy<Int> { deviceId -> deviceIdToSlotIndex[deviceId] ?: Int.MAX_VALUE }
+                    .thenBy { it },
+            )
+            .map { deviceId -> deviceId to deviceIdToSlotIndex[deviceId] }
+            .toList()
+
+    /** Current physical Android device IDs by player port; -1 marks an empty port. */
+    fun assignedPhysicalDeviceIds(): IntArray =
+        IntArray(ControllerSlot.SLOT_COUNT) { slotIndex ->
+            deviceIdToSlotIndex.entries
+                .firstOrNull { (deviceId, assignedSlot) ->
+                    assignedSlot == slotIndex &&
+                        deviceId != virtualRemoteDeviceId &&
+                        !deviceIdToSignature[deviceId].isAndroidTvVirtualController()
+                }
+                ?.key
+                ?: -1
+        }
+
+    /**
+     * Assign a connected physical controller to a player port, or leave that port empty.
+     * A displaced controller remains connected and available in the controller picker.
+     */
+    fun assignControllerToSlot(slotIndex: Int, deviceId: Int?): Boolean {
+        val result = applyControllerPortAssignment(
+            slots = _slotsFlow.value,
+            deviceSlots = deviceIdToSlotIndex,
+            deviceSignatures = deviceIdToSignature,
+            slotIndex = slotIndex,
+            deviceId = deviceId,
+            virtualRemoteDeviceId = virtualRemoteDeviceId,
+        ) ?: return false
+
+        deviceIdToSlotIndex.clear()
+        deviceIdToSlotIndex.putAll(result.deviceSlots)
+        manualSlotAssignments = result.slots.indices.map { assignedSlot ->
+            result.deviceSlots.entries
+                .firstOrNull { (assignedDeviceId, slot) ->
+                    slot == assignedSlot &&
+                        assignedDeviceId != virtualRemoteDeviceId &&
+                        !deviceIdToSignature[assignedDeviceId].isAndroidTvVirtualController()
+                }
+                ?.key
+                ?.let(deviceIdToSignature::get)
+        }
+        pauseCombinationPressedPerDevice.keys.forEach { pauseCombinationPressedPerDevice[it] = false }
+
+        val updatedSlots = result.slots.toMutableList()
+        if (deviceId != null) {
+            val device = InputDevice.getDevice(deviceId)
+            if (device != null) {
+                resolvedAxesPerDevice[deviceId] = resolveAxes(device, updatedSlots[slotIndex].mapping)
+            }
+            updatedSlots[slotIndex] = updatedSlots[slotIndex].updateSnapshot(
+                snapshotForDevice(deviceId, updatedSlots[slotIndex].mapping),
+            )
+        }
+        emitIfChanged(updatedSlots)
+        return true
+    }
 
     /** Notify settings UI which assigned physical controller produced an input event. */
     fun recordPhysicalInputActivity(deviceId: Int) {
@@ -137,7 +210,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
             if (deviceIdToSignature.containsKey(deviceId)) continue
             onInputDeviceAdded(deviceId)
         }
-
+        restoreManualSlotAssignments()
     }
 
     // ---- Lifecycle management ----
@@ -221,6 +294,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         val slotIndex = deviceIdToSlotIndex[deviceId]
         val mapping = slotIndex?.let { _slotsFlow.value[it].mapping } ?: ControllerMapping()
         resolvedAxesPerDevice[deviceId] = resolveAxes(device, mapping)
+        restoreManualSlotAssignments()
     }
 
     override fun onInputDeviceChanged(deviceId: Int) {
@@ -477,6 +551,45 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         emitIfChanged(updatedSlots)
     }
 
+    private fun restoreManualSlotAssignments() {
+        val desired = manualSlotAssignments ?: return
+        val availableDeviceIds = deviceIdToSignature.keys
+            .filter { deviceId ->
+                deviceId != virtualRemoteDeviceId &&
+                    !deviceIdToSignature[deviceId].isAndroidTvVirtualController()
+            }
+            .toMutableSet()
+        val restoredSlots = _slotsFlow.value.map(::emptyControllerSlot).toMutableList()
+        val restoredDeviceSlots = mutableMapOf<Int, Int>()
+
+        desired.forEachIndexed { slotIndex, desiredSignature ->
+            if (desiredSignature == null || slotIndex !in restoredSlots.indices) return@forEachIndexed
+            val deviceId = availableDeviceIds
+                .sorted()
+                .firstOrNull { candidate ->
+                    deviceIdToSignature[candidate]?.matchesReconnect(desiredSignature) == true
+                }
+                ?: return@forEachIndexed
+            availableDeviceIds.remove(deviceId)
+            restoredDeviceSlots[deviceId] = slotIndex
+            restoredSlots[slotIndex] = restoredSlots[slotIndex].copy(
+                preferredSignature = deviceIdToSignature.getValue(deviceId),
+                connectionState = SlotConnectionState.CONNECTED,
+                currentSnapshot = GamepadSnapshot.EMPTY,
+            )
+            InputDevice.getDevice(deviceId)?.let { device ->
+                resolvedAxesPerDevice[deviceId] = resolveAxes(device, restoredSlots[slotIndex].mapping)
+            }
+            restoredSlots[slotIndex] = restoredSlots[slotIndex].updateSnapshot(
+                snapshotForDevice(deviceId, restoredSlots[slotIndex].mapping),
+            )
+        }
+
+        deviceIdToSlotIndex.clear()
+        deviceIdToSlotIndex.putAll(restoredDeviceSlots)
+        emitIfChanged(restoredSlots)
+    }
+
     /**
      * Update a single slot by index. Thread-safe via main-thread assumption.
      */
@@ -527,27 +640,30 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     private fun rebuildSnapshotForDevice(deviceId: Int) {
         val slotIdx = deviceIdToSlotIndex[deviceId] ?: return
         val slot = _slotsFlow.value[slotIdx]
-        val mapping = if (deviceId == virtualRemoteDeviceId) {
-            slot.mapping
-        } else {
-            slot.mapping.copy(axes = resolvedAxesToNeutral(resolvedAxesPerDevice[deviceId]))
-        }
-
         val pressedKeys = pressedKeysPerDevice[deviceId] ?: emptySet()
         val hatDpadKeys = hatDpadKeysPerDevice[deviceId] ?: emptySet()
-        // Merge hat-derived and key-derived D-pad state
         val mergedKeys = pressedKeys + hatDpadKeys
         val axisValues = axisValuesPerDevice[deviceId] ?: emptyMap()
+        val snapshot = snapshotForDevice(deviceId, slot.mapping)
+        updateSlot(slotIdx) { it.updateSnapshot(snapshot) }
+        evaluatePauseMenuCombination(deviceId, slotIdx, slot.mapping.pauseMenuCombination, mergedKeys, axisValues)
+    }
 
-        val snapshot = GamepadSnapshot.fromPhysicalInput(
+    private fun snapshotForDevice(deviceId: Int, mapping: ControllerMapping): GamepadSnapshot {
+        val effectiveMapping = if (deviceId == virtualRemoteDeviceId) {
+            mapping
+        } else {
+            mapping.copy(axes = resolvedAxesToNeutral(resolvedAxesPerDevice[deviceId]))
+        }
+        val mergedKeys = pressedKeysPerDevice[deviceId].orEmpty() +
+            hatDpadKeysPerDevice[deviceId].orEmpty()
+        return GamepadSnapshot.fromPhysicalInput(
             mergedKeys.mapNotNull { NeutralKey.fromPlatform(it) }.toSet(),
-            axisValues.mapNotNull { (code, value) ->
+            axisValuesPerDevice[deviceId].orEmpty().mapNotNull { (code, value) ->
                 NeutralAxis.fromPlatform(code)?.let { it to value }
             }.toMap(),
-            mapping
+            effectiveMapping,
         )
-        updateSlot(slotIdx) { it.updateSnapshot(snapshot) }
-        evaluatePauseMenuCombination(deviceId, slotIdx, mapping.pauseMenuCombination, mergedKeys, axisValues)
     }
 
     private fun evaluatePauseMenuCombination(
@@ -809,11 +925,13 @@ internal fun physicalDeviceIdForEffectiveSlot(
     deviceSlots: Map<Int, Int>,
     deviceSignatures: Map<Int, DeviceSignature>,
     virtualRemoteDeviceId: Int = Int.MIN_VALUE,
-): Int? = physicalDeviceIds(
-    deviceSlots = deviceSlots,
-    deviceSignatures = deviceSignatures,
-    virtualRemoteDeviceId = virtualRemoteDeviceId,
-).getOrNull(slotIndex)
+): Int? = deviceSlots.entries
+    .firstOrNull { (deviceId, assignedSlot) ->
+        assignedSlot == slotIndex &&
+            deviceId != virtualRemoteDeviceId &&
+            !deviceSignatures[deviceId].isAndroidTvVirtualController()
+    }
+    ?.key
 
 internal fun physicalDeviceIds(
     deviceSlots: Map<Int, Int>,
@@ -828,6 +946,60 @@ internal fun physicalDeviceIds(
     .sortedBy { (_, assignedSlot) -> assignedSlot }
     .map { (deviceId, _) -> deviceId }
     .toList()
+
+internal data class ControllerPortAssignment(
+    val slots: List<ControllerSlot>,
+    val deviceSlots: Map<Int, Int>,
+)
+
+internal fun applyControllerPortAssignment(
+    slots: List<ControllerSlot>,
+    deviceSlots: Map<Int, Int>,
+    deviceSignatures: Map<Int, DeviceSignature>,
+    slotIndex: Int,
+    deviceId: Int?,
+    virtualRemoteDeviceId: Int = Int.MIN_VALUE,
+): ControllerPortAssignment? {
+    if (slotIndex !in slots.indices) return null
+    if (
+        deviceId != null &&
+        (
+            deviceId == virtualRemoteDeviceId ||
+                deviceSignatures[deviceId] == null ||
+                deviceSignatures[deviceId].isAndroidTvVirtualController()
+            )
+    ) {
+        return null
+    }
+
+    val updatedSlots = slots.toMutableList()
+    val updatedDeviceSlots = deviceSlots.toMutableMap()
+    val targetDeviceId = updatedDeviceSlots.entries.firstOrNull { it.value == slotIndex }?.key
+    if (targetDeviceId != null && targetDeviceId != deviceId) {
+        updatedDeviceSlots.remove(targetDeviceId)
+    }
+
+    if (deviceId == null) {
+        updatedSlots[slotIndex] = emptyControllerSlot(updatedSlots[slotIndex])
+        return ControllerPortAssignment(updatedSlots, updatedDeviceSlots)
+    }
+
+    val previousSlot = updatedDeviceSlots[deviceId]
+    if (previousSlot != null && previousSlot != slotIndex) {
+        updatedSlots[previousSlot] = emptyControllerSlot(updatedSlots[previousSlot])
+    }
+
+    updatedDeviceSlots[deviceId] = slotIndex
+    updatedSlots[slotIndex] = updatedSlots[slotIndex].copy(
+        preferredSignature = deviceSignatures.getValue(deviceId),
+        connectionState = SlotConnectionState.CONNECTED,
+        currentSnapshot = GamepadSnapshot.EMPTY,
+    )
+    return ControllerPortAssignment(updatedSlots, updatedDeviceSlots)
+}
+
+private fun emptyControllerSlot(slot: ControllerSlot): ControllerSlot =
+    ControllerSlot(playerNumber = slot.playerNumber, mapping = slot.mapping)
 
 internal fun sourceMaskFromAndroid(sources: Int): Int {
     var mask = 0
