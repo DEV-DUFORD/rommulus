@@ -61,7 +61,10 @@ object ControllerConfigMerger {
                     val address = BindingAddress(controlId, slot)
                     val isExplicit = playerOverrides[controlId]?.containsKey(slot) == true
                     val conflictsWithExplicit = explicitBindings.any { (explicitAddress, explicitBinding) ->
-                        explicitAddress != address && explicitBinding == binding
+                        explicitAddress != address &&
+                            !controlId.isPauseMenuControl &&
+                            !explicitAddress.controlId.isPauseMenuControl &&
+                            explicitBinding == binding
                     }
                     if (!isExplicit && conflictsWithExplicit) {
                         resolved = resolved.with(slot, null)

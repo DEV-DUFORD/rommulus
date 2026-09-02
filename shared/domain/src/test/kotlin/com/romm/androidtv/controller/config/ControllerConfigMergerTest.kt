@@ -17,6 +17,29 @@ class ControllerConfigMergerTest {
         ?: throw IllegalStateException("mupen64plus_next profile not found in catalog")
 
     @Test
+    fun `pause chord may share stick buttons with gameplay controls`() {
+        val ps2Profile = CoreControllerProfiles.byCoreId("lrps2")
+            ?: throw IllegalStateException("lrps2 profile not found in catalog")
+        val leftStick = PhysicalBinding.Key(NeutralKey.BUTTON_THUMBL.platformCode)
+        val rightStick = PhysicalBinding.Key(NeutralKey.BUTTON_THUMBR.platformCode)
+
+        val merged = ControllerConfigMerger.merge(
+            ps2Profile,
+            mapOf(
+                0 to mapOf(
+                    CoreControlId.L3 to mapOf(BindingSlot.PRIMARY to leftStick),
+                    CoreControlId.R3 to mapOf(BindingSlot.PRIMARY to rightStick),
+                ),
+            ),
+        ).players.getValue(0)
+
+        assertThat(merged.get(CoreControlId.L3, BindingSlot.PRIMARY)).isEqualTo(leftStick)
+        assertThat(merged.get(CoreControlId.R3, BindingSlot.PRIMARY)).isEqualTo(rightStick)
+        assertThat(merged.get(CoreControlId.PAUSE_MENU, BindingSlot.PRIMARY)).isEqualTo(leftStick)
+        assertThat(merged.get(CoreControlId.PAUSE_MENU, BindingSlot.SECONDARY)).isEqualTo(rightStick)
+    }
+
+    @Test
     fun `defaults preserved when no overrides`() {
         val config = ControllerConfigMerger.merge(snesProfile, emptyMap())
 
