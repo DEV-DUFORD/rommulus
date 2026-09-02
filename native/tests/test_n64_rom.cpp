@@ -42,6 +42,12 @@ int main() {
     CHECK(!romm::isDonkeyKong64Rom(n64Header("SUPER MARIO 64"), ""));
     CHECK(!romm::isDonkeyKong64Rom(std::vector<uint8_t>(0x40, 0), ""));
 
+    const auto marioKart64 = n64Header("MARIOKART64");
+    CHECK(romm::isMarioKart64Rom(marioKart64, ""));
+    CHECK(romm::isMarioKart64Rom(byteSwapPairs(marioKart64), ""));
+    CHECK(romm::isMarioKart64Rom(byteSwapWords(marioKart64), ""));
+    CHECK(!romm::isMarioKart64Rom(n64Header("SUPER MARIO 64"), ""));
+
     const auto snowboardKids2 = n64Header("SNOWBOARD KIDS2");
     CHECK(romm::isSnowboardKids2Rom(snowboardKids2, ""));
     CHECK(romm::isSnowboardKids2Rom(byteSwapPairs(snowboardKids2), ""));

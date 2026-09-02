@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -64,6 +65,7 @@ import com.romm.desktop.DesktopAppCoordinator
 import com.romm.desktop.controller.DesktopCaptureCoordinator
 import com.romm.desktop.controller.DesktopCapturePump
 import com.romm.desktop.controller.DesktopCaptureState
+import com.romm.desktop.controller.DesktopControllerRouter
 import com.romm.desktop.ui.controller.ControllerArtworkResolver
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
@@ -86,16 +88,20 @@ private data class PendingConflict(
 @Composable
 fun ControllerConfigScreen(
     coordinator: DesktopAppCoordinator,
+    controllerRouter: DesktopControllerRouter,
     onCaptureActiveChanged: (Boolean) -> Unit = {},
 ) {
     val coreId = coordinator.selectedControllerCoreId ?: return
-    ControllerConfigScreen(coreId, coordinator, coordinator::onBack, onCaptureActiveChanged)
+    ControllerConfigScreen(
+        coreId, coordinator, controllerRouter, coordinator::onBack, onCaptureActiveChanged,
+    )
 }
 
 @Composable
 fun ControllerConfigScreen(
     coreId: String,
     coordinator: DesktopAppCoordinator,
+    controllerRouter: DesktopControllerRouter,
     onBack: () -> Unit,
     onCaptureActiveChanged: (Boolean) -> Unit = {},
 ) {
@@ -121,14 +127,15 @@ fun ControllerConfigScreen(
     var pendingConflict by remember { mutableStateOf<PendingConflict?>(null) }
     var clearConfirmation by remember { mutableStateOf(false) }
     var resetAllConfirmation by remember { mutableStateOf(false) }
+    var controllerPickerPlayer by remember { mutableStateOf<Int?>(null) }
     var feedback by remember { mutableStateOf<String?>(null) }
     val lastFocusedAddress = remember { mutableMapOf<Int, BindingAddress>() }
 
-    val devices = coordinator.controllerInputSource.enumerate()
-    val controllerLabels = remember(devices.map { it.signature.name }, profile.playerCount) {
-        numberedControllerLabels(devices.map { it.signature.name }, profile.playerCount)
+    val connectedControllers by controllerRouter.connectedControllers.collectAsState()
+    val controllerLabels = remember(connectedControllers, profile.playerCount) {
+        controllerLabelsBySlot(connectedControllers, profile.playerCount)
     }
-    val activePlayer = devices.indices.firstOrNull()?.takeIf { it < profile.playerCount }
+    val activePlayer = connectedControllers.firstOrNull()?.slotIndex
 
     DisposableEffect(capturePump) {
         capturePump.start()
@@ -227,7 +234,7 @@ fun ControllerConfigScreen(
     }
 
     val startCapture: (CoreControlDescriptor, BindingSlot) -> Unit = { descriptor, slot ->
-        val selectedDevice = coordinator.controllerInputSource.enumerate().getOrNull(selectedPlayer)
+        val selectedDevice = connectedControllers.firstOrNull { it.slotIndex == selectedPlayer }
         onCaptureActiveChanged(true)
         captureCoordinator.beginCapture(
             slotIndex = selectedPlayer,
@@ -269,12 +276,10 @@ fun ControllerConfigScreen(
                     captureCoordinator.cancel()
                     selectedPlayer = player
                     focusedControlId = null
-                    scope.launch {
-                        delay(80)
-                        val address = lastFocusedAddress[player]
-                            ?: BindingAddress(profile.controls.first().id, BindingSlot.PRIMARY)
-                        focusNavigator.focusItem(bindingKey(address, player))
-                    }
+                },
+                onChooseController = { player ->
+                    selectedPlayer = player
+                    controllerPickerPlayer = player
                 },
             )
             Spacer(Modifier.height(18.dp))
@@ -440,6 +445,27 @@ fun ControllerConfigScreen(
             },
         )
     }
+
+    controllerPickerPlayer?.let { playerIndex ->
+        ControllerSlotPickerDialog(
+            playerIndex = playerIndex,
+            controllers = connectedControllers,
+            focusNavigator = focusNavigator,
+            onSelect = { controllerId ->
+                if (controllerRouter.assignController(playerIndex, controllerId)) {
+                    coordinator.setControllerSlotOverrides(controllerRouter.assignedControllerNames())
+                    feedback = if (controllerId == null) {
+                        "Player ${playerIndex + 1} set to No controller"
+                    } else {
+                        val name = connectedControllers.first { it.id == controllerId }.name
+                        "$name assigned to Player ${playerIndex + 1}"
+                    }
+                }
+                controllerPickerPlayer = null
+            },
+            onDismiss = { controllerPickerPlayer = null },
+        )
+    }
 }
 
 @Composable
@@ -485,18 +511,22 @@ private fun PlayerTabs(
     controllerLabels: List<String?>,
     focusNavigator: com.romm.desktop.ui.navigation.FocusNavigator,
     onSelect: (Int) -> Unit,
+    onChooseController: (Int) -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxWidth()) {
         repeat(profile.playerCount) { playerIndex ->
             Tab(
                 selected = playerIndex == selectedPlayer,
-                onClick = { onSelect(playerIndex) },
+                onClick = { onChooseController(playerIndex) },
                 modifier = Modifier
                     .weight(1f)
                     .focusableItem(
                         "controller-player-tab-$playerIndex",
                         focusNavigator,
-                    ) { onSelect(playerIndex) },
+                    ) { onChooseController(playerIndex) }
+                    .onFocusChanged {
+                        if (it.isFocused) onSelect(playerIndex)
+                    },
                 text = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
@@ -513,10 +543,79 @@ private fun PlayerTabs(
                             maxLines = 1,
                         )
                     }
+
                 },
             )
         }
     }
+}
+
+@Composable
+private fun ControllerSlotPickerDialog(
+    playerIndex: Int,
+    controllers: List<com.romm.desktop.controller.ConnectedController>,
+    focusNavigator: com.romm.desktop.ui.navigation.FocusNavigator,
+    onSelect: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val options = listOf<String?>(null) + controllers.map { it.id }
+    val initial = controllers.firstOrNull { it.slotIndex == playerIndex }?.id
+    val focusOverrideOwner = remember { Any() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose Player ${playerIndex + 1} controller") },
+        text = {
+            val dialogFocusManager = LocalFocusManager.current
+            DisposableEffect(focusNavigator, dialogFocusManager, focusOverrideOwner) {
+                focusNavigator.installSpatialFocusOverride(
+                    focusOverrideOwner,
+                    dialogFocusManager::moveFocus,
+                    onDismiss,
+                )
+                onDispose { focusNavigator.removeSpatialFocusOverride(focusOverrideOwner) }
+            }
+            LaunchedEffect(playerIndex, initial, options) {
+                delay(80)
+                focusNavigator.focusItem(
+                    "controller-slot-option-$playerIndex-${initial ?: "none"}",
+                )
+            }
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                itemsIndexed(options) { _, controllerId ->
+                    val controller = controllers.firstOrNull { it.id == controllerId }
+                    val label = controller?.name ?: "No controller"
+                    val assignment = controller?.slotIndex
+                    OutlinedButton(
+                        onClick = { onSelect(controllerId) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusableItem(
+                                "controller-slot-option-$playerIndex-${controllerId ?: "none"}",
+                                focusNavigator,
+                            ) { onSelect(controllerId) },
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.Start,
+                        ) {
+                            Text(label)
+                            if (assignment != null) {
+                                Text(
+                                    "Currently Player ${assignment + 1}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
@@ -755,19 +854,24 @@ private fun ControllerCaptureDialog(
     )
 }
 
-private fun numberedControllerLabels(names: List<String>, playerCount: Int): List<String?> {
-    val normalized = names.map { it.ifBlank { "Game controller" } }
+private fun controllerLabelsBySlot(
+    controllers: List<com.romm.desktop.controller.ConnectedController>,
+    playerCount: Int,
+): List<String?> {
+    val normalized = controllers.map { it.name.ifBlank { "Game controller" } }
     val totals = normalized.groupingBy { it }.eachCount()
     val seen = mutableMapOf<String, Int>()
-    return List(playerCount) { index ->
-        val name = normalized.getOrNull(index) ?: return@List null
+    val labelsById = controllers.zip(normalized).associate { (controller, name) ->
         if (totals.getValue(name) == 1) {
-            name
+            controller.id to name
         } else {
             val number = (seen[name] ?: 0) + 1
             seen[name] = number
-            "$name #$number"
+            controller.id to "$name #$number"
         }
+    }
+    return List(playerCount) { slot ->
+        controllers.firstOrNull { it.slotIndex == slot }?.let { labelsById[it.id] }
     }
 }
 

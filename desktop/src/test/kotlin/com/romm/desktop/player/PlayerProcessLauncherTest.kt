@@ -74,6 +74,36 @@ class PlayerProcessLauncherTest {
         assertThat(deriveAllowedCores(scanInstalledCoreIds(dir))).isEqualTo("test_core=1")
     }
 
+    @Test
+    fun `player resolution uses the first executable on PATH`(@TempDir dir: Path) {
+        val bundled = Files.createDirectories(dir.resolve("bundle-bin")).resolve("rommulus_player")
+        val later = Files.createDirectories(dir.resolve("later-bin")).resolve("rommulus_player")
+        Files.writeString(bundled, "bundled")
+        Files.writeString(later, "later")
+        val executablePermissions = setOf(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE,
+            PosixFilePermission.OWNER_EXECUTE,
+        )
+        Files.setPosixFilePermissions(bundled, executablePermissions)
+        Files.setPosixFilePermissions(later, executablePermissions)
+
+        val result = findExecutableOnPath(
+            "rommulus_player",
+            "${bundled.parent}${java.io.File.pathSeparator}${later.parent}",
+        )
+
+        assertThat(result).isEqualTo(bundled)
+    }
+
+    @Test
+    fun `player resolution ignores non-executable PATH entries`(@TempDir dir: Path) {
+        val nonExecutable = Files.createDirectories(dir.resolve("bin")).resolve("rommulus_player")
+        Files.writeString(nonExecutable, "not executable")
+
+        assertThat(findExecutableOnPath("rommulus_player", nonExecutable.parent.toString())).isNull()
+    }
+
     // ---------------------------------------------------------------- launch integration
 
     /** Minimal [Process] stand-in for the [ProcessBuilderPlayerLauncher] starter seam. */

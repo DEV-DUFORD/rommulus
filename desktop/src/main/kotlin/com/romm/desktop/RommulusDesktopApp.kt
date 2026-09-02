@@ -72,7 +72,7 @@ import java.util.logging.Level
  * Controller focus navigation: one shared [FocusNavigator] is provided to every screen via
  * [DesktopFocusScope]/[com.romm.desktop.ui.navigation.LocalFocusNavigator]. The
  * [DesktopControllerRouter] (JInput, ~60 Hz poll) emits platform-neutral [FocusAction]s from
- * the primary controller; this shell maps them onto Compose's spatial focus engine:
+ * every connected controller; this shell maps them onto Compose's spatial focus engine:
  *  - `Move(dir)` → [FocusManager.moveFocus] (D-pad / left-stick follows UI geometry)
  *  - `Activate`  → [FocusNavigator.activateFocused] (A presses the focused item's action)
  *  - `Back`      → the current top-level rail item first, then up one view
@@ -113,6 +113,11 @@ fun RommulusDesktopApp(
         onDispose {
             router.stop()
             pollScope.cancel()
+        }
+    }
+    LaunchedEffect(router, coordinator) {
+        router.connectedControllers.collect {
+            coordinator.setControllerSlotOverrides(router.assignedControllerNames())
         }
     }
 
@@ -270,6 +275,7 @@ fun RommulusDesktopApp(
                             Screen.CONTROLLER_LIST -> ControllerConsoleListScreen(coordinator)
                             Screen.CONTROLLER_CONFIG -> ControllerConfigScreen(
                                 coordinator = coordinator,
+                                controllerRouter = router,
                                 onCaptureActiveChanged = { active ->
                                     router.setFocusActionsEnabled(!active)
                                 },

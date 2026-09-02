@@ -130,10 +130,9 @@ object LibretroPadMapper {
 /**
  * Maps the four-slot [ControllerSlot] list to four Libretro ports (0-based),
  * applying [LibretroPadMapper] to each slot's current snapshot. Connected
- * physical controllers are compacted ahead of Android TV system devices such
- * as `virtual-remote` and `virtual-search`; otherwise those phantom GAMEPAD
- * devices can consume ports 0-1 before a Bluetooth controller and make
- * single-player cores (including SameBoy) ignore the real controller.
+ * player slots map directly to Libretro ports. Android TV system devices such
+ * as `virtual-remote` and `virtual-search` are filtered by the router before
+ * physical assignment, so no port compaction is needed here.
  *
  * Pure and Android-independent — see `LibretroPadMapperTest`.
  */

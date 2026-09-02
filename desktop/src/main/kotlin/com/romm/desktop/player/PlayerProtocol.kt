@@ -95,6 +95,7 @@ data class ControllerBindingDevice(
     val identity: ControllerBindingIdentity,
     val bindings: List<PlayerSlotBinding>,
     val secondaryBindings: List<PlayerSlotBinding>? = null,
+    val port: Int? = null,
 )
 
 /** The v2 request's optional controllerBindings field (absent = player keeps its defaults). */
@@ -174,6 +175,8 @@ data class PlayerRequest(
     val theme: RommTheme = RommTheme.RomMulus,
     /** v2 optional: stored controller bindings to apply from the first frame; null = defaults. */
     val controllerBindings: ControllerBindings? = null,
+    /** Optional controller names in player-slot order; null entries are empty slots. */
+    val controllerSlots: List<String?>? = null,
     /** Optional Linux keyboard bindings; null keeps the player's built-in defaults. */
     val keyboardBindings: KeyboardBindings? = null,
     /** Optional curated compatibility override; absent keeps the core's renderer default. */
@@ -264,6 +267,7 @@ object PlayerProtocol {
             var video: VideoSettings? = null
             var theme = RommTheme.RomMulus
             var controllerBindings: ControllerBindings? = null
+            var controllerSlots: List<String?>? = null
             var keyboardBindings: KeyboardBindings? = null
             var rendererOverride: RendererOverride? = null
 
@@ -297,6 +301,7 @@ object PlayerProtocol {
                     }
                     // v2 optional field (not in REQUIRED_REQUEST_FIELDS): absent = defaults.
                     "controllerBindings" -> controllerBindings = readControllerBindings(reader)
+                    "controllerSlots" -> controllerSlots = readControllerSlots(reader)
                     "keyboardBindings" -> keyboardBindings = readKeyboardBindings(reader)
                     "rendererOverride" -> {
                         val value = readString(reader, name)
@@ -330,6 +335,7 @@ object PlayerProtocol {
                 video = video!!,
                 theme = theme,
                 controllerBindings = controllerBindings,
+                controllerSlots = controllerSlots,
                 keyboardBindings = keyboardBindings,
                 rendererOverride = rendererOverride,
             )
@@ -373,6 +379,13 @@ object PlayerProtocol {
                     writeSlotBindings(writer, "pauseMenuBindings", it)
                 }
                 writer.endObject()
+            }
+            request.controllerSlots?.let { slots ->
+                writer.name("controllerSlots").beginArray()
+                slots.forEach { name ->
+                    if (name == null) writer.nullValue() else writer.value(name)
+                }
+                writer.endArray()
             }
             request.keyboardBindings?.let { keyboard ->
                 writer.name("keyboardBindings").beginObject()
@@ -423,6 +436,7 @@ object PlayerProtocol {
                                         primarySeen = true
                                         primary = readNullableScancode(reader, field)
                                     }
+
                                     "secondaryScancode" -> {
                                         secondarySeen = true
                                         secondary = readNullableScancode(reader, field)
@@ -451,6 +465,27 @@ object PlayerProtocol {
             return KeyboardBindings(result)
         }
 
+        private fun readControllerSlots(reader: JsonReader): List<String?> {
+            if (reader.peek() != JsonReader.Token.BEGIN_ARRAY) {
+                throw ProtocolException("controllerSlots must be an array")
+            }
+            val slots = mutableListOf<String?>()
+            reader.beginArray()
+            while (reader.peek() != JsonReader.Token.END_ARRAY) {
+                if (slots.size >= 4) {
+                    throw ProtocolException("controllerSlots must contain at most 4 entries")
+                }
+                slots += if (reader.peek() == JsonReader.Token.NULL) {
+                    reader.nextNull<Unit>()
+                    null
+                } else {
+                    readString(reader, "controllerSlots")
+                }
+            }
+            reader.endArray()
+            return slots
+        }
+
         private fun readNullableScancode(reader: JsonReader, name: String): Int? =
             if (reader.peek() == JsonReader.Token.NULL) {
                 reader.nextNull<Unit>()
@@ -465,6 +500,7 @@ object PlayerProtocol {
             writer.name("devices").beginArray()
             for (device in devices) {
                 writer.beginObject()
+                device.port?.let { writer.name("port").value(it.toLong()) }
                 writer.name("guid").value(device.guid)
                 writer.name("identity").beginObject()
                 if (device.identity.vendorId == null) {
@@ -761,6 +797,7 @@ object PlayerProtocol {
         reader.beginObject()
         val seen = mutableSetOf<String>()
         var guid: String? = null
+        var port: Int? = null
         var identity: ControllerBindingIdentity? = null
         var bindings: List<PlayerSlotBinding>? = null
         var secondaryBindings: List<PlayerSlotBinding>? = null
@@ -768,6 +805,13 @@ object PlayerProtocol {
             val name = reader.nextName()
             seen += name
             when (name) {
+                "port" -> {
+                    val value = readInt64(reader, name)
+                    if (value !in 0..3) {
+                        throw ProtocolException("controllerBindings device port must be between 0 and 3")
+                    }
+                    port = value.toInt()
+                }
                 "guid" -> guid = readString(reader, name)
                 "identity" -> identity = readControllerBindingIdentity(reader)
                 "bindings" -> bindings = readSlotBindings(reader)
@@ -780,10 +824,11 @@ object PlayerProtocol {
             if (field !in seen) throw ProtocolException("missing controllerBindings device field: $field")
         }
         return ControllerBindingDevice(
-            checkNotNull(guid),
-            checkNotNull(identity),
-            checkNotNull(bindings),
-            secondaryBindings,
+            guid = checkNotNull(guid),
+            identity = checkNotNull(identity),
+            bindings = checkNotNull(bindings),
+            secondaryBindings = secondaryBindings,
+            port = port,
         )
     }
 

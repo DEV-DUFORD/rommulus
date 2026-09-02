@@ -81,6 +81,10 @@ bool isDonkeyKong64Rom(const std::vector<uint8_t>& content, const std::string& c
     return isRomNamed(content, contentPath, "DONKEY KONG 64");
 }
 
+bool isMarioKart64Rom(const std::vector<uint8_t>& content, const std::string& contentPath) {
+    return isRomNamed(content, contentPath, "MARIOKART64");
+}
+
 bool isSnowboardKids2Rom(const std::vector<uint8_t>& content, const std::string& contentPath) {
     return isRomNamed(content, contentPath, "SNOWBOARD KIDS2");
 }

@@ -260,8 +260,8 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         return false;
     }
 
-    static const std::array<const char*, 4> kDeviceFields = {
-        {"guid", "identity", "bindings", "secondaryBindings"}};
+    static const std::array<const char*, 5> kDeviceFields = {
+        {"port", "guid", "identity", "bindings", "secondaryBindings"}};
     static const std::array<const char*, 3> kRequiredDeviceFields = {
         {"guid", "identity", "bindings"}};
     static const std::array<const char*, 3> kIdentityFields = {
@@ -282,6 +282,18 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         }
 
         ControllerBindingDevice device;
+        if (d.contains("port")) {
+            if (!d["port"].is_number_integer()) {
+                error = "controllerBindings device port must be an integer";
+                return false;
+            }
+            const int port = d["port"].get<int>();
+            if (port < 0 || port >= 4) {
+                error = "controllerBindings device port must be between 0 and 3";
+                return false;
+            }
+            device.port = port;
+        }
         if (!getString(d, "guid", device.guid, error)) return false;
 
         const ordered_json& id = d["identity"];
@@ -472,12 +484,12 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
 
     // controllerBindings is v2's OPTIONAL field: it passes the unknown-field
     // check below but is not part of the required set (absent = defaults).
-    static const std::array<const char*, 17> kFields = {{
+    static const std::array<const char*, 18> kFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
         "corePath",        "contentPath", "contentHash", "systemDir",
         "savePath",        "candidateSavePath", "resultPath",
         "expectedSaveSize", "video", "controllerBindings", "keyboardBindings",
-        "rendererOverride", "theme",
+        "rendererOverride", "theme", "controllerSlots",
     }};
     static const std::array<const char*, 13> kRequiredFields = {{
         "protocolVersion", "sessionId", "coreId", "coreBuildRevision",
@@ -578,6 +590,21 @@ std::optional<PlayerRequest> parseRequest(const std::string& text,
         if (!parseControllerBindings(j["controllerBindings"], bindings, err))
             return reject<PlayerRequest>(error, err);
         r.controllerBindings = std::move(bindings);
+    }
+    if (j.contains("controllerSlots")) {
+        const ordered_json& slots = j["controllerSlots"];
+        if (!slots.is_array() || slots.size() > 4)
+            return reject<PlayerRequest>(
+                error, "controllerSlots must be an array with at most 4 entries");
+        std::array<std::optional<std::string>, 4> parsed{};
+        for (std::size_t i = 0; i < slots.size(); ++i) {
+            if (slots[i].is_null()) continue;
+            if (!slots[i].is_string())
+                return reject<PlayerRequest>(
+                    error, "controllerSlots entries must be strings or null");
+            parsed[i] = slots[i].get<std::string>();
+        }
+        r.controllerSlots = std::move(parsed);
     }
     if (j.contains("keyboardBindings")) {
         KeyboardBindings bindings;
@@ -739,6 +766,7 @@ std::string serializeRequest(const PlayerRequest& r) {
         ordered_json devices = ordered_json::array();
         for (const ControllerBindingDevice& device : r.controllerBindings->devices) {
             ordered_json entry;
+            if (device.port.has_value()) entry["port"] = *device.port;
             entry["guid"] = device.guid;
             ordered_json identity;
             if (device.identity.vendorId.has_value())
@@ -842,6 +870,14 @@ std::string serializeRequest(const PlayerRequest& r) {
                 std::move(pauseBindings);
         }
         j["controllerBindings"] = std::move(controllerBindings);
+    }
+    if (r.controllerSlots.has_value()) {
+        ordered_json slots = ordered_json::array();
+        for (const auto& slot : *r.controllerSlots) {
+            if (slot.has_value()) slots.push_back(*slot);
+            else slots.push_back(nullptr);
+        }
+        j["controllerSlots"] = std::move(slots);
     }
     if (r.keyboardBindings.has_value()) {
         ordered_json entries = ordered_json::array();

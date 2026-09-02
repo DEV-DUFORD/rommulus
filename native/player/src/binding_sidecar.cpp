@@ -115,6 +115,7 @@ std::string serializeBindingSidecar(const std::vector<DeviceBindings>& devices) 
     json deviceArray = json::array();
     for (const DeviceBindings& device : devices) {
         json entry;
+        entry["port"] = device.port;
         entry["guid"] = toLower(device.guid);
         json identity;
         identity["vendorId"] = nullptr;

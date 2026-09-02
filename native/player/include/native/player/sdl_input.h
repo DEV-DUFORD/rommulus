@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include "native/player/binding_table.h"
 #include "native/player/keyboard_binding_table.h"
@@ -43,7 +44,9 @@ public:
 
     // Opens every currently-connected gamepad and assigns it to ports 0..3
     // in SDL enumeration order. Requires SDL_INIT_GAMEPAD to be active.
-    SdlInput();
+    explicit SdlInput(
+        const std::optional<std::array<std::optional<std::string>, kPorts>>&
+            controllerSlots = std::nullopt);
     ~SdlInput();
 
     SdlInput(const SdlInput&) = delete;
@@ -85,19 +88,31 @@ public:
     // Settings). The table maps each of the 16 RetroPad slots to a physical
     // control; poll() consults it instead of a hardcoded mapping. Defaults
     // are the built-in mapping; the editor mutates it at runtime.
-    const BindingTable& bindings() const { return bindings_; }
-    const BindingTable& secondaryBindings() const { return secondaryBindings_; }
-    const BindingSource& bindingForSlot(int slot, int bindingSlot = 0) const {
-        return bindingSlot == 1 ? secondaryBindings_.get(slot) : bindings_.get(slot);
+    const BindingTable& bindings(int port = 0) const { return bindings_[port]; }
+    const BindingTable& secondaryBindings(int port = 0) const {
+        return secondaryBindings_[port];
     }
-    void setBinding(int slot, BindingSource source, int bindingSlot = 0) {
-        (bindingSlot == 1 ? secondaryBindings_ : bindings_).set(slot, source);
+    const BindingSource& bindingForSlot(int port, int slot, int bindingSlot = 0) const {
+        return bindingSlot == 1
+            ? secondaryBindings_[port].get(slot) : bindings_[port].get(slot);
+    }
+    void setBinding(int port, int slot, BindingSource source, int bindingSlot = 0) {
+        (bindingSlot == 1 ? secondaryBindings_[port] : bindings_[port]).set(slot, source);
     }
     // Replaces the ENTIRE table at once (the v2 launch request seeds stored
     // bindings before the first frame; the editor mutates per slot).
     void setBindings(const BindingTable& table, const BindingTable& secondary = BindingTable(false)) {
-        bindings_ = table;
-        secondaryBindings_ = secondary;
+        bindings_.fill(table);
+        secondaryBindings_.fill(secondary);
+    }
+    void setBindingsForPort(
+        int port,
+        const BindingTable& table,
+        const BindingTable& secondary = BindingTable(false)
+    ) {
+        if (port < 0 || port >= kPorts) return;
+        bindings_[port] = table;
+        secondaryBindings_[port] = secondary;
     }
     void setPauseMenuBindings(const BindingSource& primary,
                               const BindingSource& secondary) {
@@ -107,15 +122,15 @@ public:
     }
     void configureForCore(const std::string& coreId);
     // Restores the built-in default mapping (the editor's Reset to Default).
-    void resetBindings() {
-        bindings_.reset();
-        secondaryBindings_.clear();
-        applyCoreBindingDefaults();
+    void resetBindings(int port) {
+        bindings_[port].reset();
+        secondaryBindings_[port].clear();
+        applyCoreBindingDefaults(port);
     }
     // Explicitly unmaps every slot (the editor's Clear Mappings action).
-    void clearBindings() {
-        bindings_.clear();
-        secondaryBindings_.clear();
+    void clearBindings(int port) {
+        bindings_[port].clear();
+        secondaryBindings_[port].clear();
     }
 
     const KeyboardBindingTable& keyboardBindings() const {
@@ -142,6 +157,8 @@ public:
         return port >= 0 && port < kPorts && gamepads_[port].gamepad != nullptr;
     }
     int connectedGamepadCount() const;
+    std::string gamepadDisplayName(int port) const;
+    void cycleGamepadForPort(int port, int direction);
 
     // One frame of capture samples for the binding editor: current button
     // levels and normalized axis values for every connected pad, plus Back
@@ -180,6 +197,7 @@ public:
 
 private:
     void refreshGamepads();
+    void refreshMenuGamepads();
     struct PortState {
         int32_t buttonsMask = 0;  // RETRO_DEVICE_ID_JOYPAD_* bit flags
         int16_t leftX = 0;
@@ -200,19 +218,26 @@ private:
     void closeGamepad(int port);
 
     static int16_t applyDeadzone(Sint16 value);
-    int16_t analogValue(SDL_Gamepad* gamepad, int slot) const;
+    int16_t analogValue(SDL_Gamepad* gamepad, int port, int slot) const;
     bool sourcePressed(SDL_Gamepad* gamepad, const BindingSource& source) const;
-    void applyCoreBindingDefaults();
+    void applyCoreBindingDefaults(int port);
 
     std::array<PortState, kPorts> ports_{};
     std::array<GamepadSlot, kPorts> gamepads_{};
+    std::unordered_map<SDL_JoystickID, SDL_Gamepad*> menuGamepads_{};
+    std::optional<std::array<std::optional<std::string>, kPorts>> controllerSlots_;
     Uint64 lastGamepadRefreshMs_ = 0;
 
     // The RetroPad slot -> physical control table poll() consults. Owned by
     // the editor (setBinding / resetBindings); defaults are the built-in
     // mapping. See binding_table.h.
-    BindingTable bindings_{};
-    BindingTable secondaryBindings_{false};
+    std::array<BindingTable, kPorts> bindings_{
+        BindingTable(), BindingTable(), BindingTable(), BindingTable(),
+    };
+    std::array<BindingTable, kPorts> secondaryBindings_{
+        BindingTable(false), BindingTable(false),
+        BindingTable(false), BindingTable(false),
+    };
     BindingSource pauseMenuPrimary_ =
         BindingSource::ofButton(PadButton::kLeftStick);
     BindingSource pauseMenuSecondary_ =
@@ -243,6 +268,7 @@ private:
         bool east = false;        // B — menu cancel
     };
     std::array<PrevButtons, kPorts> prevButtons_{};
+    std::unordered_map<SDL_JoystickID, PrevButtons> menuPrevButtons_{};
 
     // Per-port previous-frame Back level for the capture editor's
     // press/release edges (captureFrame). Separate from prevButtons_.back so

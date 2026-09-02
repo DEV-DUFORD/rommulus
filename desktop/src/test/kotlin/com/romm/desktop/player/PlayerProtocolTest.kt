@@ -33,6 +33,7 @@ class PlayerProtocolTest {
                     PlayerSlotBinding("dpad_left", PlayerBindingType.AXIS_DIRECTION, axis = "left_x", polarity = -1),
                     PlayerSlotBinding("dpad_right", PlayerBindingType.BUTTON, button = "dpad_right"),
                 ),
+                port = 1,
             ),
         ),
     )
@@ -82,6 +83,21 @@ class PlayerProtocolTest {
         val original = sampleRequest().copy(expectedSaveSize = null)
         val json = PlayerProtocol.serializeRequest(original)
         assertThat(json).contains("\"expectedSaveSize\": null")
+        assertThat(PlayerProtocol.parseRequest(json).getOrNull()).isEqualTo(original)
+    }
+
+    @Test
+    fun `controller slots round-trip with explicit empty players`() {
+        val original = sampleRequest().copy(
+            controllerSlots = listOf("Steam Deck", null, "Wireless Controller", null),
+        )
+        val json = PlayerProtocol.serializeRequest(original)
+
+        assertThat(json).contains(
+            "\"controllerSlots\": [",
+            "\"Steam Deck\"",
+            "\"Wireless Controller\"",
+        )
         assertThat(PlayerProtocol.parseRequest(json).getOrNull()).isEqualTo(original)
     }
 

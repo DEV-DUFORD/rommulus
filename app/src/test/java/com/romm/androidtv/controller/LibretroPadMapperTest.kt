@@ -194,7 +194,7 @@ class LibretroPadMapperTest {
         }
 
         @Test
-        fun `physical controller is compacted to port zero ahead of Android TV virtual gamepads`() {
+        fun `physical controller remains on its assigned port`() {
             val slots = ControllerSlot.createAllSlots().toMutableList()
             slots[0] = slots[0].assign(
                 DeviceSignature("virtual-search", 0x18d1, 0x0100, "virtual-search")
@@ -208,9 +208,9 @@ class LibretroPadMapperTest {
 
             val ports = mapControllerSlotsToLibretroPorts(slots)
 
-            assertThat(ports[0].buttonsMask).isEqualTo(1 shl 8)
+            assertThat(ports[0]).isEqualTo(LibretroPadState.NEUTRAL)
             assertThat(ports[1]).isEqualTo(LibretroPadState.NEUTRAL)
-            assertThat(ports[2]).isEqualTo(LibretroPadState.NEUTRAL)
+            assertThat(ports[2].buttonsMask).isEqualTo(1 shl 8)
         }
 
         @Test
@@ -226,8 +226,10 @@ class LibretroPadMapperTest {
 
             val ports = mapControllerSlotsToLibretroPorts(slots)
 
-            assertThat(ports[0].buttonsMask).isEqualTo(1 shl 8)
-            assertThat(ports[1].buttonsMask).isEqualTo(1 shl 0)
+            assertThat(ports[0]).isEqualTo(LibretroPadState.NEUTRAL)
+            assertThat(ports[1].buttonsMask).isEqualTo(1 shl 8)
+            assertThat(ports[2]).isEqualTo(LibretroPadState.NEUTRAL)
+            assertThat(ports[3].buttonsMask).isEqualTo(1 shl 0)
         }
     }
 
@@ -250,7 +252,7 @@ class LibretroPadMapperTest {
         }
 
         @Test
-        fun `connected physical slots come before virtual, which come before disconnected`() {
+        fun `connection state does not change player port order`() {
             val slots = ControllerSlot.createAllSlots().toMutableList()
             // Slot 1: virtual (CONNECTED)
             slots[0] = slots[0].assign(DeviceSignature.VIRTUAL_REMOTE)
@@ -263,11 +265,11 @@ class LibretroPadMapperTest {
             val ordered = effectiveLibretroPortOrder(slots)
 
             assertThat(ordered).hasSize(4)
-            assertThat(ordered[0].playerNumber).isEqualTo(2) // connected physical
+            assertThat(ordered[0].playerNumber).isEqualTo(1)
             assertThat(ordered[0].connectionState).isEqualTo(SlotConnectionState.CONNECTED)
-            assertThat(ordered[1].playerNumber).isEqualTo(1) // connected virtual
+            assertThat(ordered[1].playerNumber).isEqualTo(2)
             assertThat(ordered[1].connectionState).isEqualTo(SlotConnectionState.CONNECTED)
-            assertThat(ordered[2].playerNumber).isEqualTo(3) // disconnected
+            assertThat(ordered[2].playerNumber).isEqualTo(3)
             assertThat(ordered[2].connectionState).isEqualTo(SlotConnectionState.DISCONNECTED)
         }
 

@@ -14,8 +14,10 @@
 // Sharp Filter. The state machine owns the toggle states (so the overlay can
 // draw ON/OFF); handle() reports each change as a kToggle* effect and the
 // caller applies it to the video sink immediately. Controller Settings opens
-// the active core's editable configuration directly, matching Android. The
-// kPhysicalBindings list contains the core's digital RetroPad slots (each
+// a controller-port assignment page before the editable configuration. Each
+// player row shows its assigned device, cycles connected pads with Left/Right,
+// and opens that port's mappings with Confirm. The kPhysicalBindings list contains
+// the core's digital RetroPad slots (each
 // showing its current binding, read from SdlInput's BindingTable) plus Reset
 // Controller and Clear Mappings actions.
 // Confirming a slot row enters kBindingCapture: the caller starts the
@@ -41,6 +43,7 @@ enum class PauseMenuState {
     kOpen,               // The main pause menu is visible.
     kQuitConfirm,        // The "Quit game?" Yes/No dialog is visible on top of the menu.
     kVideoOptions,       // The Video Options submenu (Scanlines / Integer Scaling / Sharp Filter) is visible.
+    kControllerPorts,    // Per-player controller assignments plus Edit Mappings.
     kPhysicalBindings,   // The editable binding list plus reset/clear header actions.
     kBindingCapture,     // Capturing a new binding for the slot in selection() —
                          // gamepad input is owned by the capture coordinator;
@@ -74,6 +77,7 @@ enum class PauseMenuEffect {
     kToggleScanlines,
     kToggleIntegerScaling,
     kToggleSharpFilter,
+    kCycleController,
     // A slot row was confirmed in kPhysicalBindings: start capturing a new
     // binding for selection() (the capture coordinator; the menu is now in
     // kBindingCapture).
@@ -122,6 +126,9 @@ public:
     int selection() const { return selection_; }
     int bindingSlotCount() const { return bindingSlotCount_; }
     int keyboardRowCount() const { return keyboardRowCount_; }
+    int controllerPortCount() const { return controllerPortCount_; }
+    int controllerPortDirection() const { return controllerPortDirection_; }
+    int editingPort() const { return editingPort_; }
     int activeBindingRowCount() const {
         return state_ == PauseMenuState::kKeyboardBindings ||
                        state_ == PauseMenuState::kKeyboardCapture
@@ -134,6 +141,9 @@ public:
     }
     void setKeyboardRowCount(int count) {
         keyboardRowCount_ = count < 1 ? 1 : (count > 24 ? 24 : count);
+    }
+    void setControllerPortCount(int count) {
+        controllerPortCount_ = count < 1 ? 1 : (count > 4 ? 4 : count);
     }
     // 0 = Primary, 1 = Secondary while a binding row is selected.
     int bindingColumn() const { return bindingColumn_; }
@@ -219,6 +229,8 @@ public:
                 return handleQuitConfirm(a);
             case PauseMenuState::kVideoOptions:
                 return handleVideoOptions(a);
+            case PauseMenuState::kControllerPorts:
+                return handleControllerPorts(a);
             case PauseMenuState::kPhysicalBindings:
                 return handlePhysicalBindings(a);
             case PauseMenuState::kBindingCapture:
@@ -281,11 +293,8 @@ private:
                     selection_ = kScanlinesItem;
                     return PauseMenuEffect::kNone;
                 case kControllerSettingsItem:
-                    // Android opens the active core's full controller
-                    // configuration directly; desktop does the same.
-                    state_ = PauseMenuState::kPhysicalBindings;
-                    selection_ = kSlotA;
-                    bindingColumn_ = 0;
+                    state_ = PauseMenuState::kControllerPorts;
+                    selection_ = 0;
                     return PauseMenuEffect::kNone;
                 case kKeyboardSettingsItem:
                     state_ = PauseMenuState::kKeyboardBindings;
@@ -316,6 +325,7 @@ private:
             selection_ = kVideoOptionsItem;
             return PauseMenuEffect::kNone;
         }
+
         if (a.confirm || a.left || a.right) {
             switch (selection_) {
                 case kScanlinesItem:
@@ -334,6 +344,29 @@ private:
         return PauseMenuEffect::kNone;
     }
 
+    PauseMenuEffect handleControllerPorts(const PauseMenuActions& a) {
+        if (a.up) {
+            selection_ = (selection_ - 1 + controllerPortCount_) % controllerPortCount_;
+        }
+        if (a.down) selection_ = (selection_ + 1) % controllerPortCount_;
+        if (a.cancel) {
+            state_ = PauseMenuState::kOpen;
+            selection_ = kControllerSettingsItem;
+            return PauseMenuEffect::kNone;
+        }
+        if (a.left || a.right) {
+            controllerPortDirection_ = a.left ? -1 : 1;
+            return PauseMenuEffect::kCycleController;
+        }
+        if (a.confirm) {
+            editingPort_ = selection_;
+            state_ = PauseMenuState::kPhysicalBindings;
+            selection_ = 0;
+            bindingColumn_ = 0;
+        }
+        return PauseMenuEffect::kNone;
+    }
+
     PauseMenuEffect handlePhysicalBindings(const PauseMenuActions& a) {
         if (a.up) movePhysicalSelection(-1);
         if (a.down) movePhysicalSelection(+1);
@@ -344,10 +377,8 @@ private:
             bindingColumn_ = 0;
         }
         if (a.cancel) {
-            // Back/Escape returns directly to the pause menu, focused on the
-            // Controller Settings item, matching Android's active-core page.
-            state_ = PauseMenuState::kOpen;
-            selection_ = kControllerSettingsItem;
+            state_ = PauseMenuState::kControllerPorts;
+            selection_ = editingPort_;
             return PauseMenuEffect::kNone;
         }
         if (a.confirm) {
@@ -435,6 +466,9 @@ private:
     int bindingColumn_ = 0;
     int bindingSlotCount_ = kBindingSlotCount;
     int keyboardRowCount_ = 12;
+    int controllerPortCount_ = 2;
+    int controllerPortDirection_ = 1;
+    int editingPort_ = 0;
     bool scanlinesEnabled_ = false;
     bool integerScalingEnabled_ = false;
     bool sharpFilterEnabled_ = false;

@@ -3,6 +3,7 @@ package com.romm.androidtv.controller
 import android.view.KeyEvent
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.router.ControllerEventRouter
+import com.romm.androidtv.controller.router.applyControllerPortAssignment
 import com.romm.androidtv.controller.router.physicalDeviceIdForEffectiveSlot
 import com.romm.androidtv.controller.router.physicalDeviceIds
 import org.assertj.core.api.Assertions.assertThat
@@ -45,7 +46,7 @@ class ControllerEventRouterTest {
 
     @Test
     @DisplayName("Android TV virtual gamepads do not take remapping player slots")
-    fun `physical controller is first effective remapping device`() {
+    fun `physical controller lookup follows its assigned slot`() {
         val deviceSlots = mapOf(
             5 to 0,
             18 to 1,
@@ -63,10 +64,17 @@ class ControllerEventRouterTest {
                 deviceSlots = deviceSlots,
                 deviceSignatures = signatures,
             ),
-        ).isEqualTo(18)
+        ).isNull()
         assertThat(
             physicalDeviceIdForEffectiveSlot(
                 slotIndex = 1,
+                deviceSlots = deviceSlots,
+                deviceSignatures = signatures,
+            ),
+        ).isEqualTo(18)
+        assertThat(
+            physicalDeviceIdForEffectiveSlot(
+                slotIndex = 2,
                 deviceSlots = deviceSlots,
                 deviceSignatures = signatures,
             ),
@@ -85,6 +93,51 @@ class ControllerEventRouterTest {
         assertThat(router.connectedDeviceIdForSlot(0)).isNull()
         assertThat(router.connectedDeviceIdForSlot(-1)).isNull()
         assertThat(router.connectedDeviceIdForSlot(ControllerSlot.SLOT_COUNT)).isNull()
+    }
+
+    @Test
+    fun `controller can move to another port while port mappings stay in place`() {
+        val first = DeviceSignature("first", 1, 1, "First")
+        val second = DeviceSignature("second", 2, 2, "Second")
+        val customMapping = ControllerMapping.swapAB(ControllerMapping())
+        val slots = ControllerSlot.createAllSlots().toMutableList().apply {
+            this[0] = this[0].assign(first)
+            this[1] = this[1].remap(customMapping).assign(second)
+        }
+
+        val result = applyControllerPortAssignment(
+            slots = slots,
+            deviceSlots = mapOf(10 to 0, 20 to 1),
+            deviceSignatures = mapOf(10 to first, 20 to second),
+            slotIndex = 1,
+            deviceId = 10,
+        )
+
+        assertThat(result).isNotNull
+        assertThat(result!!.deviceSlots).containsEntry(10, 1).doesNotContainKey(20)
+        assertThat(result.slots[0].connectionState).isEqualTo(SlotConnectionState.UNASSIGNED)
+        assertThat(result.slots[1].preferredSignature).isEqualTo(first)
+        assertThat(result.slots[1].mapping).isEqualTo(customMapping)
+    }
+
+    @Test
+    fun `port can be intentionally left without a controller`() {
+        val signature = DeviceSignature("first", 1, 1, "First")
+        val slots = ControllerSlot.createAllSlots().toMutableList().apply {
+            this[0] = this[0].assign(signature)
+        }
+
+        val result = applyControllerPortAssignment(
+            slots = slots,
+            deviceSlots = mapOf(10 to 0),
+            deviceSignatures = mapOf(10 to signature),
+            slotIndex = 0,
+            deviceId = null,
+        )
+
+        assertThat(result).isNotNull
+        assertThat(result!!.deviceSlots).doesNotContainKey(10)
+        assertThat(result.slots[0].connectionState).isEqualTo(SlotConnectionState.UNASSIGNED)
     }
 
     @Nested

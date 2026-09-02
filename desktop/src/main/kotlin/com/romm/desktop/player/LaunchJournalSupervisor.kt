@@ -29,6 +29,8 @@ data class PlayerLaunchParams(
     val theme: RommTheme = RommTheme.RomMulus,
     /** v2 optional: stored controller bindings to apply from the first frame; null = player defaults. */
     val controllerBindings: ControllerBindings? = null,
+    /** Optional controller names in player-slot order; null entries leave that slot empty. */
+    val controllerSlots: List<String?>? = null,
     /** Optional Linux keyboard bindings to apply from the first frame. */
     val keyboardBindings: KeyboardBindings? = null,
     /** Curated per-game renderer override; null preserves the core default. */
@@ -356,6 +358,7 @@ class LaunchJournalSupervisor(
             video = params.video,
             theme = params.theme,
             controllerBindings = params.controllerBindings,
+            controllerSlots = params.controllerSlots,
             keyboardBindings = params.keyboardBindings,
             rendererOverride = params.rendererOverride,
         )

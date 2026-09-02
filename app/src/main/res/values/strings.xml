@@ -19,6 +19,9 @@
     <string name="controller_config_player_tab_content_description">Controller %1$d tab</string>
     <string name="controller_config_player_device_disconnected">Not connected</string>
     <string name="controller_config_player_device_active">%1$s - Active</string>
+    <string name="controller_port_picker_title">Choose Controller %1$d device</string>
+    <string name="controller_port_picker_none">No controller</string>
+    <string name="controller_port_picker_current_port">Currently Controller %1$d</string>
     <string name="controller_config_binding_row_content_description">%1$s, currently mapped to %2$s</string>
     <string name="controller_config_reset_all">Reset All Controllers</string>
     <string name="controller_config_reset_all_title">Reset All Controllers?</string>

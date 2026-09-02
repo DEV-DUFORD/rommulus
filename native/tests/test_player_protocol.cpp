@@ -48,6 +48,8 @@ PlayerRequest sampleRequest() {
     r.video.integerScaling = false;
     r.video.scanlines = true;
     r.video.sharpFilter = true;
+    r.controllerSlots = std::array<std::optional<std::string>, 4>{
+        "Steam Deck", std::nullopt, "Wireless Controller", std::nullopt};
     return r;
 }
 
@@ -58,6 +60,7 @@ ControllerBindings sampleControllerBindings() {
     ControllerBindings cb;
 
     romm::player::ControllerBindingDevice usb;
+    usb.port = 1;
     usb.guid = "036d04ca010000000000000000000000";  // 32-hex SDL USB GUID
     usb.identity.vendorId = 0x046d;
     usb.identity.productId = 0x01ca;
@@ -143,6 +146,7 @@ void checkRoundTripRequest(const PlayerRequest& in) {
     CHECK_EQ(out->video.sharpFilter, in.video.sharpFilter);
     CHECK(out->theme == in.theme);
     CHECK(out->rendererOverride == in.rendererOverride);
+    CHECK(out->controllerSlots == in.controllerSlots);
 
     // v2 optional field: presence must round-trip, and every device's
     // guid/identity/table must be byte-equal.
@@ -152,6 +156,7 @@ void checkRoundTripRequest(const PlayerRequest& in) {
         const auto& b = out->controllerBindings->devices;
         CHECK(a.size() == b.size());
         for (size_t d = 0; d < a.size() && d < b.size(); ++d) {
+            CHECK(a[d].port == b[d].port);
             CHECK_EQ(a[d].guid, b[d].guid);
             CHECK(a[d].identity.vendorId == b[d].identity.vendorId);
             CHECK(a[d].identity.productId == b[d].identity.productId);

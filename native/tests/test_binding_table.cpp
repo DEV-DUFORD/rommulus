@@ -260,6 +260,7 @@ void testSidecarSerializeAndWrite() {
     CHECK_EQ(root["protocolVersion"].get<int>(), romm::player::kBindingSidecarVersion);
     CHECK_EQ(root["devices"].size(), 1u);
     const json& entry = root["devices"][0];
+    CHECK_EQ(entry["port"].get<int>(), 0);
     CHECK(entry["guid"] == guid);
     CHECK(entry["identity"]["descriptor"] == "vid:054c-pid:17a0");
     CHECK_EQ(entry["identity"]["vendorId"].get<int>(), 0x054c);

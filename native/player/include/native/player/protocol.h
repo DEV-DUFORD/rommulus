@@ -53,6 +53,7 @@ struct ControllerBindingIdentity {
 };
 
 struct ControllerBindingDevice {
+    std::optional<int> port;  // 0-based console port; null = all ports
     std::string guid;      // canonical lowercase SDL GUID, or "" = all controllers
     ControllerBindingIdentity identity;
     BindingTable table;    // the 16 RetroPad slot bindings, in slot order
@@ -113,6 +114,8 @@ struct PlayerRequest {
     // v2: stored controller bindings to apply from the first frame (see
     // ControllerBindings below). Absent = the player keeps its defaults.
     std::optional<ControllerBindings> controllerBindings;
+    // Optional SDL controller names in player-port order; null means an empty port.
+    std::optional<std::array<std::optional<std::string>, 4>> controllerSlots;
     // Optional and backward-compatible; absent keeps the built-in keyboard
     // defaults.
     std::optional<KeyboardBindings> keyboardBindings;

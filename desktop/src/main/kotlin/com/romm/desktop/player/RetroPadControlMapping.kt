@@ -95,10 +95,10 @@ object RetroPadControlMapping {
     fun toRecords(coreId: String, device: ControllerBindingDevice): List<ControllerBindingRecord> =
         buildList {
             device.bindings.forEach { slot ->
-                add(toRecord(coreId, coreControlIdForSlot(coreId, slot.slot).id, slot, BindingSlots.PRIMARY))
+                add(toRecord(coreId, coreControlIdForSlot(coreId, slot.slot).id, slot, BindingSlots.PRIMARY, device.port ?: PLAYER_INDEX))
             }
             device.secondaryBindings?.forEach { slot ->
-                add(toRecord(coreId, coreControlIdForSlot(coreId, slot.slot).id, slot, BindingSlots.SECONDARY))
+                add(toRecord(coreId, coreControlIdForSlot(coreId, slot.slot).id, slot, BindingSlots.SECONDARY, device.port ?: PLAYER_INDEX))
             }
         }
 
@@ -107,11 +107,12 @@ object RetroPadControlMapping {
         controlId: String,
         slot: PlayerSlotBinding,
         bindingSlot: Int,
+        playerIndex: Int,
     ): ControllerBindingRecord =
         when (slot.type) {
             PlayerBindingType.UNBOUND -> ControllerBindingRecord(
                 coreId = coreId,
-                playerIndex = PLAYER_INDEX,
+                playerIndex = playerIndex,
                 controlId = controlId,
                 bindingSlot = bindingSlot,
                 bindingType = TYPE_UNMAPPED,
@@ -120,7 +121,7 @@ object RetroPadControlMapping {
             )
             PlayerBindingType.BUTTON -> ControllerBindingRecord(
                 coreId = coreId,
-                playerIndex = PLAYER_INDEX,
+                playerIndex = playerIndex,
                 controlId = controlId,
                 bindingSlot = bindingSlot,
                 bindingType = TYPE_KEY,
@@ -129,7 +130,7 @@ object RetroPadControlMapping {
             )
             PlayerBindingType.AXIS -> ControllerBindingRecord(
                 coreId = coreId,
-                playerIndex = PLAYER_INDEX,
+                playerIndex = playerIndex,
                 controlId = controlId,
                 bindingSlot = bindingSlot,
                 bindingType = TYPE_AXIS,
@@ -138,7 +139,7 @@ object RetroPadControlMapping {
             )
             PlayerBindingType.AXIS_DIRECTION -> ControllerBindingRecord(
                 coreId = coreId,
-                playerIndex = PLAYER_INDEX,
+                playerIndex = playerIndex,
                 controlId = controlId,
                 bindingSlot = bindingSlot,
                 bindingType = TYPE_AXIS_DIRECTION,

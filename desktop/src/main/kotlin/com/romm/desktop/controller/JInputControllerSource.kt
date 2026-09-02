@@ -8,6 +8,7 @@ import com.romm.desktop.log.DesktopLogger
 import net.java.games.input.Component
 import net.java.games.input.Controller
 import net.java.games.input.ControllerEnvironment
+import net.java.games.input.LinuxEnvironmentPlugin
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -134,13 +135,22 @@ class JInputControllerSource : JInputSource {
      */
     private val environment: ControllerEnvironment by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         ensureJinputNatives()
-        ControllerEnvironment.getDefaultEnvironment()
+        if (System.getProperty("os.name") == "Linux") {
+            // Keep the plugin instance so its native device list can be refreshed in place.
+            // DefaultControllerEnvironment discards the plugin after copying its controllers;
+            // nulling that aggregate cache cannot reload the already-recorded plugin.
+            LinuxEnvironmentPlugin()
+        } else {
+            ControllerEnvironment.getDefaultEnvironment()
+        }
     }
 
     /** Wrappers are cached per underlying JInput controller instance. */
     private val wrappers = HashMap<Controller, JInputController>()
     private val rescanRequested = AtomicBoolean(false)
+    private val inputTopologyTracker = InputDeviceTopologyTracker()
     private var nextRescanAllowedNanos = 0L
+    private var lastEnumerationHadGameControllers: Boolean? = null
 
     /** Set when the native bootstrap could not make the native libraries available. */
     @Volatile
@@ -160,15 +170,26 @@ class JInputControllerSource : JInputSource {
      */
     override fun enumerate(): List<JInputController> {
         return synchronized(this) {
+            if (inputTopologyTracker.changed(inputDeviceTopology()) ||
+                lastEnumerationHadGameControllers == false
+            ) {
+                rescanRequested.set(true)
+            }
             if (rescanRequested.compareAndSet(true, false)) {
-                if (refreshCachedControllers()) wrappers.clear()
+                if (refreshCachedControllers()) {
+                    wrappers.clear()
+                } else {
+                    // Do not lose a hot-plug or resume request merely because another
+                    // caller refreshed within the cooldown window.
+                    rescanRequested.set(true)
+                }
             }
             // getControllers() returns a Controller[] (a snapshot array in 2.0.10).
             val controllers = environment.controllers
-            val result = ArrayList<JInputController>(controllers.size)
+            val gameControllers = selectGameplayControllers(controllers.asList())
+            val result = ArrayList<JInputController>(gameControllers.size)
             val seen = HashSet<Controller>()
-            for (controller in controllers) {
-                if (!controller.isGameController()) continue
+            for (controller in gameControllers) {
                 seen.add(controller)
                 result.add(
                     wrappers.getOrPut(controller) {
@@ -179,6 +200,7 @@ class JInputControllerSource : JInputSource {
 
             // Drop wrappers for controllers that were unplugged since the last tick.
             wrappers.keys.retainAll(seen)
+            lastEnumerationHadGameControllers = result.isNotEmpty()
 
             // Diagnostic: log the detected set once (and whenever it changes) so "no
             // controllers detected" is distinguishable from "detected but unmapped" in a
@@ -221,11 +243,28 @@ class JInputControllerSource : JInputSource {
         val now = System.nanoTime()
         if (now < nextRescanAllowedNanos) return false
         nextRescanAllowedNanos = now + 2_000_000_000L
+        if (environment !is LinuxEnvironmentPlugin) {
+            logger.warning("JInput hot-plug refresh is not available on this platform")
+            return false
+        }
         return try {
-            val controllersField = environment.javaClass.getDeclaredField("controllers")
+            val pluginClass = LinuxEnvironmentPlugin::class.java
+            val devicesField = pluginClass.getDeclaredField("devices")
+            devicesField.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val devices = devicesField.get(environment) as MutableList<Any>
+            for (device in devices.toList()) {
+                device.javaClass.getMethod("close").apply { isAccessible = true }.invoke(device)
+            }
+            devices.clear()
+
+            val enumerateMethod = pluginClass.getDeclaredMethod("enumerateControllers")
+            enumerateMethod.isAccessible = true
+            val controllers = enumerateMethod.invoke(environment) as Array<*>
+            val controllersField = pluginClass.getDeclaredField("controllers")
             controllersField.isAccessible = true
-            controllersField.set(environment, null)
-            logger.info("JInput controller poll failed; rescanning devices")
+            controllersField.set(environment, controllers)
+            logger.info("JInput controller set changed or became unavailable; rescanning devices")
             true
         } catch (e: ReflectiveOperationException) {
             logger.log(
@@ -234,6 +273,28 @@ class JInputControllerSource : JInputSource {
                 e,
             )
             false
+        }
+    }
+
+    /**
+     * JInput caches its Linux device list, so a newly connected controller cannot be
+     * discovered unless an existing controller first fails a poll. Watching the input-node
+     * names supplies the missing reconnect signal. Returning null keeps this inert on
+     * non-Linux systems, where failed polls still drive the portable recovery path.
+     */
+    private fun inputDeviceTopology(): Set<String>? {
+        return try {
+            val inputDir = Path.of("/dev/input")
+            if (!Files.isDirectory(inputDir)) return null
+            Files.newDirectoryStream(inputDir).use { devices ->
+                devices.mapNotNullTo(sortedSetOf()) { device ->
+                    device.fileName.toString().takeIf { name ->
+                        name.startsWith("event") || name.startsWith("js")
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            null
         }
     }
 
@@ -321,30 +382,60 @@ class JInputControllerSource : JInputSource {
     }
 }
 
+internal class InputDeviceTopologyTracker {
+    private var previous: Set<String>? = null
+
+    fun changed(current: Set<String>?): Boolean {
+        if (current == null) return false
+        val old = previous
+        previous = current
+        return old != null && old != current
+    }
+}
+
 internal fun Controller.isGameController(): Boolean =
     type == Controller.Type.GAMEPAD || type == Controller.Type.STICK
+
+internal fun steamInputControllerIndex(name: String): Int? {
+    val prefix = "Microsoft X-Box 360 pad "
+    if (!name.startsWith(prefix)) return null
+    return name.removePrefix(prefix).toIntOrNull()?.takeIf { it >= 0 }
+}
+
+internal fun controllerDisplayName(name: String): String =
+    steamInputControllerIndex(name)?.let { "Steam Input Controller ${it + 1}" } ?: name
+
+internal fun selectGameplayControllers(controllers: List<Controller>): List<Controller> {
+    val gameControllers = controllers.filter(Controller::isGameController)
+    val steamInputControllers = gameControllers.filter {
+        steamInputControllerIndex(it.name.orEmpty()) != null
+    }
+    return steamInputControllers.ifEmpty { gameControllers }
+}
 
 /**
  * Wraps one JInput [Controller], translating its components into the neutral
  * model on every [poll].
  *
- * JInput exposes no portable VID/PID, so the [DeviceSignature] identity is the
- * controller name (descriptor `jinput:<name>`), which is stable for the lifetime
- * of the OS session — the same session-stability guarantee the Android
- * signature adapter provides for transient device ids.
+ * JInput exposes no portable VID/PID, so the [DeviceSignature] identity combines
+ * the controller name and JInput port. The visible name stays untouched so it
+ * can also identify the same device when the native SDL player starts.
  */
 internal class LiveJInputController(
     private val controller: Controller,
     private val onPollFailed: () -> Unit = {},
 ) : JInputController {
 
-    override val id: String = controller.name?.takeIf { it.isNotBlank() } ?: controller.javaClass.name
+    private val controllerName =
+        controller.name?.takeIf { it.isNotBlank() } ?: controller.javaClass.name
+    override val id: String =
+        "$controllerName:${controller.portType}:${controller.portNumber}"
 
     override val signature: DeviceSignature = DeviceSignature(
         descriptor = "jinput:$id",
         vendorId = 0,
         productId = 0,
-        name = id,
+        name = controllerName,
     )
 
     /**

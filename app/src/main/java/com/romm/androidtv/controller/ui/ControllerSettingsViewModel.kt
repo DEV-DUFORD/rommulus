@@ -95,6 +95,7 @@ data class ControllerBindingRow(
 data class ConnectedControllerInfo(
     val deviceId: Int,
     val name: String?,
+    val slotIndex: Int? = null,
 )
 
 internal fun playerControllerLabels(
@@ -104,15 +105,18 @@ internal fun playerControllerLabels(
     val names = devices.map { it.name?.takeIf(String::isNotBlank) ?: "Game controller" }
     val totals = names.groupingBy { it }.eachCount()
     val seen = mutableMapOf<String, Int>()
-    return List(playerCount) { playerIndex ->
-        val name = names.getOrNull(playerIndex) ?: return@List null
+    val labelsByDeviceId = devices.zip(names).associate { (device, name) ->
         if (totals.getValue(name) == 1) {
-            name
+            device.deviceId to name
         } else {
             val number = (seen[name] ?: 0) + 1
             seen[name] = number
-            "$name #$number"
+            device.deviceId to "$name #$number"
         }
+    }
+    return List(playerCount) { playerIndex ->
+        devices.firstOrNull { it.slotIndex == playerIndex }
+            ?.let { labelsByDeviceId[it.deviceId] }
     }
 }
 
@@ -139,6 +143,7 @@ data class ControllerConfigUiState(
     val artworkResourceId: Int,
     val selectedPlayerIndex: Int = 0,
     val playerCount: Int = 1,
+    val connectedControllers: List<ConnectedControllerInfo> = emptyList(),
     val playerControllerLabels: List<String?> = emptyList(),
     val activePlayerIndex: Int? = null,
     val rows: List<ControllerBindingRow> = emptyList(),
@@ -214,10 +219,12 @@ class ControllerSettingsViewModel(
     }
 
     fun refreshConnectedDevices() {
+        val devices = connectedDevicesProvider()
         _uiState.update {
             it.copy(
+                connectedControllers = devices,
                 playerControllerLabels = playerControllerLabels(
-                    devices = connectedDevicesProvider(),
+                    devices = devices,
                     playerCount = profile.playerCount,
                 ),
             )
@@ -225,7 +232,10 @@ class ControllerSettingsViewModel(
     }
 
     fun onControllerActivity(deviceId: Int) {
-        val playerIndex = connectedDevicesProvider().indexOfFirst { it.deviceId == deviceId }
+        val playerIndex = connectedDevicesProvider()
+            .firstOrNull { it.deviceId == deviceId }
+            ?.slotIndex
+            ?: return
         if (playerIndex !in 0 until profile.playerCount) return
 
         refreshConnectedDevices()
@@ -273,11 +283,11 @@ class ControllerSettingsViewModel(
         val descriptor = profile.controls.firstOrNull { it.id == controlId } ?: return
         val playerIndex = state.selectedPlayerIndex
         val devices = connectedDevicesProvider()
-        val deviceLabel = when (devices.size) {
-            0 -> null
-            1 -> devices.single().name
-            else -> "${devices.size} connected controllers"
-        }
+        val selectedDevice = devices.firstOrNull { it.slotIndex == playerIndex }
+        val deviceLabel = selectedDevice?.name
+        val captureDeviceIds = selectedDevice
+            ?.let { setOf(it.deviceId) }
+            ?: devices.mapTo(mutableSetOf()) { it.deviceId }
 
         pendingAddress = BindingAddress(controlId, bindingSlot)
         pendingConflictBinding = null
@@ -296,7 +306,7 @@ class ControllerSettingsViewModel(
 
         captureCoordinator.beginCapture(
             slotIndex = playerIndex,
-            deviceIds = devices.mapTo(mutableSetOf()) { it.deviceId },
+            deviceIds = captureDeviceIds,
             target = when (descriptor.inputKind) {
                 InputKind.BUTTON, InputKind.DPAD -> com.romm.androidtv.controller.capture.CaptureTarget.Digital
                 InputKind.ANALOG_STICK -> com.romm.androidtv.controller.capture.CaptureTarget.Analog
