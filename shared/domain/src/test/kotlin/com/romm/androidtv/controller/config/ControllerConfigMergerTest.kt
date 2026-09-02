@@ -1,5 +1,6 @@
 package com.romm.androidtv.controller.config
 
+import com.romm.androidtv.controller.model.NeutralKey
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
