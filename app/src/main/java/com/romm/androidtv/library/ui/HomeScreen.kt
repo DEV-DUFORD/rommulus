@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -209,7 +210,13 @@ private fun RomShelf(
                     )
                     withFrameNanos { }
                     withFrameNanos { }
-                    cardFocusRequesters[state.data[restoreIndex].id]?.requestFocus()
+                    if (rowState.layoutInfo.visibleItemsInfo.none { it.index == restoreIndex }) {
+                        rowState.scrollToItem(restoreIndex)
+                        withFrameNanos { }
+                    }
+                    val requester = cardFocusRequesters[state.data[restoreIndex].id]
+                        ?: return@LaunchedEffect
+                    requester.requestFocus()
                     onFocusRestored()
                 }
                 LazyRow(
@@ -219,6 +226,13 @@ private fun RomShelf(
                 ) {
                     items(state.data, key = { it.id }) { rom ->
                         val focusRequester = cardFocusRequesters.getOrPut(rom.id) { FocusRequester() }
+                        DisposableEffect(rom.id, focusRequester) {
+                            onDispose {
+                                if (cardFocusRequesters[rom.id] === focusRequester) {
+                                    cardFocusRequesters.remove(rom.id)
+                                }
+                            }
+                        }
                         GameCard(
                             title = rom.title,
                             subtitle = rom.platformDisplayName,
