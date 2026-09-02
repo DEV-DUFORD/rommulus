@@ -33,6 +33,7 @@ class PlayerProtocolTest {
                     PlayerSlotBinding("dpad_left", PlayerBindingType.AXIS_DIRECTION, axis = "left_x", polarity = -1),
                     PlayerSlotBinding("dpad_right", PlayerBindingType.BUTTON, button = "dpad_right"),
                 ),
+                port = 1,
             ),
         ),
     )

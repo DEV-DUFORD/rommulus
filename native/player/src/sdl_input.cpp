@@ -129,12 +129,21 @@ SdlInput::SdlInput(
         }
         SDL_free(ids);
     }
+    refreshMenuGamepads();
 }
 
 SdlInput::~SdlInput() {
     for (int port = 0; port < kPorts; ++port) {
-        closeGamepad(port);
+        if (gamepads_[port].gamepad != nullptr) {
+            SDL_CloseGamepad(gamepads_[port].gamepad);
+            gamepads_[port].gamepad = nullptr;
+        }
     }
+    for (const auto& [id, gamepad] : menuGamepads_) {
+        (void)id;
+        SDL_CloseGamepad(gamepad);
+    }
+    menuGamepads_.clear();
 }
 
 int SdlInput::findFreePort() const {
@@ -146,7 +155,14 @@ int SdlInput::findFreePort() const {
 
 void SdlInput::openGamepad(int port, SDL_JoystickID instanceId) {
     if (port < 0 || port >= kPorts || gamepads_[port].gamepad != nullptr) return;
-    SDL_Gamepad* gamepad = SDL_OpenGamepad(instanceId);
+    SDL_Gamepad* gamepad = nullptr;
+    const auto menuGamepad = menuGamepads_.find(instanceId);
+    if (menuGamepad != menuGamepads_.end()) {
+        gamepad = menuGamepad->second;
+        menuGamepads_.erase(menuGamepad);
+    } else {
+        gamepad = SDL_OpenGamepad(instanceId);
+    }
     if (gamepad == nullptr) {
         // The device vanished between enumeration and open — leave the
         // slot free and move on.
@@ -164,8 +180,15 @@ void SdlInput::openGamepad(int port, SDL_JoystickID instanceId) {
 void SdlInput::closeGamepad(int port) {
     if (port < 0 || port >= kPorts) return;
     if (gamepads_[port].gamepad != nullptr) {
-        SDL_CloseGamepad(gamepads_[port].gamepad);
+        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+        const SDL_JoystickID id = SDL_GetGamepadID(gamepad);
         gamepads_[port].gamepad = nullptr;
+        if (SDL_GamepadConnected(gamepad)) {
+            menuGamepads_[id] = gamepad;
+        } else {
+            SDL_CloseGamepad(gamepad);
+            menuPrevButtons_.erase(id);
+        }
     }
     // Neutralize the port so the core never sees a stuck button after the
     // pad goes away.
@@ -186,6 +209,7 @@ void SdlInput::handleEvent(const SDL_Event& event) {
                 const int port = findFreePort();
                 if (port >= 0) openGamepad(port, event.gdevice.which);
             }
+            refreshMenuGamepads();
             break;
         }
         case SDL_EVENT_GAMEPAD_REMOVED: {
@@ -196,6 +220,7 @@ void SdlInput::handleEvent(const SDL_Event& event) {
                     break;
                 }
             }
+            refreshMenuGamepads();
             break;
         }
         case SDL_EVENT_KEY_DOWN:
@@ -272,6 +297,39 @@ void SdlInput::refreshGamepads() {
         }
     }
     SDL_free(ids);
+    refreshMenuGamepads();
+}
+
+void SdlInput::refreshMenuGamepads() {
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (ids == nullptr) return;
+    std::vector<SDL_JoystickID> present(ids, ids + count);
+
+    for (auto it = menuGamepads_.begin(); it != menuGamepads_.end();) {
+        if (std::find(present.begin(), present.end(), it->first) == present.end()) {
+            SDL_CloseGamepad(it->second);
+            menuPrevButtons_.erase(it->first);
+            it = menuGamepads_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (SDL_JoystickID id : present) {
+        bool assigned = false;
+        for (const auto& slot : gamepads_) {
+            if (slot.gamepad != nullptr && SDL_GetGamepadID(slot.gamepad) == id) {
+                assigned = true;
+                break;
+            }
+        }
+        if (!assigned && menuGamepads_.find(id) == menuGamepads_.end()) {
+            if (SDL_Gamepad* gamepad = SDL_OpenGamepad(id); gamepad != nullptr) {
+                menuGamepads_[id] = gamepad;
+            }
+        }
+    }
+    SDL_free(ids);
 }
 
 int SdlInput::connectedGamepadCount() const {
@@ -279,6 +337,81 @@ int SdlInput::connectedGamepadCount() const {
         gamepads_.begin(),
         gamepads_.end(),
         [](const GamepadSlot& slot) { return slot.gamepad != nullptr; }));
+}
+
+std::string SdlInput::gamepadDisplayName(int port) const {
+    if (!hasGamepad(port)) return "No controller";
+    SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+    const char* name = SDL_GetGamepadName(gamepad);
+    const std::string base = name != nullptr && *name != '\0' ? name : "Game controller";
+
+    int ordinal = 0;
+    int matching = 0;
+    for (const auto& slot : gamepads_) {
+        if (slot.gamepad == nullptr) continue;
+        const char* otherName = SDL_GetGamepadName(slot.gamepad);
+        if (otherName != nullptr && base == otherName) {
+            ++matching;
+            if (slot.gamepad == gamepad) ordinal = matching;
+        }
+    }
+    return matching > 1 ? base + " " + std::to_string(ordinal) : base;
+}
+
+void SdlInput::cycleGamepadForPort(int port, int direction) {
+    if (port < 0 || port >= kPorts || direction == 0) return;
+
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (ids == nullptr) return;
+
+    const SDL_JoystickID currentId = hasGamepad(port)
+        ? SDL_GetGamepadID(gamepads_[port].gamepad) : 0;
+    int currentChoice = 0;  // Choice zero is intentionally "No controller".
+    for (int i = 0; i < count; ++i) {
+        if (ids[i] == currentId) {
+            currentChoice = i + 1;
+            break;
+        }
+    }
+    const int choiceCount = count + 1;
+    const int nextChoice =
+        (currentChoice + (direction < 0 ? -1 : 1) + choiceCount) % choiceCount;
+    const SDL_JoystickID nextId = nextChoice == 0 ? 0 : ids[nextChoice - 1];
+    int sourcePort = -1;
+    if (nextId != 0) {
+        for (int candidate = 0; candidate < kPorts; ++candidate) {
+            if (hasGamepad(candidate) &&
+                SDL_GetGamepadID(gamepads_[candidate].gamepad) == nextId) {
+                sourcePort = candidate;
+                break;
+            }
+        }
+    }
+
+    if (sourcePort >= 0) {
+        std::swap(gamepads_[port], gamepads_[sourcePort]);
+    } else {
+        closeGamepad(port);
+        if (nextId != 0) openGamepad(port, nextId);
+    }
+
+    if (!controllerSlots_.has_value()) {
+        controllerSlots_ =
+            std::array<std::optional<std::string>, kPorts>{};
+    }
+    for (int assignedPort = 0; assignedPort < kPorts; ++assignedPort) {
+        if (!hasGamepad(assignedPort)) {
+            (*controllerSlots_)[assignedPort] = std::nullopt;
+            continue;
+        }
+        const char* name = SDL_GetGamepadName(gamepads_[assignedPort].gamepad);
+        (*controllerSlots_)[assignedPort] =
+            name != nullptr ? std::optional<std::string>(name) : std::nullopt;
+    }
+    SDL_free(ids);
+    refreshMenuGamepads();
+    resetMenuEdges();
 }
 
 void SdlInput::poll() {
@@ -303,8 +436,8 @@ void SdlInput::poll() {
         if (gamepad != nullptr) {
             for (int slot = 0; slot < kRetroPadSlotCount; ++slot) {
                 const bool pressed =
-                    sourcePressed(gamepad, bindings_.get(slot)) ||
-                    sourcePressed(gamepad, secondaryBindings_.get(slot));
+                    sourcePressed(gamepad, bindings_[port].get(slot)) ||
+                    sourcePressed(gamepad, secondaryBindings_[port].get(slot));
                 if (pressed) {
                     mask |= (1 << retroPadSlotJoypadBit(slot));
                 }
@@ -322,18 +455,18 @@ void SdlInput::poll() {
 
         if (gamepad != nullptr) {
             if (gameCubeBindings_) {
-                p.leftX = analogValue(gamepad, kSlotSelect);
-                p.leftY = analogValue(gamepad, kSlotLeftShoulder);
-                p.rightX = analogValue(gamepad, kSlotLeftStick);
-                p.rightY = analogValue(gamepad, kSlotRightStick);
+                p.leftX = analogValue(gamepad, port, kSlotSelect);
+                p.leftY = analogValue(gamepad, port, kSlotLeftShoulder);
+                p.rightX = analogValue(gamepad, port, kSlotLeftStick);
+                p.rightY = analogValue(gamepad, port, kSlotRightStick);
             } else {
                 p.leftX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
                 p.leftY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
                 p.rightX = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
                 p.rightY = applyDeadzone(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
             }
-            p.leftTrigger = analogValue(gamepad, kSlotLeftTrigger);
-            p.rightTrigger = analogValue(gamepad, kSlotRightTrigger);
+            p.leftTrigger = analogValue(gamepad, port, kSlotLeftTrigger);
+            p.rightTrigger = analogValue(gamepad, port, kSlotRightTrigger);
         } else {
             // No pad on this port: keep the snapshot neutral (closeGamepad
             // already resets the port when a device is removed).
@@ -354,24 +487,24 @@ void SdlInput::configureForCore(const std::string& coreId) {
     coreId_ = coreId;
     gameCubeBindings_ = coreId == "dolphin";
     playStationBindings_ = coreId == "pcsx_rearmed" || coreId == "lrps2";
-    applyCoreBindingDefaults();
+    for (int port = 0; port < kPorts; ++port) applyCoreBindingDefaults(port);
     keyboardBindings_.resetForCore(coreId_);
 }
 
-void SdlInput::applyCoreBindingDefaults() {
+void SdlInput::applyCoreBindingDefaults(int port) {
     if (gameCubeBindings_) {
         for (int slot : {kSlotSelect, kSlotLeftShoulder, kSlotLeftStick, kSlotRightStick}) {
-            bindings_.set(slot, gameCubeAnalogSourceForSlot(slot));
+            bindings_[port].set(slot, gameCubeAnalogSourceForSlot(slot));
         }
     }
     if (playStationBindings_) {
         for (int slot : {kSlotA, kSlotB, kSlotX, kSlotY}) {
-            bindings_.set(slot, playStationSourceForSlot(slot));
+            bindings_[port].set(slot, playStationSourceForSlot(slot));
         }
     }
 }
 
-int16_t SdlInput::analogValue(SDL_Gamepad* gamepad, int slot) const {
+int16_t SdlInput::analogValue(SDL_Gamepad* gamepad, int port, int slot) const {
     const auto read = [gamepad](const BindingSource& source) -> int16_t {
         if (source.kind == BindingSource::Kind::kButton) {
             return SDL_GetGamepadButton(gamepad, toSdlButton(source.button))
@@ -389,8 +522,8 @@ int16_t SdlInput::analogValue(SDL_Gamepad* gamepad, int slot) const {
                   std::numeric_limits<int16_t>::max())))
             : 0;
     };
-    const int16_t primary = read(bindings_.get(slot));
-    const int16_t secondary = read(secondaryBindings_.get(slot));
+    const int16_t primary = read(bindings_[port].get(slot));
+    const int16_t secondary = read(secondaryBindings_[port].get(slot));
     return std::abs(static_cast<int>(secondary)) > std::abs(static_cast<int>(primary))
         ? secondary : primary;
 }
@@ -437,36 +570,30 @@ bool SdlInput::sourcePressed(
 
 bool SdlInput::pollPauseTrigger() {
     bool trigger = false;
+    const auto pollGamepad = [&](SDL_Gamepad* gamepad, PrevButtons& prev) {
+        const bool primary = sourcePressed(gamepad, pauseMenuPrimary_);
+        const bool secondary = sourcePressed(gamepad, pauseMenuSecondary_);
+        if (pauseChordPressed(
+                primary, secondary, prev.pausePrimary, prev.pauseSecondary)) {
+            trigger = true;
+        }
+        prev.pausePrimary = primary;
+        prev.pauseSecondary = secondary;
+    };
     for (int port = 0; port < kPorts; ++port) {
         SDL_Gamepad* gamepad = gamepads_[port].gamepad;
         if (gamepad == nullptr) continue;
-
-        PrevButtons& prev = prevButtons_[port];
-        const bool primary = sourcePressed(gamepad, pauseMenuPrimary_);
-        const bool secondary = sourcePressed(gamepad, pauseMenuSecondary_);
-
-        if (pauseChordPressed(
-                primary,
-                secondary,
-                prev.pausePrimary,
-                prev.pauseSecondary
-            )) {
-            trigger = true;
-        }
-
-        prev.pausePrimary = primary;
-        prev.pauseSecondary = secondary;
+        pollGamepad(gamepad, prevButtons_[port]);
+    }
+    for (const auto& [id, gamepad] : menuGamepads_) {
+        pollGamepad(gamepad, menuPrevButtons_[id]);
     }
     return trigger;
 }
 
 PauseMenuActions SdlInput::pollMenuActions() {
     PauseMenuActions actions{};
-    for (int port = 0; port < kPorts; ++port) {
-        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
-        if (gamepad == nullptr) continue;
-
-        PrevButtons& prev = prevButtons_[port];
+    const auto pollGamepad = [&](SDL_Gamepad* gamepad, PrevButtons& prev) {
         const bool up = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP);
         const bool down = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
         const bool left = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
@@ -493,6 +620,13 @@ PauseMenuActions SdlInput::pollMenuActions() {
         prev.east = east;
         prev.back = back;
         prev.start = start;
+    };
+    for (int port = 0; port < kPorts; ++port) {
+        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+        if (gamepad != nullptr) pollGamepad(gamepad, prevButtons_[port]);
+    }
+    for (const auto& [id, gamepad] : menuGamepads_) {
+        pollGamepad(gamepad, menuPrevButtons_[id]);
     }
     return actions;
 }
@@ -526,12 +660,9 @@ SdlInput::CaptureFrame SdlInput::captureFrame() {
 
 void SdlInput::resetMenuEdges() {
     prevButtons_ = {};
+    menuPrevButtons_.clear();
     prevBackHeld_ = {};
-    for (int port = 0; port < kPorts; ++port) {
-        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
-        if (gamepad == nullptr) continue;
-
-        PrevButtons& prev = prevButtons_[port];
+    const auto seedGamepad = [&](SDL_Gamepad* gamepad, PrevButtons& prev) {
         prev.up = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP);
         prev.down = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
         prev.left = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
@@ -542,7 +673,15 @@ void SdlInput::resetMenuEdges() {
         prev.start = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
         prev.pausePrimary = sourcePressed(gamepad, pauseMenuPrimary_);
         prev.pauseSecondary = sourcePressed(gamepad, pauseMenuSecondary_);
-        prevBackHeld_[port] = prev.back;
+    };
+    for (int port = 0; port < kPorts; ++port) {
+        SDL_Gamepad* gamepad = gamepads_[port].gamepad;
+        if (gamepad == nullptr) continue;
+        seedGamepad(gamepad, prevButtons_[port]);
+        prevBackHeld_[port] = prevButtons_[port].back;
+    }
+    for (const auto& [id, gamepad] : menuGamepads_) {
+        seedGamepad(gamepad, menuPrevButtons_[id]);
     }
 }
 

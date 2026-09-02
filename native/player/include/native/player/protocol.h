@@ -53,6 +53,7 @@ struct ControllerBindingIdentity {
 };
 
 struct ControllerBindingDevice {
+    std::optional<int> port;  // 0-based console port; null = all ports
     std::string guid;      // canonical lowercase SDL GUID, or "" = all controllers
     ControllerBindingIdentity identity;
     BindingTable table;    // the 16 RetroPad slot bindings, in slot order

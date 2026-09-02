@@ -95,6 +95,7 @@ data class ControllerBindingDevice(
     val identity: ControllerBindingIdentity,
     val bindings: List<PlayerSlotBinding>,
     val secondaryBindings: List<PlayerSlotBinding>? = null,
+    val port: Int? = null,
 )
 
 /** The v2 request's optional controllerBindings field (absent = player keeps its defaults). */
@@ -499,6 +500,7 @@ object PlayerProtocol {
             writer.name("devices").beginArray()
             for (device in devices) {
                 writer.beginObject()
+                device.port?.let { writer.name("port").value(it.toLong()) }
                 writer.name("guid").value(device.guid)
                 writer.name("identity").beginObject()
                 if (device.identity.vendorId == null) {
@@ -795,6 +797,7 @@ object PlayerProtocol {
         reader.beginObject()
         val seen = mutableSetOf<String>()
         var guid: String? = null
+        var port: Int? = null
         var identity: ControllerBindingIdentity? = null
         var bindings: List<PlayerSlotBinding>? = null
         var secondaryBindings: List<PlayerSlotBinding>? = null
@@ -802,6 +805,13 @@ object PlayerProtocol {
             val name = reader.nextName()
             seen += name
             when (name) {
+                "port" -> {
+                    val value = readInt64(reader, name)
+                    if (value !in 0..3) {
+                        throw ProtocolException("controllerBindings device port must be between 0 and 3")
+                    }
+                    port = value.toInt()
+                }
                 "guid" -> guid = readString(reader, name)
                 "identity" -> identity = readControllerBindingIdentity(reader)
                 "bindings" -> bindings = readSlotBindings(reader)
@@ -814,10 +824,11 @@ object PlayerProtocol {
             if (field !in seen) throw ProtocolException("missing controllerBindings device field: $field")
         }
         return ControllerBindingDevice(
-            checkNotNull(guid),
-            checkNotNull(identity),
-            checkNotNull(bindings),
-            secondaryBindings,
+            guid = checkNotNull(guid),
+            identity = checkNotNull(identity),
+            bindings = checkNotNull(bindings),
+            secondaryBindings = secondaryBindings,
+            port = port,
         )
     }
 

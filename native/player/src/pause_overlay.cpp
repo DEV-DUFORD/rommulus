@@ -727,6 +727,7 @@ void PauseOverlay::draw(
     const BindingTable& bindings,
     const BindingTable& secondaryBindings,
     const KeyboardBindingTable& keyboardBindings,
+    const std::array<std::string, 4>& controllerNames,
     int captureSecondsLeft,
     const char* coreId,
     PlayerTheme theme
@@ -750,6 +751,48 @@ void PauseOverlay::draw(
     const auto dp = [scale](float value) { return value * scale; };
 
     fillRect(renderer, 0.0f, 0.0f, W, H, kNightHi);
+
+    if (menu.state() == PauseMenuState::kControllerPorts) {
+        const float panelW = std::min(dp(720.0f), W - dp(32.0f));
+        const float panelH = std::min(dp(560.0f), H - dp(24.0f));
+        const float x = (W - panelW) * 0.5f;
+        const float y = (H - panelH) * 0.5f;
+        strokeRoundedRect(renderer, x, y, panelW, panelH, dp(16),
+                          std::max(1.0f, dp(1)), kStageLo, kNightLo);
+
+        const char* title = "Controller Ports";
+        drawText(renderer, x + (panelW - textWidth(title, dp(24))) * 0.5f,
+                 y + dp(27), title, dp(24), kTextPrimary.r, kTextPrimary.g,
+                 kTextPrimary.b, 255);
+        const char* subtitle =
+            "Left/Right changes a controller. Select a port to edit its mappings.";
+        drawText(renderer, x + (panelW - textWidth(subtitle, dp(13))) * 0.5f,
+                 y + dp(63), subtitle, dp(13), kTextSecondary.r, kTextSecondary.g,
+                 kTextSecondary.b, 255);
+
+        const float rowX = x + dp(32);
+        const float rowW = panelW - dp(64);
+        const float rowH = dp(70);
+        float rowY = y + dp(104);
+        for (int port = 0; port < menu.controllerPortCount(); ++port) {
+            const bool selected = menu.selection() == port;
+            strokeRoundedRect(renderer, rowX, rowY, rowW, rowH, dp(10),
+                              selected ? dp(3) : dp(1),
+                              selected ? kRomm300 : kStageLo, kNightLo);
+            const std::string portLabel = "Port " + std::to_string(port + 1);
+            drawText(renderer, rowX + dp(18), rowY + dp(12), portLabel.c_str(),
+                     dp(16), kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
+            const std::string& controller = controllerNames[port];
+            drawText(renderer, rowX + dp(18), rowY + dp(39), controller.c_str(),
+                     dp(13), kTextSecondary.r, kTextSecondary.g,
+                     kTextSecondary.b, 255);
+            drawText(renderer, rowX + rowW - dp(62), rowY + dp(25), "<  >",
+                     dp(15), kRomm300.r, kRomm300.g, kRomm300.b, 255);
+            rowY += rowH + dp(10);
+        }
+
+        return;
+    }
 
     if (menu.state() == PauseMenuState::kVideoOptions) {
         const float panelW = std::min(dp(540.0f), W - dp(32.0f));
@@ -800,7 +843,8 @@ void PauseOverlay::draw(
         const float headerY = dp(24);
         drawButton(*this, renderer, marginX, headerY, dp(84), dp(42), "Back",
                    scale, false);
-        const std::string title = std::string(consoleName) + " Controller";
+        const std::string title = std::string(consoleName) + " Port " +
+            std::to_string(menu.editingPort() + 1);
         drawText(renderer, (W - textWidth(title.c_str(), dp(24))) * 0.5f, headerY + dp(5),
                  title.c_str(), dp(24), kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
         const float clearW = dp(142);
@@ -815,8 +859,10 @@ void PauseOverlay::draw(
         const float tabY = dp(76);
         fillRoundedRect(renderer, marginX, tabY, W - marginX * 2.0f, dp(38), dp(8), kNightLo);
         fillRect(renderer, marginX, tabY + dp(35), W - marginX * 2.0f, dp(3), kRomm300);
-        const char* playerTab = "Player 1  |  Active";
-        drawText(renderer, marginX + dp(18), tabY + dp(10), playerTab, dp(14),
+        const std::string playerTab =
+            "Port " + std::to_string(menu.editingPort() + 1) + "  |  " +
+            controllerNames[menu.editingPort()];
+        drawText(renderer, marginX + dp(18), tabY + dp(10), playerTab.c_str(), dp(14),
                  kTextPrimary.r, kTextPrimary.g, kTextPrimary.b, 255);
 
         const float contentY = dp(128);

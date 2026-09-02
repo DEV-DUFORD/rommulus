@@ -48,6 +48,7 @@ constexpr int kBindingSidecarVersion = 1;
 // to every port — so each device entry carries the same table, keyed by that
 // device's stable GUID for ingestion.)
 struct DeviceBindings {
+    int port = 0;          // 0-based console port whose table was edited
     std::string guid;      // canonical 32-hex-char SDL joystick GUID string
     std::string identity;  // normalized descriptor (normalizedDeviceIdentity)
     BindingTable table;

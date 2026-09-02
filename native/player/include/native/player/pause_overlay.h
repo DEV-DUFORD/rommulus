@@ -6,6 +6,9 @@
 // low-resolution core canvas. Menu behavior remains owned by PauseMenu.
 #pragma once
 
+#include <array>
+#include <string>
+
 #include "native/player/binding_table.h"
 #include "native/player/keyboard_binding_table.h"
 #include "native/player/protocol.h"
@@ -27,6 +30,7 @@ public:
     void draw(SDL_Renderer* renderer, const PauseMenu& menu, const BindingTable& bindings,
               const BindingTable& secondaryBindings,
               const KeyboardBindingTable& keyboardBindings,
+              const std::array<std::string, 4>& controllerNames,
               int captureSecondsLeft,
               const char* coreId,
               PlayerTheme theme) const;

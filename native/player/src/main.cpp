@@ -17,6 +17,7 @@
 #include <pwd.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -209,6 +210,16 @@ std::string parentDirectory(const std::string& path) {
 bool isHardwareRenderingCore(const std::string& coreId) {
     return coreId == "mupen64plus_next" || coreId == "dolphin" ||
            coreId == "lrps2";
+}
+
+int controllerPortCountForCore(const std::string& coreId) {
+    if (coreId == "mupen64plus_next" || coreId == "dolphin") return 4;
+    if (coreId == "mgba" || coreId == "gambatte" ||
+        coreId == "mednafen_ngp" || coreId == "mednafen_wswan" ||
+        coreId == "handy") {
+        return 1;
+    }
+    return 2;
 }
 
 std::optional<std::string> dolphinSystemDirectory() {
@@ -846,15 +857,25 @@ int main(int argc, char* argv[]) {
     // v2: apply the stored controller bindings from the launch request so
     // they are active from the FIRST FRAME (the desktop supervisor ingests
     // the previous session's sidecar and serializes it into this field).
-    // The player keeps one global BindingTable applied to every port, so a
-    // multi-device request seeds from the first device entry; an absent or
-    // empty field keeps the built-in defaults.
+    // A controller-independent entry seeds every port. Device-specific
+    // entries are applied to their matching connected port.
     if (request.controllerBindings.has_value() &&
         !request.controllerBindings->devices.empty()) {
-        input.setBindings(
-            request.controllerBindings->devices.front().table,
-            request.controllerBindings->devices.front().secondaryTable
-        );
+        const auto global = std::find_if(
+            request.controllerBindings->devices.begin(),
+            request.controllerBindings->devices.end(),
+            [](const romm::player::ControllerBindingDevice& device) {
+                return !device.port.has_value();
+            });
+        if (global != request.controllerBindings->devices.end()) {
+            input.setBindings(global->table, global->secondaryTable);
+        }
+        for (const auto& device : request.controllerBindings->devices) {
+            if (device.port.has_value()) {
+                input.setBindingsForPort(
+                    *device.port, device.table, device.secondaryTable);
+            }
+        }
     }
     if (request.controllerBindings.has_value() &&
         request.controllerBindings->pauseMenuBindings.has_value()) {
@@ -865,24 +886,22 @@ int main(int argc, char* argv[]) {
     if (request.keyboardBindings.has_value()) {
         input.setKeyboardBindings(request.keyboardBindings->table);
     }
+    romm::player::PauseMenu pauseMenu;
     bool controllerBindingsDirty = false;
     const auto persistControllerBindings = [&]() {
         if (request.resultPath.empty()) return;
         std::vector<romm::player::DeviceBindings> devices;
-        for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
-            if (!input.hasGamepad(port)) continue;
+        const int portCount = controllerPortCountForCore(request.coreId);
+        for (int port = 0; port < portCount; ++port) {
             romm::player::DeviceBindings device;
-            device.guid = input.joystickGuidString(port);
+            device.port = port;
+            if (input.hasGamepad(port)) {
+                device.guid = input.joystickGuidString(port);
+            }
             device.identity = romm::player::normalizedDeviceIdentity(device.guid);
-            device.table = input.bindings();
-            device.secondaryTable = input.secondaryBindings();
+            device.table = input.bindings(port);
+            device.secondaryTable = input.secondaryBindings(port);
             devices.push_back(std::move(device));
-        }
-        // The table is global. Keep a controller-independent entry if Steam
-        // detaches its virtual gamepad before or during the write.
-        if (devices.empty()) {
-            devices.push_back(romm::player::globalBindingDevice(
-                input.bindings(), input.secondaryBindings()));
         }
         if (!romm::player::writeBindingSidecar(
                 parentDirectory(request.resultPath) + "/controller-bindings.json", devices)) {
@@ -901,7 +920,7 @@ int main(int argc, char* argv[]) {
             keyboardBindingsDirty = false;
         }
     };
-    romm::player::PauseMenu pauseMenu;
+    pauseMenu.setControllerPortCount(controllerPortCountForCore(request.coreId));
     pauseMenu.setBindingSlotCount(
         request.coreId == "mupen64plus_next" ? 14 :
         request.coreId == "pcsx_rearmed" || request.coreId == "dolphin" ||
@@ -992,12 +1011,15 @@ int main(int argc, char* argv[]) {
                         pauseMenu.sharpFilterEnabled());
                 }
                 break;
+            case romm::player::PauseMenuEffect::kCycleController:
+                input.cycleGamepadForPort(
+                    pauseMenu.selection(), pauseMenu.controllerPortDirection());
+                break;
             case romm::player::PauseMenuEffect::kBeginCapture: {
-                // A slot row was confirmed. Every connected pad is eligible — the first
-                // qualifying input wins (Android's coordinator semantics).
                 captureDevices.clear();
-                for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
-                    if (input.hasGamepad(port)) captureDevices.push_back(port);
+                const int editingPort = pauseMenu.editingPort();
+                if (input.hasGamepad(editingPort)) {
+                    captureDevices.push_back(editingPort);
                 }
                 // Seed edge history from live levels so the opening button
                 // cannot become another action when capture finishes.
@@ -1014,13 +1036,12 @@ int main(int argc, char* argv[]) {
                 break;
             }
             case romm::player::PauseMenuEffect::kResetDefault:
-                // Reset to Default: restore the built-in mapping.
-                input.resetBindings();
+                input.resetBindings(pauseMenu.editingPort());
                 controllerBindingsDirty = true;
                 persistControllerBindings();
                 break;
             case romm::player::PauseMenuEffect::kClearMappings:
-                input.clearBindings();
+                input.clearBindings(pauseMenu.editingPort());
                 controllerBindingsDirty = true;
                 persistControllerBindings();
                 break;
@@ -1230,6 +1251,7 @@ int main(int argc, char* argv[]) {
                                               ? result->polarity
                                               : 1);
                             input.setBinding(
+                                pauseMenu.editingPort(),
                                 romm::player::coreBindingSlotAt(
                                     request.coreId, pauseMenu.selection()),
                                 source, pauseMenu.bindingColumn()
@@ -1244,6 +1266,7 @@ int main(int argc, char* argv[]) {
                     case romm::player::CaptureState::kCleared:
                         // Held Back: clear the selected slot's binding.
                         input.setBinding(
+                            pauseMenu.editingPort(),
                             romm::player::coreBindingSlotAt(
                                 request.coreId, pauseMenu.selection()),
                             romm::player::BindingSource::unbound(),
@@ -1292,10 +1315,15 @@ int main(int argc, char* argv[]) {
         // Steam Deck fallback, and the hardware-core raster overlay all stay
         // in sync with the same PauseOverlay/PauseMenu/binding state.
         const auto drawOverlay = [&](SDL_Renderer* renderer) {
+            std::array<std::string, romm::player::SdlInput::kPorts> controllerNames{};
+            for (int port = 0; port < romm::player::SdlInput::kPorts; ++port) {
+                controllerNames[port] = input.gamepadDisplayName(port);
+            }
             pauseOverlay.draw(
-                renderer, pauseMenu, input.bindings(), input.secondaryBindings(),
-                input.keyboardBindings(), captureSecondsLeft, request.coreId.c_str(),
-                request.theme);
+                renderer, pauseMenu, input.bindings(pauseMenu.editingPort()),
+                input.secondaryBindings(pauseMenu.editingPort()),
+                input.keyboardBindings(), controllerNames, captureSecondsLeft,
+                request.coreId.c_str(), request.theme);
         };
         if (!useHardwareRendering) {
             // Software cores: unchanged — SdlVideoSink owns the window's

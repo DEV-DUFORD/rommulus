@@ -347,13 +347,13 @@ void testCloseFromVideoOptionsResetsFocus() {
 }
 
 // ---------------------------------------------------------------------------
-// Controller Settings opens the active configuration directly, like Android.
+// Controller Settings opens port assignment before physical mappings.
 
-void testControllerSettingsOpensFocusedOnPhysical() {
+void testControllerSettingsOpensFocusedOnFirstPort() {
     PauseMenu menu;
     selectControllerSettings(menu);
     CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
-    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
+    CHECK(menu.state() == PauseMenuState::kControllerPorts);
     CHECK(menu.isOpen());
     CHECK_EQ(menu.selection(), 0);
 }
@@ -361,7 +361,7 @@ void testControllerSettingsOpensFocusedOnPhysical() {
 void testControllerSettingsCancelToMenuThenClose() {
     PauseMenu menu;
     selectControllerSettings(menu);
-    menu.handle(confirmAction());  // -> active configuration
+    menu.handle(confirmAction());  // -> controller ports
     // Back/Escape returns to the MAIN menu (does not close it), focused on
     // Controller Settings.
     CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
@@ -373,9 +373,29 @@ void testControllerSettingsCancelToMenuThenClose() {
     CHECK(!menu.isOpen());
 }
 
+void testControllerPortAssignmentFlow() {
+    PauseMenu menu;
+    menu.setControllerPortCount(4);
+    selectControllerSettings(menu);
+    menu.handle(confirmAction());
+    CHECK(menu.state() == PauseMenuState::kControllerPorts);
+    CHECK_EQ(menu.controllerPortCount(), 4);
+    CHECK_EQ(menu.handle(rightAction()), PauseMenuEffect::kCycleController);
+    CHECK_EQ(menu.controllerPortDirection(), 1);
+    CHECK_EQ(menu.handle(leftAction()), PauseMenuEffect::kCycleController);
+    CHECK_EQ(menu.controllerPortDirection(), -1);
+    menu.handle(downAction());
+    CHECK_EQ(menu.selection(), 1);
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
+    CHECK_EQ(menu.editingPort(), 1);
+}
+
 // Opens the menu and enters the active controller configuration.
 void selectBindingList(PauseMenu& menu) {
     selectControllerSettings(menu);
+    CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
+    CHECK(menu.state() == PauseMenuState::kControllerPorts);
     CHECK_EQ(menu.handle(confirmAction()), PauseMenuEffect::kNone);
     CHECK(menu.state() == PauseMenuState::kPhysicalBindings);
 }
@@ -501,10 +521,10 @@ void testBindingListClearMappingsAction() {
 void testBindingListCancelReturnsToMenu() {
     PauseMenu menu;
     selectBindingList(menu);
-    // Back/Escape returns to the pause menu focused on Controller Settings.
+    // Back/Escape returns to controller ports focused on Edit Mappings.
     CHECK_EQ(menu.handle(cancelAction()), PauseMenuEffect::kNone);
-    CHECK(menu.state() == PauseMenuState::kOpen);
-    CHECK_EQ(menu.selection(), PauseMenu::kControllerSettingsItem);
+    CHECK(menu.state() == PauseMenuState::kControllerPorts);
+    CHECK_EQ(menu.selection(), menu.editingPort());
 }
 
 void testCloseFromControllerSettingsResetsFocus() {
@@ -576,8 +596,9 @@ int main() {
     testVideoOptionsReturnToMenu();
     testVideoOptionsCancelThenMenuCancelCloses();
     testCloseFromVideoOptionsResetsFocus();
-    testControllerSettingsOpensFocusedOnPhysical();
+    testControllerSettingsOpensFocusedOnFirstPort();
     testControllerSettingsCancelToMenuThenClose();
+    testControllerPortAssignmentFlow();
     testBindingListOpensDirectly();
     testBindingListNavigationWrapsOverFourteenRows();
     testBindingListViewportTracksSelection();

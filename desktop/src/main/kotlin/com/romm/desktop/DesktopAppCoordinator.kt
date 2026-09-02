@@ -3,6 +3,7 @@ package com.romm.desktop
 import com.romm.androidtv.auth.ClientTokenStorage
 import com.romm.androidtv.auth.SessionStorage
 import com.romm.androidtv.controller.config.ControllerConfigRepository
+import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.emulation.model.CoreLicenseFinding
 import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.emulation.model.SavePathPolicy
@@ -829,9 +830,16 @@ class DesktopAppCoordinator(
             return
         }
 
-        // Every device entry carries the player's single global table; upsert per device (the
-        // last device wins — identical tables in practice, so this is a no-op).
-        val records = sidecar.devices.flatMap { device -> RetroPadControlMapping.toRecords(coreId, device) }
+        val playerCount = CoreControllerProfiles.byCoreId(coreId)?.playerCount ?: 1
+        val records = sidecar.devices.flatMap { device ->
+            if (device.port == null) {
+                (0 until playerCount).flatMap { port ->
+                    RetroPadControlMapping.toRecords(coreId, device.copy(port = port))
+                }
+            } else {
+                RetroPadControlMapping.toRecords(coreId, device)
+            }
+        }
         controllerBindingStore.upsertAll(records)
             .onSuccess {
                 controllerConfigRepository.refreshFromStore(coreId)
@@ -882,15 +890,29 @@ class DesktopAppCoordinator(
         // The exit watcher imports sidecars asynchronously. Reconcile this independent session
         // artifact synchronously so a user who immediately relaunches gets their in-game remap.
         playerSupervisor.syncControllerBindingSidecars()
-        val records = controllerConfigRepository.effectiveLaunchRecords(
-            coreId,
-            RetroPadControlMapping.PLAYER_INDEX,
-        )
+        val playerCount = CoreControllerProfiles.byCoreId(coreId)?.playerCount ?: 1
         val pauseMenuRecords = controllerConfigRepository.effectivePauseMenuRecords(
             coreId,
             RetroPadControlMapping.PLAYER_INDEX,
         )
-        RetroPadControlMapping.toLaunchBindings(records, pauseMenuRecords)
+        val perPort = (0 until playerCount).mapNotNull { port ->
+            RetroPadControlMapping.toLaunchBindings(
+                controllerConfigRepository.effectiveLaunchRecords(coreId, port),
+                if (port == RetroPadControlMapping.PLAYER_INDEX) pauseMenuRecords else emptyList(),
+            )?.devices?.singleOrNull()?.copy(port = port)
+        }
+        if (perPort.isEmpty()) {
+            null
+        } else {
+            val pauseBindings = RetroPadControlMapping.toLaunchBindings(
+                controllerConfigRepository.effectiveLaunchRecords(
+                    coreId,
+                    RetroPadControlMapping.PLAYER_INDEX,
+                ),
+                pauseMenuRecords,
+            )?.pauseMenuBindings
+            ControllerBindings(perPort, pauseBindings)
+        }
     }.getOrElse { e ->
         log.warning("loading stored controller bindings for $coreId failed: $e; launching with defaults")
         null

@@ -260,8 +260,8 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         return false;
     }
 
-    static const std::array<const char*, 4> kDeviceFields = {
-        {"guid", "identity", "bindings", "secondaryBindings"}};
+    static const std::array<const char*, 5> kDeviceFields = {
+        {"port", "guid", "identity", "bindings", "secondaryBindings"}};
     static const std::array<const char*, 3> kRequiredDeviceFields = {
         {"guid", "identity", "bindings"}};
     static const std::array<const char*, 3> kIdentityFields = {
@@ -282,6 +282,18 @@ bool parseControllerBindings(const ordered_json& j, ControllerBindings& out,
         }
 
         ControllerBindingDevice device;
+        if (d.contains("port")) {
+            if (!d["port"].is_number_integer()) {
+                error = "controllerBindings device port must be an integer";
+                return false;
+            }
+            const int port = d["port"].get<int>();
+            if (port < 0 || port >= 4) {
+                error = "controllerBindings device port must be between 0 and 3";
+                return false;
+            }
+            device.port = port;
+        }
         if (!getString(d, "guid", device.guid, error)) return false;
 
         const ordered_json& id = d["identity"];
@@ -754,6 +766,7 @@ std::string serializeRequest(const PlayerRequest& r) {
         ordered_json devices = ordered_json::array();
         for (const ControllerBindingDevice& device : r.controllerBindings->devices) {
             ordered_json entry;
+            if (device.port.has_value()) entry["port"] = *device.port;
             entry["guid"] = device.guid;
             ordered_json identity;
             if (device.identity.vendorId.has_value())
