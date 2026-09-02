@@ -92,5 +92,5 @@ fun main() {
     }
 }
 
-private const val APP_VERSION = "0.3.0"
+private const val APP_VERSION = "0.3.1"
 private const val BUILD_DEFAULT_ORIGIN = "https://demo.romm.app"
