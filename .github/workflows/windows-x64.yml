@@ -789,8 +789,10 @@ jobs:
           # fixtures are the next lane's scope.
           $env:PATH = "$stageBin;$env:SystemRoot\System32;$env:SystemRoot"
           Write-Host "sanitized loader PATH: $env:PATH"
+          $ErrorActionPreference = "Continue"
           $err = & (Join-Path $stageBin "rommulus-player.exe") 2>&1
           $rc = $LASTEXITCODE
+          $ErrorActionPreference = "Stop"
           Write-Host "player exit code: $rc"
           $err | ForEach-Object { Write-Host $_ }
           if ($rc -ne 2) { throw "expected usage exit 2, got $rc" }

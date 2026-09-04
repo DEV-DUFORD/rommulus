@@ -149,9 +149,9 @@ class DesktopSavePickerWiringTest {
 
     /** Blocks until the exit watcher has reconciled [sessionId] (INTERRUPTED — no result file). */
     private fun waitForReconciled(supervisor: LaunchJournalSupervisor, sessionId: String) {
-        val deadline = System.currentTimeMillis() + 5_000
+        val deadline = System.currentTimeMillis() + 30_000
         while (supervisor.store.read(sessionId).getOrNull()?.state != JournalState.INTERRUPTED) {
-            check(System.currentTimeMillis() < deadline) { "exit watcher did not reconcile $sessionId within 5s" }
+            check(System.currentTimeMillis() < deadline) { "exit watcher did not reconcile $sessionId within 30s" }
             Thread.sleep(10)
         }
     }

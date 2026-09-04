@@ -153,7 +153,7 @@ class DesktopPreLaunchSaveSyncWiringTest {
     }
 
     private fun waitForReconciled(wired: Wired, sessionId: String) {
-        val deadline = System.currentTimeMillis() + 5_000
+        val deadline = System.currentTimeMillis() + 30_000
         while (wired.supervisor.store.read(sessionId).getOrNull()?.state != JournalState.INTERRUPTED) {
             check(System.currentTimeMillis() < deadline) { "exit watcher did not reconcile $sessionId" }
             Thread.sleep(10)

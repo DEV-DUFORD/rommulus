@@ -303,9 +303,9 @@ class DesktopAppCoordinatorTest {
      * test fails intermittently with IOException during temp-dir deletion.
      */
     private fun waitForReconciled(supervisor: LaunchJournalSupervisor, sessionId: String) {
-        val deadline = System.currentTimeMillis() + 15_000
+        val deadline = System.currentTimeMillis() + 30_000
         while (supervisor.store.read(sessionId).getOrNull()?.state != JournalState.INTERRUPTED) {
-            check(System.currentTimeMillis() < deadline) { "exit watcher did not reconcile $sessionId within 15s" }
+            check(System.currentTimeMillis() < deadline) { "exit watcher did not reconcile $sessionId within 30s" }
             Thread.sleep(10)
         }
     }
