@@ -50,12 +50,6 @@
 
 include(${CMAKE_CURRENT_LIST_DIR}/fceumm-sources.cmake)
 
-add_library(fceumm_core_archive STATIC
-    # The exact curated 505-source set from the shared fragment (identical to
-    # Android and Linux; network-free by construction).
-    ${ROMM_FCEUMM_SOURCES}
-)
-
 add_library(fceumm_core SHARED
     # PE export table: CMake passes a .def listed in add_library() straight to
     # the MinGW linker. Everything not enumerated stays local to the DLL.
@@ -68,46 +62,42 @@ set_target_properties(fceumm_core PROPERTIES
     LINKER_LANGUAGE C
 )
 
-target_include_directories(fceumm_core_archive SYSTEM PRIVATE
-    ${FCEUMM_DIR}/src/drivers/libretro
-    ${FCEUMM_DIR}/src/drivers/libretro/libretro-common/include
-    ${FCEUMM_DIR}/src
-    ${FCEUMM_DIR}/src/input
-    ${FCEUMM_DIR}/src/boards
-    ${FCEUMM_DIR}/src/ntsc
-)
-
-target_compile_definitions(fceumm_core_archive PRIVATE
-    # Same platform behavior as cores/fceumm-linux.cmake (the Android
-    # fragment differs only in FRONTEND_SUPPORTS_RGB565; this candidate
-    # matches Linux).
-    __LIBRETRO__
-    PATH_MAX=1024
-    FCEU_VERSION_NUMERIC=9900
-    FRONTEND_SUPPORTS_RGB888
-    HAVE_NTSC_FILTER
-    HAVE_HDPACK
-    PSS_STYLE=1
-    GIT_VERSION=\"b5e3566\"
-    # Neutralize RETRO_API (libretro-common/include/libretro.h defaults it to
-    # __attribute__((__dllexport__)) on Windows+GCC, which would export ALL 25
-    # libretro.h-declared functions — including retro_cheat_reset /
-    # retro_cheat_set / retro_load_game_special, none of which the player's
-    # CoreLibrary resolves). With RETRO_API empty, the .def file is the SOLE
-    # authority over the PE export table: exactly the 22 required exports.
-    RETRO_API=
-)
-
-# Warning suppressions matching upstream's own Android build (identical to the
-# POSIX fragments), plus release-quality bytecode for the candidate audit.
-# Vendored third-party source: not held to this project's own -Wall -Wextra.
-# The toolchain contract already adds -static-libgcc/-static-libstdc++ to
-# shared link flags, keeping libgcc out of the audited DLL closure.
-target_compile_options(fceumm_core_archive PRIVATE
-    -Wno-write-strings -Wsign-compare -Wundef -Wmissing-prototypes
-    -O2
-    -DNDEBUG
-)
+set(ROMM_FCEUMM_ARCHIVES)
+list(LENGTH ROMM_FCEUMM_SOURCES ROMM_FCEUMM_SOURCE_COUNT)
+set(ROMM_FCEUMM_OFFSET 0)
+set(ROMM_FCEUMM_ARCHIVE_INDEX 0)
+while(ROMM_FCEUMM_OFFSET LESS ROMM_FCEUMM_SOURCE_COUNT)
+    list(SUBLIST ROMM_FCEUMM_SOURCES ${ROMM_FCEUMM_OFFSET} 80 ROMM_FCEUMM_CHUNK)
+    set(ROMM_FCEUMM_ARCHIVE "fceumm_core_archive_${ROMM_FCEUMM_ARCHIVE_INDEX}")
+    add_library(${ROMM_FCEUMM_ARCHIVE} STATIC ${ROMM_FCEUMM_CHUNK})
+    target_include_directories(${ROMM_FCEUMM_ARCHIVE} SYSTEM PRIVATE
+        ${FCEUMM_DIR}/src/drivers/libretro
+        ${FCEUMM_DIR}/src/drivers/libretro/libretro-common/include
+        ${FCEUMM_DIR}/src
+        ${FCEUMM_DIR}/src/input
+        ${FCEUMM_DIR}/src/boards
+        ${FCEUMM_DIR}/src/ntsc
+    )
+    target_compile_definitions(${ROMM_FCEUMM_ARCHIVE} PRIVATE
+        __LIBRETRO__
+        PATH_MAX=1024
+        FCEU_VERSION_NUMERIC=9900
+        FRONTEND_SUPPORTS_RGB888
+        HAVE_NTSC_FILTER
+        HAVE_HDPACK
+        PSS_STYLE=1
+        GIT_VERSION=\"b5e3566\"
+        RETRO_API=
+    )
+    target_compile_options(${ROMM_FCEUMM_ARCHIVE} PRIVATE
+        -Wno-write-strings -Wsign-compare -Wundef -Wmissing-prototypes
+        -O2
+        -DNDEBUG
+    )
+    list(APPEND ROMM_FCEUMM_ARCHIVES ${ROMM_FCEUMM_ARCHIVE})
+    math(EXPR ROMM_FCEUMM_OFFSET "${ROMM_FCEUMM_OFFSET} + 80")
+    math(EXPR ROMM_FCEUMM_ARCHIVE_INDEX "${ROMM_FCEUMM_ARCHIVE_INDEX} + 1")
+endwhile()
 
 # GNU ld accepts --no-undefined for PE targets (verified by the local MinGW
 # cross-build and the Windows CI gate): any unresolved import fails the link.
@@ -115,11 +105,10 @@ target_link_options(fceumm_core PRIVATE
     "-Wl,--no-undefined"
 )
 
-# Archive the large object set first so the final DLL link stays below
-# MSYS2's command-line limit. Whole-archive preserves every Libretro entry
-# point for the explicit PE export table.
+# Bounded archives keep both ar and the final DLL link below MSYS2's command
+# limit. Whole-archive preserves every entry point for the PE export table.
 target_link_libraries(fceumm_core PRIVATE
     "-Wl,--whole-archive"
-    fceumm_core_archive
+    ${ROMM_FCEUMM_ARCHIVES}
     "-Wl,--no-whole-archive"
 )
