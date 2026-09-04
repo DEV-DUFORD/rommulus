@@ -242,6 +242,7 @@ class JnaWindowsCredentialApi : WindowsCredentialApi {
         if (!ok) {
             val code = lastError()
             return when (code) {
+                ERROR_NOT_FOUND, ERROR_CREDENTIAL_UNKNOWN -> CredentialEnumerateResult.Ok(emptyList())
                 ERROR_ACCESS_DENIED -> CredentialEnumerateResult.Denied(describeError(code))
                 else -> CredentialEnumerateResult.Unavailable(describeError(code))
             }

@@ -17,6 +17,15 @@ import java.nio.file.Path
  * tiny so it is easy to audit and to fake in tests.
  */
 interface Advapi32Security : com.sun.jna.Library {
+    fun OpenProcessToken(process: Pointer, desiredAccess: Int, token: PointerByReference): Boolean
+    fun GetTokenInformation(
+        token: Pointer,
+        infoClass: Int,
+        buffer: Pointer?,
+        length: Int,
+        returnLength: IntByReference,
+    ): Boolean
+
     /** `ConvertSidToStringSidW(Sid, &StringSid)` → BOOL; caller frees the result with `LocalFree`. */
     fun ConvertSidToStringSidW(sid: Pointer, stringSid: PointerByReference): Boolean
 
@@ -77,14 +86,6 @@ interface Advapi32Security : com.sun.jna.Library {
 /** Minimal `kernel32` surface for token/SID resolution, file handles, and error formatting. */
 interface Kernel32Security : com.sun.jna.Library {
     fun GetCurrentProcess(): Pointer
-    fun OpenProcessToken(process: Pointer, desiredAccess: Int, token: PointerByReference): Boolean
-    fun GetTokenInformation(
-        token: Pointer,
-        infoClass: Int,
-        buffer: Pointer?,
-        length: Int,
-        returnLength: IntByReference,
-    ): Boolean
     fun CreateFileW(
         name: WString,
         desiredAccess: Int,
@@ -244,7 +245,7 @@ class JnaWindowsAclApplier : WindowsAclApplier {
     /** The current user's SID as a string (e.g. `S-1-5-21-...-1001`), from the process token. */
     internal fun currentUserSid(): String {
         val tokenRef = PointerByReference()
-        if (!kernel32.OpenProcessToken(kernel32.GetCurrentProcess(), TOKEN_QUERY, tokenRef)) {
+        if (!advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), TOKEN_QUERY, tokenRef)) {
             throw IllegalStateException("OpenProcessToken failed: ${describeLastError()}")
         }
         val token = tokenRef.getValue()
@@ -254,7 +255,7 @@ class JnaWindowsAclApplier : WindowsAclApplier {
             // return FALSE with GetLastError() == ERROR_INSUFFICIENT_BUFFER (122) while filling
             // ReturnLength — that failure is the SUCCESS path; anything else is a real error.
             val lengthRef = IntByReference(0)
-            if (!kernel32.GetTokenInformation(token, TOKEN_INFORMATION_CLASS_USER, null, 0, lengthRef)) {
+            if (!advapi32.GetTokenInformation(token, TOKEN_INFORMATION_CLASS_USER, null, 0, lengthRef)) {
                 val code = kernel32.GetLastError()
                 if (code != ERROR_INSUFFICIENT_BUFFER) {
                     throw IllegalStateException("GetTokenInformation (size query) failed: ${describeWin32Error(code)}")
@@ -266,7 +267,7 @@ class JnaWindowsAclApplier : WindowsAclApplier {
             }
             val buffer = Memory(size.toLong())
             try {
-                if (!kernel32.GetTokenInformation(token, TOKEN_INFORMATION_CLASS_USER, buffer, size, lengthRef)) {
+                if (!advapi32.GetTokenInformation(token, TOKEN_INFORMATION_CLASS_USER, buffer, size, lengthRef)) {
                     throw IllegalStateException("GetTokenInformation (read) failed: ${describeLastError()}")
                 }
                 // TOKEN_USER is a single PSID field at offset 0.

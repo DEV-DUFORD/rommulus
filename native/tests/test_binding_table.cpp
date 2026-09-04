@@ -5,6 +5,7 @@
 // normalization and JSON serialization/write (binding_sidecar.{h,cpp}).
 #include "romm_test.h"
 
+#include <filesystem>
 #include <cstdio>
 #include <string>
 
@@ -280,7 +281,8 @@ void testSidecarSerializeAndWrite() {
     CHECK_EQ(dpadLeft["polarity"].get<int>(), -1);
 
     // Atomic write to a temp path, then read the file back and re-parse it.
-    const std::string path = "/tmp/romm_binding_sidecar_test.json";
+    const std::filesystem::path tempDir = std::filesystem::temp_directory_path();
+    const std::string path = (tempDir / "romm_binding_sidecar_test.json").string();
     CHECK(romm::player::writeBindingSidecar(path, {device}));
     FILE* file = std::fopen(path.c_str(), "rb");
     CHECK(file != nullptr);
@@ -297,7 +299,9 @@ void testSidecarSerializeAndWrite() {
     std::remove(path.c_str());
 
     // A missing parent directory fails cleanly (no throw, no crash).
-    CHECK(!romm::player::writeBindingSidecar("/tmp/does-not-exist-xyz/c.json", {device}));
+    const std::string missingParent =
+        (tempDir / "romm-does-not-exist-xyz" / "c.json").string();
+    CHECK(!romm::player::writeBindingSidecar(missingParent, {device}));
 }
 
 void testGlobalBindingDevice() {

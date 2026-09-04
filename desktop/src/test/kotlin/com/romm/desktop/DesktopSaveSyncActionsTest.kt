@@ -63,8 +63,7 @@ class DesktopSaveSyncActionsTest {
         val LOCAL_BYTES = "local-save-bytes".toByteArray()
         val SERVER_BYTES = "server-save-bytes".toByteArray()
 
-        /** SavePathPolicy sanitizes '/' and '\' to '_' — the scope key for [ORIGIN]'s save path. */
-        val SERVER_KEY: String = ORIGIN.map { if (it == '/' || it == '\\') '_' else it }.joinToString("")
+        val SERVER_KEY: String = SavePathPolicy.sanitizeSegment(ORIGIN)
 
         val SLOT = SavePathPolicy.AUTOSAVE_SLOT
     }

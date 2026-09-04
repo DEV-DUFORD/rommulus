@@ -91,6 +91,7 @@ bool setSecurityFromSddl(const std::wstring& path, const wchar_t* sddl,
 std::wstring g_root;  // temp working root for this run
 
 void testCanonicalization() {
+    CreateDirectoryW((g_root + L"\\a").c_str(), nullptr);
     CreateDirectoryW((g_root + L"\\a\\b").c_str(), nullptr);
     CHECK(writeFileBytes(g_root + L"\\a\\b\\rom.zip", "ROMDATA", 7));
 

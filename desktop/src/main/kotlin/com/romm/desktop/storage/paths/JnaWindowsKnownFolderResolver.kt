@@ -2,6 +2,7 @@ package com.romm.desktop.storage.paths
 
 import com.sun.jna.Native
 import com.sun.jna.Pointer
+import com.sun.jna.platform.win32.Guid
 import com.sun.jna.ptr.PointerByReference
 import java.nio.file.Path
 import java.util.UUID
@@ -10,16 +11,15 @@ import java.util.UUID
  * The minimal `shell32` Known Folder surface RomMulus needs (plans/WINDOWS_IMPL.md §3.4).
  *
  * Method names are the exact Win32 export names and the signatures were verified against the
- * pinned JNA 5.19.1 dependency by compilation. JNA maps a `java.util.UUID` argument to the
- * native GUID layout (including the mixed endianness of the first three fields), so no
- * hand-rolled struct is required. JNA Platform ships no Known Folder binding, so this narrow
+ * pinned JNA 5.19.1 dependency by compilation. [Guid.GUID] supplies the native GUID layout,
+ * including the mixed endianness of the first three fields. This narrow
  * interface is the project-owned seam; it is deliberately tiny so it is easy to audit and to
  * fake in tests.
  */
 interface Shell32KnownFolders : com.sun.jna.Library {
     /** `SHGetKnownFolderPath(rfid, dwFlags, hToken, ppwszPath)` → HRESULT (0 = S_OK). */
     fun SHGetKnownFolderPath(
-        rfid: UUID,
+        rfid: Guid.GUID,
         dwFlags: Int,
         hToken: Pointer?,
         ppwszPath: PointerByReference,
@@ -79,7 +79,7 @@ class JnaWindowsKnownFolderResolver : WindowsKnownFolderResolver {
     private fun resolve(folderId: UUID): Path {
         val out = PointerByReference()
         val hr = try {
-            shell32.SHGetKnownFolderPath(folderId, KFO_FLAGS_NONE, null, out)
+            shell32.SHGetKnownFolderPath(Guid.GUID(folderId.toString()), KFO_FLAGS_NONE, null, out)
         } catch (e: Throwable) {
             throw IllegalStateException(
                 "SHGetKnownFolderPath($folderId) failed to invoke: ${e.javaClass.simpleName}: ${e.message}",

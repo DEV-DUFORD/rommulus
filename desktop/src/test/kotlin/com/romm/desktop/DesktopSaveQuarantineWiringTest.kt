@@ -44,8 +44,7 @@ class DesktopSaveQuarantineWiringTest {
         const val ROM_HASH = "abc123hash"
         const val GEN = 1_700_000_000_000L
 
-        /** SavePathPolicy sanitizes '/' and '\' to '_' — the scope key for [ORIGIN]'s save path. */
-        val SERVER_KEY: String = ORIGIN.map { if (it == '/' || it == '\\') '_' else it }.joinToString("")
+        val SERVER_KEY: String = SavePathPolicy.sanitizeSegment(ORIGIN)
 
         val SLOT = SavePathPolicy.AUTOSAVE_SLOT
         val SERVER_BYTES = "server-save-bytes".toByteArray()

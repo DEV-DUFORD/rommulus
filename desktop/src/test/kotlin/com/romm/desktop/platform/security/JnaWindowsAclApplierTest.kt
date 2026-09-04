@@ -165,6 +165,20 @@ class JnaWindowsAclApplierTest {
         var setSecurityInfoObjectType: Int? = null
         var setSecurityInfoInfo: Int? = null
 
+        override fun OpenProcessToken(
+            process: Pointer,
+            desiredAccess: Int,
+            token: PointerByReference,
+        ): Boolean = error("not used by applySddlTo")
+
+        override fun GetTokenInformation(
+            token: Pointer,
+            infoClass: Int,
+            buffer: Pointer?,
+            length: Int,
+            returnLength: IntByReference,
+        ): Boolean = error("not used by applySddlTo")
+
         override fun ConvertSidToStringSidW(sid: Pointer, stringSid: PointerByReference): Boolean =
             error("not used by applySddlTo")
 
@@ -215,20 +229,6 @@ class JnaWindowsAclApplierTest {
         var createFileFlags: Int? = null
 
         override fun GetCurrentProcess(): Pointer = Memory(1)
-
-        override fun OpenProcessToken(
-            process: Pointer,
-            desiredAccess: Int,
-            token: PointerByReference,
-        ): Boolean = error("not used by applySddlTo")
-
-        override fun GetTokenInformation(
-            token: Pointer,
-            infoClass: Int,
-            buffer: Pointer?,
-            length: Int,
-            returnLength: IntByReference,
-        ): Boolean = error("not used by applySddlTo")
 
         override fun CreateFileW(
             name: WString,

@@ -365,6 +365,7 @@ if(WIN32)
     target_link_libraries(test_windows_process_control PRIVATE kernel32)
     romm_apply_warning_flags(test_windows_process_control)
     add_test(NAME test_windows_process_control COMMAND test_windows_process_control)
+    set_tests_properties(test_windows_process_control PROPERTIES TIMEOUT 30)
 
     # Win32 health-metrics slice (Phase 2, plans/WINDOWS_IMPL.md section
     # 5.1): processHealth() sanity against the live GetProcessMemoryInfo API

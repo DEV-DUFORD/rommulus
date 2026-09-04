@@ -75,8 +75,15 @@ object SavePathPolicy {
      * path by a raw origin/username (e.g. the desktop save-status lookup)
      * must apply this too — an unsanitized query can never match.
      */
-    fun sanitizeSegment(segment: String): String =
-        segment.map { c -> if (c == '/' || c == '\\' || c == '\u0000') '_' else c }
+    fun sanitizeSegment(segment: String): String {
+        val windows = File.separatorChar == '\\'
+        return segment.map { c ->
+            val forbiddenOnWindows = windows && (c < ' ' || c in "<>:\"|?*")
+            if (c == '/' || c == '\\' || c == '\u0000' || forbiddenOnWindows) '_' else c
+        }
             .joinToString("")
             .let { if (it == "." || it == "..") "_" else it }
+            .let { if (windows) it.trimEnd(' ', '.') else it }
+            .ifEmpty { "_" }
+    }
 }

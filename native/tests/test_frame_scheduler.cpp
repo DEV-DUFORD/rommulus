@@ -64,11 +64,12 @@ void testDriftRecovery() {
     // (sleep_until never wakes early, so this bound is CI-safe.)
     CHECK(ms >= 5.0);
 
-    // The reset deadline must be one frame step in the future (16.67ms step
-    // minus the ~6ms delay already slept), not left stale in the past.
-    const auto delta = sched.nextFrameTime() - steady_clock::now();
-    CHECK(delta > milliseconds(1));
-    CHECK(delta <= milliseconds(20));
+    // The reset deadline must be one frame step after the recovery call began.
+    // Compare against the captured start rather than "now": Windows' default
+    // timer quantum can overshoot the 6ms sleep past the deadline.
+    const auto resetStep = sched.nextFrameTime() - start;
+    CHECK(resetStep >= milliseconds(15));
+    CHECK(resetStep <= milliseconds(20));
 }
 
 void testBoundedCatchUp() {
@@ -92,7 +93,7 @@ void testExpensiveFrameClampsDelayToZero() {
     auto start = steady_clock::now();
     sched.waitForNextFrame();
     const double ms = elapsedMs(start);
-    CHECK(ms < 30.0);
+    CHECK(ms < 50.0);
 }
 
 }  // namespace

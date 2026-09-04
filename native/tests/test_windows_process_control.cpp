@@ -203,13 +203,13 @@ int main() {
 
     // --- Child mode dispatch (the parent spawns us with one of these). ----
     const std::vector<std::wstring> args = wideArgs();
-    if (args.size() == 2 && args[0] == L"--watchdog-cycles") {
-        return runWatchdogCyclesChild(args[1]);
+    if (args.size() == 3 && args[1] == L"--watchdog-cycles") {
+        return runWatchdogCyclesChild(args[2]);
     }
-    if (args.size() == 2 && args[0] == L"--watchdog-disarm") {
-        return runWatchdogDisarmChild(args[1]);
+    if (args.size() == 3 && args[1] == L"--watchdog-disarm") {
+        return runWatchdogDisarmChild(args[2]);
     }
-    if (args.size() == 1 && args[0] == L"--watchdog-deadlock") {
+    if (args.size() == 2 && args[1] == L"--watchdog-deadlock") {
         return runWatchdogDeadlockChild();
     }
 

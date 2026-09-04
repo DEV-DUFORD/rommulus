@@ -1,5 +1,6 @@
 package com.romm.desktop.platform.security
 
+import com.romm.desktop.storage.sqlite.SqliteDatabase
 import org.junit.jupiter.api.extension.AfterEachCallback
 import org.junit.jupiter.api.extension.BeforeEachCallback
 import org.junit.jupiter.api.extension.ExtensionContext
@@ -63,11 +64,17 @@ object TestFileSecurityPolicy : FileSecurityPolicy {
  */
 class TestFileSecurityPolicyExtension : BeforeEachCallback, AfterEachCallback {
 
+    private val openedDatabases = mutableListOf<SqliteDatabase>()
+
     override fun beforeEach(context: ExtensionContext) {
         FileSecurityPolicies.testPolicyOverride = TestFileSecurityPolicy
+        SqliteDatabase.databaseOpenedHook = { database -> openedDatabases += database }
     }
 
     override fun afterEach(context: ExtensionContext) {
+        SqliteDatabase.databaseOpenedHook = null
+        openedDatabases.asReversed().forEach(SqliteDatabase::close)
+        openedDatabases.clear()
         FileSecurityPolicies.testPolicyOverride = null
     }
 }

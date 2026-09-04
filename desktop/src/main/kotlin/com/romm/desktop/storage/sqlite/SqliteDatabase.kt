@@ -138,6 +138,9 @@ class SqliteDatabase private constructor(
         private const val MIGRATIONS_RESOURCE_DIR = "db/migrations"
         private val MIGRATION_FILE_NAME = Regex("^V(\\d+)__[^/]+\\.sql$")
 
+        @Volatile
+        internal var databaseOpenedHook: ((SqliteDatabase) -> Unit)? = null
+
         /** Opens [path], applies any pending classpath migrations, and returns the ready database. */
         fun open(path: Path): Result<SqliteDatabase> = open(path, discoverClasspathMigrations())
 
@@ -171,7 +174,10 @@ class SqliteDatabase private constructor(
                     securityPolicy.hardenFile(dbPath, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.SENSITIVE)
                 }
                 val appliedVersion = SqliteMigrationRunner(dbPath).apply(connection, migrations)
-                SqliteDatabase(dbPath, connection, securityPolicy).also { it._schemaVersion = appliedVersion }
+                SqliteDatabase(dbPath, connection, securityPolicy).also {
+                    it._schemaVersion = appliedVersion
+                    databaseOpenedHook?.invoke(it)
+                }
             } catch (e: Exception) {
                 runCatching { connection.close() }
                 throw e

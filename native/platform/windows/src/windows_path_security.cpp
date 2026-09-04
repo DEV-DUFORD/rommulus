@@ -406,12 +406,9 @@ RequestFileStatus requestFileSecurity(const std::string& path) {
         const auto* header = static_cast<const ACE_HEADER*>(ace);
         if (header->AceType == ACCESS_ALLOWED_ACE_TYPE) {
             const auto* allowed = static_cast<const ACCESS_ALLOWED_ACE*>(ace);
-            // SidStart is a byte offset from the ACE start to the ACE's SID
-            // — the comparator needs the SID itself, not the offset. PSID is
-            // a non-const void* in both the SDK and MinGW, so the offset is
-            // applied to the (non-const) ACE pointer GetAce returned.
-            const PSID aceSid =
-                reinterpret_cast<PSID>(reinterpret_cast<BYTE*>(ace) + allowed->SidStart);
+            // SidStart is the first DWORD of the variable-length SID stored
+            // inline in ACCESS_ALLOWED_ACE, not an offset value.
+            const PSID aceSid = reinterpret_cast<PSID>(&allowed->SidStart);
             if ((allowed->Mask & kWriteMask) != 0 && EqualSid(aceSid, everyoneSid) != 0) {
                 LocalFree(everyoneSid);
                 LocalFree(daclSd);

@@ -78,8 +78,7 @@ class DesktopSaveSyncWiringTest {
         /** FakeRomContentStager's default staged payload (the pinned content hash). */
         val ROM_HASH: String = sha256Hex("fake-rom-content".toByteArray())
 
-        /** SavePathPolicy sanitizes '/' and '\' to '_' — the scope key for [ORIGIN]'s save path. */
-        val SERVER_KEY: String = ORIGIN.map { if (it == '/' || it == '\\') '_' else it }.joinToString("")
+        val SERVER_KEY: String = SavePathPolicy.sanitizeSegment(ORIGIN)
     }
 
     private data class Wired(

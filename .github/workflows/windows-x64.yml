@@ -419,6 +419,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$PWD/native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$SDL_PREFIX" \
+            -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
             -DSDL_SHARED=ON \
             -DSDL_STATIC=OFF \
             -DSDL_TESTS=OFF
