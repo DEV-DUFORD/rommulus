@@ -11,6 +11,7 @@
 #include "native/player/validation.h"
 
 #include <fstream>
+#include <filesystem>
 #include <optional>
 #include <sstream>
 
@@ -145,7 +146,7 @@ ValidationOutcome validateRequestFile(const std::string& requestPath,
             break;
     }
 
-    std::ifstream in(requestPath, std::ios::binary);
+    std::ifstream in(std::filesystem::u8path(requestPath), std::ios::binary);
     if (!in) return fail("cannot open request file: " + requestPath);
     std::ostringstream buffer;
     buffer << in.rdbuf();
