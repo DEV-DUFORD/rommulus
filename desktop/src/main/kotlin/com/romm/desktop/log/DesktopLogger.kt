@@ -4,12 +4,15 @@
  */
 package com.romm.desktop.log
 
+import com.romm.androidtv.storage.AppPaths
+import com.romm.androidtv.storage.logsDir
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import java.io.File
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.nio.file.attribute.PosixFilePermission
-import java.nio.file.attribute.PosixFilePermissions
 import java.util.logging.FileHandler
 import java.util.logging.Level
 import java.util.logging.Logger
@@ -20,8 +23,10 @@ import java.util.logging.Logger
  * Configuration (tunable via the named constants below):
  *  - One active log file + [backupCount] rotated files, each ≤ [maxBytes] bytes.
  *  - Every record passes through [TokenRedactor.redact] before hitting the file or stderr.
- *  - Files are created under [AppPaths.stateDir]`/logs` (or `~/.local/state/rommulus/logs`).
- *  - Log files are created with mode 0600 (owner read/write only).
+ *  - Files are created under the explicitly installed log directory: production startup calls
+ *    [install] with `AppPaths.logsDir()` (state dir + "logs"); until then [get] falls back to
+ *    the historical XDG default `~/.local/state/rommulus/logs`.
+ *  - The logs directory is created user-only (0700 on Linux) through the file-security policy.
  *
  * **Note to maintainers:** this is intentionally a tiny shim around JUL. The test suite exercises
  * it through [newLogger]; production code can swap the implementation later without touching call
@@ -35,33 +40,50 @@ object DesktopLogger {
     const val LOGGER_NAME: String = "com.romm.desktop"
     val LOG_FILE_NAME: String = "romm-desktop.log"
 
-    /** Per §9 LINUX_X64.md: logs dir uses user-only write permissions (0700). */
-    private val LOGS_DIR_PERMISSIONS: Set<PosixFilePermission> = setOf(
-        PosixFilePermission.OWNER_READ,
-        PosixFilePermission.OWNER_WRITE,
-        PosixFilePermission.OWNER_EXECUTE,
-    )
-
     /** Default log directory (XDG state + "rommulus"/logs). Used when no AppPaths is available. */
     private fun defaultLogsDir(): Path =
         Paths.get(System.getProperty("user.home"), ".local", "state", "rommulus", "logs")
 
     /**
-     * Create a fully configured Logger bound to [logsDir] (or default).
+     * Explicitly install (or reconfigure) the shared desktop logger to write under [logsDir]
+     * (plans/WINDOWS_IMPL.md §4.4). Existing handlers are closed and replaced safely, so this is
+     * idempotent and may be called again to move logging to a new directory. Startup calls this
+     * with `AppPaths.logsDir()` before ordinary logging begins; the logs directory is created
+     * user-only when absent (0700 on Linux, containment + ACL on Windows).
+     *
+     * Install-before-first-get: this also sets/replaces [Holder.instance], so a later [get]
+     * serves the installed logger and its directory even when [get] has never been called
+     * before [install] (the real startup order in `Main`).
+     */
+    fun install(logsDir: Path): Logger {
+        val logger = newLogger(logsDir)
+        Holder.instance = logger
+        return logger
+    }
+
+    /** Install from an [AppPaths]: logs resolve under its state dir (`state/logs`). */
+    fun install(appPaths: AppPaths): Logger = install(appPaths.logsDir())
+
+    /**
+     * Create a fully configured Logger bound to [logsDir] (or the historical default).
      *
      * The returned Logger must not be logged through before the caller invokes [install] (or uses
      * the result directly). Returned Logger instance is thread-safe once installed.
      */
-    fun newLogger(logsDir: Path? = null): Logger {
+    fun newLogger(
+        logsDir: Path? = null,
+        securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
+    ): Logger {
         val logDir = (logsDir ?: defaultLogsDir()).toFile()
         if (!logDir.exists()) {
-            Files.createDirectories(logDir.toPath())
-            try {
-                Files.setPosixFilePermissions(logDir.toPath(), LOGS_DIR_PERMISSIONS)
-            } catch (_: UnsupportedOperationException) {
-                // Non-POSIX filesystems (e.g., Windows, FAT) don't support
-                // PosixFilePermissions — permissions are not enforced.
-            }
+            // Create-only hardening; 0700 on Linux per §9 LINUX_X64.md. Logs carry session and
+            // diagnostic data, so the directory is SENSITIVE: a filesystem that cannot establish
+            // user-only security fails explicitly instead of proceeding silently.
+            securityPolicy.createDirectoryIfAbsent(
+                logDir.toPath(),
+                PathPermissionProfile.USER_ONLY_DIRECTORY,
+                FileSensitivity.SENSITIVE,
+            )
         }
         // append=true: active log is `romm-desktop.log`; rotated files are `romm-desktop.log.1`,
         // `romm-desktop.log.2`, etc. (no `.0` suffix on the active file).
@@ -94,17 +116,28 @@ object DesktopLogger {
         return logger
     }
 
-    /** Convenience singleton accessor. Idempotent. */
-    fun get(): Logger = Holder.instance
+    /**
+     * Convenience singleton accessor. Idempotent. Before any [install], the first [get] falls
+     * back to the historical default directory (and remembers the result in [Holder]).
+     */
+    fun get(): Logger = Holder.instance ?: newLogger().also { Holder.instance = it }
 
     /** Marker type so callers can plug in their own AppPaths if needed (placeholder for Phase 6). */
     fun interface LogDirectoryProvider {
         fun resolveLogsDir(): Path
     }
 
-    /** Holder: eager, thread-safe singleton. */
+    /**
+     * Holder: thread-safe singleton slot. [instance] stays null until the first [install] or
+     * [get] — deliberately NOT eagerly initialized: an eager `newLogger()` would reconfigure
+     * the shared logger to the default directory the moment the slot is first touched,
+     * clobbering an [install] that ran just before the first [get] (the real startup order).
+     * [install] sets/replaces the slot; a concurrent first [get] is harmless because
+     * [newLogger] always returns the same shared JUL logger.
+     */
     private object Holder {
-        val instance: Logger = newLogger()
+        @Volatile
+        var instance: Logger? = null
     }
 }
 

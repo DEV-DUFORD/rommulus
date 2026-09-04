@@ -24,7 +24,6 @@ import com.romm.desktop.ui.components.DesktopTextField
 import com.romm.desktop.ui.components.ErrorBanner
 import com.romm.desktop.ui.components.LocalRommulusColors
 import com.romm.desktop.ui.components.LoadingIndicator
-import com.romm.desktop.ui.input.openSteamVirtualKeyboard
 import com.romm.desktop.ui.navigation.LocalFocusNavigator
 import com.romm.desktop.ui.navigation.focusableItem
 import com.romm.desktop.ui.navigation.keyboardShortcuts
@@ -72,7 +71,7 @@ fun SearchScreen(
             modifier = Modifier.focusableItem(
                 key = "search:query",
                 navigator = navigator,
-                onActivate = { openSteamVirtualKeyboard() },
+                onActivate = { coordinator.virtualKeyboardLauncher.launch() },
             ),
         )
 

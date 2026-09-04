@@ -1,12 +1,15 @@
 package com.romm.desktop.storage.sqlite
 
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import java.nio.channels.FileChannel
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
-import java.nio.file.attribute.PosixFilePermission
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
@@ -43,6 +46,7 @@ class MigrationFailedException(message: String, cause: Throwable? = null) : Runt
 class SqliteDatabase private constructor(
     val path: Path,
     val connection: Connection,
+    private val securityPolicy: FileSecurityPolicy,
 ) : AutoCloseable {
 
     @Volatile
@@ -141,12 +145,20 @@ class SqliteDatabase private constructor(
          * Opens [path] with an explicit migration list (test seam; production uses the classpath).
          * On failure the prior DB file is restored from the pre-migration backup and the
          * connection is closed; callers must treat a failed result as "refuse writable startup".
+         *
+         * The database and its parent directory are hardened user-only (0700/0600 on Linux)
+         * through [securityPolicy] — the database holds sensitive local data, so a filesystem
+         * that cannot establish that security fails explicitly (plans/WINDOWS_IMPL.md §4.2).
          */
-        fun open(path: Path, migrations: List<Migration>): Result<SqliteDatabase> = runCatching {
+        fun open(
+            path: Path,
+            migrations: List<Migration>,
+            securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
+        ): Result<SqliteDatabase> = runCatching {
             val dbPath = path.toAbsolutePath().normalize()
             dbPath.parent?.let { parent ->
-                Files.createDirectories(parent)
-                parent.applyOwnerOnlyDirectoryPermissions()
+                // Create + always re-apply (historical behavior): user-only directory.
+                securityPolicy.ensureDirectory(parent, PathPermissionProfile.USER_ONLY_DIRECTORY, FileSensitivity.SENSITIVE)
             }
             val connection = DriverManager.getConnection("jdbc:sqlite:$dbPath")
             try {
@@ -155,9 +167,11 @@ class SqliteDatabase private constructor(
                     st.execute("PRAGMA foreign_keys = ON")
                     st.execute("PRAGMA busy_timeout = 5000")
                 }
-                if (Files.exists(dbPath)) dbPath.applyOwnerOnlyFilePermissions()
+                if (Files.exists(dbPath)) {
+                    securityPolicy.hardenFile(dbPath, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.SENSITIVE)
+                }
                 val appliedVersion = SqliteMigrationRunner(dbPath).apply(connection, migrations)
-                SqliteDatabase(dbPath, connection).also { it._schemaVersion = appliedVersion }
+                SqliteDatabase(dbPath, connection, securityPolicy).also { it._schemaVersion = appliedVersion }
             } catch (e: Exception) {
                 runCatching { connection.close() }
                 throw e
@@ -222,7 +236,10 @@ class SqliteDatabase private constructor(
  * whose `user_version` exceeds the latest known migration is rejected outright: migrations
  * are forward-only.
  */
-internal class SqliteMigrationRunner(private val path: Path) {
+internal class SqliteMigrationRunner(
+    private val path: Path,
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
+) {
 
     private val backupFile: Path get() = path.resolveSibling(path.fileName.toString() + ".bak")
 
@@ -274,7 +291,7 @@ internal class SqliteMigrationRunner(private val path: Path) {
         } catch (e: AtomicMoveNotSupportedException) {
             Files.move(tmp, backupFile, StandardCopyOption.REPLACE_EXISTING)
         }
-        backupFile.applyOwnerOnlyFilePermissions()
+        securityPolicy.hardenFile(backupFile, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.SENSITIVE)
     }
 
     private fun restoreFromBackup() {
@@ -401,23 +418,3 @@ internal fun splitSqlStatements(sql: String): List<String> {
     if (tail.isNotEmpty()) statements.add(tail)
     return statements
 }
-
-private fun applyPosixPermissions(target: Path, permissions: Set<PosixFilePermission>) {
-    runCatching {
-        if (target.fileSystem.supportedFileAttributeViews().contains("posix")) {
-            Files.setPosixFilePermissions(target, permissions)
-        }
-    }
-}
-
-/** User-only directory permissions (0700); best-effort on non-POSIX filesystems (§9 rule 4). */
-internal fun Path.applyOwnerOnlyDirectoryPermissions() = applyPosixPermissions(
-    this,
-    setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE),
-)
-
-/** User-only file permissions (0600); best-effort on non-POSIX filesystems (§9 rule 4). */
-internal fun Path.applyOwnerOnlyFilePermissions() = applyPosixPermissions(
-    this,
-    setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
-)

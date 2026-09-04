@@ -8,7 +8,7 @@
     "linuxSupportManifest": "docs/linux-support-manifest.md"
   },
   "notes": [
-    "One entry per Linux-enabled core (14 total: test_core + 13 production cores). 'enabled' and 'linuxGateStatus' are copied from docs/linux-support-manifest.md; provenance fields (upstream, commit, license, systems/extensions/firmware, ABIs) are copied from CoreManifest.kt.",
+    "One entry per Linux-enabled core (16 total: test_core + 15 production cores). 'enabled' and 'linuxGateStatus' are copied from docs/linux-support-manifest.md; provenance fields (upstream, commit, license, systems/extensions/firmware, ABIs) are copied from CoreManifest.kt.",
     "binaryChecksums records the Android ABI checksums pinned in CoreManifest.kt. The linux-x86_64 entry is null until Phase 14 pins Linux .so checksums; at package time packaging/build-tarball.sh computes and asserts every shipped file against share/rommulus/PACKAGE.sha256.",
     "Per §13.1, Android checksums and build commands are never overwritten by the Linux build identity."
   ],
@@ -367,7 +367,7 @@
       "license": {
         "summary": "The core is licensed under MPL-2.0 (file-level weak copyleft, no non-commercial restriction). Vendored subcomponents in the compiled subset: inih (BSD-3-Clause), crc32 by Gary S. Brown (Public Domain), MurmurHash3 by Austin Appleby (Public Domain). Two data-only files (hle-bios.c, gbk-table.c) carry no per-file license header and are covered by the project-level MPL-2.0 LICENSE. No GPL-incompatible or non-commercial-restricted components found in the compiled subset. GBA content launches without external BIOS via built-in HLE implementation; GB/GBC boot without BIOS (no hardware BIOS exists for those platforms).",
         "commercialUseFinding": "PERMISSIVE_OR_COPYLEFT_OK",
-        "sourceOfferSatisfied": false,
+        "sourceOfferSatisfied": true,
         "attributionSatisfied": false,
         "reviewedBy": "DEV-DUFORD",
         "reviewedOn": "2026-07-31"

@@ -1,18 +1,23 @@
 // test_atomic_file_store.cpp — write-temp/fsync/rename durable writes and
 // exact-size reads: round-trip, atomic rename (no .tmp leftover),
-// overwrite, size-mismatch rejection, missing files, empty files, and
-// failed writes leaving the original intact.
+// overwrite, size-mismatch rejection, missing files, empty files, failed
+// writes leaving the original intact, and multi-byte UTF-8 file names.
 #include "atomic_file_store.h"
 
 #include "romm_test.h"
 
+// Cross-platform by construction: the temp-directory, existence/size, and
+// cleanup helpers below use only C++17 <filesystem>, so this test is
+// source-ready on Win32 (it compiles under the MinGW-w64 UCRT64 toolchain)
+// even though it only *runs* once windows_path_security lands — see the
+// platform-selection note in native/tests/CMakeLists.txt. On POSIX the same
+// <filesystem> calls are byte-exact, so UNIX coverage is unchanged.
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <stdlib.h>  // mkdtemp on Linux/glibc
-#include <unistd.h>  // mkdtemp on macOS/BSD
+#include <filesystem>
 #include <string>
-#include <sys/stat.h>
 #include <vector>
 
 using romm::atomicWriteFile;
@@ -21,24 +26,38 @@ using romm::readWholeFile;
 
 namespace {
 
+// Creates a fresh, uniquely-named temp directory and returns it as a native
+// string. std::filesystem::temp_directory_path() is the portable replacement
+// for the hard-coded "/tmp/...XXXXXX" mkdtemp template: on POSIX it resolves
+// to $TMPDIR (or /tmp), on Win32 to %TEMP%. The name is ASCII (a steady_clock
+// tick plus a process counter) so no wide-path boundary is involved in
+// creating the directory itself; the per-test file names — including the
+// multi-byte UTF-8 one — are what exercise each platform's path handling.
 std::string makeTempDir() {
-    char templatePath[] = "/tmp/romm_engine_test_XXXXXX";
-    if (mkdtemp(templatePath) == nullptr) {
-        std::fprintf(stderr, "fatal: mkdtemp failed\n");
+    namespace fs = std::filesystem;
+    static std::atomic<unsigned long> sequence{0};
+    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path dir = fs::temp_directory_path() /
+        ("romm_engine_test_" + std::to_string(static_cast<long long>(ticks)) + "_" +
+         std::to_string(sequence.fetch_add(1)));
+    std::error_code ec;
+    if (!fs::create_directories(dir, ec) || !fs::is_directory(dir, ec)) {
+        std::fprintf(stderr, "fatal: could not create temp dir\n");
         std::exit(2);
     }
-    return templatePath;
+    return dir.string();
 }
 
 bool fileExists(const std::string& path) {
-    struct stat st {};
-    return stat(path.c_str(), &st) == 0;
+    std::error_code ec;
+    return std::filesystem::exists(path, ec);
 }
 
 long fileSize(const std::string& path) {
-    struct stat st {};
-    if (stat(path.c_str(), &st) != 0) return -1;
-    return static_cast<long>(st.st_size);
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec) return -1;  // missing/unreadable: mirror the old stat() == -1 case
+    return static_cast<long>(size);
 }
 
 std::vector<uint8_t> pattern(size_t size, int seed) {
@@ -129,6 +148,25 @@ void testReadWholeFile(const std::string& dir) {
     CHECK(whole == data);
 }
 
+void testUnicodePath(const std::string& dir) {
+    // Multi-byte UTF-8 file names ("séve-😀.bin") must round-trip: on POSIX
+    // the name passes through as bytes; on Win32 it crosses the strict
+    // UTF-8 -> UTF-16 boundary (Phase 2, plans/WINDOWS_IMPL.md section 5.5).
+    const std::string path = dir + "/s\xc3\xa9ve-\xF0\x9F\x98\x80.bin";
+    const auto data = pattern(64, 7);
+    CHECK(atomicWriteFile(path, data.data(), data.size()));
+    CHECK(fileExists(path));
+    CHECK(!fileExists(path + ".tmp"));  // rename happened; no temp leftover
+
+    std::vector<uint8_t> back(64, 0);
+    CHECK(readFileExact(path, back.data(), back.size()));
+    CHECK(back == data);
+
+    std::vector<uint8_t> whole;
+    CHECK(readWholeFile(path, whole));
+    CHECK(whole == data);
+}
+
 }  // namespace
 
 int main() {
@@ -140,15 +178,13 @@ int main() {
     testFailedWriteLeavesOriginalIntact(dir);
     testEmptyFile(dir);
     testReadWholeFile(dir);
+    testUnicodePath(dir);
 
-    // Best-effort cleanup.
-    std::remove((dir + "/save.bin").c_str());
-    std::remove((dir + "/sized.bin").c_str());
-    std::remove((dir + "/overwrite.bin").c_str());
-    std::remove((dir + "/guarded.bin").c_str());
-    std::remove((dir + "/empty.bin").c_str());
-    std::remove((dir + "/whole.bin").c_str());
-    std::remove(dir.c_str());
+    // Best-effort cleanup of the whole temp tree (cross-platform; replaces
+    // the former per-file std::remove + directory-remove sequence and also
+    // covers the multi-byte UTF-8 file name without spelling it again).
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 
     return rommtest::finish("test_atomic_file_store");
 }

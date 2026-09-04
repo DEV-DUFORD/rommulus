@@ -3,6 +3,8 @@ package com.romm.desktop.storage.contentindex
 import com.romm.androidtv.storage.ports.ContentIndexStore
 import com.romm.androidtv.storage.records.ContentIndexRecord
 import com.romm.desktop.player.AtomicFileIo
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.KotlinJsonAdapterFactory
 import com.squareup.moshi.Moshi
@@ -109,7 +111,13 @@ class JsonContentIndexStore(
         val dir = indexPath.parent
         try {
             if (dir != null) Files.createDirectories(dir)
-            AtomicFileIo.writeAtomically(indexPath, json.toByteArray(UTF_8), AtomicFileIo.FILE_USER_ONLY)
+            // Rebuildable cache index: user-only file (0600 on Linux), non-sensitive.
+            AtomicFileIo.writeAtomically(
+                indexPath,
+                json.toByteArray(UTF_8),
+                PathPermissionProfile.USER_ONLY_FILE,
+                FileSensitivity.NORMAL,
+            )
         } catch (e: Exception) {
             logger.log(Level.WARNING, "Content index persist to $indexPath failed; keeping in-memory state", e)
         }

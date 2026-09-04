@@ -380,6 +380,16 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
         // -------------------------------------------------------------------
 
         case RETRO_ENVIRONMENT_SET_HW_RENDER: {
+#ifdef ROMM_WIN32_SOFTWARE_ONLY
+            // Fail closed (ROMM_WIN32_SOFTWARE_ONLY, the temporary pre-ANGLE
+            // Windows boundary): this build has no hardware render context,
+            // so the request is rejected for every context type instead of
+            // being silently downgraded. The core's own initialization fails
+            // on the rejection and the launch is reported as failed.
+            LOGW("SET_HW_RENDER rejected: ROMM_WIN32_SOFTWARE_ONLY build has "
+                 "no hardware render context");
+            return false;
+#else
             auto* cb = static_cast<struct retro_hw_render_callback*>(data);
             if (cb == nullptr) return false;
 
@@ -409,9 +419,17 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
                  hwRenderCallback_.version_major,
                  hwRenderCallback_.version_minor);
             return true;
+#endif
         }
 
         case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
+#ifdef ROMM_WIN32_SOFTWARE_ONLY
+            // Fail closed (ROMM_WIN32_SOFTWARE_ONLY): no render context exists
+            // in this build; never hand out an interface.
+            LOGW("GET_HW_RENDER_INTERFACE rejected: ROMM_WIN32_SOFTWARE_ONLY "
+                 "build has no hardware render context");
+            return false;
+#else
             // GLideN64/glsm may query this after SET_HW_RENDER to obtain the
             // render context and proc-address function. The core casts the
             // base struct to the ES-specific OpenGlEsHwRenderInterface layout.
@@ -443,6 +461,7 @@ bool EnvironmentHandler::handle(unsigned cmd, void* data) {
             *interface = reinterpret_cast<struct retro_hw_render_interface*>(&hwRenderInterface_);
             LOGI("GET_HW_RENDER_INTERFACE: returning ES interface (version 1)");
             return true;
+#endif
         }
 
         case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {

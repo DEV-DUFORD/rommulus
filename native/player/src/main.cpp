@@ -9,19 +9,14 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
-#include <sys/file.h>
-#include <sys/param.h>
-#include <sys/stat.h>
-#include <sys/resource.h>
-#include <fcntl.h>
-#include <pwd.h>
-#include <unistd.h>
-
-#include <atomic>
+// No OS headers here (Phase 2 step 1, plans/WINDOWS_IMPL.md section 5.1):
+// every platform operation — dynamic loading, path security, session lock,
+// home/XDG roots, executable location, signals/watchdog/re-exec, and health
+// metrics — goes through the narrow contracts in native/player/include/,
+// whose implementations are selected per platform at configure time under
+// native/platform/{posix,windows}/src/ (this file names no platform type).
 #include <cerrno>
 #include <chrono>
-#include <cerrno>
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -44,14 +39,20 @@
 #include "native/player/binding_capture.h"
 #include "native/player/binding_sidecar.h"
 #include "native/player/display_geometry.h"
+#include "native/player/dynamic_library_factory.h"
+#include "native/player/hardware_core.h"
+#include "native/player/health_metrics.h"
 #include "native/player/keyboard_binding_sidecar.h"
 #include "native/player/pause_menu.h"
 #include "native/player/pause_overlay.h"
+#include "native/player/path_security.h"
+#include "native/player/platform_paths.h"
+#include "native/player/process_control.h"
 #include "native/player/presentation_dirty_state.h"
 #include "native/player/protocol.h"
 #include "native/player/save_metadata.h"
+#include "native/player/session_lock.h"
 #include "native/player/sdl_audio_sink.h"
-#include "native/player/sdl_dynamic_library.h"
 #include "native/player/sdl_hardware_context.h"
 #include "native/player/sdl_input.h"
 #include "native/player/sdl_log_sink.h"
@@ -61,25 +62,10 @@
 
 namespace {
 
-// SIGTERM/SIGINT flip this flag; the main loop checks it once per frame.
-// The handler does nothing else (async-signal-safe by construction).
-std::atomic<bool> g_signal_flag{false};
-
-// The fd backing <stateRoot>/<sessionId>.lock, held open for the process
-// lifetime so the flock survives until exit (the kernel releases the lock
-// when the fd is closed at termination). Intentionally never closed.
-// The .lock FILE itself is likewise left in stateRoot on purpose: the lock
-// is kernel-held via this open fd, so unlinking the file would race with
-// another process trying to create/flock the same name (it could steal our
-// session id or deadlock behind a stale inode). Do NOT unlink it.
-int g_sessionLockFd = -1;
-
-void signalHandler(int) { g_signal_flag.store(true, std::memory_order_relaxed); }
-
-// Teardown can block inside an uncooperative core or its dependencies. The
-// result is committed before teardown starts, so this process-level timeout
-// can terminate safely without leaving the desktop supervisor waiting.
-void teardownTimeoutHandler(int) { ::_exit(0); }
+// Termination signaling (SIGTERM/SIGINT flag), the session lock, and the
+// teardown watchdog live behind process_control.h / session_lock.h; the
+// POSIX implementations retain the original semantics verbatim (async-
+// signal-safe flag handler, process-lifetime flock fd, _exit(0) alarm).
 
 #ifndef ROMM_STEAM_DECK_PLAYER
 // Rasterizes PauseOverlay off-window into RGBA8888 pixels for hardware-
@@ -171,25 +157,13 @@ constexpr romm::player::PadAxis kAllPadAxes[romm::player::kPadAxisCount] = {
     romm::player::PadAxis::kLeftTrigger, romm::player::PadAxis::kRightTrigger,
 };
 
+// The ROMM_PLAYER_* environment contract is strict UTF-8 on every platform.
+// Read it through the platform path contract (platform_paths.h): POSIX maps
+// that to getenv(); Win32 must use GetEnvironmentVariableW, because the ANSI
+// getenv() decodes through the active code page and would corrupt non-ASCII
+// trusted roots (e.g. a "тест état" state root) on a CP-1252 runner.
 std::string envVar(const char* name) {
-    const char* value = std::getenv(name);
-    return value != nullptr ? value : "";
-}
-
-std::string homeDirectory() {
-    const std::string home = envVar("HOME");
-    if (!home.empty()) return home;
-    const struct passwd* entry = getpwuid(getuid());
-    if (entry != nullptr && entry->pw_dir != nullptr) return entry->pw_dir;
-    return ".";
-}
-
-// XDG base-directory lookup with the standard per-variable default under
-// $HOME.
-std::string xdgHome(const char* name, const std::string& home, const char* relativeDefault) {
-    const std::string value = envVar(name);
-    if (!value.empty()) return value;
-    return home + relativeDefault;
+    return romm::player::utf8EnvironmentVariable(name);
 }
 
 std::string parentDirectory(const std::string& path) {
@@ -199,27 +173,13 @@ std::string parentDirectory(const std::string& path) {
     return path.substr(0, pos);
 }
 
-// Single source of truth for the hardware-rendering core classification:
-// these cores render through the player's SDL-managed OpenGL context
-// (offscreen compositor on Linux, direct framebuffer on Steam Deck) instead
-// of the software video sink. Every hardware-vs-software decision in this
-// file — GL context attributes, SdlHardwareContext creation, the pause-menu
-// present() gate, and the Steam Deck player re-exec — must go through this
-// helper so a new GL core is added in exactly one place.
-bool isHardwareRenderingCore(const std::string& coreId) {
-    return coreId == "mupen64plus_next" || coreId == "dolphin" ||
-           coreId == "lrps2";
-}
-
 std::optional<std::string> dolphinSystemDirectory() {
-    std::error_code pathError;
-    const std::filesystem::path executable =
-        std::filesystem::read_symlink("/proc/self/exe", pathError);
-    if (pathError) return std::nullopt;
+    const auto executable = romm::player::executablePath();
+    if (!executable.has_value()) return std::nullopt;
 
     const std::array<std::filesystem::path, 2> roots = {
-        executable.parent_path() / "share/rommulus",
-        executable.parent_path() / "../share/rommulus",
+        executable->parent_path() / "share/rommulus",
+        executable->parent_path() / "../share/rommulus",
     };
     for (const auto& root : roots) {
         if (std::filesystem::is_directory(root / "dolphin-emu/Sys")) {
@@ -236,14 +196,12 @@ std::optional<std::string> dolphinSystemDirectory() {
 // bin directory or its parent. Returns nullopt when this build does not ship
 // it (the core then falls back to its built-in compatibility database).
 std::optional<std::string> lrps2GameIndexPath() {
-    std::error_code pathError;
-    const std::filesystem::path executable =
-        std::filesystem::read_symlink("/proc/self/exe", pathError);
-    if (pathError) return std::nullopt;
+    const auto executable = romm::player::executablePath();
+    if (!executable.has_value()) return std::nullopt;
 
     const std::array<std::filesystem::path, 2> roots = {
-        executable.parent_path() / "share/rommulus/lrps2/resources",
-        executable.parent_path() / "../share/rommulus/lrps2/resources",
+        executable->parent_path() / "share/rommulus/lrps2/resources",
+        executable->parent_path() / "../share/rommulus/lrps2/resources",
     };
     for (const auto& root : roots) {
         const std::filesystem::path candidate = root / "GameIndex.yaml";
@@ -257,28 +215,25 @@ std::optional<std::string> lrps2GameIndexPath() {
 }
 
 // Builds the TrustedRoots from the ROMM_PLAYER_* environment contract.
-// Every root falls back to an XDG-based default under ~/.local/share,
-// ~/.cache, and ~/.local/state so a manually launched player still has a
-// sane (if narrow) trust policy:
-//   coreRoot  $ROMM_PLAYER_CORE_ROOT   or $XDG_DATA_HOME/rommulus/cores
-//   cacheRoot $ROMM_PLAYER_CACHE_ROOT  or $XDG_CACHE_HOME/rommulus
-//   dataRoot  $ROMM_PLAYER_DATA_ROOT   or $XDG_DATA_HOME/rommulus
-//   stateRoot $ROMM_PLAYER_STATE_ROOT  or $XDG_STATE_HOME/rommulus
+// Every root falls back to a platform default (XDG-based under
+// ~/.local/share, ~/.cache, and ~/.local/state on POSIX) so a manually
+// launched player still has a sane (if narrow) trust policy:
+//   coreRoot  $ROMM_PLAYER_CORE_ROOT   or the platform core-root default
+//   cacheRoot $ROMM_PLAYER_CACHE_ROOT  or the platform cache-root default
+//   dataRoot  $ROMM_PLAYER_DATA_ROOT   or the platform data-root default
+//   stateRoot $ROMM_PLAYER_STATE_ROOT  or the platform state-root default
 romm::player::TrustedRoots trustedRootsFromEnv() {
     romm::player::TrustedRoots roots;
-    const std::string home = homeDirectory();
-    const std::string dataHome = xdgHome("XDG_DATA_HOME", home, "/.local/share");
-    const std::string cacheHome = xdgHome("XDG_CACHE_HOME", home, "/.cache");
-    const std::string stateHome = xdgHome("XDG_STATE_HOME", home, "/.local/state");
+    const romm::player::DefaultTrustedRoots defaults = romm::player::defaultTrustedRoots();
 
     roots.coreRoot = envVar("ROMM_PLAYER_CORE_ROOT");
-    if (roots.coreRoot.empty()) roots.coreRoot = dataHome + "/rommulus/cores";
+    if (roots.coreRoot.empty()) roots.coreRoot = defaults.coreRoot;
     roots.cacheRoot = envVar("ROMM_PLAYER_CACHE_ROOT");
-    if (roots.cacheRoot.empty()) roots.cacheRoot = cacheHome + "/rommulus";
+    if (roots.cacheRoot.empty()) roots.cacheRoot = defaults.cacheRoot;
     roots.dataRoot = envVar("ROMM_PLAYER_DATA_ROOT");
-    if (roots.dataRoot.empty()) roots.dataRoot = dataHome + "/rommulus";
+    if (roots.dataRoot.empty()) roots.dataRoot = defaults.dataRoot;
     roots.stateRoot = envVar("ROMM_PLAYER_STATE_ROOT");
-    if (roots.stateRoot.empty()) roots.stateRoot = stateHome + "/rommulus";
+    if (roots.stateRoot.empty()) roots.stateRoot = defaults.stateRoot;
 
     // "coreId=revision;coreId=revision" — malformed entries are skipped.
     const std::string allowed = envVar("ROMM_PLAYER_ALLOWED_CORES");
@@ -299,76 +254,15 @@ romm::player::TrustedRoots trustedRootsFromEnv() {
     const std::string expectedHash = envVar("ROMM_PLAYER_EXPECTED_CONTENT_HASH");
     if (!expectedHash.empty()) roots.expectedContentHash = expectedHash;
 
-    // Session lock: try to take an exclusive non-blocking flock on
-    // <stateRoot>/<sessionId>.lock. If another process already holds it,
-    // report the session as active (validation then rejects the request).
-    // Defense in depth: O_NOFOLLOW prevents symlink-based escape, and the
-    // composed lock path is verified to stay inside stateRoot BEFORE it is
-    // opened; a session whose lock path escapes is rejected (reported as
-    // active so the validator refuses to launch).
-    // Canonicalize stateRoot ONCE (resolves symlinks/relative components) so
-    // every containment check compares against the same real absolute path.
-    // If the directory does not exist yet, fall back to the raw value with
-    // any trailing slash stripped — open() below then fails harmlessly on
-    // its own.
+    // Session lock: the platform implementation (session_lock.h) takes an
+    // exclusive non-blocking lock on <stateRoot>/<sessionId>.lock held for
+    // the process lifetime, with fail-closed containment checks against the
+    // canonical state root. If another live player already holds it — or
+    // the lock path cannot be proven inside stateRoot — it reports the
+    // session as active and validation rejects the request.
     const std::string stateRoot = roots.stateRoot;
-    std::string canonicalStateRoot = stateRoot;
-    char resolvedRoot[4096];
-    if (::realpath(stateRoot.c_str(), resolvedRoot) != nullptr) {
-        canonicalStateRoot.assign(resolvedRoot);
-    } else if (!canonicalStateRoot.empty() && canonicalStateRoot.back() == '/') {
-        canonicalStateRoot.pop_back();
-    }
-    roots.sessionActive = [canonicalStateRoot](const std::string& sessionId) -> bool {
-        if (sessionId.empty()) return false;
-        const std::string lockPath = canonicalStateRoot + "/" + sessionId + ".lock";
-        // Containment check BEFORE opening (defense in depth on top of the
-        // sessionId format validation done separately in validateRequest):
-        // the composed path must stay inside the canonical state root.
-        const std::string rootPrefix = canonicalStateRoot + "/";
-        char resolvedLock[4096];
-        if (::realpath(lockPath.c_str(), resolvedLock) != nullptr) {
-            // Path exists: it must resolve back inside the state root (this
-            // catches pre-planted symlinks and any ".." that lands outside).
-            if (std::string(resolvedLock).rfind(rootPrefix, 0) != 0) {
-                std::fprintf(stderr, "warning: session lock for %s escapes the state root; rejecting\n",
-                             sessionId.c_str());
-                return true;
-            }
-        } else if (errno == ENOENT) {
-            // Not present yet: it must be a single path component directly
-            // under the root (no '/', no '.'/'..').
-            const std::string name = sessionId + ".lock";
-            if (name.find('/') != std::string::npos || name == "." || name == "..") {
-                std::fprintf(stderr, "warning: session lock name for %s escapes the state root; rejecting\n",
-                             sessionId.c_str());
-                return true;
-            }
-        } else {
-            // ELOOP/EACCES/... — cannot verify containment; do not open a
-            // path we cannot prove is inside the state root.
-            std::fprintf(stderr, "warning: cannot resolve session lock for %s (%s); rejecting\n",
-                         sessionId.c_str(), std::strerror(errno));
-            return true;
-        }
-        const int fd = ::open(lockPath.c_str(), O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
-        if (fd < 0) {
-            std::fprintf(stderr, "warning: could not create session lock %s: %s\n",
-                         lockPath.c_str(), std::strerror(errno));
-            return false;
-        }
-        if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
-            if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                ::close(fd);
-                return true;  // a live player already owns this session
-            }
-            std::fprintf(stderr, "warning: flock failed on %s: %s\n", lockPath.c_str(),
-                         std::strerror(errno));
-            ::close(fd);
-            return false;
-        }
-        g_sessionLockFd = fd;  // held until process exit (deliberate leak)
-        return false;
+    roots.sessionActive = [stateRoot](const std::string& sessionId) -> bool {
+        return romm::player::sessionActive(stateRoot, sessionId);
     };
 
     return roots;
@@ -467,19 +361,20 @@ int main(int argc, char* argv[]) {
 
 #ifndef ROMM_STEAM_DECK_PLAYER
     if (parsed.has_value() &&
-        isHardwareRenderingCore(parsed->coreId) &&
+        romm::player::isHardwareRenderingCore(parsed->coreId) &&
         romm::player::shouldUseSteamDeckPlayer()) {
-        std::error_code pathError;
-        const std::filesystem::path executable =
-            std::filesystem::read_symlink("/proc/self/exe", pathError);
-        const std::filesystem::path deckPlayer =
-            executable.parent_path() / "rommulus-player-deck";
-        if (!pathError && std::filesystem::exists(deckPlayer)) {
-            ::execv(deckPlayer.c_str(), argv);
-            std::fprintf(
-                stderr, "error: failed to start Steam Deck player: %s\n",
-                std::strerror(errno));
-            return 1;
+        const auto executable = romm::player::executablePath();
+        if (executable.has_value()) {
+            const std::filesystem::path deckPlayer =
+                executable->parent_path() / "rommulus-player-deck";
+            if (std::filesystem::exists(deckPlayer)) {
+                if (!romm::player::reexec(deckPlayer.string(), argc, argv)) {
+                    std::fprintf(
+                        stderr, "error: failed to start Steam Deck player: %s\n",
+                        std::strerror(errno));
+                    return 1;
+                }
+            }
         }
         std::fprintf(stderr, "error: Steam Deck player binary is missing\n");
         return 1;
@@ -508,12 +403,84 @@ int main(int argc, char* argv[]) {
     }
     const romm::player::PlayerRequest request = *parsed;
 
+#ifdef ROMM_PLAYER_QUALIFICATION
+    // Qualification-only presented-frame bound (CI candidate builds, see
+    // native/player/CMakeLists.txt ROMM_PLAYER_QUALIFICATION): when
+    // ROMM_PLAYER_MAX_FRAMES names a positive integer, the main loop exits
+    // cleanly as soon as the presented-frame count (diagnostics().frameCount
+    // — incremented once per presented video frame by the engine's
+    // video-refresh trampoline, i.e. the exact value reported as the
+    // result's `frames` field) reaches it. The exit goes through the normal
+    // shutdown path below: the SRAM checkpoint is written BEFORE session
+    // stop() and exitKind is `completed` (player-initiated — the core never
+    // requested shutdown). Strictly bounded semantics: the main loop polls
+    // far faster than the core's ~16.7 ms frame period, so the reported
+    // frame count lands in [limit, limit + 2] — the safe tolerance the
+    // e2e harness asserts (assert_gambatte_result). Malformed or non-positive
+    // values are ignored with a warning (qualification aid, never a launch
+    // gate). In production builds this whole block is compiled out and the
+    // environment variable has no effect.
+    int64_t qualificationMaxFrames = 0;
+    {
+        const std::string maxFramesEnv = envVar("ROMM_PLAYER_MAX_FRAMES");
+        if (!maxFramesEnv.empty()) {
+            bool valid = maxFramesEnv.size() <= 9;
+            for (const char c : maxFramesEnv) {
+                if (c < '0' || c > '9') {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) {
+                const int64_t value = std::strtoll(maxFramesEnv.c_str(), nullptr, 10);
+                if (value > 0) {
+                    qualificationMaxFrames = value;
+                }
+            }
+            if (qualificationMaxFrames == 0) {
+                std::fprintf(stderr,
+                             "warning: ROMM_PLAYER_MAX_FRAMES=%s is not a positive "
+                             "integer; the qualification frame bound is disabled\n",
+                             maxFramesEnv.c_str());
+            }
+        }
+    }
+    if (qualificationMaxFrames > 0) {
+        std::fprintf(stderr,
+                     "info: qualification frame bound active: %lld presented frames\n",
+                     static_cast<long long>(qualificationMaxFrames));
+    }
+#endif  // ROMM_PLAYER_QUALIFICATION
+
+#ifdef ROMM_WIN32_SOFTWARE_ONLY
+    // Fail closed (ROMM_WIN32_SOFTWARE_ONLY, the temporary pre-ANGLE Windows
+    // boundary): this build has no hardware render context — the GLES3/ANGLE
+    // context source is excluded and only the no-op SdlHardwareContext is
+    // linked — so a core classified as hardware-rendering can never launch.
+    // Report launch_failed with a clear error before any SDL/GL work instead
+    // of silently downgrading or reaching an unresolved GL path. Software
+    // cores (e.g. test_core) continue through the normal video/audio/input
+    // path below.
+    if (romm::player::isHardwareRenderingCore(request.coreId)) {
+        const std::string error = "core '" + request.coreId +
+            "' requires hardware rendering, which is unavailable in this "
+            "software-only Windows build (ROMM_WIN32_SOFTWARE_ONLY)";
+        std::fprintf(stderr, "error: %s\n", error.c_str());
+        writeResult(request, romm::player::ExitKind::LaunchFailed, false, 0, 0, 0, &error);
+        return 1;
+    }
+#endif
+
     // 5. Install the platform sinks (before any engine code runs). Keep a
     // raw pointer to the video sink for the main loop's present() calls.
     auto videoSinkOwned = std::make_unique<romm::player::SdlVideoSink>();
     romm::player::SdlVideoSink* videoSink = videoSinkOwned.get();
     romm::log::setSink(std::make_unique<romm::player::SdlLogSink>());
-    romm::dynamiclib::setFactory([] { return std::make_unique<romm::player::SdlDynamicLibrary>(); });
+    // Platform-neutral factory (dynamic_library_factory.h): the selected
+    // implementation is compiled in per platform (POSIX dlopen wrapper today;
+    // Win32 LoadLibraryExW wrapper in a later step). main.cpp names no
+    // platform loader type.
+    romm::dynamiclib::setFactory(&romm::player::createPlatformDynamicLibrary);
     romm::audio::setSink(std::make_unique<romm::player::SdlAudioSink>());
     romm::video::setSink(std::move(videoSinkOwned));
 
@@ -529,17 +496,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // SIGTERM/SIGINT → set the flag; the main loop exits cleanly and still
-    // writes a result.
-    struct sigaction sa {};
-    sa.sa_handler = signalHandler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    ::sigaction(SIGTERM, &sa, nullptr);
-    ::sigaction(SIGINT, &sa, nullptr);
+    // SIGTERM/SIGINT → set the termination flag; the main loop exits cleanly
+    // and still writes a result (POSIX: async-signal-safe flag handler).
+    romm::player::installTerminationHandlers();
 
     // 7. Create the window and apply the requested video settings.
-    const bool useHardwareRendering = isHardwareRenderingCore(request.coreId);
+    const bool useHardwareRendering = romm::player::isHardwareRenderingCore(request.coreId);
 #ifdef ROMM_STEAM_DECK_PLAYER
     const bool useSteamDeckHardwarePath = useHardwareRendering;
 #else
@@ -650,7 +612,7 @@ int main(int argc, char* argv[]) {
     // Give the window manager one chance to deliver an early close/quit
     // before committing to loading the core — a user who already asked to
     // leave is reported as user_cancelled_before_start, not launch_failed.
-    bool quitBeforeStart = g_signal_flag.load(std::memory_order_relaxed);
+    bool quitBeforeStart = romm::player::terminationRequested();
     SDL_Event earlyEvent;
     while (!quitBeforeStart && SDL_PollEvent(&earlyEvent)) {
         if (earlyEvent.type == SDL_EVENT_QUIT ||
@@ -813,14 +775,14 @@ int main(int argc, char* argv[]) {
     //     image; we log a clear error and continue with a fresh save —
     //     never crash, never abort the launch.
     if (!request.savePath.empty()) {
-        struct stat saveStat {};
-        if (::stat(request.savePath.c_str(), &saveStat) == 0 && saveStat.st_size > 0) {
+        const auto saveSize = romm::player::fileSize(request.savePath);
+        if (saveSize.has_value() && *saveSize > 0) {
             if (!session.restoreSaveRam(request.savePath)) {
                 std::fprintf(stderr,
                              "error: SRAM restore-on-launch failed for %s (file is %lld bytes; "
                              "the core's SRAM region is %zu bytes, or the core rejected the "
                              "image); continuing with a fresh save\n",
-                             request.savePath.c_str(), (long long) saveStat.st_size,
+                             request.savePath.c_str(), *saveSize,
                              session.memorySize(RETRO_MEMORY_SAVE_RAM));
             }
         } else {
@@ -1325,18 +1287,29 @@ int main(int argc, char* argv[]) {
 #endif
         }
         if (session.diagnostics().coreRequestedShutdown.load()) running = false;
-        if (g_signal_flag.load()) running = false;  // SIGTERM/SIGINT
+#ifdef ROMM_PLAYER_QUALIFICATION
+        // Qualification frame bound (see the ROMM_PLAYER_MAX_FRAMES parse
+        // above): presented-frame count reached → clean player-initiated
+        // completed exit through the normal shutdown path (checkpoint
+        // before stop, exitKind=completed).
+        if (qualificationMaxFrames > 0 &&
+            static_cast<int64_t>(session.diagnostics().frameCount.load()) >=
+                    qualificationMaxFrames) {
+            running = false;
+        }
+#endif  // ROMM_PLAYER_QUALIFICATION
+        if (romm::player::terminationRequested()) running = false;  // SIGTERM/SIGINT
         const auto healthNow = std::chrono::steady_clock::now();
         if (healthNow >= nextHealthLog) {
-            struct rusage usage {};
-            if (::getrusage(RUSAGE_SELF, &usage) == 0) {
+            const romm::player::HealthSnapshot health = romm::player::processHealth();
+            if (health.available) {
                 std::fprintf(
                     stderr,
                     "health: frames=%llu max_rss_kib=%ld audio_underrun=%llu "
                     "audio_overrun=%llu controllers=%d\n",
                     static_cast<unsigned long long>(
                         session.diagnostics().frameCount.load()),
-                    usage.ru_maxrss,
+                    health.maxRssKib,
                     static_cast<unsigned long long>(
                         romm::audio::sink().underrunFrames()),
                     static_cast<unsigned long long>(
@@ -1378,17 +1351,15 @@ int main(int argc, char* argv[]) {
                 overrunFrames, nullptr, &finalVideo);
 
     // 13. Cleanup. A core is allowed to take time to deinitialize, but it
-    // must not keep the desktop shell waiting forever. A process-level alarm
-    // is deliberately used instead of another thread: it still fires when
-    // teardown deadlocks on a runtime lock.
-    struct sigaction teardownTimeout {};
-    teardownTimeout.sa_handler = teardownTimeoutHandler;
-    sigemptyset(&teardownTimeout.sa_mask);
-    ::sigaction(SIGALRM, &teardownTimeout, nullptr);
-    ::alarm(5);
+    // must not keep the desktop shell waiting forever. The result file was
+    // committed above (step 12), so the teardown watchdog — a process-level
+    // alarm on POSIX that _exit(0)s after five seconds, deliberately used
+    // instead of another thread so it still fires when teardown deadlocks on
+    // a runtime lock — can terminate safely from here.
+    romm::player::armTeardownWatchdog(5);
     if (useHardwareRendering) videoSink->detachWindow();
     session.stop();
-    ::alarm(0);
+    romm::player::disarmTeardownWatchdog();
 
     session.releaseProcessSlot();  // stop() already released; idempotent no-op
     videoSink->detachWindow();

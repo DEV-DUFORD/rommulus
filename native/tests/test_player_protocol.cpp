@@ -9,6 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -583,7 +584,11 @@ int main() {
     // 4294967297 (2^32+1) wraps to 1 in a 32-bit read; the parser must
     // compare as int64_t and reject it. (v1 requests are ALSO rejected now
     // that the protocol is at v2 — covered by version 1L below.)
-    for (long version : {0L, -1L, 1L, 3L, 99L, 4294967297L}) {
+    // int64_t elements: on MinGW-w64 (LLP64) `long` is 32-bit, so a
+    // {long, long long} braced list would fail initializer_list deduction;
+    // an explicit int64_t vector compiles identically on every toolchain.
+    const std::vector<std::int64_t> versions = {0, -1, 1, 3, 99, 4294967297};
+    for (const std::int64_t version : versions) {
         json mutated = base;
         mutated["protocolVersion"] = version;
         expectRequestRejected(mutated.dump(), "unknown request version");

@@ -34,6 +34,11 @@ get_filename_component(ROMM_NATIVE_ROOT ${CMAKE_CURRENT_LIST_DIR} ABSOLUTE)
 get_filename_component(ROMM_REPO_ROOT ${CMAKE_CURRENT_LIST_DIR}/.. ABSOLUTE)
 set(ROMM_APP_CPP_DIR ${ROMM_REPO_ROOT}/app/src/main/cpp)
 
+# ROMM_WIN32_SOFTWARE_ONLY is a Windows-player-only boundary; declare and
+# validate it here too so passing it to this (Android) build is clearly
+# ignored with a warning instead of silently dropped.
+include(${ROMM_NATIVE_ROOT}/cmake/romm-windows-software-only.cmake)
+
 # ---------------------------------------------------------------------------
 # Oboe (Apache-2.0): vendored under third_party/oboe/ (include/, src/, its own
 # CMakeLists.txt, and LICENSE), pinned to the upstream v1.10.0 tag, commit

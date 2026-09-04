@@ -1,5 +1,6 @@
 package com.romm.desktop.player
 
+import com.romm.desktop.PosixTestSupport
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -51,6 +52,7 @@ class LaunchJournalStoreTest {
 
     @Test
     fun `journal file is mode 0600`() {
+        PosixTestSupport.assumePosixFilesystem(tempDir)
         val store = store()
         store.write(journal())
         val perms = Files.getPosixFilePermissions(store.journalPath("abc-123"))
@@ -70,6 +72,9 @@ class LaunchJournalStoreTest {
 
     @Test
     fun `failed overwrite preserves previous file and leaves no temp files`() {
+        // The failure is simulated with POSIX read-only directory bits — a mechanism that does
+        // not exist on NTFS, so the test only applies where POSIX attributes are supported.
+        PosixTestSupport.assumePosixFilesystem(tempDir)
         val store = store()
         store.write(journal(JournalState.PENDING))
         val root = tempDir.resolve("journals")

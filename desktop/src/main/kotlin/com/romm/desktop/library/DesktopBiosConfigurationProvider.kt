@@ -14,6 +14,11 @@ import com.romm.androidtv.romm.PlatformIdResult
 import com.romm.androidtv.romm.RommApi
 import com.romm.androidtv.romm.RommApiError
 import com.romm.desktop.log.DesktopLogger
+import com.romm.desktop.platform.security.FileSecurityException
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -22,7 +27,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
-import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.logging.Level
@@ -73,6 +77,7 @@ class DesktopBiosConfigurationProvider(
     private val firmwareDir: Path,
     private val logger: Logger = DesktopLogger.get(),
     private val platformSlug: String,
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
 ) : BiosConfigurationProvider {
 
     private val systemName: String = when (platformSlug) {
@@ -151,6 +156,13 @@ class DesktopBiosConfigurationProvider(
 
         try {
             ensureFirmwareDir()
+        } catch (e: FileSecurityException) {
+            // Explicit security failure (plans/WINDOWS_IMPL.md §4.2): refuse staging with a
+            // clear diagnostic instead of a success-shaped fallback or an unhandled crash.
+            return@withContext FirmwareStagingOutcome.CorruptedDownload(
+                firmware.fileName,
+                "firmware directory blocked by file security policy: ${e.message}",
+            )
         } catch (e: IOException) {
             return@withContext classifyIo(e, firmware)
         }
@@ -328,8 +340,13 @@ class DesktopBiosConfigurationProvider(
         }
 
         try {
-            bestEffort0600(part)
+            hardenStagedFile(part)
             movePart(part, destination)
+        } catch (e: FileSecurityException) {
+            dropPart(part)
+            // Explicit security failure (plans/WINDOWS_IMPL.md §4.2): surface it as a staging
+            // error rather than crashing the coroutine or silently proceeding.
+            return FirmwareStagingOutcome.CorruptedDownload(fileName, "staging blocked by file security policy: ${e.message}")
         } catch (e: IOException) {
             dropPart(part)
             return FirmwareStagingOutcome.CorruptedDownload(fileName, "write failed: ${e.message}")
@@ -446,7 +463,7 @@ class DesktopBiosConfigurationProvider(
         return selected
     }
 
-    /** Creates [firmwareDir] user-only (0700, §9 rule 4) if absent; rejects a symlink root. */
+    /** Creates [firmwareDir] user-only (0700 on Linux, §9 rule 4) if absent; rejects a symlink root. */
     private fun ensureFirmwareDir() {
         if (Files.exists(firmwareDir)) {
             if (Files.isSymbolicLink(firmwareDir)) {
@@ -454,24 +471,14 @@ class DesktopBiosConfigurationProvider(
             }
             return
         }
-        Files.createDirectories(firmwareDir)
-        bestEffort0700(firmwareDir)
+        // BIOS/firmware is SENSITIVE: on a filesystem that cannot establish user-only security
+        // this throws and the caller's fail-closed mapping applies (no silent staging).
+        securityPolicy.createDirectoryIfAbsent(firmwareDir, PathPermissionProfile.USER_ONLY_DIRECTORY, FileSensitivity.SENSITIVE)
     }
 
-    private fun bestEffort0700(directory: Path) {
-        try {
-            Files.setPosixFilePermissions(directory, USER_ONLY_DIR_PERMS)
-        } catch (_: UnsupportedOperationException) {
-            // Non-POSIX filesystems: permissions cannot be set; do not fail staging.
-        }
-    }
-
-    private fun bestEffort0600(file: Path) {
-        try {
-            Files.setPosixFilePermissions(file, USER_ONLY_FILE_PERMS)
-        } catch (_: UnsupportedOperationException) {
-            // Non-POSIX filesystems: no-op.
-        }
+    /** Hardens a staged firmware file user-only (0600 on Linux); throws [FileSecurityException] when security cannot be established. */
+    private fun hardenStagedFile(file: Path) {
+        securityPolicy.hardenFile(file, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.SENSITIVE)
     }
 
     private fun dropPart(part: Path) {
@@ -551,14 +558,3 @@ private val CANONICAL_PSX_FILENAMES = listOf(
     "scph7001.bin",
     "scph1001.bin",
 )
-
-private val USER_ONLY_DIR_PERMS: Set<PosixFilePermission> = setOf(
-    PosixFilePermission.OWNER_READ,
-    PosixFilePermission.OWNER_WRITE,
-    PosixFilePermission.OWNER_EXECUTE,
-) // 0700: user-only (§9 rule 4)
-
-private val USER_ONLY_FILE_PERMS: Set<PosixFilePermission> = setOf(
-    PosixFilePermission.OWNER_READ,
-    PosixFilePermission.OWNER_WRITE,
-) // 0600: user-only

@@ -199,7 +199,7 @@ object CoreManifest {
             requiredFirmware = listOf(
                 "bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin",
             ),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `genesis_plus_gx_core` CMake target " +
                 "in app/src/main/cpp/CMakeLists.txt, compiling " +
@@ -258,7 +258,7 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("snes", "sfc"),
             supportedExtensions = listOf(".sfc", ".smc"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `snes9x_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/snes9x/{core," +
@@ -302,7 +302,7 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("nes"),
             supportedExtensions = listOf(".nes", ".unf"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `fceumm_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/fceumm/src/**/* " +
@@ -326,9 +326,13 @@ object CoreManifest {
             releaseTag = "", // Upstream carries no usable release tags (only ancient 0.1.0/0.1.1 pre-releases).
             licenseSummary = "The core is licensed under MPL-2.0 (file-level weak copyleft, no non-commercial restriction). Vendored subcomponents in the compiled subset: inih (BSD-3-Clause), crc32 by Gary S. Brown (Public Domain), MurmurHash3 by Austin Appleby (Public Domain). Two data-only files (hle-bios.c, gbk-table.c) carry no per-file license header and are covered by the project-level MPL-2.0 LICENSE. No GPL-incompatible or non-commercial-restricted components found in the compiled subset. GBA content launches without external BIOS via built-in HLE implementation; GB/GBC boot without BIOS (no hardware BIOS exists for those platforms).",
             commercialUseFinding = CommercialUseFinding.PERMISSIVE_OR_COPYLEFT_OK,
+            // The MPL-2.0 source obligation is satisfied in-repo: the compiled subset is vendored
+            // at third_party/cores/mgba with its project-level LICENSE (VENDORING.md), matching
+            // the package manifest's sourceOfferSatisfied = true.
+            sourceOfferSatisfied = true,
             supportedSystems = listOf("gba"),
             supportedExtensions = listOf(".gba", ".agb"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `mgba_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mgba/*.{c,h} with " +
@@ -355,7 +359,7 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("atari2600"),
             supportedExtensions = listOf(".a26", ".bin"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `stella_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/stella/**/* " +
@@ -383,7 +387,7 @@ object CoreManifest {
             attributionSatisfied = false,
             supportedSystems = listOf("gb", "gbc"),
             supportedExtensions = listOf(".gb", ".gbc"),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `gambatte_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/gambatte/{libretro," +
@@ -412,7 +416,7 @@ object CoreManifest {
             supportedSystems = listOf("tg16"),
             supportedExtensions = listOf(".pce"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `beetle_pce_fast_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/beetle_pce_fast/{libretro.c," +
@@ -441,7 +445,7 @@ object CoreManifest {
             supportedSystems = listOf("neo-geo-pocket", "neo-geo-pocket-color"),
             supportedExtensions = listOf(".ngp", ".ngc", ".ngpc", ".npc"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `mednafen_ngp_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mednafen_ngp/{libretro.c," +
@@ -470,7 +474,7 @@ object CoreManifest {
             supportedSystems = listOf("wonderswan", "wonderswan-color"),
             supportedExtensions = listOf(".ws", ".wsc", ".pc2"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `mednafen_wswan_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/mednafen_wswan/{libretro.c," +
@@ -499,7 +503,7 @@ object CoreManifest {
             supportedSystems = listOf("lynx"),
             supportedExtensions = listOf(".lnx", ".lyx", ".o"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `handy_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/handy/{libretro," +
@@ -528,7 +532,7 @@ object CoreManifest {
             supportedSystems = listOf("atari7800"),
             supportedExtensions = listOf(".a78", ".bin", ".cdf"),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds the `prosystem_core` CMake target in " +
                 "app/src/main/cpp/CMakeLists.txt, compiling third_party/cores/prosystem/{core,bupboop," +
@@ -576,7 +580,7 @@ object CoreManifest {
                 "scph5500.bin", "scph5501.bin", "scph5502.bin",
                 "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
             ),
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds `pcsx_rearmed_core` with upstream's " +
                 "Android.mk source closure and flags: ARM/ARM64 ari64 dynarec, NEON GPU, " +
@@ -613,7 +617,7 @@ object CoreManifest {
             supportedSystems = listOf("n64"),
             supportedExtensions = listOf(".n64", ".z64", ".v64", ".bin", ".u1"),
             requiredFirmware = emptyList(), // No BIOS required — mupen64plus_next runs PIF HLE; IPL3 is read from the ROM at offset 0x40
-            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", "linux-x86_64"),
+            supportedAbis = listOf("armeabi-v7a", "arm64-v8a", NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "JAVA_HOME=\"/opt/homebrew/opt/openjdk@17\" ./gradlew assembleRelease " +
                 "(NDK r27.2.12479018, CMake 3.22.1; builds `mupen64plus_next_core` with upstream's " +
                 "Android.mk/Makefile.common source closure and flags: ARM/ARM64 dynarec " +
@@ -650,7 +654,7 @@ object CoreManifest {
                 ".ciso", ".gcz", ".wia", ".rvz", ".m3u",
             ),
             requiredFirmware = emptyList(),
-            supportedAbis = listOf("linux-x86_64"),
+            supportedAbis = listOf(NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "git submodule update --init --recursive && " +
                 "cmake -S native/player -B build/player && cmake --build build/player " +
                 "(target dolphin_core via native/cmake/cores/dolphin-linux.cmake; GCC C++23 " +
@@ -683,7 +687,7 @@ object CoreManifest {
                 ".bin", ".mdf", ".nrg", ".img", ".dump", ".elf", ".m3u",
             ),
             requiredFirmware = listOf("bios_PS2.bin"),
-            supportedAbis = listOf("linux-x86_64"),
+            supportedAbis = listOf(NativeBuildIdentities.LINUX_X86_64),
             buildCommand = "git submodule update --init --recursive && " +
                 "cmake -S native/player -B build/player && cmake --build build/player " +
                 "(target lrps2_core via native/cmake/cores/lrps2-linux.cmake; GCC C++17 " +
@@ -710,7 +714,7 @@ object CoreManifest {
             // slug is recorded instead of emptyList().
             supportedSystems = listOf("synthetic"),
             supportedExtensions = emptyList(),
-            supportedAbis = listOf("linux-x86_64"),
+            supportedAbis = listOf(NativeBuildIdentities.LINUX_X86_64),
             reviewedBy = "romm-android-tv",
             reviewedOn = "2026-08-17",
             approved = true,

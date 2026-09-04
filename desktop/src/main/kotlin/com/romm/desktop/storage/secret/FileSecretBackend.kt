@@ -1,5 +1,10 @@
 package com.romm.desktop.storage.secret
 
+import com.romm.desktop.platform.security.FileSecurityException
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.file.AtomicMoveNotSupportedException
@@ -7,15 +12,22 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
-import java.nio.file.attribute.PosixFilePermission
 import java.util.Properties
 
 /**
  * Owner-only fallback for hosts such as Steam Deck Gaming Mode where no
  * freedesktop Secret Service provider exists.
+ *
+ * Linux/macOS-only by construction: [CredentialBackendFactory] never builds it on Windows
+ * (no plaintext token fallback there, plans/WINDOWS_IMPL.md §4.3). All permission hardening is
+ * routed through [FileSecurityPolicy] (plans/WINDOWS_IMPL.md §4.2) — on POSIX hosts that applies
+ * the historical 0700 directory / 0600 file modes exactly; on a filesystem that cannot establish
+ * user-only security for this SENSITIVE data the policy fails explicitly and every operation
+ * fails closed (the historical silent no-op was a success-shaped fallback for token data).
  */
 class FileSecretBackend(
     private val credentialsFile: Path,
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
 ) : SecretBackend {
     private val lock = Any()
 
@@ -26,6 +38,8 @@ class FileSecretBackend(
         } catch (_: IOException) {
             KeyringState.Unavailable
         } catch (_: SecurityException) {
+            KeyringState.Unavailable
+        } catch (_: FileSecurityException) {
             KeyringState.Unavailable
         }
     }
@@ -40,6 +54,8 @@ class FileSecretBackend(
             false
         } catch (_: SecurityException) {
             false
+        } catch (_: FileSecurityException) {
+            false
         }
     }
 
@@ -49,6 +65,8 @@ class FileSecretBackend(
         } catch (_: IOException) {
             null
         } catch (_: SecurityException) {
+            null
+        } catch (_: FileSecurityException) {
             null
         }
     }
@@ -60,6 +78,8 @@ class FileSecretBackend(
         } catch (_: IOException) {
             Unit
         } catch (_: SecurityException) {
+            Unit
+        } catch (_: FileSecurityException) {
             Unit
         }
     }
@@ -93,7 +113,7 @@ class FileSecretBackend(
                 StandardOpenOption.WRITE,
                 StandardOpenOption.TRUNCATE_EXISTING,
             ).use { values.store(it, "RomMulus client tokens") }
-            setPermissions(temp, FILE_PERMISSIONS)
+            securityPolicy.hardenFile(temp, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.SENSITIVE)
             FileChannel.open(temp, StandardOpenOption.WRITE).use { it.force(true) }
             try {
                 Files.move(
@@ -105,37 +125,21 @@ class FileSecretBackend(
             } catch (_: AtomicMoveNotSupportedException) {
                 Files.move(temp, credentialsFile, StandardCopyOption.REPLACE_EXISTING)
             }
-            setPermissions(credentialsFile, FILE_PERMISSIONS)
+            securityPolicy.hardenFile(credentialsFile, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.SENSITIVE)
         } finally {
             Files.deleteIfExists(temp)
         }
     }
 
     private fun ensureParent() {
-        Files.createDirectories(credentialsFile.parent)
-        setPermissions(credentialsFile.parent, DIRECTORY_PERMISSIONS)
-        if (Files.exists(credentialsFile)) setPermissions(credentialsFile, FILE_PERMISSIONS)
-    }
-
-    private fun setPermissions(path: Path, permissions: Set<PosixFilePermission>) {
-        try {
-            Files.setPosixFilePermissions(path, permissions)
-        } catch (_: UnsupportedOperationException) {
-            // SteamOS and supported Ubuntu filesystems are POSIX. This keeps
-            // tests and unusual mounted filesystems functional.
+        securityPolicy.ensureDirectory(
+            credentialsFile.parent,
+            PathPermissionProfile.USER_ONLY_DIRECTORY,
+            FileSensitivity.SENSITIVE,
+        )
+        if (Files.exists(credentialsFile)) {
+            securityPolicy.hardenFile(credentialsFile, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.SENSITIVE)
         }
-    }
-
-    private companion object {
-        val DIRECTORY_PERMISSIONS = setOf(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE,
-            PosixFilePermission.OWNER_EXECUTE,
-        )
-        val FILE_PERMISSIONS = setOf(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE,
-        )
     }
 }
 

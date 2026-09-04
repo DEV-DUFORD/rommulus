@@ -1,10 +1,13 @@
 package com.romm.desktop.player
 
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import java.io.FileOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
-import java.nio.file.attribute.PosixFilePermission
 
 /**
  * Bounded capture of the player process's combined stdout+stderr.
@@ -37,6 +40,7 @@ import java.nio.file.attribute.PosixFilePermission
 class PlayerLogCapture(
     private val logFile: Path,
     private val maxBytes: Long = DEFAULT_MAX_BYTES,
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
 ) {
     private val lock = Any()
     @Volatile private var closed = false
@@ -127,11 +131,18 @@ class PlayerLogCapture(
     private fun openStream(): FileOutputStream {
         val out = FileOutputStream(logFile.toFile(), /* append = */ true)
         runCatching {
-            Files.setPosixFilePermissions(
+            // File-level 0600 is best-effort hygiene, so this site is deliberately
+            // [FileSensitivity.NORMAL]: a NORMAL hardening can never fail explicitly, which keeps
+            // the drain thread free of any swallowed SENSITIVE failure (plans/WINDOWS_IMPL.md
+            // §4.2 forbids silent success-shaped fallbacks for sensitive data). The load-bearing
+            // SENSITIVE hardening is the session directory, created by LaunchJournalStore with
+            // explicit failure; on Windows its inheritable user-only ACL covers this file too.
+            securityPolicy.hardenFile(
                 logFile,
-                setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
+                PathPermissionProfile.USER_ONLY_FILE,
+                FileSensitivity.NORMAL,
             )
-        } // Non-POSIX filesystems: permissions are not enforced there.
+        }
         activeBytes = runCatching { Files.size(logFile) }.getOrDefault(0L)
         stream = out
         return out

@@ -11,63 +11,20 @@
 # third_party/cores/gambatte/VENDORING.md for exactly what was vendored, why,
 # and what was deliberately excluded (network code, CI, docs, intl scripts).
 #
-# Source list mirrors upstream's libretro/jni/Android.mk + Makefile.common exactly:
-# 3 C files from libretro/ (gambatte_log, blipper, cc_resampler), 15 C files from
-# libretro-common/, and 27 C++ files (libretro/libretro.cpp + src/**/*.cpp).
+# Compiled source list: the shared fragment cmake/cores/gambatte-sources.cmake —
+# the single source of truth consumed by the Android, Linux, and Windows
+# candidate fragments so no platform can drift. 46 sources exactly: 3 C files
+# from libretro/ (gambatte_log, blipper, cc_resampler), 13 C files from
+# libretro-common/, and 30 C++ files (libretro/libretro.cpp + src/**/*.cpp).
 # Mixed C/C++ target; -Wno-c++11-narrowing applies to C++ sources.
 # ---------------------------------------------------------------------------
 
+include(${CMAKE_CURRENT_LIST_DIR}/gambatte-sources.cmake)
+
 add_library(gambatte_core SHARED
-    # libretro/ — C sources (SOURCES_C from Makefile.common, minus net_serial.cpp)
-    ${GAMBATTE_DIR}/libretro/gambatte_log.c
-    ${GAMBATTE_DIR}/libretro/blipper.c
-    ${GAMBATTE_DIR}/libretro/cc_resampler.c
-    # libretro/ — C++ driver (SOURCES_CXX from Makefile.common)
-    ${GAMBATTE_DIR}/libretro/libretro.cpp
-    # src/ — core C++ emulation engine (SOURCES_CXX from Makefile.common)
-    ${GAMBATTE_DIR}/src/bootloader.cpp
-    ${GAMBATTE_DIR}/src/cpu.cpp
-    ${GAMBATTE_DIR}/src/gambatte-memory.cpp
-    ${GAMBATTE_DIR}/src/gambatte.cpp
-    ${GAMBATTE_DIR}/src/initstate.cpp
-    ${GAMBATTE_DIR}/src/interrupter.cpp
-    ${GAMBATTE_DIR}/src/interruptrequester.cpp
-    ${GAMBATTE_DIR}/src/mem/cartridge.cpp
-    ${GAMBATTE_DIR}/src/mem/cartridge_libretro.cpp
-    ${GAMBATTE_DIR}/src/mem/huc3.cpp
-    ${GAMBATTE_DIR}/src/mem/memptrs.cpp
-    ${GAMBATTE_DIR}/src/mem/rtc.cpp
-    ${GAMBATTE_DIR}/src/sound.cpp
-    ${GAMBATTE_DIR}/src/sound/channel1.cpp
-    ${GAMBATTE_DIR}/src/sound/channel2.cpp
-    ${GAMBATTE_DIR}/src/sound/channel3.cpp
-    ${GAMBATTE_DIR}/src/sound/channel4.cpp
-    ${GAMBATTE_DIR}/src/sound/duty_unit.cpp
-    ${GAMBATTE_DIR}/src/sound/envelope_unit.cpp
-    ${GAMBATTE_DIR}/src/sound/length_counter.cpp
-    ${GAMBATTE_DIR}/src/statesaver.cpp
-    ${GAMBATTE_DIR}/src/tima.cpp
-    ${GAMBATTE_DIR}/src/video.cpp
-    ${GAMBATTE_DIR}/src/video_libretro.cpp
-    ${GAMBATTE_DIR}/src/video/ly_counter.cpp
-    ${GAMBATTE_DIR}/src/video/lyc_irq.cpp
-    ${GAMBATTE_DIR}/src/video/next_m0_time.cpp
-    ${GAMBATTE_DIR}/src/video/ppu.cpp
-    ${GAMBATTE_DIR}/src/video/sprite_mapper.cpp
-    # libretro-common/ — C helper utilities (15 files)
-    ${GAMBATTE_DIR}/libretro-common/compat/compat_posix_string.c
-    ${GAMBATTE_DIR}/libretro-common/compat/compat_snprintf.c
-    ${GAMBATTE_DIR}/libretro-common/compat/compat_strcasestr.c
-    ${GAMBATTE_DIR}/libretro-common/compat/compat_strl.c
-    ${GAMBATTE_DIR}/libretro-common/compat/fopen_utf8.c
-    ${GAMBATTE_DIR}/libretro-common/encodings/encoding_utf.c
-    ${GAMBATTE_DIR}/libretro-common/file/file_path.c
-    ${GAMBATTE_DIR}/libretro-common/file/file_path_io.c
-    ${GAMBATTE_DIR}/libretro-common/streams/file_stream.c
-    ${GAMBATTE_DIR}/libretro-common/streams/file_stream_transforms.c
-    ${GAMBATTE_DIR}/libretro-common/string/stdstring.c
-    ${GAMBATTE_DIR}/libretro-common/time/rtime.c
-    ${GAMBATTE_DIR}/libretro-common/vfs/vfs_implementation.c
+    # The exact curated 46-source set from the shared fragment (network-
+    # disabled: net_serial.cpp is not vendored and HAVE_NETWORK is off).
+    ${ROMM_GAMBATTE_SOURCES}
 )
 
 set_target_properties(gambatte_core PROPERTIES

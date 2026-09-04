@@ -7,8 +7,6 @@ import com.romm.androidtv.controller.util.AxisNormalizer
 import com.romm.desktop.log.DesktopLogger
 import net.java.games.input.Component
 import net.java.games.input.Controller
-import net.java.games.input.ControllerEnvironment
-import net.java.games.input.LinuxEnvironmentPlugin
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -114,42 +112,25 @@ private val JINPUT_NATIVE_RESOURCES = listOf(
 )
 
 /**
- * Production [JInputSource] backed by JInput's `ControllerEnvironment` singleton.
+ * Production [JInputSource] backed by a platform-selected [ControllerEnvironmentPolicy].
  *
- * The environment is obtained lazily on first [enumerate] so that merely
- * constructing this class (e.g. in a headless test JVM) does not load any
- * platform native.
+ * The policy (see [ControllerEnvironmentPolicy.forHostOs]) owns every platform-specific concern —
+ * the JInput environment, hot-plug refresh, and `/dev/input` topology / readability diagnostics —
+ * so this class keeps only the portable JInput -> neutral mapping, the per-controller wrapper
+ * cache, and the dedup logic. The environment is obtained from the policy lazily on first
+ * [enumerate] so that merely constructing this class (e.g. in a headless test JVM) does not load
+ * any platform native.
  */
-class JInputControllerSource : JInputSource {
+class JInputControllerSource(
+    private val policy: ControllerEnvironmentPolicy,
+) : JInputSource {
 
     private val logger: Logger = DesktopLogger.get()
-
-    /**
-     * The environment is obtained lazily on first [enumerate] so that merely
-     * constructing this class (e.g. in a headless test JVM) does not load any
-     * platform native. [ensureJinputNatives] must run BEFORE the first environment
-     * access: the platform plugin classes (e.g. `LinuxEnvironmentPlugin`) load their
-     * native in a static initializer, and `DefaultControllerEnvironment.getControllers()`
-     * wraps plugin loading in `catch (Throwable)` — a swallowed `UnsatisfiedLinkError`
-     * leaves the environment reporting zero controllers forever.
-     */
-    private val environment: ControllerEnvironment by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        ensureJinputNatives()
-        if (System.getProperty("os.name") == "Linux") {
-            // Keep the plugin instance so its native device list can be refreshed in place.
-            // DefaultControllerEnvironment discards the plugin after copying its controllers;
-            // nulling that aggregate cache cannot reload the already-recorded plugin.
-            LinuxEnvironmentPlugin()
-        } else {
-            ControllerEnvironment.getDefaultEnvironment()
-        }
-    }
 
     /** Wrappers are cached per underlying JInput controller instance. */
     private val wrappers = HashMap<Controller, JInputController>()
     private val rescanRequested = AtomicBoolean(false)
     private val inputTopologyTracker = InputDeviceTopologyTracker()
-    private var nextRescanAllowedNanos = 0L
     private var lastEnumerationHadGameControllers: Boolean? = null
 
     /** Set when the native bootstrap could not make the native libraries available. */
@@ -170,13 +151,16 @@ class JInputControllerSource : JInputSource {
      */
     override fun enumerate(): List<JInputController> {
         return synchronized(this) {
-            if (inputTopologyTracker.changed(inputDeviceTopology()) ||
+            // Make the natives loadable before the first environment access (see [ensureJinputNatives]).
+            // Idempotent and cheap: it returns immediately once the librarypath property is set.
+            ensureJinputNatives()
+            if (inputTopologyTracker.changed(policy.topologySnapshot()) ||
                 lastEnumerationHadGameControllers == false
             ) {
                 rescanRequested.set(true)
             }
             if (rescanRequested.compareAndSet(true, false)) {
-                if (refreshCachedControllers()) {
+                if (policy.refresh()) {
                     wrappers.clear()
                 } else {
                     // Do not lose a hot-plug or resume request merely because another
@@ -185,7 +169,7 @@ class JInputControllerSource : JInputSource {
                 }
             }
             // getControllers() returns a Controller[] (a snapshot array in 2.0.10).
-            val controllers = environment.controllers
+            val controllers = policy.environment.controllers
             val gameControllers = selectGameplayControllers(controllers.asList())
             val result = ArrayList<JInputController>(gameControllers.size)
             val seen = HashSet<Controller>()
@@ -218,89 +202,16 @@ class JInputControllerSource : JInputSource {
                 } else {
                     logger.log(Level.INFO, "JInput detected ${names.size} controller(s): $names")
                 }
-                // "Detected but unreadable" diagnostic: JInput enumerates controllers from
-                // /dev/input/event* but cannot open them when this process lacks read
-                // permission (open() fails with EACCES) — typically because the user is not
-                // in the `input` group. JInput logs the per-device failures only to
-                // java.util.logging internally, so without this probe the app would just
-                // report "detected N controller(s)" while nothing works.
-                if (names.isNotEmpty() && inputEventDevicesReadable() == false) {
-                    logger.log(
-                        Level.WARNING,
-                        "Controllers were detected but no /dev/input/event* device is readable " +
-                            "by this process (opening them fails with permission denied). " +
-                            "Add your user to the 'input' group: sudo usermod -aG input \$USER, " +
-                            "then log out and back in."
-                    )
-                }
+                // Platform-specific diagnostics (Linux: /dev/input readability; non-Linux: none).
+                policy.diagnostics(names).forEach { message -> logger.log(Level.WARNING, message) }
             }
 
             result
         }
     }
 
-    private fun refreshCachedControllers(): Boolean {
-        val now = System.nanoTime()
-        if (now < nextRescanAllowedNanos) return false
-        nextRescanAllowedNanos = now + 2_000_000_000L
-        if (environment !is LinuxEnvironmentPlugin) {
-            logger.warning("JInput hot-plug refresh is not available on this platform")
-            return false
-        }
-        return try {
-            val pluginClass = LinuxEnvironmentPlugin::class.java
-            val devicesField = pluginClass.getDeclaredField("devices")
-            devicesField.isAccessible = true
-            @Suppress("UNCHECKED_CAST")
-            val devices = devicesField.get(environment) as MutableList<Any>
-            for (device in devices.toList()) {
-                device.javaClass.getMethod("close").apply { isAccessible = true }.invoke(device)
-            }
-            devices.clear()
-
-            val enumerateMethod = pluginClass.getDeclaredMethod("enumerateControllers")
-            enumerateMethod.isAccessible = true
-            val controllers = enumerateMethod.invoke(environment) as Array<*>
-            val controllersField = pluginClass.getDeclaredField("controllers")
-            controllersField.isAccessible = true
-            controllersField.set(environment, controllers)
-            logger.info("JInput controller set changed or became unavailable; rescanning devices")
-            true
-        } catch (e: ReflectiveOperationException) {
-            logger.log(
-                Level.WARNING,
-                "JInput controller poll failed and the device cache could not be refreshed",
-                e,
-            )
-            false
-        }
-    }
-
     /**
-     * JInput caches its Linux device list, so a newly connected controller cannot be
-     * discovered unless an existing controller first fails a poll. Watching the input-node
-     * names supplies the missing reconnect signal. Returning null keeps this inert on
-     * non-Linux systems, where failed polls still drive the portable recovery path.
-     */
-    private fun inputDeviceTopology(): Set<String>? {
-        return try {
-            val inputDir = Path.of("/dev/input")
-            if (!Files.isDirectory(inputDir)) return null
-            Files.newDirectoryStream(inputDir).use { devices ->
-                devices.mapNotNullTo(sortedSetOf()) { device ->
-                    device.fileName.toString().takeIf { name ->
-                        name.startsWith("event") || name.startsWith("js")
-                    }
-                }
-            }
-        } catch (t: Throwable) {
-            null
-        }
-    }
-
-    /**
-     * Make the JInput native libraries loadable BEFORE the first [ControllerEnvironment]
-     * access (see [environment]).
+     * Make the JInput native libraries loadable BEFORE the first [policy.environment] access.
      *
      * JInput 2.0.10 ships its natives in the `natives-all` classifier jar (a plain
      * `implementation` dependency in `desktop/build.gradle.kts`) but does NOT extract
@@ -348,36 +259,6 @@ class JInputControllerSource : JInputSource {
         } catch (t: Throwable) {
             nativeBootstrapFailed = true
             logger.log(Level.WARNING, "JInput native extraction failed: $t", t)
-        }
-    }
-
-    /**
-     * Best-effort readability probe for the "detected but unreadable" condition:
-     * returns true if at least one `/dev/input/event*` device node is readable by this
-     * process, false if event devices exist but NONE are readable, and null if the probe
-     * cannot run (non-Linux platform, `/dev/input` missing, no event nodes, or any I/O
-     * failure). Callers treat null as "unknown" and do not warn. [Files.isReadable]
-     * evaluates the permission bits against the current uid/gid — the same check that
-     * makes open() fail with EACCES — so it faithfully predicts JInput's open failures.
-     */
-    private fun inputEventDevicesReadable(): Boolean? {
-        return try {
-            val inputDir = Path.of("/dev/input")
-            if (!Files.isDirectory(inputDir)) return null
-            var found = false
-            var anyReadable = false
-            Files.newDirectoryStream(inputDir, "event*").use { devices ->
-                for (device in devices) {
-                    found = true
-                    if (Files.isReadable(device)) {
-                        anyReadable = true
-                        break
-                    }
-                }
-            }
-            if (!found) null else anyReadable
-        } catch (t: Throwable) {
-            null
         }
     }
 }

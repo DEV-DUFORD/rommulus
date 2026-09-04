@@ -28,7 +28,7 @@ rommulus-<version>-linux-x86_64.tar.zst
     ├── licenses/rommulus/       libretro.txt, third_party_license_metadata,
     │                            third_party_licenses, NOTICE
     └── rommulus/
-        ├── core-manifest.json   §13.1 Linux build identity for all 14 cores
+        ├── core-manifest.json   §13.1 Linux build identity for all 16 cores
         ├── font.ttf             Bitstream Vera Sans used by the native player UI
         ├── PACKAGE.sha256       generated at package time (every file except itself)
         └── PACKAGE.sha256.asc   OPTIONAL detached GPG signature over PACKAGE.sha256

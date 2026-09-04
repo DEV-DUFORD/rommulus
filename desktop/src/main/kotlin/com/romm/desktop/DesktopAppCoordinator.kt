@@ -58,6 +58,7 @@ import com.romm.androidtv.storage.records.ContentIndexKind
 import com.romm.androidtv.storage.records.ContentIndexRecord
 import com.romm.androidtv.storage.romCacheDir
 import com.romm.androidtv.storage.settingsFile
+import com.romm.desktop.controller.ControllerEnvironmentPolicy
 import com.romm.desktop.controller.JInputControllerSource
 import com.romm.desktop.controller.JInputSource
 import com.romm.desktop.controller.config.DesktopControllerConfigRepository
@@ -70,7 +71,6 @@ import com.romm.desktop.player.AdoptionSummary
 import com.romm.desktop.player.CONTROLLER_BINDINGS_SIDECAR_FILE_NAME
 import com.romm.desktop.player.ControllerBindingSidecarCodec
 import com.romm.desktop.player.ControllerBindings
-import com.romm.desktop.player.LINUX_X86_64_ABI
 import com.romm.desktop.player.LaunchJournalSupervisor
 import com.romm.desktop.player.LaunchOutcome
 import com.romm.desktop.player.LaunchRecoveryDiagnostic
@@ -86,8 +86,10 @@ import com.romm.desktop.player.RomContentStagingFailure
 import com.romm.desktop.player.RomContentStager
 import com.romm.desktop.player.StagedContent
 import com.romm.desktop.player.VideoSettings
-import com.romm.desktop.player.coreLibraryFileNames
-import com.romm.desktop.player.resolveCoreLibraryPath
+import com.romm.desktop.platform.DesktopPlatformDetector
+import com.romm.desktop.platform.HostOs
+import com.romm.desktop.platform.LinuxNativeArtifactLayout
+import com.romm.desktop.platform.NativeArtifactLayout
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopClientTokenStorage
 import com.romm.desktop.storage.DesktopSessionStorage
@@ -124,6 +126,7 @@ import com.romm.desktop.sync.SaveSyncDrainExecutor
 import com.romm.desktop.sync.SaveSyncSession
 import com.romm.desktop.sync.SaveSyncSessionReader
 import com.romm.desktop.ui.image.DesktopImageLoader
+import com.romm.desktop.ui.input.VirtualKeyboardLauncher
 import com.romm.desktop.ui.screens.detail.SavePickerEntryUiModel
 import com.romm.desktop.ui.screens.detail.SaveSyncStatusPresenter
 import androidx.compose.runtime.getValue
@@ -179,6 +182,9 @@ internal fun cachedContentIdentityMatches(
  * @param secretBackend    Injectable [SecretBackend] so tests can use a fake keyring.
  * @param appVersion       Version string surfaced in Settings.
  * @param buildDefaultOrigin Compiled-in default origin fallback (like Android BuildConfig).
+ * @param layout           Platform artifact layout (player/core naming, installed-core scan,
+ *                         and the host build identity used for ABI filtering). Defaults to the
+ *                         Linux layout, preserving the historical desktop behavior.
  * @param scope            CoroutineScope for presenter + session-verification work.
  * @param playerSupervisorOverride Test seam: inject a supervisor backed by a fake launcher;
  *                                 production uses the real `ProcessBuilder` launcher.
@@ -349,6 +355,32 @@ class DesktopAppCoordinator(
     val secretBackend: SecretBackend,
     val appVersion: String,
     val buildDefaultOrigin: String,
+    /** Platform artifact layout; defaults to the Linux layout (historical behavior). */
+    val layout: NativeArtifactLayout = LinuxNativeArtifactLayout,
+    /**
+     * Normalized host OS family the platform strategies are selected from (plans/WINDOWS_IMPL.md
+     * §3.1). Defaults to the real JVM host so production wiring is unchanged; tests inject an
+     * explicit value so no feature code sniffs `os.name`.
+     */
+    val hostOs: HostOs = DesktopPlatformDetector.detectHostOs(),
+    /**
+     * JInput controller-environment strategy (Phase 1). Defaults to the one selected for [hostOs];
+     * tests inject a fake to avoid loading JInput natives.
+     */
+    val controllerEnvironmentPolicy: ControllerEnvironmentPolicy =
+        ControllerEnvironmentPolicy.forHostOs(hostOs),
+    /**
+     * On-screen virtual keyboard launcher (Phase 1). Defaults to the one selected for [hostOs];
+     * the search field's activate action consumes this instead of sniffing `os.name`.
+     */
+    val virtualKeyboardLauncher: VirtualKeyboardLauncher =
+        VirtualKeyboardLauncher.forHostOs(hostOs),
+    /**
+     * Single-instance lock (plans/LINUX_X64.md §10.4). Production startup builds exactly ONE
+     * [FileLockAppInstanceLock] and injects it here; when absent (tests) the coordinator builds
+     * its own over [paths].stateDir, preserving the historical behavior.
+     */
+    appInstanceLock: FileLockAppInstanceLock? = null,
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     playerSupervisorOverride: LaunchJournalSupervisor? = null,
     romDetailLookup: ((Long) -> RomDetail?)? = null,
@@ -416,7 +448,7 @@ class DesktopAppCoordinator(
      * router (via [RommulusDesktopApp]) and by the controller-settings capture pump, so one
      * native-environment bootstrap serves both.
      */
-    val controllerInputSource: JInputSource by lazy { JInputControllerSource() }
+    val controllerInputSource: JInputSource by lazy { JInputControllerSource(controllerEnvironmentPolicy) }
 
     private val deviceIdentityStorage = SqliteDeviceIdentityStorage(database)
     private val schedulerStateStore: SchedulerStateStore = SqliteSchedulerStateStore(database)
@@ -512,8 +544,12 @@ class DesktopAppCoordinator(
     private val detailPresenters: MutableMap<Long, RomDetailPresenter> =
         Collections.synchronizedMap(mutableMapOf())
 
-    /** Single-instance lock (plans/LINUX_X64.md §10.4). Constructed here; acquired by Main. */
-    val appInstanceLock: FileLockAppInstanceLock = FileLockAppInstanceLock(null, paths.stateDir)
+    /**
+     * Single-instance lock (plans/LINUX_X64.md §10.4). The injected production instance (built
+     * ONCE by startup and acquired there); falls back to a coordinator-owned lock for tests.
+     */
+    val appInstanceLock: FileLockAppInstanceLock =
+        appInstanceLock ?: FileLockAppInstanceLock(null, paths.stateDir)
 
     /**
      * Phase 9 save-sync drain executor: the ported Android state machine over the durable queue
@@ -1389,7 +1425,7 @@ class DesktopAppCoordinator(
             // ROMM_PLAYER_ALLOWED_CORES value, so the manifest's releaseTag (falling back to
             // commitSha) is the authoritative revision pin.
             coreBuildRevision = coreBuildRevision,
-            corePath = resolveCoreLibraryPath(coresDir, core.coreId),
+            corePath = layout.resolveCoreLibraryPath(coresDir, core.coreId),
             contentPath = staged.path,
             contentHash = staged.sha256,
             systemDir = paths.firmwareDir(),
@@ -1681,7 +1717,7 @@ class DesktopAppCoordinator(
             scope = scope,
             repository = network.libraryRepository,
             hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
-            supportedCoreAbis = setOf(LINUX_X86_64_ABI),
+            supportedCoreAbis = setOf(layout.buildIdentity),
         )
     }
 
@@ -1697,7 +1733,7 @@ class DesktopAppCoordinator(
         scope = scope,
         repository = network.libraryRepository,
         hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
-        supportedCoreAbis = setOf(LINUX_X86_64_ABI),
+        supportedCoreAbis = setOf(layout.buildIdentity),
     )
 
     fun romGridPresenter(query: RomQuery): RomGridPresenter = RomGridPresenter(
@@ -1705,7 +1741,7 @@ class DesktopAppCoordinator(
         repository = network.libraryRepository,
         query = query,
         hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
-        supportedCoreAbis = setOf(LINUX_X86_64_ABI),
+        supportedCoreAbis = setOf(layout.buildIdentity),
     )
 
     fun romDetailPresenter(romId: Long): RomDetailPresenter =
@@ -1989,18 +2025,18 @@ class DesktopAppCoordinator(
     /**
      * Resolves the core to launch for a platform slug.
      *
-     * Resolves the platform's approved core, but ONLY when it is approved for the
-     * [LINUX_X86_64_ABI] ABI and its shared library is actually installed in the desktop
-     * data root's `cores/` directory. Unsupported and uninstalled platforms return null.
+     * Resolves the platform's approved core, but ONLY when it is approved for the layout's
+     * [NativeArtifactLayout.buildIdentity] and its shared library is actually installed in the
+     * desktop data root's `cores/` directory. Unsupported and uninstalled platforms return null.
      */
     private fun resolveLaunchCore(platformSlug: String): CoreLicenseFinding? {
         val coresDir = paths.dataDir.resolve("cores")
         val installed: (CoreLicenseFinding) -> Boolean = { core ->
-            coreLibraryFileNames(core.coreId).any { Files.exists(coresDir.resolve(it)) }
+            layout.coreLibraryFileNames(core.coreId).any { Files.exists(coresDir.resolve(it)) }
         }
         return CoreManifest.approvedEntries().firstOrNull {
             it.supportedSystems.contains(platformSlug) &&
-                LINUX_X86_64_ABI in it.supportedAbis &&
+                layout.buildIdentity in it.supportedAbis &&
                 installed(it)
         }
     }

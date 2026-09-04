@@ -1,0 +1,23 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 1 },
+  "configurePresets": [
+    {
+      "name": "windows-x86_64",
+      "displayName": "Windows x86_64 engine tests (MinGW-w64 UCRT64 + Ninja)",
+      "description": "Phase 2 contract preset (plans/WINDOWS_IMPL.md sections 3.2 and 5.1). Run on a pinned windows-2022 runner with the MinGW-w64 UCRT64 toolchain and Ninja on PATH. Mirrors the player's platform source selection: all Win32 platform sources have landed, so this test project configures and builds on WIN32 (and the standalone PLAYER preset's platform source selection is complete too — its WIN32 configure proceeds to the SDL3/ANGLE dependency checks); it never falls back to POSIX sources. CI runs the suite with an explicit CTest invocation rather than a test preset: ctest --test-dir build/engine-tests-windows-x86_64 --output-on-failure (path relative to the repo root, matching binaryDir), mirroring .github/workflows/linux-x64.yml",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/engine-tests-windows-x86_64",
+      "toolchainFile": "${sourceDir}/../cmake/toolchains/windows-mingw-ucrt-x86_64.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-x86_64",
+      "configurePreset": "windows-x86_64"
+    }
+  ]
+}

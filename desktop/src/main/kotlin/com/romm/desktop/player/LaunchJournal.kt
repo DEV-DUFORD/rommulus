@@ -1,9 +1,12 @@
 package com.romm.desktop.player
 
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.attribute.PosixFilePermission
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.KotlinJsonAdapterFactory
 import com.squareup.moshi.Moshi
@@ -23,20 +26,18 @@ import java.nio.file.StandardOpenOption.WRITE
  */
 internal object AtomicFileIo {
 
-    /** 0600: journal/request files are user-only (plans/LINUX_X64.md §9; §12.4 step 2). */
-    val FILE_USER_ONLY: Set<PosixFilePermission> = setOf(
-        PosixFilePermission.OWNER_READ,
-        PosixFilePermission.OWNER_WRITE,
-    )
-
-    /** 0700: session directories are user-only (plans/LINUX_X64.md §9). */
-    val DIR_USER_ONLY: Set<PosixFilePermission> = setOf(
-        PosixFilePermission.OWNER_READ,
-        PosixFilePermission.OWNER_WRITE,
-        PosixFilePermission.OWNER_EXECUTE,
-    )
-
-    fun writeAtomically(target: Path, bytes: ByteArray, permissions: Set<PosixFilePermission>? = null) {
+    /**
+     * Atomically writes [bytes] to [target], hardening the temp file (0600 on Linux) through
+     * [policy] before the rename. Journal/request files are user-only and sensitive
+     * (plans/LINUX_X64.md §9; §12.4 step 2; plans/WINDOWS_IMPL.md §4.2).
+     */
+    fun writeAtomically(
+        target: Path,
+        bytes: ByteArray,
+        profile: PathPermissionProfile = PathPermissionProfile.USER_ONLY_FILE,
+        sensitivity: FileSensitivity = FileSensitivity.SENSITIVE,
+        policy: FileSecurityPolicy = FileSecurityPolicies.default(),
+    ) {
         val dir = checkNotNull(target.parent) { "target has no parent directory: $target" }
         val temp = Files.createTempFile(dir, ".tmp-", target.fileName.toString())
         try {
@@ -45,7 +46,7 @@ internal object AtomicFileIo {
                 while (buffer.hasRemaining()) channel.write(buffer)
                 channel.force(true) // fsync BEFORE the rename so the content is durable
             }
-            if (permissions != null) setPosixPermissionsQuietly(temp, permissions)
+            policy.hardenFile(temp, profile, sensitivity)
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         } catch (e: Exception) {
             runCatching { Files.deleteIfExists(temp) }
@@ -53,20 +54,9 @@ internal object AtomicFileIo {
         }
     }
 
-    fun setPosixPermissionsQuietly(path: Path, permissions: Set<PosixFilePermission>) {
-        try {
-            Files.setPosixFilePermissions(path, permissions)
-        } catch (_: UnsupportedOperationException) {
-            // Non-POSIX filesystems (e.g. Windows): permissions are not enforced there.
-        }
-    }
-
-    /** Creates [dir] (and parents) with 0700 when absent. */
-    fun ensureUserOnlyDirectory(dir: Path) {
-        if (!Files.exists(dir)) {
-            Files.createDirectories(dir)
-            setPosixPermissionsQuietly(dir, DIR_USER_ONLY)
-        }
+    /** Creates [dir] (and parents) user-only (0700 on Linux) when absent. */
+    fun ensureUserOnlyDirectory(dir: Path, policy: FileSecurityPolicy = FileSecurityPolicies.default()) {
+        policy.createDirectoryIfAbsent(dir, PathPermissionProfile.USER_ONLY_DIRECTORY, FileSensitivity.SENSITIVE)
     }
 }
 
@@ -205,11 +195,8 @@ class LaunchJournalStore(private val journalsRoot: Path) {
         val target = journalPath(journal.sessionId)
         AtomicFileIo.ensureUserOnlyDirectory(checkNotNull(target.parent))
         val json = journalAdapter.toJson(LaunchJournalFile.from(journal))
-        AtomicFileIo.writeAtomically(
-            target,
-            json.toByteArray(StandardCharsets.UTF_8),
-            AtomicFileIo.FILE_USER_ONLY,
-        )
+        // Defaults: USER_ONLY_FILE (0600 on Linux) + SENSITIVE.
+        AtomicFileIo.writeAtomically(target, json.toByteArray(StandardCharsets.UTF_8))
     }
 
     /**
@@ -235,11 +222,8 @@ class LaunchJournalStore(private val journalsRoot: Path) {
     fun writeRequest(sessionId: String, json: String) {
         val target = requestPath(sessionId)
         AtomicFileIo.ensureUserOnlyDirectory(checkNotNull(target.parent))
-        AtomicFileIo.writeAtomically(
-            target,
-            json.toByteArray(StandardCharsets.UTF_8),
-            AtomicFileIo.FILE_USER_ONLY,
-        )
+        // Defaults: USER_ONLY_FILE (0600 on Linux) + SENSITIVE.
+        AtomicFileIo.writeAtomically(target, json.toByteArray(StandardCharsets.UTF_8))
     }
 
     /** Session IDs on disk (directory names that pass [SecureFiles.requireSessionId]). */

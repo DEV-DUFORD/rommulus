@@ -30,19 +30,25 @@ client-side, no cloud gaming.
 
 Handled by the vendored cores under [`third_party/cores/`](third_party/cores), each with its own
 `VENDORING.md` and license record in
-[`CoreManifest.kt`](app/src/main/java/com/romm/androidtv/emulation/model/CoreManifest.kt):
+[`CoreManifest.kt`](shared/domain/src/main/kotlin/com/romm/androidtv/emulation/model/CoreManifest.kt):
 
 Game Boy / Game Boy Color (Gambatte) · Game Boy Advance (mGBA) · NES/Famicom (FCEUmm) · SNES
 (Snes9x) · Master System / Game Gear / Mega Drive / Genesis / Sega CD (Genesis Plus GX) · Atari 2600
 (Stella) · Atari 7800 (ProSystem) · Atari Lynx (Handy) · TurboGrafx-16/PC Engine (Beetle PCE Fast) ·
 Neo Geo Pocket·Color (Beetle NeoPop) · WonderSwan·Color (Beetle WonderSwan) · Nintendo 64
-(Mupen64Plus-next) · PlayStation (PCSX-ReARMed).
+(Mupen64Plus-next) · PlayStation (PCSX-ReARMed) · GameCube/Wii (Dolphin, x86_64 Linux desktop
+build only) · PlayStation 2 (lrps2, x86_64 Linux desktop build only).
 
 ## Building
 
 - **Android**: `./gradlew assembleRelease` (NDK r27.2.12479018, CMake 3.22.1; the libretro cores
   build as pinned shared libraries for `armeabi-v7a` and `arm64-v8a`).
 - **Tests**: `./gradlew test` (JVM unit tests) and `./gradlew connectedAndroidTest` (instrumented).
+- **Windows x86_64 (in progress, CI-only)**: no local Windows build guide and no Windows release
+  artifacts exist yet. The in-progress Windows work is built only by
+  `.github/workflows/windows-x64.yml` on a pinned `windows-2022` runner (MinGW-w64 UCRT64 + Ninja
+  under MSYS2, pinned SDL3 3.4.16 source); current, non-advertised status is recorded in
+  [`docs/windows-support-manifest.md`](docs/windows-support-manifest.md).
 
 A RomM server URL is read from `local.properties` (`romm.origin`) for local debug only; release
 builds always use an empty origin and connect via the in-app onboarding flow.
@@ -96,7 +102,7 @@ This project is licensed under the **GNU General Public License v3.0** (see
   (`app/src/main/assets/licenses/libretro.txt`).
 - Per-core license, vendoring, and provenance detail lives in each
   [`third_party/cores/*/VENDORING.md`](third_party/cores) file and the
-  [`CoreManifest.kt`](app/src/main/java/com/romm/androidtv/emulation/model/CoreManifest.kt) review
+  [`CoreManifest.kt`](shared/domain/src/main/kotlin/com/romm/androidtv/emulation/model/CoreManifest.kt) review
   record.
 
 Several vendored cores carry their own copyleft or non-commercial terms; see the individual

@@ -8,7 +8,11 @@ add_library(romm_libretro_host SHARED
     ${ROMM_NATIVE_ROOT}/engine/src/core_library.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/environment.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/emulation_session.cpp
-    ${ROMM_NATIVE_ROOT}/engine/src/atomic_file_store.cpp
+    # POSIX platform implementation of the atomic file store contract
+    # (Phase 2 step 1, plans/WINDOWS_IMPL.md section 5.1): Android is a
+    # POSIX host, so it selects the same source as the Linux/macOS player
+    # and test builds. The engine tree itself carries no file-system code.
+    ${ROMM_NATIVE_ROOT}/platform/posix/src/posix_atomic_file_store.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/log.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/n64_rom.cpp
     ${ROMM_NATIVE_ROOT}/engine/src/dynamic_library.cpp

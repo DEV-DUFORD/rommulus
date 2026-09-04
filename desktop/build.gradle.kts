@@ -25,6 +25,13 @@ dependencies {
     // plans/LINUX_X64.md §10.2. Pure-JDBC driver; no Room annotations anywhere on desktop.
     implementation("org.xerial:sqlite-jdbc:3.41.2.2")
     implementation("net.java.jinput:jinput:2.0.10")
+    // Windows Credential Manager binding (plans/WINDOWS_IMPL.md §4.3): pinned, maintained
+    // JNA/JNA Platform versions for the narrow credential seam
+    // (com.romm.desktop.storage.secret.windows). The seam loads advapi32 lazily on first use, so
+    // the dependency is inert on Linux/macOS; JNA Platform is used only for WinBase.FILETIME /
+    // SECURITY_ATTRIBUTES types in the CREDENTIAL structure.
+    implementation("net.java.dev.jna:jna:5.19.1")
+    implementation("net.java.dev.jna:jna-platform:5.19.1")
     // JInput's main jar contains ONLY the platform plugin classes — zero native libraries
     // (verified: jinput-2.0.10.jar has no .so/.dll/.jnilib entries). The natives ship in the
     // `natives-all` classifier (jinput-2.0.10-natives-all.jar: libjinput-linux64.so,
@@ -78,4 +85,10 @@ tasks.withType<Test> {
     // Mock mode (available|locked|unavailable) from the mock's env var, so the conformance test
     // can gate which assertions apply per CI run.
     systemProperty("rommulus.secretServiceMode", System.getenv("ROM_SECRET_MODE") ?: "")
+    // Real Windows Credential Manager round-trip gate (plans/WINDOWS_IMPL.md §4.3): set
+    // ROMM_WINDOWS_CREDENTIAL_INTEGRATION=1 on the windows-2022 runner to enable; inert elsewhere.
+    systemProperty(
+        "rommulus.windowsCredentialIntegration",
+        System.getenv("ROMM_WINDOWS_CREDENTIAL_INTEGRATION") ?: "",
+    )
 }

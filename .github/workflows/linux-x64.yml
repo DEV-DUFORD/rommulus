@@ -951,6 +951,14 @@ jobs:
       # No JDK / native toolchain needed here: the assertions run against the
       # source tree and the tarball artifact produced by package-tarball.
 
+      - name: Assert — Linux core inventory agreement (validator)
+        run: |
+          set -euo pipefail
+          # Source-only guard: CoreManifest.kt == core-manifest.json == the
+          # linux-support-manifest.md Core status table, every package entry is
+          # enabled and linux-x86_64, and no approved core advertises windows.
+          python3 packaging/validate-linux-targets.py
+
       - name: Download tarball artifact (from package-tarball)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

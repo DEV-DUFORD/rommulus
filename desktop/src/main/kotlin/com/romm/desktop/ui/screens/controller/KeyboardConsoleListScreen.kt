@@ -28,7 +28,7 @@ import com.romm.desktop.ui.navigation.keyboardShortcuts
 fun KeyboardConsoleListScreen(coordinator: DesktopAppCoordinator) {
     val colors = LocalRommulusColors.current
     val profiles = remember {
-        CoreControllerProfiles.forApprovedCores(setOf(com.romm.desktop.player.LINUX_X86_64_ABI))
+        CoreControllerProfiles.forApprovedCores(setOf(coordinator.layout.buildIdentity))
     }
     Column(
         Modifier.fillMaxSize()

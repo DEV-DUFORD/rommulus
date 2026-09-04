@@ -1,6 +1,10 @@
 package com.romm.desktop.storage
 
 import com.romm.androidtv.storage.ports.AppInstanceLock
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -8,8 +12,6 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption.CREATE
 import java.nio.file.StandardOpenOption.READ
 import java.nio.file.StandardOpenOption.WRITE
-import java.nio.file.attribute.PosixFilePermission
-import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -52,7 +54,8 @@ import java.util.concurrent.ConcurrentHashMap
  * not depend on the mode bits).
  */
 class FileLockAppInstanceLock(
-    val lockFile: Path
+    val lockFile: Path,
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
 ) : AppInstanceLock {
 
     /**
@@ -78,20 +81,21 @@ class FileLockAppInstanceLock(
 
         try {
             lockFile.parent?.let { parent ->
-                Files.createDirectories(parent)
-                try {
-                    Files.setPosixFilePermissions(parent, DIRECTORY_PERMISSIONS)
-                } catch (_: UnsupportedOperationException) {
-                    // Non-POSIX filesystem: no permission bits to set.
-                }
+                // Create + always re-apply (historical behavior): 0700 on Linux. The lock is
+                // advisory and holds no data, so it is NORMAL sensitivity: best-effort
+                // hardening, containment verification on Windows. A containment failure here
+                // propagates to the fail-closed catch below — acquire returns false.
+                securityPolicy.ensureDirectory(parent, PathPermissionProfile.USER_ONLY_DIRECTORY, FileSensitivity.NORMAL)
             }
 
             val opened = FileChannel.open(lockFile, READ, WRITE, CREATE)
             try {
-                Files.setPosixFilePermissions(lockFile, FILE_PERMISSIONS)
-            } catch (_: UnsupportedOperationException) {
-                // Non-POSIX filesystem: mode bits unavailable; advisory lock
-                // semantics do not depend on them.
+                // 0600 on Linux; best-effort elsewhere — advisory lock semantics do not
+                // depend on mode bits or ACLs.
+                securityPolicy.hardenFile(lockFile, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.NORMAL)
+            } catch (_: Exception) {
+                // Hardening unavailable (non-POSIX FS / unconfigured ACL seam): proceed with
+                // the advisory lock only, matching the historical best-effort behavior.
             }
 
             // Non-blocking: null means another *process* already holds the lock.
@@ -146,19 +150,6 @@ class FileLockAppInstanceLock(
          */
         fun resolveLockFile(runtimeDir: Path?, stateDir: Path): Path =
             (runtimeDir?.takeIf { Files.isDirectory(it) } ?: stateDir).resolve(LOCK_FILE_NAME)
-
-        /** 0700: owner-only (user-only write permissions). */
-        val DIRECTORY_PERMISSIONS: Set<PosixFilePermission> = setOf(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE,
-            PosixFilePermission.OWNER_EXECUTE
-        )
-
-        /** 0600: owner read/write only. */
-        val FILE_PERMISSIONS: Set<PosixFilePermission> = setOf(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE
-        )
 
         /**
          * In-JVM registry of live lock instances per normalized path.

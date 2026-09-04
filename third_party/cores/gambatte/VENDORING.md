@@ -28,7 +28,7 @@ plus the headers those files need:
   - Network code (`net_serial.cpp` / `.h`) deliberately **excluded** — the app
     does not compile with `HAVE_NETWORK=1` (`Android.mk` defaults to `1` but
     the app sets it off).
-- **`libgambatte/src/`** (65 files — 22 `.cpp`, 43 `.h`): the complete C++
+- **`libgambatte/src/`** (65 files — 29 `.cpp`, 36 `.h`): the complete C++
   Game Boy / Game Boy Color emulation core (CPU, PPU, sound channels,
   cartridge/ROM handling, SRAM, MBCs incl. MBC5/Huc3/RTC, state saving,
   TIMA timer, video/LCD timing). All files referenced by
@@ -42,19 +42,24 @@ plus the headers those files need:
 - **`libgambatte/libretro-common/`** (35 files — 13 `.c`, 22 `.h`): the full
   in-tree `libretro-common` subtree compiled by the Android build
   (`-DSTATIC_LINKING` undefined in the Android build; `Makefile.common`'s
-  `ifneq ($(STATIC_LINKING), 1)` block pulls in the 12 source files plus all
+  `ifneq ($(STATIC_LINKING), 1)` block pulls in the 13 source files plus all
   needed headers). See "Per-component license" below for license details.
 - **`COPYING`** (1 file, root): full GPLv2 text from upstream.
 - **`link.T`** (1 file, from `libgambatte/libretro/`): upstream linker version
   script — exports `retro_*` symbols only, hides everything else. Referenced
   by `Android.mk`'s `LOCAL_LDFLAGS := -Wl,-version-script=..., --no-undefined`.
 
-Total vendored: **118 files** (36 `.c`, 15 `.cpp`, 67 `.h`, 1 `.T`, 1 `COPYING`).
+Total vendored: **118 files** (16 `.c`, 30 `.cpp`, 70 `.h`, 1 `.T`, 1 `COPYING`),
+plus this record (`VENDORING.md`) — 119 tracked files in total.
 
 The vendored set was verified against upstream's `Makefile.common` `SOURCES_C`
-+ `SOURCES_CXX` lists (file-by-file): 12 C sources + 1 libretro driver `.cpp`
-+ 22 core `.cpp` files = 35 compiled sources, all present. The header sets
-above are the complete transitive closure needed by those 35 sources.
++ `SOURCES_CXX` lists (file-by-file): 16 C sources (3 from `libretro/`, 13
+from `libretro-common/`) + 30 C++ files (`libretro/libretro.cpp` + 29 core
+`.cpp` files) = 46 compiled sources, all present and enumerated exactly once
+in the shared CMake fragment `native/cmake/cores/gambatte-sources.cmake`,
+which every platform build (Android, Linux, Windows candidate) consumes. The
+header sets above are the complete transitive closure needed by those 46
+sources.
 
 ## Deliberately excluded
 
@@ -120,7 +125,10 @@ recorded 2026-08-01.
 
 ## Build integration notes
 
-The `gambatte_core` CMake target (`app/src/main/cpp/CMakeLists.txt`) mirrors
+The `gambatte_core` CMake targets (`native/cmake/cores/gambatte.cmake` for
+Android, `gambatte-linux.cmake` for the POSIX player, and the Windows
+candidate `gambatte-windows.cmake`; all consume the shared source list in
+`gambatte-sources.cmake`) mirror
 upstream's `libgambatte/libretro/jni/Android.mk` + `Makefile.common` exactly:
 
 - **Defines (COREFLAGS)**: `-DINLINE=inline -DHAVE_STDINT_H -DHAVE_INTTYPES_H
@@ -138,9 +146,9 @@ upstream's `libgambatte/libretro/jni/Android.mk` + `Makefile.common` exactly:
 - **Network feature** is off (`HAVE_NETWORK` not defined); `net_serial.cpp`
   is NOT compiled.
 - **Per-ABI note**: the upstream `Android.mk` defaults to `HAVE_NETWORK=1`,
-  but the app explicitly sets `HAVE_NETWORK=0` / omits the flag. The
-  `net_serial.cpp` source is vendored for reference but excluded from the
-  compiled set.
+  but every RomMulus build omits the flag entirely, and `net_serial.cpp` /
+  `net_serial.h` are NOT vendored at this pin — no network code can enter any
+  platform's compiled set.
 
 **Inline ARM assembly**: none present in the vendored set. The only inline
 assembly is the MIPS-specific `__asm__` block inside `cc_resampler.c`, gated

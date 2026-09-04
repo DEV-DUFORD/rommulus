@@ -16,8 +16,10 @@
 //   9. verify content hash when requested;
 //  10. reject an already-active session lock.
 //
-// Platform-neutral (POSIX file operations; the player targets Linux and
-// the host tests run on macOS). No SDL, no Android, no JNI.
+// Platform-neutral policy: the OS-dependent primitives (canonicalization,
+// symlink detection, request-file ownership/mode) are declared in
+// path_security.h and implemented by a platform-selected source (POSIX
+// today; Win32 in a later Phase 2 step). No SDL, no Android, no JNI.
 #pragma once
 
 #include <functional>
@@ -25,6 +27,7 @@
 #include <optional>
 #include <string>
 
+#include "native/player/path_security.h"
 #include "native/player/protocol.h"
 
 namespace romm::player {
@@ -81,13 +84,8 @@ ValidationOutcome validateRequestFile(const std::string& requestPath,
 ValidationOutcome validateRequest(const PlayerRequest& request,
                                   const PlayerConfig& config);
 
-// Canonicalizes `path` to an absolute path with symlinks, `.`, and `..`
-// resolved. Relative paths resolve against the current working directory.
-// For paths that do not exist yet (e.g. a candidate save being created),
-// the deepest existing ancestor is canonicalized and the remaining
-// components are re-appended, so the result is still fully canonical.
-// Returns std::nullopt (and sets *error) on failure.
-std::optional<std::string> canonicalPath(const std::string& path,
-                                         std::string* error = nullptr);
+// canonicalPath() — the OS-dependent path canonicalization primitive used
+// by the checks above — is declared in path_security.h (included above) so
+// its implementation can be selected per platform at build time.
 
 }  // namespace romm::player

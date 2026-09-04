@@ -1,12 +1,21 @@
-// sdl_dynamic_library.cpp — POSIX dynamic-loader implementation of the
-// engine's DynamicLibrary seam.
-#include "native/player/sdl_dynamic_library.h"
+// posix_dynamic_library.cpp — POSIX dynamic-loader implementation of the
+// engine's DynamicLibrary seam (dlopen/dlsym/dlclose; no SDL involved).
+// Phase 2 step 1: moved verbatim from native/player/src/sdl_dynamic_library.cpp
+// to the POSIX platform tree so a Win32 implementation can be selected
+// alongside it at CMake configure time in a later step. Also defines the
+// platform-neutral factory (dynamic_library_factory.h) that main.cpp calls;
+// the future Win32 tree defines the same symbol from its own source.
+#include "native/player/posix_dynamic_library.h"
 
 #include <dlfcn.h>
 
 namespace romm::player {
 
-bool SdlDynamicLibrary::open(const std::string& path) {
+std::unique_ptr<romm::dynamiclib::DynamicLibrary> createPlatformDynamicLibrary() {
+    return std::make_unique<PosixDynamicLibrary>();
+}
+
+bool PosixDynamicLibrary::open(const std::string& path) {
     // Clear any stale error from a previous operation before we start, so
     // a failure here is attributed to this open() and not to history.
     dlerror();
@@ -21,7 +30,7 @@ bool SdlDynamicLibrary::open(const std::string& path) {
     return true;
 }
 
-std::optional<void*> SdlDynamicLibrary::resolve(const std::string& symbol) {
+std::optional<void*> PosixDynamicLibrary::resolve(const std::string& symbol) {
     if (handle_ == nullptr) {
         return std::nullopt;
     }
@@ -40,14 +49,14 @@ std::optional<void*> SdlDynamicLibrary::resolve(const std::string& symbol) {
     return address;
 }
 
-void SdlDynamicLibrary::close() {
+void PosixDynamicLibrary::close() {
     if (handle_ != nullptr) {
         dlclose(handle_);
         handle_ = nullptr;
     }
 }
 
-std::string SdlDynamicLibrary::lastError() const {
+std::string PosixDynamicLibrary::lastError() const {
     // Returns the string captured by the most recent failed operation.
     // Never calls dlerror() here: by the time the caller asks, the pending
     // error has long since been consumed, and re-reading would return an

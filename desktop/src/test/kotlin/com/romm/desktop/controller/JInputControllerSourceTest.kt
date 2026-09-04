@@ -4,6 +4,7 @@ import com.romm.androidtv.controller.model.NeutralKey
 import com.romm.androidtv.controller.model.NeutralAxis
 import net.java.games.input.Component
 import net.java.games.input.Controller
+import net.java.games.input.ControllerEnvironment
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.lang.reflect.Proxy
@@ -173,6 +174,30 @@ class JInputControllerSourceTest {
         assertThat(tracker.changed(setOf("event14", "js2"))).isTrue()
     }
 
+    @Test
+    fun `source enumerates through the injected policy without loading natives`() {
+        val pad = controller(emptyArray(), name = "Wireless Controller")
+        val source = JInputControllerSource(FakePolicy(FakeEnvironment(listOf(pad))))
+
+        val enumerated = source.enumerate()
+
+        assertThat(enumerated).hasSize(1)
+        assertThat(enumerated.first().id).contains("Wireless Controller")
+    }
+
+    /** A [ControllerEnvironmentPolicy] backed entirely by fakes — no JInput native is loaded. */
+    private class FakePolicy(private val env: ControllerEnvironment) : ControllerEnvironmentPolicy {
+        override val environment: ControllerEnvironment = env
+        override fun refresh(): Boolean = true
+        override fun topologySnapshot(): Set<String>? = null
+        override fun diagnostics(names: List<String>): List<String> = emptyList()
+    }
+
+    private class FakeEnvironment(private val controllers: List<Controller>) : ControllerEnvironment() {
+        override fun getControllers(): Array<Controller> = controllers.toTypedArray()
+        override fun isSupported(): Boolean = true
+    }
+
     private fun component(
         identifier: Component.Identifier,
         pollData: () -> Float,
@@ -183,6 +208,9 @@ class JInputControllerSourceTest {
             "getDeadZone" -> 0f
             "getName" -> identifier.name
             "isRelative", "isAnalog" -> false
+            "hashCode" -> identifier.hashCode()
+            "equals" -> false
+            "toString" -> identifier.name
             else -> error("Unexpected Component method: ${method.name}")
         }
     }
@@ -200,6 +228,11 @@ class JInputControllerSourceTest {
             "getPortNumber" -> 0
             "getComponents" -> components
             "poll" -> poll()
+            "hashCode" -> name.hashCode()
+            // Identity-based equals is not reachable: enumerate() only ever inserts this
+            // single proxy into an empty HashSet/HashMap, so equals() is never invoked.
+            "equals" -> false
+            "toString" -> name
             else -> error("Unexpected Controller method: ${method.name}")
         }
     }

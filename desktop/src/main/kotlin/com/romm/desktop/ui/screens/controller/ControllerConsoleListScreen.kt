@@ -54,7 +54,7 @@ fun ControllerConsoleListScreen(
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
     val profiles = remember {
-        CoreControllerProfiles.forApprovedCores(setOf(com.romm.desktop.player.LINUX_X86_64_ABI))
+        CoreControllerProfiles.forApprovedCores(setOf(coordinator.layout.buildIdentity))
     }
 
     Column(

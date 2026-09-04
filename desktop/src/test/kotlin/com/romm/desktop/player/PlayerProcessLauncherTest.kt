@@ -2,6 +2,8 @@ package com.romm.desktop.player
 
 import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.firmwareDir
+import com.romm.desktop.PosixTestSupport
+import com.romm.desktop.platform.LinuxNativeArtifactLayout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -21,32 +23,32 @@ class PlayerProcessLauncherTest {
 
     @Test
     fun `deriveAllowedCores emits approved linux-x86_64 cores as coreId=revision pairs in sorted order`() {
-        assertThat(deriveAllowedCores(listOf("beetle_pce_fast", "dolphin", "fceumm", "gambatte", "genesis_plus_gx", "handy", "mednafen_ngp", "mednafen_wswan", "mgba", "mupen64plus_next", "pcsx_rearmed", "prosystem", "snes9x", "stella", "test_core")))
+        assertThat(LinuxNativeArtifactLayout.deriveAllowedCores(listOf("beetle_pce_fast", "dolphin", "fceumm", "gambatte", "genesis_plus_gx", "handy", "mednafen_ngp", "mednafen_wswan", "mgba", "mupen64plus_next", "pcsx_rearmed", "prosystem", "snes9x", "stella", "test_core")))
             .isEqualTo("beetle_pce_fast=b211204c7026dff6e86e79b00185512e2421fff8;dolphin=841bacadb5d5c3f9acba0dc652d306ecd77a7bbf;fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;genesis_plus_gx=ca93fec870378f3bff65931bcd828d5e756cce75;handy=bc55d462f0b2d6b073ea93dc552ebd73cec60fd1;mednafen_ngp=a50d5ac288a81f2104ddf43195a4efdd15c72227;mednafen_wswan=4b01295838ea89e3f1355bbe4cb5cf98aa6108cd;mgba=32de792178a3662cd0402c8568fccfaad4a764a1;mupen64plus_next=98c1b0d877542b01314b3b04272282ba223b65b3;pcsx_rearmed=da2cb8ecd17fd0932ab6d94774c0522beebce6e3;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;snes9x=1.63;stella=7.0;test_core=1")
         // Input order must not matter: the output is sorted by coreId.
-        assertThat(deriveAllowedCores(listOf("test_core", "snes9x", "stella", "prosystem", "pcsx_rearmed", "mupen64plus_next", "mednafen_wswan", "handy", "mgba", "fceumm", "gambatte", "genesis_plus_gx", "beetle_pce_fast", "mednafen_ngp", "dolphin")))
+        assertThat(LinuxNativeArtifactLayout.deriveAllowedCores(listOf("test_core", "snes9x", "stella", "prosystem", "pcsx_rearmed", "mupen64plus_next", "mednafen_wswan", "handy", "mgba", "fceumm", "gambatte", "genesis_plus_gx", "beetle_pce_fast", "mednafen_ngp", "dolphin")))
             .isEqualTo("beetle_pce_fast=b211204c7026dff6e86e79b00185512e2421fff8;dolphin=841bacadb5d5c3f9acba0dc652d306ecd77a7bbf;fceumm=b5e3566515c27dc66c9c20572171673126532e06;gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;genesis_plus_gx=ca93fec870378f3bff65931bcd828d5e756cce75;handy=bc55d462f0b2d6b073ea93dc552ebd73cec60fd1;mednafen_ngp=a50d5ac288a81f2104ddf43195a4efdd15c72227;mednafen_wswan=4b01295838ea89e3f1355bbe4cb5cf98aa6108cd;mgba=32de792178a3662cd0402c8568fccfaad4a764a1;mupen64plus_next=98c1b0d877542b01314b3b04272282ba223b65b3;pcsx_rearmed=da2cb8ecd17fd0932ab6d94774c0522beebce6e3;prosystem=363b6dfbd3e240762e022c2b4897b4fe55722be3;snes9x=1.63;stella=7.0;test_core=1")
     }
 
     @Test
     fun `deriveAllowedCores excludes coreIds that are not in the manifest`() {
-        assertThat(deriveAllowedCores(listOf("not_a_real_core"))).isEmpty()
+        assertThat(LinuxNativeArtifactLayout.deriveAllowedCores(listOf("not_a_real_core"))).isEmpty()
     }
 
     @Test
     fun `deriveAllowedCores excludes non-approved cores`() {
         // sameboy is in the manifest but not approved.
-        assertThat(deriveAllowedCores(listOf("sameboy"))).isEmpty()
+        assertThat(LinuxNativeArtifactLayout.deriveAllowedCores(listOf("sameboy"))).isEmpty()
     }
 
     @Test
     fun `deriveAllowedCores excludes cores whose supportedAbis lack linux-x86_64`() {
-        assertThat(deriveAllowedCores(listOf("sameboy"))).isEmpty()
+        assertThat(LinuxNativeArtifactLayout.deriveAllowedCores(listOf("sameboy"))).isEmpty()
     }
 
     @Test
     fun `deriveAllowedCores emits an empty string when nothing is installed`() {
-        assertThat(deriveAllowedCores(emptyList())).isEmpty()
+        assertThat(LinuxNativeArtifactLayout.deriveAllowedCores(emptyList())).isEmpty()
     }
 
     // ---------------------------------------------------------------- scanInstalledCoreIds
@@ -57,12 +59,12 @@ class PlayerProcessLauncherTest {
         Files.write(dir.resolve("libfoo.so"), byteArrayOf(0))
         Files.write(dir.resolve("notes.txt"), byteArrayOf(0))
 
-        assertThat(scanInstalledCoreIds(dir)).containsExactly("foo", "gambatte")
+        assertThat(LinuxNativeArtifactLayout.scanInstalledCoreIds(dir)).containsExactly("foo", "gambatte")
     }
 
     @Test
     fun `scanInstalledCoreIds returns an empty list when the directory does not exist`() {
-        assertThat(scanInstalledCoreIds(Path.of("/nonexistent", "rommulus", "cores"))).isEmpty()
+        assertThat(LinuxNativeArtifactLayout.scanInstalledCoreIds(Path.of("/nonexistent", "rommulus", "cores"))).isEmpty()
     }
 
     @Test
@@ -71,11 +73,13 @@ class PlayerProcessLauncherTest {
         // must recover the manifest's test_core entry so the fallback stays allowlisted.
         Files.write(dir.resolve("libtest_core.so"), byteArrayOf(0))
 
-        assertThat(deriveAllowedCores(scanInstalledCoreIds(dir))).isEqualTo("test_core=1")
+        assertThat(LinuxNativeArtifactLayout.deriveAllowedCores(LinuxNativeArtifactLayout.scanInstalledCoreIds(dir))).isEqualTo("test_core=1")
     }
 
     @Test
     fun `player resolution uses the first executable on PATH`(@TempDir dir: Path) {
+        // Execute-bit semantics are POSIX-only; on NTFS every regular file is "executable".
+        PosixTestSupport.assumePosixFilesystem(dir)
         val bundled = Files.createDirectories(dir.resolve("bundle-bin")).resolve("rommulus_player")
         val later = Files.createDirectories(dir.resolve("later-bin")).resolve("rommulus_player")
         Files.writeString(bundled, "bundled")
@@ -98,6 +102,8 @@ class PlayerProcessLauncherTest {
 
     @Test
     fun `player resolution ignores non-executable PATH entries`(@TempDir dir: Path) {
+        // "Non-executable" only exists where POSIX execute bits exist.
+        PosixTestSupport.assumePosixFilesystem(dir)
         val nonExecutable = Files.createDirectories(dir.resolve("bin")).resolve("rommulus_player")
         Files.writeString(nonExecutable, "not executable")
 
@@ -205,6 +211,8 @@ class PlayerProcessLauncherTest {
 
     @Test
     fun `player output larger than a pipe cannot block exit observation or reconciliation`(@TempDir dir: Path) {
+        // The synthetic player is a /bin/sh script — Unix hosts only.
+        PosixTestSupport.assumeUnixLikeHost()
         val paths = TestAppPaths(dir)
         val journalsRoot = paths.stateDir.resolve("journals")
         val syntheticPlayer = dir.resolve("synthetic-player.sh")
@@ -301,12 +309,16 @@ class PlayerProcessLauncherTest {
         val logFile = journalsRoot.resolve(sessionId).resolve("player.log")
         assertThat(Files.exists(logFile)).isTrue()
         assertThat(Files.readString(logFile)).contains("[pre-launch]").contains("spawn refused (test)")
-        assertThat(Files.getPosixFilePermissions(logFile))
-            .containsExactlyInAnyOrder(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+        if (PosixTestSupport.isPosixFilesystem(logFile)) {
+            assertThat(Files.getPosixFilePermissions(logFile))
+                .containsExactlyInAnyOrder(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+        }
     }
 
     @Test
     fun `player output is captured to the per-session log and stays bounded`(@TempDir dir: Path) {
+        // The synthetic player is a /bin/sh script — Unix hosts only.
+        PosixTestSupport.assumeUnixLikeHost()
         val paths = TestAppPaths(dir)
         val journalsRoot = paths.stateDir.resolve("journals")
         val syntheticPlayer = dir.resolve("chatty-player.sh")

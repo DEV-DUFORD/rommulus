@@ -1,0 +1,907 @@
+# Windows x86_64 Desktop CI — RomMulus
+# -------------------------------------------------------------------
+# Plan:   plans/WINDOWS_IMPL.md §8 and .slim/deepwork/windows-phase-0.md (Lane C)
+# Runner: windows-2022 (pinned; NOT windows-latest)
+# JDK:    Temurin 17 (pinned via actions/setup-java@v4)
+#
+# STATUS (Phase 1 JVM jobs + Phase 2 native test gate):
+#   Jobs 1-2 are intentionally honest and JVM-only. They run the shared
+#   module unit tests and the desktop build/tests on a native Windows runner.
+#   The desktop test task now exercises, host-gated to windows-2022:
+#     • the real Windows Credential Manager round-trip (JNA) — enabled here via
+#       ROMM_WINDOWS_CREDENTIAL_INTEGRATION=1 (plumbed to the test JVM by
+#       desktop/build.gradle.kts as rommulus.windowsCredentialIntegration);
+#     • the JNA Known Folder resolver smoke test (SHGetKnownFolderPath for
+#       %APPDATA%/%LOCALAPPDATA%) and the real NTFS ACL apply/verify round-trip;
+#     • the two-process advisory file-lock test (rejection + crash release on NTFS).
+#   Job 3 (native-win64-tests) is the Phase 2 native gate: it configures,
+#   builds, and runs the standalone engine test suite (native/tests, preset
+#   windows-x86_64) with MinGW-w64 UCRT64 + Ninja under MSYS2 — tests only.
+#   Job 4 (native-player-win64) is the Phase 3 SDL3 boundary: it builds the
+#   pinned release-3.4.16 SDL3 source archive (SHA256-verified before use;
+#   data download only, no script execution over the network) shared-only
+#   under the same UCRT64 toolchain into a job-local prefix ($RUNNER_TEMP),
+#   then configures/builds native/player with the
+#   windows-x86_64-software-only preset (pre-ANGLE boundary: no-op hardware
+#   context, fail-closed for hardware-rendering cores). It asserts canonical
+#   output names (rommulus-player.exe, test_core.dll — never
+#   libtest_core.dll), stages SDL3.dll beside the player plus the exact
+#   UCRT64 libwinpthread-1.dll whenever the closure imports it (the toolchain
+#   links the mingw-w64 threading runtime dynamically; explicit staging keeps
+#   the boundary auditable), recursively audits EVERY PE image in the import
+ #   closure with objdump (PE32+ x86-64; no libgcc/libstdc++/MSYS runtime or
+ #   ANGLE imports; no unresolved non-system DLL), records the staged layout +
+ #   SHA256 hashes in the artifact's import-audit.txt, smoke-tests process
+ #   launch under a sanitized PATH (PowerShell — only System32 + the staged
+ #   bin visible to the PE loader, never /ucrt64/bin or build tools) so usage
+  #   exit 2 proves the FULL closure resolves at load time, and uploads an
+  #   UNSIGNED artifact. Job 4 also configures with ROMM_PLAYER_QUALIFICATION=
+  #   ON (OFF in production/normal presets; ON only in this Windows software-
+  #   only candidate CI build): the qualification-only generic player frame-
+  #   limit hook (ROMM_PLAYER_MAX_FRAMES → clean player-initiated completed
+  #   exit at the presented-frame bound, checkpoint before stop; no new CLI)
+  #   that the Gambatte + FCEUmm candidate E2Es in job 5 drive. Job 4 also
+  #   builds and audits the second CANDIDATE core, fceumm_core.dll (same
+  #   treatment as gambatte_core.dll: canonical name check, cores-candidate/
+  #   staging, recursive PE32+/import-closure audit, exact 22-symbol export
+  #   allowlist via native/cmake/cores/fceumm-windows.def, provenance + hash
+  #   in import-audit.txt, repeated load/init/deinit smoke).
+ #   Job 5 (player-win64-e2e) is the Phase 3b synthetic-core gate: it
+ #   downloads that artifact (pinned download-artifact), verifies every file
+ #   against import-audit.txt's SHA256 section, and runs the committed
+ #   host-portable Python harness (native/player/tests/e2e/player_e2e.py) —
+ #   Unicode/space-containing temp roots, strict protocol-v2 request JSON,
+ #   headless SDL (offscreen video + software render + dummy audio), and the
+ #   deterministic scenarios: core-requested shutdown via test_core's CI-only
+ #   max-frames hook, save restore across relaunch, concurrent same-session
+ #   lock rejection, force-kill → lock release → relaunch, negative request
+ #   validation, no orphans + deletable state tree. Results/logs upload
+ #   always.
+#   This workflow still does NOT:
+#     • build the player with the pinned ANGLE distribution (§8.1)
+#     • package an MSI/EXE/ZIP, sign, or run jpackage
+#     • launch a Compose window or run any GUI/headless smoke
+# -------------------------------------------------------------------
+
+name: Windows x64 CI
+
+on:
+  push:
+    branches: [main, zd/windows-build]
+  pull_request:
+    branches: [main, zd/windows-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+# NOTE: do NOT set org.gradle.jvmargs here — a system property from
+# GRADLE_OPTS overrides gradle.properties and would drop the AGP-required
+# --add-opens flags (JDK 17 strong encapsulation / Gson reflection).
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+
+jobs:
+  # =================================================================
+  # 1. shared-jvm-tests  — Phase 0 (shared module unit tests)
+  # =================================================================
+  shared-jvm-tests:
+    name: Shared JVM tests
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Assert — Linux core inventory agreement (validator)
+        # Source-only, toolchain-independent guard: fast feedback before the
+        # JVM build. `python` is the Windows launcher on windows-2022.
+        shell: bash
+        run: python packaging/validate-linux-targets.py
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Print Gradle + JDK version (wrapper sanity check)
+        shell: powershell
+        run: .\gradlew.bat --version
+
+      - name: Run shared module JVM tests
+        shell: powershell
+        run: |
+          .\gradlew.bat --configure-on-demand `
+            :shared:domain:test `
+            :shared:network:test `
+            :shared:storage-api:test `
+            :shared:presentation:test `
+            :shared:ui:test
+
+  # =================================================================
+  # 2. desktop-build-tests  — Phase 1 (desktop assemble + tests,
+  #    real Windows Credential Manager / JNA path+ACL / lock tests)
+  # =================================================================
+  desktop-build-tests:
+    name: Desktop build and tests
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    env:
+      # Enable the gated real-Credential-Manager integration test (plans/WINDOWS_IMPL.md §4.3):
+      # desktop/build.gradle.kts plumbs this env var into the test JVM as the
+      # rommulus.windowsCredentialIntegration system property. Inert on non-Windows hosts.
+      ROMM_WINDOWS_CREDENTIAL_INTEGRATION: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Print Gradle + JDK version (wrapper sanity check)
+        shell: powershell
+        run: .\gradlew.bat --version
+
+      - name: Run desktop assemble and tests
+        # :desktop:assemble builds the JVM artifact; :desktop:test runs the full desktop suite,
+        # which on this runner includes the host-gated real Windows integration tests (Credential
+        # Manager round-trip, JNA Known Folder + NTFS ACL smoke, two-process advisory lock).
+        shell: powershell
+        run: .\gradlew.bat --configure-on-demand :desktop:assemble :desktop:test
+
+  # =================================================================
+  # 3. native-win64-tests  — Phase 2 (engine test suite, MinGW-w64 UCRT64)
+  # =================================================================
+  # Runs the standalone engine test project (native/tests) through its
+  # windows-x86_64 preset: MinGW-w64 UCRT64 + Ninja under MSYS2 on a pinned
+  # windows-2022 runner (plans/WINDOWS_IMPL.md sections 3.2/5.1). Tests only —
+  # the SDL3/ANGLE player build and core DLLs are deliberately NOT part of
+  # this gate yet (§8.1). The skip audit below fails the job on any SKIP line
+  # in the captured test output except the documented privileged symlink
+  # sub-test (CreateSymbolicLinkW needs SeCreateSymbolicLinkPrivilege, which
+  # GitHub-hosted runners do not grant), so coverage cannot silently shrink.
+  native-win64-tests:
+    name: Native Win64 tests (UCRT64)
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up MSYS2 (UCRT64)
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf
+
+      - name: Verify toolchain (UCRT64, x86_64-w64-mingw32 family)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          x86_64-w64-mingw32-gcc --version | head -1
+          x86_64-w64-mingw32-g++ --version | head -1
+          cmake --version | head -1
+          ninja --version
+          echo "=========================="
+          # Assert the UCRT64 family: the compiler must come from /ucrt64/bin
+          # (never /mingw64 or /clang64) and target x86_64-w64-mingw32.
+          gcc_bin="$(command -v x86_64-w64-mingw32-gcc)"
+          case "$gcc_bin" in
+            /ucrt64/bin/x86_64-w64-mingw32-gcc) : ;;
+            *) echo "::error::expected the UCRT64 toolchain at /ucrt64/bin, found: $gcc_bin"; exit 1 ;;
+          esac
+          dumpmachine="$(x86_64-w64-mingw32-gcc -dumpmachine)"
+          [ "$dumpmachine" = "x86_64-w64-mingw32" ] \
+            || { echo "::error::unexpected -dumpmachine: $dumpmachine"; exit 1; }
+          echo "✓ UCRT64 x86_64-w64-mingw32 toolchain verified ($gcc_bin)"
+
+      - name: Configure engine tests (preset windows-x86_64, clean)
+        working-directory: native/tests
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf ../../build/engine-tests-windows-x86_64
+          cmake --preset windows-x86_64
+
+      - name: Build engine tests (preset windows-x86_64)
+        working-directory: native/tests
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake --build --preset windows-x86_64
+
+      - name: Run engine tests (CTest) and audit for silent skips
+        working-directory: native/tests
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          BUILD_DIR=../../build/engine-tests-windows-x86_64
+          LOG="$BUILD_DIR/ctest.log"
+          CONSOLE="$BUILD_DIR/ctest-console.log"
+          # --output-log captures EVERY test's stdout/stderr (pass or fail) so
+          # the skip audit below sees sub-test SKIP lines even in passing tests;
+          # --output-on-failure mirrors failed-test output to the console.
+          set +e
+          ctest --test-dir "$BUILD_DIR" --output-on-failure --output-log "$LOG" 2>&1 | tee "$CONSOLE"
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::CTest failed with exit code $rc (see output above)"
+            exit "$rc"
+          fi
+          echo "=== CTest summary ==="
+          grep -E 'tests (passed|failed) out of|Total Test time' "$CONSOLE" || true
+          grep -Eq 'tests (passed|failed) out of [1-9]' "$CONSOLE" \
+            || { echo "::error::CTest reported no tests — the suite did not run"; exit 1; }
+          # Skip audit: the ONLY allowed skip is the documented privileged
+          # symlink sub-test. Any other SKIP line means a test silently gave up
+          # on real coverage (temp dir, long paths, working directory, ...) and
+          # must fail the gate loudly.
+          unexpected="$(grep -F 'SKIP' "$LOG" | grep -vF 'SKIP symlink sub-tests (CreateSymbolicLinkW failed' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "::error::Unexpected skipped tests in CTest output:"
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+          echo "✓ No unexpected skips (privileged symlink skip is the only allowed one)."
+          # The process-control test spawns a real child via CreateProcessW and
+          # force-terminates it with the teardown watchdog; it has no skip path,
+          # so its PASS line must appear in the captured output.
+          grep -q 'PASS test_windows_process_control (' "$LOG" \
+            || { echo "::error::test_windows_process_control did not report PASS — process-watchdog coverage missing"; exit 1; }
+          pass_count="$(grep -c 'PASS test_' "$LOG" || true)"
+          echo "✓ ${pass_count} test executables reported PASS"
+
+  # =================================================================
+  # 4. native-player-win64  — Phase 3 (SDL3 software-only player build)
+  # =================================================================
+  # Builds the SDL3-backed rommulus-player.exe + test_core.dll for Windows
+  # x86_64 under the SAME pinned MinGW-w64 UCRT64 toolchain as job 3, using
+  # the windows-x86_64-software-only preset (ROMM_WIN32_SOFTWARE_ONLY=ON:
+  # pre-ANGLE boundary — no-op hardware context, fail-closed for hardware-
+  # rendering cores; plans/WINDOWS_IMPL.md sections 3.2/5.1/5.6). SDL3 comes
+# from the pinned release-3.4.16 source archive (SHA256 asserted before
+# extraction; deterministic pin — no actions/cache, so correctness never
+# depends on cache state), built shared-only and installed job-local in
+# $RUNNER_TEMP (never system-wide). The PE audit is RECURSIVE over the
+# import closure (rommulus-player.exe + test_core.dll + SDL3.dll + any
+# staged runtime they pull in, e.g. libwinpthread-1.dll): every image is
+# asserted PE32+ x86-64 with a clean import table — no
+# libgcc/libstdc++/MSYS runtime or ANGLE DLLs, and no non-system DLL left
+# unresolved (i.e. without an exact staged copy). The staged layout and the
+# SHA256 of every staged file are recorded in import-audit.txt inside the
+# artifact. The load smoke runs under a sanitized PATH (PowerShell; only
+# System32 + the staged bin — never /ucrt64/bin or build tools), so usage
+# exit 2 proves the full closure resolves without toolchain help. The
+ # artifact is UNSIGNED by design (signing lands with the Phase 4 package
+ # lane). The E2E scenarios that consume this artifact live in job 5
+ # (player-win64-e2e, below) and its committed harness.
+  native-player-win64:
+    name: Native Win64 player (SDL3, software-only)
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up MSYS2 (UCRT64)
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf
+
+      - name: Verify toolchain (UCRT64, x86_64-w64-mingw32 family)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          echo "=== Toolchain versions ==="
+          x86_64-w64-mingw32-gcc --version | head -1
+          x86_64-w64-mingw32-g++ --version | head -1
+          cmake --version | head -1
+          ninja --version
+          x86_64-w64-mingw32-objdump --version | head -1
+          echo "=========================="
+          # Assert the UCRT64 family: the compiler must come from /ucrt64/bin
+          # (never /mingw64 or /clang64) and target x86_64-w64-mingw32.
+          gcc_bin="$(command -v x86_64-w64-mingw32-gcc)"
+          case "$gcc_bin" in
+            /ucrt64/bin/x86_64-w64-mingw32-gcc) : ;;
+            *) echo "::error::expected the UCRT64 toolchain at /ucrt64/bin, found: $gcc_bin"; exit 1 ;;
+          esac
+          dumpmachine="$(x86_64-w64-mingw32-gcc -dumpmachine)"
+          [ "$dumpmachine" = "x86_64-w64-mingw32" ] \
+            || { echo "::error::unexpected -dumpmachine: $dumpmachine"; exit 1; }
+          echo "✓ UCRT64 x86_64-w64-mingw32 toolchain verified ($gcc_bin)"
+
+      - name: Download pinned SDL3 source (release-3.4.16) and verify SHA256
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          SDL_VERSION="3.4.16"
+          SDL_SHA256="7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68"
+          SDL_URL="https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-${SDL_VERSION}.tar.gz"
+          mkdir -p deps
+          # Data download only — no script execution over the network. The
+          # archive is SHA256-verified BEFORE extraction or use, so a
+          # tampered or mis-fetched release can never enter the build.
+          curl --fail --location --retry 3 --output "deps/SDL3-${SDL_VERSION}.tar.gz" "$SDL_URL"
+          echo "${SDL_SHA256}  deps/SDL3-${SDL_VERSION}.tar.gz" | sha256sum --check
+          mkdir -p deps/sdl3
+          tar -xzf "deps/SDL3-${SDL_VERSION}.tar.gz" -C deps/sdl3 --strip-components=1
+          rm -f "deps/SDL3-${SDL_VERSION}.tar.gz"
+          echo "✓ SDL3 ${SDL_VERSION} source verified (SHA256) and extracted to deps/sdl3"
+
+      - name: Build and install SDL3 (shared-only, job-local prefix)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          # Job-local install prefix: $RUNNER_TEMP is per-job and outside the
+          # workspace, so SDL3.dll + CMake package + headers never touch the
+          # system toolchain. Exported for the later steps via GITHUB_ENV.
+          SDL_PREFIX="$RUNNER_TEMP/sdl3-ucrt64"
+          echo "SDL_PREFIX=$SDL_PREFIX" >> "$GITHUB_ENV"
+          # -G Ninja is pinned explicitly: windows-2022 ships Visual Studio,
+          # so CMake's default generator selection would pick the VS generator
+          # and conflict with the MinGW toolchain file. SDL_TESTS=OFF skips
+          # SDL3's own demo/test programs (testffmpeg.exe needs FFmpeg, which
+          # is not in the UCRT64 environment) — only the shared library,
+          # headers, and CMake package are needed.
+          cmake -S deps/sdl3 -B build/sdl-windows-x86_64 \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$SDL_PREFIX" \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DSDL_TESTS=OFF
+          cmake --build build/sdl-windows-x86_64 -j"$(nproc)"
+          cmake --install build/sdl-windows-x86_64
+          [ -f "$SDL_PREFIX/bin/SDL3.dll" ] \
+            || { echo "::error::SDL3.dll missing from the job-local install prefix"; exit 1; }
+          echo "✓ SDL3 installed (shared-only) to $SDL_PREFIX"
+
+      - name: Verify installed SDL3 (exact version + shared library)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          echo "=== Installed SDL3 layout ==="
+          ls -l "$SDL_PREFIX/bin"
+          ls -l "$SDL_PREFIX/lib/cmake/SDL3"
+          # Assert the installed headers report exactly 3.4.16 — the pinned
+          # archive, not a drifted or cached copy. The release-3.4.16 header
+          # aligns the values with multiple spaces ("#define SDL_MAJOR_VERSION
+          #   3"), so the matcher must accept any whitespace run and anchor
+          # the value to end-of-line: a single-space literal grep rejects the
+          # aligned header, and an unanchored match would accept "160" as "16".
+          VER_HEADER="$SDL_PREFIX/include/SDL3/SDL_version.h"
+          [ -f "$VER_HEADER" ] || { echo "::error::SDL_version.h missing from install prefix"; exit 1; }
+          sdl_ver_is() { # $1=macro name, $2=expected value (exact, EOL-anchored)
+            grep -Eq "^[[:space:]]*#define[[:space:]]+$1[[:space:]]+$2[[:space:]]*$" "$VER_HEADER"
+          }
+          # Self-checks of the matcher itself, so a regex regression fails
+          # loudly here instead of misreading the installed header: aligned
+          # whitespace must match, a prefixed value ("160" vs "16") must not.
+          printf '#define SDL_MAJOR_VERSION   3\n' \
+            | grep -Eq '^[[:space:]]*#define[[:space:]]+SDL_MAJOR_VERSION[[:space:]]+3[[:space:]]*$' \
+            || { echo "::error::version matcher self-check failed (aligned whitespace rejected)"; exit 1; }
+          printf '#define SDL_MICRO_VERSION   160\n' \
+            | grep -Eq '^[[:space:]]*#define[[:space:]]+SDL_MICRO_VERSION[[:space:]]+16[[:space:]]*$' \
+            && { echo "::error::version matcher self-check failed (prefixed value accepted)"; exit 1; }
+          sdl_ver_is SDL_MAJOR_VERSION 3 \
+            && sdl_ver_is SDL_MINOR_VERSION 4 \
+            && sdl_ver_is SDL_MICRO_VERSION 16 \
+            || { echo "::error::installed SDL3 headers are not version 3.4.16"; exit 1; }
+          [ -f "$SDL_PREFIX/bin/SDL3.dll" ] || { echo "::error::SDL3.dll missing from install prefix"; exit 1; }
+          echo "✓ installed SDL3 is exactly 3.4.16 (shared)"
+
+      - name: Configure player (preset windows-x86_64-software-only, clean)
+        working-directory: native/player
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf ../../build/player-windows-x86_64-software-only
+          # ROMM_PLAYER_QUALIFICATION=ON: the qualification-only generic
+          # player frame-limit hook (ROMM_PLAYER_MAX_FRAMES → clean
+          # player-initiated completed exit at the presented-frame bound,
+          # checkpoint before stop). OFF in production/normal presets; ON
+          # ONLY in this Windows software-only candidate CI build so the
+          # Gambatte candidate E2E (job 5) can drive bounded deterministic
+          # runs. No new CLI surface: the bound arrives via environment.
+          cmake --preset windows-x86_64-software-only \
+            -DSDL3_ROOT="$SDL_PREFIX" \
+            -DROMM_PLAYER_QUALIFICATION=ON
+
+      - name: Build player + test_core (preset windows-x86_64-software-only)
+        working-directory: native/player
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake --build --preset windows-x86_64-software-only -j"$(nproc)"
+
+      - name: Verify build outputs (canonical names)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          BUILD_DIR="build/player-windows-x86_64-software-only"
+          # CMake places a Windows shared library's .dll in the RUNTIME output
+          # directory, so test_core.dll lands beside the player exe in bin/
+          # (the import library libtest_core.dll.a is a build byproduct only).
+          [ -f "$BUILD_DIR/bin/rommulus-player.exe" ] \
+            || { echo "::error::rommulus-player.exe missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
+          [ -f "$BUILD_DIR/bin/test_core.dll" ] \
+            || { echo "::error::test_core.dll (canonical name) missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libtest_core.dll" ] \
+            || { echo "::error::non-canonical libtest_core.dll produced — the WIN32 PREFIX \"\" fix regressed"; exit 1; }
+          # Candidate Gambatte core (NOT advertised in any manifest): its
+          # canonical name must be gambatte_core.dll, never libgambatte_core.dll.
+          [ -f "$BUILD_DIR/bin/gambatte_core.dll" ] \
+            || { echo "::error::candidate gambatte_core.dll missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libgambatte_core.dll" ] \
+            || { echo "::error::non-canonical libgambatte_core.dll produced — the WIN32 PREFIX \"\" fix regressed"; exit 1; }
+          # Candidate FCEUmm core (NOT advertised in any manifest): its
+          # canonical name must be fceumm_core.dll, never libfceumm_core.dll.
+          [ -f "$BUILD_DIR/bin/fceumm_core.dll" ] \
+            || { echo "::error::candidate fceumm_core.dll missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libfceumm_core.dll" ] \
+            || { echo "::error::non-canonical libfceumm_core.dll produced — the WIN32 PREFIX \"\" fix regressed"; exit 1; }
+          echo "✓ rommulus-player.exe + test_core.dll + candidate gambatte_core.dll + candidate fceumm_core.dll built with canonical names"
+
+      - name: Stage unsigned artifact (SDL3.dll + libwinpthread closure beside the player)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          BUILD_DIR="build/player-windows-x86_64-software-only"
+          STAGE="dist/player-win64-software-only"
+          rm -rf "$STAGE"
+           mkdir -p "$STAGE/bin" "$STAGE/cores" "$STAGE/cores-candidate"
+           cp "$BUILD_DIR/bin/rommulus-player.exe" "$STAGE/bin/"
+          # SDL3.dll staged beside the player (same directory as the exe), so
+          # the PE loader resolves it from the application directory.
+          cp "$SDL_PREFIX/bin/SDL3.dll" "$STAGE/bin/"
+           cp "$BUILD_DIR/bin/test_core.dll" "$STAGE/cores/"
+            # Candidate Gambatte + FCEUmm cores staged SEPARATELY from enabled
+            # cores: cores-candidate/ keeps the candidates fully auditable
+            # while no current path can load them as shipped (enabled) cores.
+            cp "$BUILD_DIR/bin/gambatte_core.dll" "$STAGE/cores-candidate/"
+            cp "$BUILD_DIR/bin/fceumm_core.dll" "$STAGE/cores-candidate/"
+          # libwinpthread-1.dll: the toolchain contract only guarantees static
+          # libgcc/libstdc++ (-static-libgcc/-static-libstdc++); the mingw-w64
+          # threading runtime is linked DYNAMICALLY by default, so threaded
+          # binaries (the player; often SDL3.dll as well) import
+          # libwinpthread-1.dll. We do NOT force it static — explicit staging
+          # of the EXACT UCRT64 copy keeps the runtime boundary visible and
+          # auditable. The copy comes from the same bin as the verified
+          # compiler (never /mingw64, /clang64, or a system DLL), is staged
+          # beside the player so the closure resolves without /ucrt64/bin on
+          # PATH, and is only staged when actually imported. The recursive
+          # import audit below fails closed if any non-system import is left
+          # unresolved either way.
+          UCRT64_BIN="$(dirname "$(command -v x86_64-w64-mingw32-gcc)")"
+          closure_imports() {
+            x86_64-w64-mingw32-objdump -p "$1" | grep 'DLL Name:' | sed 's/.*DLL Name: *//'
+          }
+            if { closure_imports "$STAGE/bin/rommulus-player.exe"; \
+                closure_imports "$STAGE/cores/test_core.dll"; \
+                closure_imports "$STAGE/bin/SDL3.dll"; \
+                closure_imports "$STAGE/cores-candidate/gambatte_core.dll"; \
+                closure_imports "$STAGE/cores-candidate/fceumm_core.dll"; } \
+                | grep -qi '^libwinpthread-1\.dll$'; then
+            [ -f "$UCRT64_BIN/libwinpthread-1.dll" ] \
+              || { echo "::error::libwinpthread-1.dll missing from $UCRT64_BIN (expected the UCRT64 toolchain bin)"; exit 1; }
+            cp "$UCRT64_BIN/libwinpthread-1.dll" "$STAGE/bin/"
+            echo "✓ libwinpthread-1.dll imported by the closure — staged the exact UCRT64 copy from $UCRT64_BIN"
+          else
+            echo "✓ no libwinpthread-1.dll import in the closure — nothing to stage"
+          fi
+          echo "=== Staged artifact ==="
+          find "$STAGE" -type f | LC_ALL=C sort
+
+      - name: Audit PE format and import tables recursively (objdump)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          STAGE="dist/player-win64-software-only"
+          AUDIT="$STAGE/import-audit.txt"
+          OBJDUMP=x86_64-w64-mingw32-objdump
+          : > "$AUDIT"
+
+          # Windows SYSTEM DLLs: OS-provided, resolved from System32 by the PE
+          # loader on every supported Windows. Includes the UCRT surface both
+          # as ucrtbase.dll (direct import) and as api-ms-win-* forwarders,
+          # plus the OS graphics/com builtins an SDL video backend may import
+          # (d3d11/dxgi & friends are Windows components — NOT the ANGLE
+          # stack, which is forbidden below) and dinput8.dll (DirectInput 8 —
+          # a System32 component on every supported Windows that SDL's
+          # joystick/haptic backends link). Anything not matched here is a
+          # NON-SYSTEM DLL and must have an exact staged copy.
+          is_system_dll() {
+            case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+              kernel32.dll|ntdll.dll|kernelbase.dll|user32.dll|gdi32.dll|gdiplus.dll \
+              |advapi32.dll|shell32.dll|ole32.dll|oleaut32.dll|psapi.dll \
+              |setupapi.dll|version.dll|winmm.dll|imm32.dll|ucrtbase.dll) return 0 ;;
+              api-ms-win-*) return 0 ;;
+              d3d11.dll|d3d12.dll|dxgi.dll|d3dcompiler_47.dll \
+              |dinput8.dll) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          # Forbidden in this software-only artifact, regardless of staging:
+          # GCC runtime DLLs (libgcc/libstdc++ — the toolchain contract
+          # statically links them), the MSYS2 runtime (msys-2.0.dll — a MinGW
+          # cross-build must never import it), and the ANGLE/hardware-GL stack
+          # (pre-ANGLE boundary: no libEGL/libGLESv2/angle DLLs anywhere in
+          # the closure).
+          is_forbidden_dll() {
+            case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+              libgcc*|libstdc++*|msys-2.0.dll) return 0 ;;
+              angle*.dll|libegl.dll|libglesv2.dll|glesv2.dll) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          # Exact staged copy of a non-system import (bin/ or cores/,
+          # case-insensitive — PE DLL names are). Prints the path or fails.
+          staged_copy_of() {
+            local want="$1" f base
+            for f in "$STAGE"/bin/* "$STAGE"/cores/*; do
+              [ -f "$f" ] || continue
+              base="$(basename "$f" | tr '[:upper:]' '[:lower:]')"
+              if [ "$base" = "$want" ]; then printf '%s\n' "$f"; return 0; fi
+            done
+            return 1
+          }
+
+          imports_of() {
+            $OBJDUMP -p "$1" | grep 'DLL Name:' | sed 's/.*DLL Name: *//' | LC_ALL=C sort
+          }
+
+          # Self-checks of the classifiers themselves, so an allowlist
+          # regression fails here instead of misclassifying the closure:
+          # authoritative system DLLs must classify system (case-insensitively,
+          # PE DLL names are), a known non-system DLL must not, and a known
+          # forbidden runtime must still classify forbidden.
+          is_system_dll dinput8.dll \
+            || { echo "::error::self-check failed: dinput8.dll not classified as system"; exit 1; }
+          is_system_dll DINPUT8.DLL \
+            || { echo "::error::self-check failed: case-insensitive system classification regressed"; exit 1; }
+          if is_system_dll libwinpthread-1.dll; then
+            echo "::error::self-check failed: libwinpthread-1.dll classified as system"
+            exit 1
+          fi
+          is_forbidden_dll msys-2.0.dll \
+            || { echo "::error::self-check failed: msys-2.0.dll not classified as forbidden"; exit 1; }
+
+          # Recursive (BFS) import audit over the closure roots. Every PE
+          # image in the closure — rommulus-player.exe, test_core.dll,
+          # SDL3.dll, and any staged runtime DLL they pull in (e.g.
+          # libwinpthread-1.dll) — is asserted PE32+ x86-64 and its full
+          # import table is classified per DLL: system (OS-provided),
+          # forbidden (fail), or non-system (must have an exact staged copy,
+          # which is then audited in turn). Anything else fails the gate.
+            # gambatte_core.dll and fceumm_core.dll are the CANDIDATE cores
+            # (staged under cores-candidate/): they enter the same recursive
+            # PE32+ / import-closure audit as every shipped image, plus the
+            # exact export-allowlist checks below.
+            queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll"
+          seen=" "
+          while [ -n "$queue" ]; do
+            name="${queue%% *}"
+            case "$queue" in
+              *" "*) queue="${queue#* }" ;;
+              *) queue="" ;;
+            esac
+            case "$seen" in *" $name "*) continue ;; esac
+            seen="$seen$name "
+            path=""
+             for d in "$STAGE/bin" "$STAGE/cores" "$STAGE/cores-candidate"; do
+               if [ -f "$d/$name" ]; then path="$d/$name"; break; fi
+             done
+            [ -n "$path" ] \
+              || { echo "::error::closure member $name missing from the staged artifact"; exit 1; }
+            echo "=== $path ===" >> "$AUDIT"
+            $OBJDUMP -f "$path" >> "$AUDIT"
+            # PE32+ x86-64 assertion (binutils prints "pei-x86-64"; accept the
+            # plain "pe-x86-64" spelling of other objdump builds too).
+            $OBJDUMP -f "$path" | grep -Eq 'file format (pei|pe)-x86-64' \
+              || { echo "::error::$path is not a PE32+ x86-64 image"; exit 1; }
+            imports="$(imports_of "$path")"
+            echo "--- imported DLLs ---" >> "$AUDIT"
+            fail=0
+            for dll in $imports; do
+              low="$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')"
+              if is_forbidden_dll "$low"; then
+                echo "FORBIDDEN  $dll" >> "$AUDIT"
+                echo "::error::$path imports a forbidden runtime (GCC/MSYS2/ANGLE): $dll"
+                fail=1
+              elif is_system_dll "$low"; then
+                echo "system     $dll" >> "$AUDIT"
+              else
+                staged="$(staged_copy_of "$low" || true)"
+                if [ -n "$staged" ]; then
+                  echo "staged     $dll -> ${staged#"$STAGE"/}" >> "$AUDIT"
+                  # Recurse: the staged copy is part of the closure and must
+                  # be audited in turn.
+                  case "$seen" in *" $(basename "$staged") "*) : ;; *) queue="$queue $(basename "$staged")" ;; esac
+                else
+                  echo "UNRESOLVED $dll" >> "$AUDIT"
+                  echo "::error::$path imports non-system DLL $dll with no staged copy (unresolved closure)"
+                  fail=1
+                fi
+              fi
+            done
+            [ "$fail" -eq 0 ] || exit 1
+            if [ "$name" = "rommulus-player.exe" ]; then
+              printf '%s\n' "$imports" | grep -qi 'SDL3\.dll' \
+                || { echo "::error::rommulus-player.exe does not import SDL3.dll"; exit 1; }
+            fi
+          done
+
+          # Exact PE export allowlist for BOTH candidate cores: each DLL must
+          # export EXACTLY the 22 Libretro symbols the player's CoreLibrary
+          # resolves (native/engine/src/core_library.cpp) — no romm_* save
+          # extensions (neither core defines any at its pin), no unused
+          # upstream extras, no internal symbols. The .def files that produce
+          # these tables: native/cmake/cores/gambatte-windows.def and
+          # native/cmake/cores/fceumm-windows.def (RETRO_API is neutralized to
+          # empty in both Windows fragments so the .def is the sole export
+          # authority).
+          expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
+          audit_candidate_exports() { # $1 = staged DLL path, $2 = core name
+            local dll="$1" label="$2" actual_exports
+            [ -f "$dll" ] \
+              || { echo "::error::candidate ${label}_core.dll missing from the staged artifact"; exit 1; }
+            # objdump's PE export section prints one line per export under the
+            # "[Ordinal/Name Pointer] Table" header:  [   0] +base[   1]  HINT NAME
+            # (verified against binutils on both the local MinGW cross-
+            # toolchain and windows-2022's UCRT64 objdump). The export name is
+            # the last whitespace-separated field of those lines.
+            actual_exports="$($OBJDUMP -p "$dll" \
+              | sed -n '/\[Ordinal\/Name Pointer\] Table/,$p' \
+              | grep -E '^[[:space:]]*\[[[:space:]]*[0-9]+\] \+base\[' \
+              | awk '{print $NF}' | LC_ALL=C sort)"
+            [ "$expected_exports" = "$actual_exports" ] \
+              || { echo "::error::${label}_core.dll export table does not match the exact 22-symbol allowlist"; printf 'expected:\n%s\n--- actual:\n%s\n' "$expected_exports" "$actual_exports"; exit 1; }
+          }
+          audit_candidate_exports "$STAGE/cores-candidate/gambatte_core.dll" gambatte
+          audit_candidate_exports "$STAGE/cores-candidate/fceumm_core.dll" fceumm
+          # Candidate provenance/hashes recorded in the AUDIT ARTIFACT ONLY —
+          # deliberately NOT in CoreManifest.kt supportedAbis (the validator
+          # packaging/validate-linux-targets.py keeps windows-x86_64 out of
+          # every approved core).
+          {
+            echo "=== gambatte candidate provenance (CANDIDATE — NOT advertised) ==="
+            echo "status: windows-x86_64 in NO supportedAbis; staged under cores-candidate/ only"
+            echo "upstream: libretro/gambatte-libretro @ 96174369b3c30d9fc57c926fa3379c273dc6a9a5 (pinned tree: third_party/cores/gambatte)"
+            echo "sources: native/cmake/cores/gambatte-sources.cmake (shared 46-source list, network-disabled)"
+            echo "fragment: native/cmake/cores/gambatte-windows.cmake"
+            echo "exports:  native/cmake/cores/gambatte-windows.def (22 retro_* exports; no romm_* save extensions present in this core)"
+            echo "sha256(cores-candidate/gambatte_core.dll): $(sha256sum "$STAGE/cores-candidate/gambatte_core.dll" | cut -d' ' -f1)"
+            echo "=== fceumm candidate provenance (CANDIDATE — NOT advertised) ==="
+            echo "status: windows-x86_64 in NO supportedAbis; staged under cores-candidate/ only"
+            echo "upstream: libretro/libretro-fceumm @ b5e3566515c27dc66c9c20572171673126532e06 (pinned tree: third_party/cores/fceumm)"
+            echo "sources: native/cmake/cores/fceumm-sources.cmake (shared 505-source list, network-free)"
+            echo "fragment: native/cmake/cores/fceumm-windows.cmake"
+            echo "exports:  native/cmake/cores/fceumm-windows.def (22 retro_* exports; no romm_* save extensions present in this core)"
+            echo "sha256(cores-candidate/fceumm_core.dll): $(sha256sum "$STAGE/cores-candidate/fceumm_core.dll" | cut -d' ' -f1)"
+          } >> "$AUDIT"
+
+          # Artifact layout + SHA256 of every staged file (the audit log
+          # itself is excluded from the hash list — it is this report).
+          echo "=== staged artifact layout ===" >> "$AUDIT"
+          find "$STAGE" -type f | LC_ALL=C sort >> "$AUDIT"
+          echo "=== SHA256 of staged files ===" >> "$AUDIT"
+          ( cd "$STAGE" && find . -type f ! -name import-audit.txt | LC_ALL=C sort | xargs sha256sum ) >> "$AUDIT"
+          cat "$AUDIT"
+          echo "✓ recursive PE32+ x86-64 + import-closure audits passed (no libgcc/libstdc++/MSYS runtime, no ANGLE, no unresolved non-system DLL; staged layout + hashes recorded)"
+
+      - name: Smoke — player process launches under a sanitized PATH (usage exit 2)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stageBin = Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/bin"
+          # Deliberately NOT the msys2 shell: setup-msys2 puts C:\msys64\ucrt64\bin
+          # (and friends) on the step PATH, and the PE loader searches PATH — so an
+          # MSYS shell would let a MISSING staged DLL (e.g. libwinpthread-1.dll or
+          # SDL3.dll) resolve from the toolchain and mask a broken closure. This
+          # PowerShell step sanitizes the loader PATH instead: ONLY the staged
+          # artifact bin + the Windows system directories are visible. No
+          # arguments: main() prints usage and returns 2 BEFORE any SDL_Init, but
+          # the PE loader must first resolve the entire import closure (KERNEL32/
+          # UCRTBASE from System32 + SDL3.dll/libwinpthread-1.dll beside the exe)
+          # — so exit 2 proves the FULL staged closure loads. A missing DLL would
+          # be a load failure (0xC0000135), not usage output. Full E2E request
+          # fixtures are the next lane's scope.
+          $env:PATH = "$stageBin;$env:SystemRoot\System32;$env:SystemRoot"
+          Write-Host "sanitized loader PATH: $env:PATH"
+          $err = & (Join-Path $stageBin "rommulus-player.exe") 2>&1
+          $rc = $LASTEXITCODE
+          Write-Host "player exit code: $rc"
+          $err | ForEach-Object { Write-Host $_ }
+          if ($rc -ne 2) { throw "expected usage exit 2, got $rc" }
+          if (($err -join "`n") -notmatch 'usage:') { throw "usage message missing from player output" }
+          Write-Host "OK: rommulus-player.exe launched and printed usage (full staged import closure resolves without the toolchain on PATH)"
+
+      - name: Smoke — repeated native load/retro_api_version/init/deinit (no ROM content)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          STAGE="dist/player-win64-software-only"
+          SMOKE_DIR="$RUNNER_TEMP/core-smoke"
+          mkdir -p "$SMOKE_DIR"
+          # Build the committed smoke executable with the SAME UCRT64 toolchain:
+          # it LoadLibrary()s a core DLL, asserts retro_api_version()==1, and
+          # cycles retro_init()/retro_deinit() — no ROM content is ever loaded.
+          # The import-closure integrity of every staged image was already
+          # proven by the recursive PE audit above; this step proves the
+          # exported entry points are callable and stable across repeated
+          # load/unload (the per-core gate's init/deinit smoke, plans/
+          # WINDOWS_IMPL.md section 6.4 item 5).
+          x86_64-w64-mingw32-gcc -O2 -Wall -Wextra -static-libgcc \
+            -o "$SMOKE_DIR/core_load_smoke.exe" native/player/tests/core_smoke/core_load_smoke.c
+          # Harness control first: test_core.dll (known-good synthetic core)
+          # must pass, so a smoke-harness regression fails here BEFORE the
+          # candidates are judged.
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores/test_core.dll" 25
+          # The candidate Gambatte + FCEUmm cores: 50 repeated
+          # load/api/init/deinit cycles each.
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/gambatte_core.dll" 50
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/fceumm_core.dll" 50
+          echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + gambatte + fceumm candidates, no ROM content)"
+
+      - name: Upload unsigned player artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-player-windows-x86_64-software-only
+          path: dist/player-win64-software-only
+          if-no-files-found: error
+          compression-level: 0
+
+  # =================================================================
+  # 5. player-win64-e2e  — Phase 3b (synthetic-core E2E on the staged
+  #    unsigned artifact)
+  # =================================================================
+  # Consumes job 4's UNSIGNED artifact via pinned download-artifact, verifies
+  # every staged file against import-audit.txt's SHA256 section, and runs the
+  # committed host-portable harness (native/player/tests/e2e/player_e2e.py —
+  # Python 3 stdlib only) against rommulus-player.exe + test_core.dll under a
+  # sanitized PATH (PowerShell: staged bin + System32 only — never
+  # /ucrt64/bin or build tools). The harness builds its own fixture tree with
+  # SPACE + NON-ASCII directory names ("тест état"), emits strict protocol-v2
+  # request JSON, sets the ROMM_PLAYER_*_ROOT contract + allowed revision
+  # "test_core=1", and drives headless SDL (SDL_VIDEODRIVER=offscreen — a real
+  # window framebuffer for the software renderer — + SDL_RENDER_DRIVER=software
+  # + SDL_AUDIODRIVER=dummy; no GPU, no desktop session on windows-2022).
+  # Scenarios (all bounded by per-launch timeouts; cleanup targets exact PIDs
+  # via TerminateProcess/ctypes, never broad taskkill):
+  #   1. valid no-content launch → test_core's own core-requested shutdown
+  #      (its CI-only ROMM_TEST_CORE_MAX_FRAMES hook — compiled only into the
+  #      player's test_core build — requests RETRO_ENVIRONMENT_SHUTDOWN after
+  #      exactly N frames with zero input); asserts result schema/session/
+  #      exitKind=core_requested_shutdown/exact frame count/checkpoint +
+  #      save size + SHA256 (test_core's 64-byte SRAM is fully deterministic,
+  #      so the expected hash is computed in the harness and checked against
+  #      BOTH the player-reported value and the file on disk);
+  #   2. repeated launch with save restore (candidate moved to savePath like
+  #      the desktop supervisor; the restored SRAM byte must carry over — a
+  #      fresh core would hash differently, proving the restore);
+  #   3. concurrent same-session lock rejection (challenger exits 1 with
+  #      launch_failed + "session already active" while the holder runs);
+  #   4. force-kill the holder's exact PID → kernel releases the byte-range
+  #      lock → immediate relaunch of the SAME session succeeds;
+  #   5. negative validation: coreBuildRevision mismatch and corePath outside
+  #      the trusted core root (both launch_failed with the exact error text);
+  #   6. no orphan PID survives and the whole state tree (including the
+  #      deliberately-kept .lock files) deletes cleanly.
+  #   7. CANDIDATE Gambatte qualification (cores-candidate/gambatte_core.dll,
+  #      passed via --candidate-core; NOT advertised in any manifest): the
+  #      harness generates the original deterministic 32 KiB ROM in-process
+  #      (gambatte_rom.py — no Nintendo logo, no third-party bytes) into the
+  #      trusted CACHE root and launches it under the pinned revision
+  #      96174369b3c30d9fc57c926fa3379c273dc6a9a5 (MBC1+RAM+battery, 8 KiB
+  #      battery SRAM = 8192 bytes as Gambatte exposes it). Each run is
+  #      bounded by the player's qualification ROMM_PLAYER_MAX_FRAMES hook
+  #      (compiled in by job 4) and asserts: real frames (bounded
+  #      [limit, limit+2]), result schema, exitKind=completed (player-
+  #      initiated, checkpoint before stop), 8192-byte SRAM, and the ROM's
+  #      deterministic marker/counter invariants against the reported frame
+  #      count — plus candidate adoption with counter persistence across
+  #      relaunch, repeated load, and force-kill → lock release → relaunch.
+  #   8. CANDIDATE FCEUmm qualification (cores-candidate/fceumm_core.dll,
+  #      passed via --fceumm-core; NOT advertised in any manifest): the
+  #      harness generates the original deterministic 49168-byte iNES ROM in-
+  #      process (fceumm_rom.py — mapper 0 NROM + battery bit → FCEUmm's
+  #      8192-byte WRAM as SAVE_RAM; no trainer, no third-party bytes) into
+  #      the trusted CACHE root and launches it under the pinned revision
+  #      b5e3566515c27dc66c9c20572171673126532e06. Each run is bounded by the
+  #      same ROMM_PLAYER_MAX_FRAMES hook and asserts: real frames (bounded
+  #      [limit, limit+2]), result schema, exitKind=completed, 8192-byte
+  #      SRAM, and the ROM's deterministic marker/counter invariants against
+  #      the per-run reported frame counts (each power-on contributes its own
+  #      two ppudead frames with no VBlank edge) — plus candidate adoption
+  #      with counter persistence across relaunch, repeated load, and force-
+  #      kill → lock release → relaunch.
+  # The e2e-out directory (machine-readable report JSON + per-launch logs +
+  # result copies) uploads ALWAYS so a green run is auditable and a red one
+  # ships its evidence.
+  player-win64-e2e:
+    name: Player Win64 E2E (synthetic core)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    needs: native-player-win64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Download unsigned player artifact (pinned action)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rommulus-player-windows-x86_64-software-only
+          path: dist/player-win64-software-only
+
+      - name: Verify artifact SHA256 manifest (import-audit.txt)
+        # Pre-flight integrity gate: every staged file must match the hash
+        # recorded by job 4's recursive PE/import audit, so a corrupted or
+        # partial download can never reach the E2E scenarios.
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          python native/player/tests/e2e/player_e2e.py --verify-artifact dist/player-win64-software-only
+          if ($LASTEXITCODE -ne 0) { throw "artifact verification failed (exit $LASTEXITCODE)" }
+
+      - name: Run synthetic-core E2E harness (sanitized PATH, headless SDL)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stageBin = Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/bin"
+          # Sanitized loader PATH: ONLY the staged artifact bin + the Windows
+          # system directories — never /ucrt64/bin or build tools (same
+          # discipline as job 4's smoke step). The harness spawns the player
+          # with Python subprocess APIs, bounds every launch, and cleans up
+          # exact PIDs only.
+          $env:PATH = "$stageBin;$env:SystemRoot\System32;$env:SystemRoot"
+          Write-Host "sanitized loader PATH: $env:PATH"
+          # --candidate-core / --fceumm-core pass the CANDIDATE Gambatte and
+          # FCEUmm cores explicitly (cores-candidate/ — never an enabled-core
+          # path): the harness stages each into its trusted core root,
+          # generates the original deterministic ROMs (32 KiB Game Boy image;
+          # 49168-byte iNES mapper-0 NROM + battery) into the trusted cache
+          # root, and runs both cores' qualification scenarios (bounded
+          # presented-frame runs under the ROMM_PLAYER_MAX_FRAMES hook
+          # compiled in by job 4, 8192-byte battery SRAM, deterministic
+          # marker/counter invariants, candidate adoption/relaunch
+          # persistence, repeated load, force-kill lock recovery) alongside
+          # every test_core scenario.
+          python native/player/tests/e2e/player_e2e.py `
+            --stage dist/player-win64-software-only `
+            --workdir e2e-out `
+            --candidate-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/gambatte_core.dll") `
+            --fceumm-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/fceumm_core.dll")
+          if ($LASTEXITCODE -ne 0) { throw "player E2E harness failed (exit $LASTEXITCODE)" }
+
+      - name: Upload E2E results and logs (always)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-player-win64-e2e-results
+          path: e2e-out
+          if-no-files-found: ignore

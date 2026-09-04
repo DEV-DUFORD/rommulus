@@ -7,6 +7,13 @@
 // from the emulation thread's own control flow between retro_run() calls,
 // not from inside a libretro callback itself).
 //
+// Platform contract (Phase 2 step 1, plans/WINDOWS_IMPL.md section 5.1):
+// this header is the stable, platform-neutral API. The implementation is
+// selected at CMake configure time per build site — POSIX hosts compile
+// native/platform/posix/src/posix_atomic_file_store.cpp; a Win32
+// implementation will be added alongside it in a later Phase 2 step. The
+// engine tree itself carries no file-system code.
+//
 // Phase 2 scope: used only for the synthetic core's SRAM region. The full
 // server-key/user-key/rom-hash directory layout from section 11.1 is a
 // later phase; Phase 2 just needs the atomic write/read primitive proven

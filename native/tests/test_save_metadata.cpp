@@ -1,22 +1,51 @@
+// test_save_metadata.cpp — SHA-256/size extraction from save-file headers.
+// Cross-platform by construction: the temp-file helpers use only C++17
+// <filesystem> (the former mkstemp/write/close/unlink sequence was POSIX-
+// only and blocked the WIN32 CTest suite), so this test compiles and runs
+// on both the POSIX and the MinGW-w64 UCRT64 toolchains with identical
+// coverage.
 #include "native/player/save_metadata.h"
 
 #include "romm_test.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
-#include <unistd.h>
 
 namespace {
 
-void checkMetadata(const std::string& contents, const std::string& expectedHash) {
-    char path[] = "/tmp/romm-save-metadata-XXXXXX";
-    const int fd = mkstemp(path);
-    CHECK(fd >= 0);
-    if (fd < 0) return;
+// A fresh, uniquely-named temp file inside a per-run temp directory
+// (std::filesystem::temp_directory_path(): $TMPDIR//tmp on POSIX, %TEMP%
+// on Win32). ASCII name — no wide-path boundary in the temp plumbing.
+std::string makeTempFile() {
+    namespace fs = std::filesystem;
+    static std::atomic<unsigned long> sequence{0};
+    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path dir = fs::temp_directory_path() /
+        ("romm_save_metadata_test_" + std::to_string(static_cast<long long>(ticks)));
+    std::error_code ec;
+    if (!fs::create_directories(dir, ec)) {
+        std::fprintf(stderr, "fatal: could not create temp dir\n");
+        std::exit(2);
+    }
+    return (dir / (std::to_string(sequence.fetch_add(1)) + ".srm")).string();
+}
 
-    const ssize_t written = write(fd, contents.data(), contents.size());
-    CHECK_EQ(written, static_cast<ssize_t>(contents.size()));
-    CHECK_EQ(close(fd), 0);
+void checkMetadata(const std::string& contents, const std::string& expectedHash) {
+    const std::string path = makeTempFile();
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            CHECK(false);
+            return;
+        }
+        out << contents;
+        CHECK(static_cast<bool>(out));
+    }
 
     const auto metadata = romm::player::readSaveMetadata(path);
     CHECK(metadata.has_value());
@@ -24,7 +53,8 @@ void checkMetadata(const std::string& contents, const std::string& expectedHash)
         CHECK_EQ(metadata->size, static_cast<int64_t>(contents.size()));
         CHECK_EQ(metadata->sha256, expectedHash);
     }
-    CHECK_EQ(unlink(path), 0);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 }
 
 }  // namespace

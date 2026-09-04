@@ -1,10 +1,11 @@
 package com.romm.desktop.storage.paths
 
 import com.romm.androidtv.storage.AppPaths
-import java.nio.file.Files
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.FileSensitivity
+import com.romm.desktop.platform.security.PathPermissionProfile
 import java.nio.file.Path
-import java.nio.file.attribute.PosixFilePermission
-import java.nio.file.attribute.PosixFilePermissions
 
 /**
  * XDG Base Directory compliant [AppPaths] implementation for Linux desktop.
@@ -25,10 +26,15 @@ import java.nio.file.attribute.PosixFilePermissions
  * - `homeDir`: the user's home directory, defaults to the JVM-resolved home
  *
  * Null or blank values in `xdgEnv` are treated as unset (fall through to defaults).
+ *
+ * Permission hardening is routed through the injected [securityPolicy]
+ * (plans/WINDOWS_IMPL.md §4.2): on Linux this applies exactly the historical modes — config
+ * 0755, data/state/cache 0700, applied only when the directory is created.
  */
 class XdgAppPaths(
     private val xdgEnv: Map<String, String?> = System.getenv() as Map<String, String?>,
-    private val homeDir: Path = Path.of(System.getProperty("user.home"))
+    private val homeDir: Path = Path.of(System.getProperty("user.home")),
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
 ) : AppPaths {
 
     private val configBase: Path by lazy { resolveXdgOrFallback("XDG_CONFIG_HOME", homeDir.resolve(".config"), "rommulus") }
@@ -36,10 +42,10 @@ class XdgAppPaths(
     private val stateBase: Path by lazy { resolveXdgOrFallback("XDG_STATE_HOME", homeDir.resolve(".local").resolve("state"), "rommulus") }
     private val cacheBase: Path by lazy { resolveXdgOrFallback("XDG_CACHE_HOME", homeDir.resolve(".cache"), "rommulus") }
 
-    override val configDir: Path get() = ensureDirectory(configBase, CONFIG_PERMISSIONS)
-    override val dataDir: Path get() = ensureDirectory(dataBase, DATA_PERMISSIONS)
-    override val stateDir: Path get() = ensureDirectory(stateBase, DATA_PERMISSIONS)
-    override val cacheDir: Path get() = ensureDirectory(cacheBase, DATA_PERMISSIONS)
+    override val configDir: Path get() = ensureDirectory(configBase, PathPermissionProfile.CONFIG_DIRECTORY, FileSensitivity.NORMAL)
+    override val dataDir: Path get() = ensureDirectory(dataBase, PathPermissionProfile.USER_ONLY_DIRECTORY, FileSensitivity.SENSITIVE)
+    override val stateDir: Path get() = ensureDirectory(stateBase, PathPermissionProfile.USER_ONLY_DIRECTORY, FileSensitivity.SENSITIVE)
+    override val cacheDir: Path get() = ensureDirectory(cacheBase, PathPermissionProfile.USER_ONLY_DIRECTORY, FileSensitivity.NORMAL)
 
     private fun resolveXdgOrFallback(envVar: String, fallback: Path, appSubdir: String): Path {
         val value = xdgEnv[envVar]
@@ -49,34 +55,13 @@ class XdgAppPaths(
         return fallback.resolve(appSubdir)
     }
 
-    private fun ensureDirectory(base: Path, perms: Set<PosixFilePermission>): Path {
-        if (!Files.exists(base)) {
-            Files.createDirectories(base)
-            try {
-                Files.setPosixFilePermissions(base, perms)
-            } catch (_: UnsupportedOperationException) {
-                // Non-POSIX filesystems (e.g., Windows, FAT) don't support
-                // PosixFilePermissions — permissions are not enforced.
-            }
-        }
+    private fun ensureDirectory(
+        base: Path,
+        profile: PathPermissionProfile,
+        sensitivity: FileSensitivity,
+    ): Path {
+        // Create-only hardening: pre-existing directories keep their owner-set permissions.
+        securityPolicy.createDirectoryIfAbsent(base, profile, sensitivity)
         return base
-    }
-
-    internal companion object {
-        private val CONFIG_PERMISSIONS: Set<PosixFilePermission> = setOf(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE,
-            PosixFilePermission.OWNER_EXECUTE,
-            PosixFilePermission.GROUP_READ,
-            PosixFilePermission.GROUP_EXECUTE,
-            PosixFilePermission.OTHERS_READ,
-            PosixFilePermission.OTHERS_EXECUTE
-        ) // 0755: user-writable, group/others readable (standard for config)
-
-        private val DATA_PERMISSIONS: Set<PosixFilePermission> = setOf(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE,
-            PosixFilePermission.OWNER_EXECUTE
-        ) // 0700: user-only (per §9 "user-only write permissions")
     }
 }

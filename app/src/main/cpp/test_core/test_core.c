@@ -49,6 +49,33 @@
 #define TEST_CORE_GEOMETRY_CHANGE_FRAME 300
 #define TEST_CORE_SHUTDOWN_HOLD_FRAMES 120 /* ~2s of START+SELECT held */
 
+/* ---------------------------------------------------------------------------
+ * CI/E2E-only deterministic shutdown hook (ROMM_TEST_CORE_MAX_FRAMES).
+ *
+ * Compiled ONLY into the player build's test_core target (native/player/
+ * CMakeLists.txt defines ROMM_TEST_CORE_MAX_FRAMES; the Android app build in
+ * native/cmake/cores/test_core.cmake does not), and active only when the
+ * ROMM_TEST_CORE_MAX_FRAMES environment variable names a positive frame
+ * count. When set, the core requests RETRO_ENVIRONMENT_SHUTDOWN as soon as
+ * its frame counter reaches that count — with NO input required — so a
+ * headless runner (the GUI-less windows-2022 CI runner, or a local macOS
+ * host) can drive the player's full core-requested-shutdown path
+ * deterministically: exact rendered frame count, checkpoint write,
+ * exitKind=core_requested_shutdown. See the harness at
+ * native/player/tests/e2e/player_e2e.py. Inert in every other
+ * configuration (variable unset → g_max_frames stays 0).
+ * --------------------------------------------------------------------------- */
+#ifdef ROMM_TEST_CORE_MAX_FRAMES
+static uint32_t g_max_frames = 0;
+
+static void test_core_apply_max_frames_hook(void) {
+    const char *env = getenv("ROMM_TEST_CORE_MAX_FRAMES");
+    if (env == NULL || *env == '\0') return;
+    long value = strtol(env, NULL, 10);
+    if (value > 0) g_max_frames = (uint32_t)value;
+}
+#endif /* ROMM_TEST_CORE_MAX_FRAMES */
+
 // ---------------------------------------------------------------------------
 // Libretro callback storage
 // ---------------------------------------------------------------------------
@@ -157,6 +184,10 @@ void retro_init(void) {
     g_state.marker_x = TEST_CORE_BASE_WIDTH / 2;
     g_state.marker_y = TEST_CORE_BASE_HEIGHT / 2;
     g_state.sram[0] = 0;
+
+#ifdef ROMM_TEST_CORE_MAX_FRAMES
+    test_core_apply_max_frames_hook();
+#endif
 
     g_width = TEST_CORE_BASE_WIDTH;
     g_height = TEST_CORE_BASE_HEIGHT;
@@ -386,6 +417,16 @@ static void poll_input(void) {
 // ---------------------------------------------------------------------------
 
 void retro_run(void) {
+#ifdef ROMM_TEST_CORE_MAX_FRAMES
+    /* CI/E2E hook: request shutdown BEFORE any input/render work so the
+     * rendered frame count is exactly g_max_frames and no controller state
+     * (or lack of it) can influence the outcome. */
+    if (g_max_frames != 0 && g_state.frame_count >= g_max_frames) {
+        environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
+        return;
+    }
+#endif
+
     poll_input();
 
     /* Visible incrementing SRAM byte, roughly once per second. */

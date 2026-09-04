@@ -1,85 +1,11 @@
 package com.romm.desktop.player
 
-import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.storage.AppPaths
+import com.romm.desktop.platform.LinuxNativeArtifactLayout
+import com.romm.desktop.platform.NativeArtifactLayout
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
-
-/**
- * The desktop player's host ABI. A core is launchable on the Linux desktop only when its
- * [com.romm.androidtv.emulation.model.CoreLicenseFinding.supportedAbis] contains this value
- * (plans/LINUX_X64.md §13.1: `linux-x86_64` is a first-class build identity, not an Android ABI).
- */
-const val LINUX_X86_64_ABI = "linux-x86_64"
-
-/**
- * On-disk shared-library file names that may carry [coreId], in preference order.
- *
- * CMake names core targets `<coreId>_core` (e.g. `gambatte_core` → `libgambatte_core.so`),
- * but the synthetic `test_core` target is named `test_core` itself (→ `libtest_core.so`), so
- * both spellings are accepted wherever a core library is resolved.
- */
-fun coreLibraryFileNames(coreId: String): List<String> =
-    listOf("lib$coreId.so", "lib${coreId}_core.so")
-
-/**
- * Scans [coresDir] for installed core shared libraries (`lib*.so` regular files) and returns
- * the extracted core ids, sorted for determinism. A missing (or non-directory) [coresDir]
- * yields an empty list.
- *
- * Extraction: strip the `lib` prefix and `.so` suffix, then a trailing `_core` CMake target
- * suffix (`libgambatte_core.so` → `gambatte`). Note the `_core` strip is lossy for the
- * synthetic `test_core` (`libtest_core.so` → `test`); [deriveAllowedCores] resolves that
- * ambiguity against [CoreManifest].
- */
-fun scanInstalledCoreIds(coresDir: Path): List<String> {
-    if (!Files.isDirectory(coresDir)) return emptyList()
-    val names = Files.list(coresDir).use { stream ->
-        stream
-            .filter { Files.isRegularFile(it) }
-            .map { it.fileName.toString() }
-            .filter { it.startsWith("lib") && it.endsWith(".so") }
-            .toList()
-    }
-    return names
-        .map { it.removePrefix("lib").removeSuffix(".so").removeSuffix("_core") }
-        .filter { it.isNotEmpty() }
-        .distinct()
-        .sorted()
-}
-
-/**
- * Derives the `ROMM_PLAYER_ALLOWED_CORES` value from the installed [installedCoreIds]:
- * `coreId=revision` pairs, semicolon-joined, sorted by coreId for determinism.
- *
- * Only cores that exist in [CoreManifest], are approved, AND support [LINUX_X86_64_ABI] are
- * emitted. The revision is the manifest's [com.romm.androidtv.emulation.model.CoreLicenseFinding.releaseTag],
- * falling back to [com.romm.androidtv.emulation.model.CoreLicenseFinding.commitSha] when the tag
- * is blank (gambatte carries no upstream release tags). Unknown ids are dropped.
- */
-fun deriveAllowedCores(installedCoreIds: Collection<String>): String =
-    installedCoreIds.distinct()
-        .mapNotNull { id ->
-            // The scan's `_core` strip is lossy for the synthetic test_core (libtest_core.so →
-            // "test"); recover it by retrying with the CMake target suffix.
-            CoreManifest.findById(id) ?: CoreManifest.findById("${id}_core")
-        }
-        .filter { it.approved && LINUX_X86_64_ABI in it.supportedAbis }
-        .sortedBy { it.coreId }
-        .joinToString(";") { core -> "${core.coreId}=${core.releaseTag.ifBlank { core.commitSha }}" }
-
-/**
- * Resolves the on-disk core library for [coreId] under [coresDir]: the first existing
- * candidate from [coreLibraryFileNames]. When nothing is installed, falls back to the
- * canonical `lib<coreId>.so` so the player rejects the request with a clear missing-file
- * error instead of the desktop failing to compose a path.
- */
-fun resolveCoreLibraryPath(coresDir: Path, coreId: String): Path =
-    coresDir.resolve(
-        coreLibraryFileNames(coreId).firstOrNull { Files.exists(coresDir.resolve(it)) }
-            ?: "lib$coreId.so",
-    )
 
 /**
  * Spawns the `rommulus-player` process for a prepared launch request (§12.1):
@@ -114,7 +40,8 @@ sealed interface LaunchOutcome {
  * `ROMM_PLAYER_DATA_ROOT`, `ROMM_PLAYER_STATE_ROOT`, `ROMM_PLAYER_ALLOWED_CORES`, and
  * `ROMM_PLAYER_EXPECTED_CONTENT_HASH` on the child process from the desktop's [AppPaths]
  * and the request's content hash. `ROMM_PLAYER_ALLOWED_CORES` is derived at launch time via
- * [deriveAllowedCores] over [scanInstalledCoreIds] of the cores root — no hard-coded list.
+ * [NativeArtifactLayout.deriveAllowedCores] over [NativeArtifactLayout.scanInstalledCoreIds]
+ * of the cores root — no hard-coded list.
  *
  * Diagnostics: the player's combined stdout+stderr are drained (async daemon thread, see
  * [PlayerLogCapture]) into the bounded per-session log `<sessionDir>/player.log` — never
@@ -126,6 +53,11 @@ class ProcessBuilderPlayerLauncher(
     private val playerBinaryPath: Path,
     private val journalsRoot: Path,
     private val appPaths: AppPaths,
+    /**
+     * Platform artifact layout (player/core naming + installed-core scan). Defaults to the
+     * Linux layout, preserving the historical desktop behavior.
+     */
+    private val layout: NativeArtifactLayout = LinuxNativeArtifactLayout,
     /** Test seam: replaces `ProcessBuilder.start()` with full env-var capture. */
     private val starter: (List<String>, Map<String, String>) -> Process = { command, env ->
         ProcessBuilder(command).apply {
@@ -183,7 +115,7 @@ class ProcessBuilderPlayerLauncher(
         put("ROMM_PLAYER_CACHE_ROOT", appPaths.cacheDir.toString())
         put("ROMM_PLAYER_DATA_ROOT", appPaths.dataDir.toString())
         put("ROMM_PLAYER_STATE_ROOT", appPaths.stateDir.toString())
-        put("ROMM_PLAYER_ALLOWED_CORES", deriveAllowedCores(scanInstalledCoreIds(coresDir)))
+        put("ROMM_PLAYER_ALLOWED_CORES", layout.deriveAllowedCores(layout.scanInstalledCoreIds(coresDir)))
         request.contentHash.takeIf { it.isNotEmpty() }?.let {
             put("ROMM_PLAYER_EXPECTED_CONTENT_HASH", it)
         }
@@ -191,28 +123,29 @@ class ProcessBuilderPlayerLauncher(
 
     companion object {
         /**
-         * Resolves the locally built player for development runs; release bundles put
-         * `rommulus_player` on PATH through their launcher.
+         * Resolves the locally built player for development runs; release bundles put the
+         * layout's player executable on PATH through their launcher.
          */
         fun defaultFor(
             journalsRoot: Path,
             appPaths: AppPaths,
-            playerBinaryPath: Path = Path.of("rommulus_player"),
+            layout: NativeArtifactLayout = LinuxNativeArtifactLayout,
+            playerBinaryPath: Path = Path.of(layout.playerExecutableName),
         ): ProcessBuilderPlayerLauncher {
-            val resolvedPlayer = if (playerBinaryPath == Path.of("rommulus_player")) {
+            val resolvedPlayer = if (playerBinaryPath == Path.of(layout.playerExecutableName)) {
                 findExecutableOnPath(playerBinaryPath.fileName.toString())
-                    ?: findDevelopmentPlayer()
+                    ?: findDevelopmentPlayer(layout)
                     ?: playerBinaryPath
             } else {
                 playerBinaryPath
             }
-            return ProcessBuilderPlayerLauncher(resolvedPlayer, journalsRoot, appPaths)
+            return ProcessBuilderPlayerLauncher(resolvedPlayer, journalsRoot, appPaths, layout)
         }
 
-        private fun findDevelopmentPlayer(): Path? {
+        private fun findDevelopmentPlayer(layout: NativeArtifactLayout): Path? {
             var directory = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize()
             while (true) {
-                val candidate = directory.resolve("build").resolve("player").resolve("rommulus_player")
+                val candidate = directory.resolve("build").resolve("player").resolve(layout.playerExecutableName)
                 if (Files.isExecutable(candidate)) return candidate
                 directory = directory.parent ?: return null
             }

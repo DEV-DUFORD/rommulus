@@ -1,3 +1,16 @@
+// posix_atomic_file_store.cpp — POSIX implementation of the engine's
+// atomic file store contract (native/engine/src/atomic_file_store.h).
+//
+// Phase 2 step 1 (plans/WINDOWS_IMPL.md section 5.1): the durable-write
+// primitive previously lived in native/engine/src/atomic_file_store.cpp,
+// which forced POSIX calls (fsync/fileno/stat/rename) into the otherwise
+// platform-neutral engine tree. The contract header stays in the engine;
+// this file is selected at CMake configure time by every POSIX build site
+// (the Android romm_libretro_host library, the standalone Linux/macOS
+// player, and the native test library). A Win32 implementation will be
+// added alongside it in a later Phase 2 step; behavior on POSIX hosts is
+// a verbatim move — same temp-file name, same fsync-before-rename order,
+// same log messages.
 #include "atomic_file_store.h"
 
 #include <native/engine/LogSink.h>

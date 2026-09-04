@@ -1,5 +1,6 @@
 package com.romm.desktop.storage.secret
 
+import com.romm.desktop.PosixTestSupport
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -13,6 +14,9 @@ class FileSecretBackendTest {
 
     @Test
     fun `file backend round trips overwrites and deletes scopes`() {
+        // The backend is Linux/macOS-only and its SENSITIVE hardening fails closed on
+        // filesystems without user-only security (e.g. NTFS in the Windows CI gate).
+        PosixTestSupport.assumePosixFilesystem(tempDir)
         val backend = FileSecretBackend(tempDir.resolve("credentials/tokens.properties"))
 
         assertThat(backend.state()).isEqualTo(KeyringState.Available)
@@ -31,6 +35,7 @@ class FileSecretBackendTest {
 
     @Test
     fun `file backend enforces owner-only permissions`() {
+        PosixTestSupport.assumePosixFilesystem(tempDir)
         val file = tempDir.resolve("credentials/tokens.properties")
         val backend = FileSecretBackend(file)
 
