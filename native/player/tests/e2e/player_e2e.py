@@ -1321,7 +1321,7 @@ def verify_artifact(stage_dir):
     checked = 0
     failed = False
     for line in lines[start + 1:]:
-        m = re.match(r"^([0-9a-f]{64})  \./(.+)$", line.strip())
+        m = re.match(r"^([0-9a-f]{64}) [ *]\./(.+)$", line.strip())
         if not m:
             continue
         digest, rel = m.group(1), m.group(2).replace("/", os.sep)

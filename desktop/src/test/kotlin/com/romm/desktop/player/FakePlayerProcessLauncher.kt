@@ -6,7 +6,7 @@ package com.romm.desktop.player
  * player does while running (e.g. writing its candidate save + result file before exiting).
  */
 class FakePlayerProcessLauncher(
-    private val outcomeFor: (PlayerRequest) -> LaunchOutcome = { LaunchOutcome.Started(pid = 4242L) },
+    private val outcomeFor: (PlayerRequest) -> LaunchOutcome = { LaunchOutcome.Started(pid = Long.MAX_VALUE) },
     private val onLaunch: ((PlayerRequest) -> Unit)? = null,
 ) : PlayerProcessLauncher {
 
