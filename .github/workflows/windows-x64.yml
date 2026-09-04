@@ -289,8 +289,8 @@ jobs:
           # The process-control test spawns a real child via CreateProcessW and
           # force-terminates it with the teardown watchdog; it has no skip path,
           # so its PASS line must appear in the captured output.
-          grep -q 'PASS test_windows_process_control (' "$LOG" \
-            || { echo "::error::test_windows_process_control did not report PASS — process-watchdog coverage missing"; exit 1; }
+          grep -Eq 'test_windows_process_control .*Passed' "$CONSOLE" \
+            || { echo "::error::test_windows_process_control did not pass — process-watchdog coverage missing"; exit 1; }
           pass_count="$(grep -c 'PASS test_' "$LOG" || true)"
           echo "✓ ${pass_count} test executables reported PASS"
 
@@ -482,6 +482,7 @@ jobs:
           # runs. No new CLI surface: the bound arrives via environment.
           cmake --preset windows-x86_64-software-only \
             -DSDL3_ROOT="$SDL_PREFIX" \
+            -DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON \
             -DROMM_PLAYER_QUALIFICATION=ON
 
       - name: Build player + test_core (preset windows-x86_64-software-only)
