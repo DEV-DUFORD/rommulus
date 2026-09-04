@@ -934,6 +934,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $stageBin = Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/bin"
           $python = (Get-Command python).Source
+          $env:PYTHONUTF8 = "1"
           # Sanitized loader PATH: ONLY the staged artifact bin + the Windows
           # system directories — never /ucrt64/bin or build tools (same
           # discipline as job 4's smoke step). The harness spawns the player
