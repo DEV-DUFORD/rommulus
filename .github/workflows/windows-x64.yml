@@ -416,7 +416,7 @@ jobs:
           # headers, and CMake package are needed.
           cmake -S deps/sdl3 -B build/sdl-windows-x86_64 \
             -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$SDL_PREFIX" \
             -DSDL_SHARED=ON \

@@ -38,7 +38,7 @@ class BearerAuthInterceptorTest {
 
     /** Same-origin config rooted at this server's host/port with base path `/base`. */
     private fun sameOrigin(): String =
-        "http://localhost:${server.port}/base"
+        "${baseUrl()}/base"
 
     private fun baseUrl(): String = server.url("/").toString().removeSuffix("/")
 
@@ -95,7 +95,9 @@ class BearerAuthInterceptorTest {
         server.enqueue(MockResponse().setResponseCode(200))
 
         // Origin is https, request goes to http (MockWebServer).
-        val client = client("https://localhost:${server.port}/base") { "rmm_token" }
+        val client = client(server.url("/").newBuilder().scheme("https").addPathSegment("base").build().toString()) {
+            "rmm_token"
+        }
         client.newCall(
             okhttp3.Request.Builder().url("${baseUrl()}/base/api/test").get().build(),
         ).execute().use { }
@@ -110,7 +112,9 @@ class BearerAuthInterceptorTest {
         server.enqueue(MockResponse().setResponseCode(200))
 
         // Origin points at a different (non-default, unused) port.
-        val client = client("http://localhost:1/base") { "rmm_token" }
+        val client = client(server.url("/").newBuilder().port(1).addPathSegment("base").build().toString()) {
+            "rmm_token"
+        }
         client.newCall(
             okhttp3.Request.Builder().url("${baseUrl()}/base/api/test").get().build(),
         ).execute().use { }
