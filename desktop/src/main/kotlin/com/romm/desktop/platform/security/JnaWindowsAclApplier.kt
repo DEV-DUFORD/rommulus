@@ -4,6 +4,7 @@ import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.WString
+import com.sun.jna.platform.win32.WinDef.BOOLByReference
 import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.PointerByReference
 import java.nio.file.Path
@@ -41,11 +42,10 @@ interface Advapi32Security : com.sun.jna.Library {
     ): Boolean
 
     /**
-     * `GetSecurityDescriptorDacl(pSecurityDescriptor, &daclPresent, &pDacl, &daclSize)` → BOOL
+     * `GetSecurityDescriptorDacl(pSecurityDescriptor, &daclPresent, &pDacl, &daclDefaulted)` → BOOL
      * (securapi.h, exported by `advapi32.dll`). ABI-identical to the pinned JNA 5.19.1 Platform
      * binding `com.sun.jna.platform.win32.Advapi32.GetSecurityDescriptorDacl(SECURITY_DESCRIPTOR,
-     * BOOLByReference, PACLByReference, BOOLByReference)` — a raw [IntByReference] is the same
-     * 4-byte out-pointer JNA uses for the `BOOL*`/`LPDWORD*` parameters.
+     * BOOLByReference, PACLByReference, BOOLByReference)`.
      *
      * Contract trap: the returned `PACL` points INTO the self-relative `SECURITY_DESCRIPTOR`
      * buffer (the OS does not allocate a copy). The caller must NOT free it and must keep the
@@ -53,9 +53,9 @@ interface Advapi32Security : com.sun.jna.Library {
      */
     fun GetSecurityDescriptorDacl(
         securityDescriptor: Pointer,
-        daclPresent: IntByReference,
+        daclPresent: BOOLByReference,
         dacl: PointerByReference,
-        daclSize: IntByReference?,
+        daclDefaulted: BOOLByReference?,
     ): Boolean
 
     /**
@@ -226,14 +226,14 @@ class JnaWindowsAclApplier : WindowsAclApplier {
      * PACL itself.
      */
     private fun extractDacl(sd: Pointer, path: Path): Pointer {
-        val daclPresent = IntByReference(0)
+        val daclPresent = BOOLByReference()
         val daclRef = PointerByReference()
         if (!advapi32.GetSecurityDescriptorDacl(sd, daclPresent, daclRef, null)) {
             throw IllegalStateException(
                 "GetSecurityDescriptorDacl failed for $path: ${describeLastError()}",
             )
         }
-        if (daclPresent.getValue() == 0) {
+        if (!daclPresent.value.booleanValue()) {
             throw IllegalStateException(
                 "the converted descriptor for $path carries no DACL; refusing to apply it",
             )

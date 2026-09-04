@@ -138,8 +138,40 @@ std::optional<std::wstring> readDaclSddl(const std::wstring& path) {
     return result;
 }
 
-bool contains(const std::wstring& haystack, const std::wstring& needle) {
-    return haystack.find(needle) != std::wstring::npos;
+bool daclAllowsSid(const std::wstring& path, const std::wstring& sidString) {
+    PSID expectedSid = nullptr;
+    if (ConvertStringSidToSidW(sidString.c_str(), &expectedSid) == FALSE) return false;
+
+    const HANDLE h = CreateFileW(path.c_str(), READ_CONTROL,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                 nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        LocalFree(expectedSid);
+        return false;
+    }
+
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    const DWORD status = GetSecurityInfo(h, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                                         nullptr, nullptr, &dacl, nullptr, &sd);
+    CloseHandle(h);
+    bool found = false;
+    if (status == ERROR_SUCCESS && dacl != nullptr) {
+        ACL_SIZE_INFORMATION info {};
+        if (GetAclInformation(dacl, &info, sizeof(info), AclSizeInformation) != FALSE) {
+            for (DWORD i = 0; i < info.AceCount && !found; ++i) {
+                LPVOID ace = nullptr;
+                if (GetAce(dacl, i, &ace) != FALSE &&
+                    static_cast<ACE_HEADER*>(ace)->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+                    auto* allowed = static_cast<ACCESS_ALLOWED_ACE*>(ace);
+                    found = EqualSid(&allowed->SidStart, expectedSid) != FALSE;
+                }
+            }
+        }
+    }
+    if (sd != nullptr) LocalFree(sd);
+    LocalFree(expectedSid);
+    return found;
 }
 
 bool fileExists(const std::wstring& path) {
@@ -205,9 +237,9 @@ void testPreservesExistingDacL() {
     const auto pre = readDaclSddl(dest);
     CHECK(pre.has_value());
     if (pre) {
-        CHECK(contains(*pre, L";;;S-1-5-18)"));
-        CHECK(contains(*pre, L";;;" + *userSid + L")"));
-        CHECK(!contains(*pre, L";;;WD)"));  // no Everyone ACE
+        CHECK(daclAllowsSid(dest, L"S-1-5-18"));
+        CHECK(daclAllowsSid(dest, *userSid));
+        CHECK(!daclAllowsSid(dest, L"S-1-1-0"));  // no Everyone ACE
     }
 
     const std::vector<uint8_t> payload(512, 'R');
@@ -226,9 +258,10 @@ void testPreservesExistingDacL() {
     const auto post = readDaclSddl(dest);
     CHECK(post.has_value());
     if (post) {
-        CHECK(contains(*post, L";;;S-1-5-18)"));
-        CHECK(contains(*post, L";;;" + *userSid + L")"));
-        CHECK(!contains(*post, L";;;WD)"));
+        CHECK(daclAllowsSid(dest, L"S-1-5-18"));
+        CHECK(daclAllowsSid(dest, *userSid));
+        CHECK(!daclAllowsSid(dest, L"S-1-1-0"));
+        CHECK(*post == *pre);
         const auto def = directoryDefaultDacL(dir);
         if (def) CHECK(*post != *def);
     }
@@ -243,9 +276,10 @@ void testPreservesExistingDacL() {
     const auto post2 = readDaclSddl(dest);
     CHECK(post2.has_value());
     if (post2) {
-        CHECK(contains(*post2, L";;;S-1-5-18)"));
-        CHECK(contains(*post2, L";;;" + *userSid + L")"));
-        CHECK(!contains(*post2, L";;;WD)"));
+        CHECK(daclAllowsSid(dest, L"S-1-5-18"));
+        CHECK(daclAllowsSid(dest, *userSid));
+        CHECK(!daclAllowsSid(dest, L"S-1-1-0"));
+        if (post) CHECK(*post2 == *post);
     }
 }
 
@@ -275,9 +309,9 @@ void testAbsentDestinationGetsSafeDacL() {
     const auto sddl = readDaclSddl(dest);
     CHECK(sddl.has_value());
     if (sddl) {
-        CHECK(contains(*sddl, L";;;" + *userSid + L")"));
-        CHECK(contains(*sddl, L";;;S-1-5-18)"));
-        CHECK(!contains(*sddl, L";;;WD)"));
+        CHECK(daclAllowsSid(dest, *userSid));
+        CHECK(daclAllowsSid(dest, L"S-1-5-18"));
+        CHECK(!daclAllowsSid(dest, L"S-1-1-0"));
     }
 
     // A subsequent write takes the REPLACE path (the destination now exists)
@@ -290,9 +324,10 @@ void testAbsentDestinationGetsSafeDacL() {
     const auto sddl2 = readDaclSddl(dest);
     CHECK(sddl2.has_value());
     if (sddl2) {
-        CHECK(contains(*sddl2, L";;;" + *userSid + L")"));
-        CHECK(contains(*sddl2, L";;;S-1-5-18)"));
-        CHECK(!contains(*sddl2, L";;;WD)"));
+        CHECK(daclAllowsSid(dest, *userSid));
+        CHECK(daclAllowsSid(dest, L"S-1-5-18"));
+        CHECK(!daclAllowsSid(dest, L"S-1-1-0"));
+        if (sddl) CHECK(*sddl2 == *sddl);
     }
 }
 

@@ -58,7 +58,7 @@ bool writeSentinel(const std::wstring& path, const wchar_t* text) {
     const HANDLE handle = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr,
                                       CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE) return false;
-    const DWORD length = static_cast<DWORD>(wcslen(text));
+    const DWORD length = static_cast<DWORD>(wcslen(text) * sizeof(wchar_t));
     DWORD written = 0;
     const bool ok = WriteFile(handle, text, length, &written, nullptr) != 0 && written == length;
     CloseHandle(handle);
@@ -76,7 +76,7 @@ std::wstring readSentinel(const std::wstring& path) {
                              nullptr) != 0;
     CloseHandle(handle);
     if (!ok) return L"";
-    return std::wstring(buffer.begin(), buffer.begin() + read);
+    return std::wstring(buffer.begin(), buffer.begin() + read / sizeof(wchar_t));
 }
 
 struct ChildResult {

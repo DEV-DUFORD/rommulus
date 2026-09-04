@@ -406,7 +406,7 @@ jobs:
           # Job-local install prefix: $RUNNER_TEMP is per-job and outside the
           # workspace, so SDL3.dll + CMake package + headers never touch the
           # system toolchain. Exported for the later steps via GITHUB_ENV.
-          SDL_PREFIX="$RUNNER_TEMP/sdl3-ucrt64"
+          SDL_PREFIX="$(cygpath -u "$RUNNER_TEMP")/sdl3-ucrt64"
           echo "SDL_PREFIX=$SDL_PREFIX" >> "$GITHUB_ENV"
           # -G Ninja is pinned explicitly: windows-2022 ships Visual Studio,
           # so CMake's default generator selection would pick the VS generator

@@ -101,7 +101,11 @@ void testCanonicalization() {
     if (canonical) {
         // Absolute slash form, inside the temp root (case-insensitive: the
         // OS final path carries on-disk casing), ending in the file name.
-        CHECK(ciStartsWith(*canonical, toUtf8(g_root)));
+        std::string normalizedRoot = toUtf8(g_root);
+        for (char& c : normalizedRoot) {
+            if (c == '\\') c = '/';
+        }
+        CHECK(ciStartsWith(*canonical, normalizedRoot));
         CHECK(endsWith(*canonical, "/a/b/rom.zip"));
         // Idempotent: canonicalizing the canonical form is a fixed point.
         const auto again = canonicalPath(*canonical, &err);

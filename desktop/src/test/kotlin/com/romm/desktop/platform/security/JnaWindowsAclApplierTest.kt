@@ -3,6 +3,8 @@ package com.romm.desktop.platform.security
 import com.sun.jna.Memory
 import com.sun.jna.Pointer
 import com.sun.jna.WString
+import com.sun.jna.platform.win32.WinDef.BOOL
+import com.sun.jna.platform.win32.WinDef.BOOLByReference
 import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.PointerByReference
 import org.assertj.core.api.Assertions.assertThat
@@ -194,13 +196,13 @@ class JnaWindowsAclApplierTest {
 
         override fun GetSecurityDescriptorDacl(
             securityDescriptor: Pointer,
-            daclPresent: IntByReference,
+            daclPresent: BOOLByReference,
             dacl: PointerByReference,
-            daclSize: IntByReference?,
+            daclDefaulted: BOOLByReference?,
         ): Boolean {
             check(securityDescriptor == sd) { "GetSecurityDescriptorDacl got an unexpected descriptor" }
             if (!getDaclSucceeds) return false
-            daclPresent.setValue(daclPresentValue)
+            daclPresent.value = BOOL(daclPresentValue.toLong())
             dacl.setValue(if (daclPresentValue == 1) pAcl else null)
             return true
         }
