@@ -553,12 +553,14 @@ jobs:
           closure_imports() {
             objdump -p "$1" | grep 'DLL Name:' | sed 's/.*DLL Name: *//' | tr -d '\r'
           }
-            if { closure_imports "$STAGE/bin/rommulus-player.exe"; \
-                closure_imports "$STAGE/cores/test_core.dll"; \
-                closure_imports "$STAGE/bin/SDL3.dll"; \
-                closure_imports "$STAGE/cores-candidate/gambatte_core.dll"; \
-                closure_imports "$STAGE/cores-candidate/fceumm_core.dll"; } \
-                | grep -qi '^libwinpthread-1\.dll$'; then
+          imports="$(
+            closure_imports "$STAGE/bin/rommulus-player.exe"
+            closure_imports "$STAGE/cores/test_core.dll"
+            closure_imports "$STAGE/bin/SDL3.dll"
+            closure_imports "$STAGE/cores-candidate/gambatte_core.dll"
+            closure_imports "$STAGE/cores-candidate/fceumm_core.dll"
+          )"
+          if grep -qi '^libwinpthread-1\.dll$' <<< "$imports"; then
             [ -f "$UCRT64_BIN/libwinpthread-1.dll" ] \
               || { echo "::error::libwinpthread-1.dll missing from $UCRT64_BIN (expected the UCRT64 toolchain bin)"; exit 1; }
             cp "$UCRT64_BIN/libwinpthread-1.dll" "$STAGE/bin/"
