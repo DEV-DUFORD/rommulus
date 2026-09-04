@@ -78,6 +78,10 @@ tasks.register<Copy>("copyRuntimeClasspath") {
 tasks.withType<Test> {
     useJUnitPlatform()
     systemProperty("junit.jupiter.extensions.autodetection.enabled", "true")
+    testLogging {
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
     // Plumb the D-Bus session address into the test JVM so the Linux Secret Service conformance
     // test can enable. Single source of truth: the DBUS_SESSION_BUS_ADDRESS env var (set by
     // dbus-run-session in CI) — the same variable the backend's forSessionBus() reads. When unset

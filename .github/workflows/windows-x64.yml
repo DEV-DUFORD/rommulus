@@ -422,6 +422,10 @@ jobs:
             -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
             -DSDL_SHARED=ON \
             -DSDL_STATIC=OFF \
+            -DSDL_GPU=OFF \
+            -DSDL_OPENGL=OFF \
+            -DSDL_OPENGLES=OFF \
+            -DSDL_VULKAN=OFF \
             -DSDL_TESTS=OFF
           cmake --build build/sdl-windows-x86_64 -j"$(nproc)"
           cmake --install build/sdl-windows-x86_64

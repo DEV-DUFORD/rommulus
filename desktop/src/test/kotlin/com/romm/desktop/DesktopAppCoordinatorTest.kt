@@ -1,5 +1,6 @@
 package com.romm.desktop
 
+import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.auth.SessionStorage
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
@@ -999,8 +1000,7 @@ class DesktopAppCoordinatorTest {
             // CHD content's SHA-256 and the server origin.
             val savesRoot = paths.dataDir.toAbsolutePath().normalize().toString() + java.io.File.separator + "saves"
             assertThat(firstSave).startsWith(savesRoot)
-            // Server segment sanitized exactly like SavePathPolicy (only '/' and '\' → '_').
-            assertThat(firstSave).contains(server.origin.replace('/', '_').replace('\\', '_'))
+            assertThat(firstSave).contains(SavePathPolicy.sanitizeSegment(server.origin))
             assertThat(firstSave).contains(sha256Hex(chdBytes))
             assertThat(firstSave).endsWith("autosave" + java.io.File.separator + "srm.srm")
         } finally {
@@ -1072,8 +1072,7 @@ class DesktopAppCoordinatorTest {
             // CHD content's SHA-256 and the server origin.
             val savesRoot = paths.dataDir.toAbsolutePath().normalize().toString() + java.io.File.separator + "saves"
             assertThat(firstSave).startsWith(savesRoot)
-            // Server segment sanitized exactly like SavePathPolicy (only '/' and '\' → '_').
-            assertThat(firstSave).contains(server.origin.replace('/', '_').replace('\\', '_'))
+            assertThat(firstSave).contains(SavePathPolicy.sanitizeSegment(server.origin))
             // The romId segment scopes the save per ROM.
             assertThat(firstSave).contains(java.io.File.separator + "7" + java.io.File.separator)
             assertThat(firstSave).contains(sha256Hex(chdBytes))

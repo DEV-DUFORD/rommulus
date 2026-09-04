@@ -408,7 +408,8 @@ RequestFileStatus requestFileSecurity(const std::string& path) {
             const auto* allowed = static_cast<const ACCESS_ALLOWED_ACE*>(ace);
             // SidStart is the first DWORD of the variable-length SID stored
             // inline in ACCESS_ALLOWED_ACE, not an offset value.
-            const PSID aceSid = reinterpret_cast<PSID>(&allowed->SidStart);
+            const PSID aceSid =
+                reinterpret_cast<PSID>(const_cast<DWORD*>(&allowed->SidStart));
             if ((allowed->Mask & kWriteMask) != 0 && EqualSid(aceSid, everyoneSid) != 0) {
                 LocalFree(everyoneSid);
                 LocalFree(daclSd);

@@ -1,5 +1,6 @@
 package com.romm.desktop
 
+import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.ports.SettingsKeys
 import com.romm.desktop.storage.secret.FakeSecretBackend
@@ -20,8 +21,7 @@ class SaveSessionKeysTest {
 
     private companion object {
         const val ORIGIN = "https://demo.romm.app"
-        /** SavePathPolicy.sanitizeSegment maps each of the two '/' in "https://" to '_'. */
-        const val SANITIZED_ORIGIN = "https:__demo.romm.app"
+        val SANITIZED_ORIGIN = SavePathPolicy.sanitizeSegment(ORIGIN)
     }
 
     private fun coordinator(dir: Path, defaultOrigin: String = ORIGIN): DesktopAppCoordinator =
