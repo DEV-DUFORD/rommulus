@@ -933,6 +933,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $stageBin = Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/bin"
+          $python = (Get-Command python).Source
           # Sanitized loader PATH: ONLY the staged artifact bin + the Windows
           # system directories — never /ucrt64/bin or build tools (same
           # discipline as job 4's smoke step). The harness spawns the player
@@ -951,7 +952,7 @@ jobs:
           # marker/counter invariants, candidate adoption/relaunch
           # persistence, repeated load, force-kill lock recovery) alongside
           # every test_core scenario.
-          python native/player/tests/e2e/player_e2e.py `
+          & $python native/player/tests/e2e/player_e2e.py `
             --stage dist/player-win64-software-only `
             --workdir e2e-out `
             --candidate-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/gambatte_core.dll") `
