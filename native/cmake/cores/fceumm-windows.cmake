@@ -50,10 +50,13 @@
 
 include(${CMAKE_CURRENT_LIST_DIR}/fceumm-sources.cmake)
 
-add_library(fceumm_core SHARED
+add_library(fceumm_core_archive STATIC
     # The exact curated 505-source set from the shared fragment (identical to
     # Android and Linux; network-free by construction).
     ${ROMM_FCEUMM_SOURCES}
+)
+
+add_library(fceumm_core SHARED
     # PE export table: CMake passes a .def listed in add_library() straight to
     # the MinGW linker. Everything not enumerated stays local to the DLL.
     ${CMAKE_CURRENT_LIST_DIR}/fceumm-windows.def
@@ -62,9 +65,10 @@ add_library(fceumm_core SHARED
 set_target_properties(fceumm_core PROPERTIES
     # Canonical output name: fceumm_core.dll, never libfceumm_core.dll.
     PREFIX ""
+    LINKER_LANGUAGE C
 )
 
-target_include_directories(fceumm_core SYSTEM PRIVATE
+target_include_directories(fceumm_core_archive SYSTEM PRIVATE
     ${FCEUMM_DIR}/src/drivers/libretro
     ${FCEUMM_DIR}/src/drivers/libretro/libretro-common/include
     ${FCEUMM_DIR}/src
@@ -73,7 +77,7 @@ target_include_directories(fceumm_core SYSTEM PRIVATE
     ${FCEUMM_DIR}/src/ntsc
 )
 
-target_compile_definitions(fceumm_core PRIVATE
+target_compile_definitions(fceumm_core_archive PRIVATE
     # Same platform behavior as cores/fceumm-linux.cmake (the Android
     # fragment differs only in FRONTEND_SUPPORTS_RGB565; this candidate
     # matches Linux).
@@ -99,7 +103,7 @@ target_compile_definitions(fceumm_core PRIVATE
 # Vendored third-party source: not held to this project's own -Wall -Wextra.
 # The toolchain contract already adds -static-libgcc/-static-libstdc++ to
 # shared link flags, keeping libgcc out of the audited DLL closure.
-target_compile_options(fceumm_core PRIVATE
+target_compile_options(fceumm_core_archive PRIVATE
     -Wno-write-strings -Wsign-compare -Wundef -Wmissing-prototypes
     -O2
     -DNDEBUG
@@ -109,4 +113,13 @@ target_compile_options(fceumm_core PRIVATE
 # cross-build and the Windows CI gate): any unresolved import fails the link.
 target_link_options(fceumm_core PRIVATE
     "-Wl,--no-undefined"
+)
+
+# Archive the large object set first so the final DLL link stays below
+# MSYS2's command-line limit. Whole-archive preserves every Libretro entry
+# point for the explicit PE export table.
+target_link_libraries(fceumm_core PRIVATE
+    "-Wl,--whole-archive"
+    fceumm_core_archive
+    "-Wl,--no-whole-archive"
 )
