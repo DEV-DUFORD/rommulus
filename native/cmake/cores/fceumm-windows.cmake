@@ -50,6 +50,10 @@
 
 include(${CMAKE_CURRENT_LIST_DIR}/fceumm-sources.cmake)
 
+# The curated source set is large enough to exceed MSYS2's command-line limit
+# when Ninja expands every object directly into the linker invocation.
+set(CMAKE_C_USE_RESPONSE_FILE_FOR_OBJECTS ON)
+
 add_library(fceumm_core SHARED
     # The exact curated 505-source set from the shared fragment (identical to
     # Android and Linux; network-free by construction).

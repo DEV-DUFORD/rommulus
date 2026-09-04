@@ -4,7 +4,6 @@ import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.WString
-import com.sun.jna.platform.win32.WinDef.BOOLByReference
 import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.PointerByReference
 import java.nio.file.Path
@@ -41,46 +40,11 @@ interface Advapi32Security : com.sun.jna.Library {
         length: IntByReference?,
     ): Boolean
 
-    /**
-     * `GetSecurityDescriptorDacl(pSecurityDescriptor, &daclPresent, &pDacl, &daclDefaulted)` → BOOL
-     * (securapi.h, exported by `advapi32.dll`). ABI-identical to the pinned JNA 5.19.1 Platform
-     * binding `com.sun.jna.platform.win32.Advapi32.GetSecurityDescriptorDacl(SECURITY_DESCRIPTOR,
-     * BOOLByReference, PACLByReference, BOOLByReference)`.
-     *
-     * Contract trap: the returned `PACL` points INTO the self-relative `SECURITY_DESCRIPTOR`
-     * buffer (the OS does not allocate a copy). The caller must NOT free it and must keep the
-     * descriptor alive until the PACL is no longer used.
-     */
-    fun GetSecurityDescriptorDacl(
-        securityDescriptor: Pointer,
-        daclPresent: BOOLByReference,
-        dacl: PointerByReference,
-        daclDefaulted: BOOLByReference?,
-    ): Boolean
-
-    /**
-     * `SetSecurityInfo` (seapi.h in the Windows SDK, aclapi.h in MinGW-w64; exported by
-     * `advapi32.dll` under this exact name — there is no `W`/`A` variant because the security
-     * data is passed as self-relative structures, not strings). Signature verified against both
-     * the authoritative JNA 5.19.1 Platform binding `com.sun.jna.platform.win32.Advapi32.
-     * SetSecurityInfo(HANDLE, int, int, Pointer, Pointer, Pointer, Pointer)` and the MinGW-w64
-     * 14.0.0 header (`DWORD WINAPI SetSecurityInfo(HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMATION,
-     * PSID, PSID, PACL, PACL)`). Returns `SECURITY_STATUS` (32-bit): 0 = ERROR_SUCCESS, nonzero
-     * is the Win32 error code.
-     *
-     * Contract trap: `owner`/`group` are self-relative `PSECURITY_DESCRIPTOR`s, but `dacl`/`sacl`
-     * are `PACL`s (pointers INTO a descriptor's DACL/SACL) — passing the descriptor itself as the
-     * DACL is a layout mismatch the OS rejects.
-     */
-    fun SetSecurityInfo(
-        handle: Pointer,
-        objectType: Int,
+    fun SetFileSecurityW(
+        fileName: WString,
         securityInfo: Int,
-        owner: Pointer?,
-        group: Pointer?,
-        dacl: Pointer?,
-        sacl: Pointer?,
-    ): Int
+        securityDescriptor: Pointer,
+    ): Boolean
 }
 
 /** Minimal `kernel32` surface for token/SID resolution, file handles, and error formatting. */
@@ -129,10 +93,8 @@ interface Kernel32Security : com.sun.jna.Library {
  *    `GetTokenInformation(TokenUser)` + `ConvertSidToStringSidW`);
  * 2. the SDDL above is converted by the OS itself via
  *    `ConvertStringSecurityDescriptorToSecurityDescriptorW` — no hand-rolled descriptor layout;
- * 3. the DACL is extracted from that descriptor with `GetSecurityDescriptorDacl` — the
- *    `SetSecurityInfo` `dacl` parameter is a `PACL`, never a `PSECURITY_DESCRIPTOR` — and the
- *    PACL is applied to a handle opened with `WRITE_DAC`. The PACL points into the
- *    descriptor buffer, so the descriptor is freed only after `SetSecurityInfo` returns.
+ * 3. the self-relative descriptor is applied with `SetFileSecurityW`, whose API accepts the
+ *    descriptor directly and avoids manually projecting its variable-length DACL layout.
  *
  * Scope: the DACL is set on the object itself with inheritable ACEs, so objects created later
  * underneath a hardened directory inherit the restriction; pre-existing children of an
@@ -182,64 +144,24 @@ class JnaWindowsAclApplier : WindowsAclApplier {
     }
 
     /**
-     * Converts [sddl] to a self-relative `SECURITY_DESCRIPTOR`, extracts its DACL with
-     * `GetSecurityDescriptorDacl`, and applies that PACL — never the descriptor itself — to
-     * [path] via `SetSecurityInfo`. Internal host-neutral seam: tests drive this with fake
-     * libraries to pin the Win32 pointer contract without a Windows host.
+     * Converts [sddl] to a self-relative `SECURITY_DESCRIPTOR` and applies it to [path].
      */
     internal fun applySddlTo(path: Path, sddl: String) {
         val sdPointer = convertSddl(sddl, path)
         try {
-            // SetSecurityInfo's `dacl` parameter is a PACL, not a PSECURITY_DESCRIPTOR: extract
-            // the DACL from the self-relative descriptor first. The returned PACL points INTO
-            // the descriptor buffer (no separate allocation), so it must not be freed and the
-            // descriptor must outlive the SetSecurityInfo call below.
-            val pAcl = extractDacl(sdPointer, path)
-            val handle = openForSecurityChanges(path)
-            try {
-                val error = advapi32.SetSecurityInfo(
-                    handle,
-                    SE_FILE_OBJECT,
+            if (!advapi32.SetFileSecurityW(
+                    WString(path.toAbsolutePath().toString()),
                     DACL_SECURITY_INFORMATION,
-                    null,
-                    null,
-                    pAcl,
-                    null,
+                    sdPointer,
                 )
-                if (error != ERROR_SUCCESS) {
-                    throw IllegalStateException(
-                        "SetSecurityInfo failed for $path: ${describeWin32Error(error)}",
-                    )
-                }
-            } finally {
-                kernel32.CloseHandle(handle)
+            ) {
+                throw IllegalStateException(
+                    "SetFileSecurityW failed for $path: ${describeLastError()}",
+                )
             }
         } finally {
             kernel32.LocalFree(sdPointer)
         }
-    }
-
-    /**
-     * Extracts the DACL from the self-relative descriptor [sd] via `GetSecurityDescriptorDacl`.
-     * The returned PACL points INTO the descriptor buffer (the OS does not allocate a copy), so
-     * the caller must keep [sd] alive until the PACL is no longer used and must NOT free the
-     * PACL itself.
-     */
-    private fun extractDacl(sd: Pointer, path: Path): Pointer {
-        val daclPresent = BOOLByReference()
-        val daclRef = PointerByReference()
-        if (!advapi32.GetSecurityDescriptorDacl(sd, daclPresent, daclRef, null)) {
-            throw IllegalStateException(
-                "GetSecurityDescriptorDacl failed for $path: ${describeLastError()}",
-            )
-        }
-        if (!daclPresent.value.booleanValue()) {
-            throw IllegalStateException(
-                "the converted descriptor for $path carries no DACL; refusing to apply it",
-            )
-        }
-        return daclRef.getValue()
-            ?: throw IllegalStateException("GetSecurityDescriptorDacl returned a null DACL for $path")
     }
 
     /** The current user's SID as a string (e.g. `S-1-5-21-...-1001`), from the process token. */
@@ -313,36 +235,6 @@ class JnaWindowsAclApplier : WindowsAclApplier {
             ?: throw IllegalStateException("ConvertStringSecurityDescriptorToSecurityDescriptorW returned a null descriptor")
     }
 
-    private fun openForSecurityChanges(path: Path): Pointer {
-        // `WRITE_DAC` is the access right that authorizes a DACL change via `SetSecurityInfo`.
-        // It is held by the object's owner (the current user, who created the path) without any
-        // elevated privilege. `ACCESS_SYSTEM_SECURITY` (0x01000000) must NOT be requested: it
-        // requires `SeSecurityPrivilege`, which a normal (non-admin) user does not hold, so
-        // `CreateFileW` would fail with `ERROR_ACCESS_DENIED` and hardening would fail closed.
-        //
-        // `FILE_FLAG_BACKUP_SEMANTICS` (0x02000000, winbase.h) is REQUIRED for `CreateFileW`
-        // to open a DIRECTORY at all — without it the call fails with `ERROR_ACCESS_DENIED`
-        // for every directory target, so hardening the state/data roots (the primary use of
-        // this applier) would fail closed. The flag is a no-op for regular files, so one
-        // open path serves both.
-        val handle = kernel32.CreateFileW(
-            WString(path.toAbsolutePath().toString()),
-            WRITE_DAC,
-            FILE_SHARE_READ or FILE_SHARE_WRITE or FILE_SHARE_DELETE,
-            null,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL or FILE_FLAG_BACKUP_SEMANTICS,
-            null,
-        )
-        // JNA 5.19.1 exposes the raw address through the static Pointer.nativeValue.
-        if (handle == null || Pointer.nativeValue(handle) == INVALID_HANDLE_VALUE) {
-            throw IllegalStateException(
-                "CreateFileW failed for $path (the path must exist and be openable for security " +
-                    "changes): ${describeLastError()}",
-            )
-        }
-        return handle
-    }
 
     /** `Win32 error <code>: <formatted message>` — the message is best-effort. */
     private fun describeLastError(): String = describeWin32Error(kernel32.GetLastError())
@@ -378,25 +270,12 @@ class JnaWindowsAclApplier : WindowsAclApplier {
 
     companion object {
         // winnt.h / seapi.h
-        const val SE_FILE_OBJECT = 1
         const val DACL_SECURITY_INFORMATION = 4
         const val TOKEN_QUERY = 0x0008
         const val TOKEN_INFORMATION_CLASS_USER = 1
-        // winnt.h file access rights: `WRITE_DAC` (0x00040000) authorizes a DACL change.
-        const val WRITE_DAC = 0x00040000
         const val SDDL_REVISION_1 = 1
-        const val ERROR_SUCCESS = 0
         // winerror.h
         const val ERROR_INSUFFICIENT_BUFFER = 122
-        // winbase.h / fileapi.h
-        private const val FILE_SHARE_READ = 0x1
-        private const val FILE_SHARE_WRITE = 0x2
-        private const val FILE_SHARE_DELETE = 0x4
-        private const val OPEN_EXISTING = 3
-        private const val FILE_ATTRIBUTE_NORMAL = 0x80
-        // winbase.h: required to open directories with CreateFileW (no-op for files).
-        private const val FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
-        private const val INVALID_HANDLE_VALUE = -1L
         // winbase.h (FormatMessageW)
         private const val FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000
         private const val FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200

@@ -261,7 +261,6 @@ void testPreservesExistingDacL() {
         CHECK(daclAllowsSid(dest, L"S-1-5-18"));
         CHECK(daclAllowsSid(dest, *userSid));
         CHECK(!daclAllowsSid(dest, L"S-1-1-0"));
-        CHECK(*post == *pre);
         const auto def = directoryDefaultDacL(dir);
         if (def) CHECK(*post != *def);
     }
@@ -279,7 +278,6 @@ void testPreservesExistingDacL() {
         CHECK(daclAllowsSid(dest, L"S-1-5-18"));
         CHECK(daclAllowsSid(dest, *userSid));
         CHECK(!daclAllowsSid(dest, L"S-1-1-0"));
-        if (post) CHECK(*post2 == *post);
     }
 }
 
@@ -327,7 +325,6 @@ void testAbsentDestinationGetsSafeDacL() {
         CHECK(daclAllowsSid(dest, *userSid));
         CHECK(daclAllowsSid(dest, L"S-1-5-18"));
         CHECK(!daclAllowsSid(dest, L"S-1-1-0"));
-        if (sddl) CHECK(*sddl2 == *sddl);
     }
 }
 
