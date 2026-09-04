@@ -86,9 +86,16 @@ tasks.withType<Test> {
     // can gate which assertions apply per CI run.
     systemProperty("rommulus.secretServiceMode", System.getenv("ROM_SECRET_MODE") ?: "")
     // Real Windows Credential Manager round-trip gate (plans/WINDOWS_IMPL.md §4.3): set
-    // ROMM_WINDOWS_CREDENTIAL_INTEGRATION=1 on the windows-2022 runner to enable; inert elsewhere.
+    // ROMM_WINDOWS_CREDENTIAL_INTEGRATION to 1 or true (case-insensitive) on the windows-2022
+    // runner to enable; inert elsewhere. The gated test's @EnabledIfSystemProperty matches
+    // exactly "true", so only those explicit enable values are normalized to "true" here (the
+    // workflow sets "1"); every other value ("0", "false", a typo, blank) maps to "" and leaves
+    // the gate disabled — the property never carries a raw value that could match by accident.
+    val windowsCredentialIntegration = System.getenv("ROMM_WINDOWS_CREDENTIAL_INTEGRATION") ?: ""
     systemProperty(
         "rommulus.windowsCredentialIntegration",
-        System.getenv("ROMM_WINDOWS_CREDENTIAL_INTEGRATION") ?: "",
+        if (windowsCredentialIntegration.equals("1", ignoreCase = true) ||
+            windowsCredentialIntegration.equals("true", ignoreCase = true)
+        ) "true" else "",
     )
 }

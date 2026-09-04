@@ -35,6 +35,17 @@ find_program(ROMM_WIN32_C_COMPILER NAMES x86_64-w64-mingw32-gcc HINTS ${_romm_mi
 find_program(ROMM_WIN32_CXX_COMPILER NAMES x86_64-w64-mingw32-g++ HINTS ${_romm_mingw_hint})
 find_program(ROMM_WIN32_RC_COMPILER NAMES x86_64-w64-mingw32-windres HINTS ${_romm_mingw_hint})
 
+# MSYS2's mingw-w64-ucrt-x86_64-binutils installs the UNPREFIXED tools (as, ld, objdump,
+# windres) directly into <prefix>/bin (e.g. /ucrt64/bin, on PATH in the UCRT64 environment);
+# there is no target-prefixed binutils layout on MSYS2, so the prefixed lookup above only
+# resolves for classic cross-toolchain roots (ROMM_MINGW_PREFIX). On MSYS2 it does not
+# resolve, and we then accept the unprefixed windres ONLY from the same bin as the verified
+# UCRT64 gcc — never from another toolchain family on PATH (fail closed, section 3.2).
+if(NOT ROMM_WIN32_RC_COMPILER AND ROMM_WIN32_C_COMPILER)
+    get_filename_component(_romm_mingw_bin_dir "${ROMM_WIN32_C_COMPILER}" DIRECTORY)
+    find_program(ROMM_WIN32_RC_COMPILER NAMES windres PATHS "${_romm_mingw_bin_dir}" NO_DEFAULT_PATH)
+endif()
+
 if(NOT ROMM_WIN32_C_COMPILER OR NOT ROMM_WIN32_CXX_COMPILER OR NOT ROMM_WIN32_RC_COMPILER)
     message(FATAL_ERROR
         "windows-mingw-ucrt-x86_64 toolchain: MinGW-w64 UCRT64 not found. "

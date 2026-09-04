@@ -284,9 +284,20 @@ class WindowsFileSecurityPolicy(
  */
 object FileSecurityPolicies {
 
+    /**
+     * Test-only injection seam — production code never sets it: when non-null, [default]
+     * returns this policy instead of the host-selected one. The desktop test suite installs a
+     * POSIX-aware no-op-hardening policy (see `TestFileSecurityPolicy` in the test sources) so
+     * tests on ANY host — including a real Windows CI runner — exercise their own fakes rather
+     * than the fail-closed process default, which must refuse to manage JUnit temp dirs outside
+     * the user's trusted profile roots and cannot establish NTFS ACLs without startup wiring.
+     */
+    @Volatile
+    internal var testPolicyOverride: FileSecurityPolicy? = null
+
     /** The policy for the real JVM host, selected once per call (cheap; no I/O). */
     fun default(): FileSecurityPolicy =
-        forHost(System.getProperty("os.name") ?: "", System.getenv())
+        testPolicyOverride ?: forHost(System.getProperty("os.name") ?: "", System.getenv())
 
     /**
      * Explicit Windows construction seam for startup integration (plans/WINDOWS_IMPL.md §4.2):

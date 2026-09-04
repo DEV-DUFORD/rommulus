@@ -34,22 +34,30 @@ class PathsTest {
     @Test
     fun `testAppPaths creates expected subdirectories`() {
         val paths = TestAppPaths(tempDir)
-        assertThat(paths.configDir.toString()).endsWith("config")
-        assertThat(paths.dataDir.toString()).endsWith("data")
-        assertThat(paths.stateDir.toString()).endsWith("state")
-        assertThat(paths.cacheDir.toString()).endsWith("cache")
+        assertTail(paths.configDir, "config")
+        assertTail(paths.dataDir, "data")
+        assertTail(paths.stateDir, "state")
+        assertTail(paths.cacheDir, "cache")
     }
 
     @Test
     fun `derived paths resolve correctly`() {
         val paths = TestAppPaths(tempDir)
-        assertThat(paths.settingsFile().toString()).endsWith("config/settings.json")
-        assertThat(paths.databaseDir().toString()).endsWith("data/database")
-        assertThat(paths.savesDir().toString()).endsWith("data/saves")
-        assertThat(paths.journalsDir().toString()).endsWith("state/journals")
-        assertThat(paths.logsDir().toString()).endsWith("state/logs")
-        assertThat(paths.romCacheDir().toString()).endsWith("cache/roms")
-        assertThat(paths.artworkCacheDir().toString()).endsWith("cache/artwork")
+        // Compare name components, never slash-formatted Path.toString(): on Windows the
+        // separator is '\', so string suffixes like "config/settings.json" can never match.
+        assertTail(paths.settingsFile(), "config", "settings.json")
+        assertTail(paths.databaseDir(), "data", "database")
+        assertTail(paths.savesDir(), "data", "saves")
+        assertTail(paths.journalsDir(), "state", "journals")
+        assertTail(paths.logsDir(), "state", "logs")
+        assertTail(paths.romCacheDir(), "cache", "roms")
+        assertTail(paths.artworkCacheDir(), "cache", "artwork")
+    }
+
+    /** Platform-neutral tail check: the last [expected] name components of [path], in order. */
+    private fun assertTail(path: Path, vararg expected: String) {
+        val names = (0 until path.nameCount).map { path.getName(it).toString() }
+        assertThat(names.takeLast(expected.size)).containsExactly(*expected)
     }
 
     @Test

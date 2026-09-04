@@ -20,8 +20,15 @@ import java.nio.file.Path
 class SaveSyncStatusPresenterTest {
 
     private companion object {
-        /** Sanitized form of https://demo.romm.app (each '/' → '_'), as replicas persist it. */
-        const val SERVER_KEY = "https:__demo.romm.app"
+        /**
+         * Save-scope server key for the test session. The presenter treats it as an opaque
+         * path segment, so any well-formed value exercises the same logic. It is deliberately
+         * not the literal [SavePathPolicy.sanitizeSegment] output for an https origin
+         * ("https:__demo.romm.app"): this test materializes real directories under the key,
+         * and ':' is not a valid character in Windows directory names. The exact sanitizeSegment
+         * mapping for an https origin is pinned by SaveSessionKeysTest (desktop).
+         */
+        const val SERVER_KEY = "https___demo.romm.app"
         const val USER_KEY = "zack"
         const val ROM_ID = 7L
         const val ROM_HASH = "abc123"

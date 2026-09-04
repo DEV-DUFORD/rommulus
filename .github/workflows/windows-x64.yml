@@ -189,6 +189,32 @@ jobs:
           update: false
           install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf
 
+      - name: Verify UCRT64 binutils provenance (unprefixed as/ld/objdump/windres)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          # MSYS2's mingw-w64-ucrt-x86_64-binutils installs the UNPREFIXED tools — as, ld,
+          # objdump, windres — directly into /ucrt64/bin; there is no target-prefixed
+          # binutils layout (x86_64-w64-mingw32-*) to expose. /ucrt64/bin is already on PATH
+          # in the UCRT64 environment, so this step only pins provenance and fails closed if
+          # the package layout ever changes or another toolchain family shadows these names
+          # on PATH. The CMake toolchain file (native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake)
+          # locates windres from this same bin via its NO_DEFAULT_PATH fallback, so a layout
+          # change fails configure with "MinGW-w64 UCRT64 not found" rather than silently
+          # picking up a foreign toolchain.
+          for tool in as.exe ld.exe objdump.exe windres.exe; do
+            [ -f "/ucrt64/bin/$tool" ] \
+              || { echo "::error::/ucrt64/bin/$tool missing — the UCRT64 binutils package layout changed"; exit 1; }
+          done
+          for tool in as ld objdump windres; do
+            resolved="$(command -v "$tool")"
+            case "$resolved" in
+              /ucrt64/bin/"$tool".exe | /ucrt64/bin/"$tool") : ;;
+              *) echo "::error::$tool resolves to $resolved, not /ucrt64/bin — a non-UCRT64 toolchain is shadowing it on PATH"; exit 1 ;;
+            esac
+          done
+          echo "✓ UCRT64 binutils provenance verified (unprefixed as/ld/objdump/windres in /ucrt64/bin)"
+
       - name: Verify toolchain (UCRT64, x86_64-w64-mingw32 family)
         shell: msys2 {0}
         run: |
@@ -308,6 +334,30 @@ jobs:
           update: false
           install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf
 
+      - name: Verify UCRT64 binutils provenance (unprefixed as/ld/objdump/windres)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          # MSYS2's mingw-w64-ucrt-x86_64-binutils installs the UNPREFIXED tools — as, ld,
+          # objdump, windres — directly into /ucrt64/bin; there is no target-prefixed
+          # binutils layout (x86_64-w64-mingw32-*) to expose. /ucrt64/bin is already on PATH
+          # in the UCRT64 environment, so this step only pins provenance and fails closed if
+          # the package layout ever changes or another toolchain family shadows these names
+          # on PATH. The toolchain verify below, the recursive PE/import audit, and the
+          # libwinpthread staging all invoke the unprefixed objdump from this bin.
+          for tool in as.exe ld.exe objdump.exe windres.exe; do
+            [ -f "/ucrt64/bin/$tool" ] \
+              || { echo "::error::/ucrt64/bin/$tool missing — the UCRT64 binutils package layout changed"; exit 1; }
+          done
+          for tool in as ld objdump windres; do
+            resolved="$(command -v "$tool")"
+            case "$resolved" in
+              /ucrt64/bin/"$tool".exe | /ucrt64/bin/"$tool") : ;;
+              *) echo "::error::$tool resolves to $resolved, not /ucrt64/bin — a non-UCRT64 toolchain is shadowing it on PATH"; exit 1 ;;
+            esac
+          done
+          echo "✓ UCRT64 binutils provenance verified (unprefixed as/ld/objdump/windres in /ucrt64/bin)"
+
       - name: Verify toolchain (UCRT64, x86_64-w64-mingw32 family)
         shell: msys2 {0}
         run: |
@@ -317,7 +367,7 @@ jobs:
           x86_64-w64-mingw32-g++ --version | head -1
           cmake --version | head -1
           ninja --version
-          x86_64-w64-mingw32-objdump --version | head -1
+          objdump --version | head -1
           echo "=========================="
           # Assert the UCRT64 family: the compiler must come from /ucrt64/bin
           # (never /mingw64 or /clang64) and target x86_64-w64-mingw32.
@@ -496,7 +546,7 @@ jobs:
           # unresolved either way.
           UCRT64_BIN="$(dirname "$(command -v x86_64-w64-mingw32-gcc)")"
           closure_imports() {
-            x86_64-w64-mingw32-objdump -p "$1" | grep 'DLL Name:' | sed 's/.*DLL Name: *//'
+            objdump -p "$1" | grep 'DLL Name:' | sed 's/.*DLL Name: *//'
           }
             if { closure_imports "$STAGE/bin/rommulus-player.exe"; \
                 closure_imports "$STAGE/cores/test_core.dll"; \
@@ -520,7 +570,7 @@ jobs:
           set -euo pipefail
           STAGE="dist/player-win64-software-only"
           AUDIT="$STAGE/import-audit.txt"
-          OBJDUMP=x86_64-w64-mingw32-objdump
+          OBJDUMP=objdump
           : > "$AUDIT"
 
           # Windows SYSTEM DLLs: OS-provided, resolved from System32 by the PE
