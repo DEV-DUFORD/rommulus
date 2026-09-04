@@ -1,5 +1,9 @@
 #include "native/player/save_metadata.h"
 
+#ifdef _WIN32
+#include <native/platform/windows/utf16.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -138,7 +142,14 @@ private:
 }  // namespace
 
 std::optional<SaveMetadata> readSaveMetadata(const std::string& path) {
+#ifdef _WIN32
+    const auto widePath = romm::win32::utf8ToUtf16(path);
+    if (!widePath) return std::nullopt;
+    const std::wstring nativePath = romm::win32::toWideString(*widePath);
+    FILE* file = _wfopen(nativePath.c_str(), L"rb");
+#else
     FILE* file = std::fopen(path.c_str(), "rb");
+#endif
     if (file == nullptr) return std::nullopt;
 
     Sha256 hash;

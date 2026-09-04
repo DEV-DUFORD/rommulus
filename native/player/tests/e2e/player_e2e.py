@@ -374,13 +374,15 @@ def pid_alive(pid):
         return False
     try:
         if IS_WINDOWS:
-            # OpenProcess with a query-only right: succeeds iff it exists.
+            # A retained process object can still be opened after exit. Query
+            # its signaled state instead of treating an open handle as alive.
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            handle = kernel32.OpenProcess(0x0400, False, pid)  # QUERY_LIMITED_INFORMATION
+            handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
             if handle:
+                wait = kernel32.WaitForSingleObject(handle, 0)
                 kernel32.CloseHandle(handle)
-                return True
-            return ctypes.get_last_error() != 3  # ERROR_FILE_NOT_FOUND
+                return wait == 0x00000102  # WAIT_TIMEOUT
+            return ctypes.get_last_error() not in (3, 87)  # NOT_FOUND / INVALID_PARAMETER
         os.kill(pid, 0)
         return True
     except OSError:
