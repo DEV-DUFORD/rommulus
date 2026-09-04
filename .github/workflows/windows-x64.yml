@@ -551,7 +551,7 @@ jobs:
           # unresolved either way.
           UCRT64_BIN="$(dirname "$(command -v x86_64-w64-mingw32-gcc)")"
           closure_imports() {
-            objdump -p "$1" | grep 'DLL Name:' | sed 's/.*DLL Name: *//'
+            objdump -p "$1" | grep 'DLL Name:' | sed 's/.*DLL Name: *//' | tr -d '\r'
           }
             if { closure_imports "$STAGE/bin/rommulus-player.exe"; \
                 closure_imports "$STAGE/cores/test_core.dll"; \
