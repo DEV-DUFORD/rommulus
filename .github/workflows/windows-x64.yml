@@ -798,6 +798,7 @@ jobs:
           if ($rc -ne 2) { throw "expected usage exit 2, got $rc" }
           if (($err -join "`n") -notmatch 'usage:') { throw "usage message missing from player output" }
           Write-Host "OK: rommulus-player.exe launched and printed usage (full staged import closure resolves without the toolchain on PATH)"
+          $global:LASTEXITCODE = 0
 
       - name: Smoke — repeated native load/retro_api_version/init/deinit (no ROM content)
         shell: msys2 {0}
