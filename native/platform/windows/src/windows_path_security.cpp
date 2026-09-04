@@ -305,19 +305,33 @@ RequestFileStatus requestFileSecurity(const std::string& path) {
         return RequestFileStatus::MissingOrUnreadable;
     }
 
-    // The current user's SID comes from the process token (two-pass
-    // GetTokenInformation: query length, then fill).
+    // Compare against both TokenUser and TokenOwner. Elevated Windows tokens
+    // can create files owned by their default owner group (for example,
+    // BUILTIN\Administrators) even though the creating process's TokenUser is
+    // the interactive account.
     PSID userSid = nullptr;
-    std::vector<BYTE> tokenBuffer;
+    PSID tokenOwnerSid = nullptr;
+    std::vector<BYTE> userBuffer;
+    std::vector<BYTE> ownerBuffer;
     HANDLE token = nullptr;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) != 0) {
         DWORD tokenNeeded = 0;
         if (GetTokenInformation(token, TokenUser, nullptr, 0, &tokenNeeded) == 0 &&
             GetLastError() == ERROR_INSUFFICIENT_BUFFER && tokenNeeded > 0) {
-            tokenBuffer.resize(tokenNeeded);
-            if (GetTokenInformation(token, TokenUser, tokenBuffer.data(), tokenNeeded,
+            userBuffer.resize(tokenNeeded);
+            if (GetTokenInformation(token, TokenUser, userBuffer.data(), tokenNeeded,
                                     &tokenNeeded) != 0) {
-                userSid = reinterpret_cast<const TOKEN_USER*>(tokenBuffer.data())->User.Sid;
+                userSid = reinterpret_cast<const TOKEN_USER*>(userBuffer.data())->User.Sid;
+            }
+        }
+        tokenNeeded = 0;
+        if (GetTokenInformation(token, TokenOwner, nullptr, 0, &tokenNeeded) == 0 &&
+            GetLastError() == ERROR_INSUFFICIENT_BUFFER && tokenNeeded > 0) {
+            ownerBuffer.resize(tokenNeeded);
+            if (GetTokenInformation(token, TokenOwner, ownerBuffer.data(), tokenNeeded,
+                                    &tokenNeeded) != 0) {
+                tokenOwnerSid =
+                    reinterpret_cast<const TOKEN_OWNER*>(ownerBuffer.data())->Owner;
             }
         }
     }
@@ -331,7 +345,9 @@ RequestFileStatus requestFileSecurity(const std::string& path) {
     // SID comparator: it returns TRUE when the two SIDs are identical. (The
     // earlier draft called SidEquals — no such function exists in the SDK or
     // MinGW headers.)
-    const bool ownedByUser = EqualSid(ownerSid, userSid) != 0;
+    const bool ownedByUser =
+        EqualSid(ownerSid, userSid) != 0 ||
+        (tokenOwnerSid != nullptr && EqualSid(ownerSid, tokenOwnerSid) != 0);
     LocalFree(ownerSd);
     if (!ownedByUser) {
         CloseHandle(*handle);
