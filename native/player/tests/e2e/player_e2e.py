@@ -2230,7 +2230,9 @@ class Runner:
         rc, result = self._genesis_plus_gx_launch(name, session,
                                                    GENESIS_PLUS_GX_RUN1_FRAMES)
         self.check(name, rc == 0, "exit code %r (want 0)" % rc)
-        if result and self.assert_genesis_plus_gx_result(
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        if self.assert_genesis_plus_gx_result(
                 name, result, session, GENESIS_PLUS_GX_RUN1_FRAMES,
                 [result["frames"]]):
             self.genesis_plus_gx_chain = [result["frames"]]
@@ -2249,11 +2251,12 @@ class Runner:
         rc, result = self._genesis_plus_gx_launch(name, session,
                                                    GENESIS_PLUS_GX_RUN2_FRAMES)
         self.check(name, rc == 0, "exit code %r (want 0)" % rc)
-        if result:
-            chain = list(getattr(self, "genesis_plus_gx_chain", [])) + [result["frames"]]
-            if self.assert_genesis_plus_gx_result(
-                    name, result, session, GENESIS_PLUS_GX_RUN2_FRAMES, chain):
-                self.genesis_plus_gx_chain = chain
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        chain = list(getattr(self, "genesis_plus_gx_chain", [])) + [result["frames"]]
+        if self.assert_genesis_plus_gx_result(
+                name, result, session, GENESIS_PLUS_GX_RUN2_FRAMES, chain):
+            self.genesis_plus_gx_chain = chain
 
     def scenario_genesis_plus_gx_repeated_load(self):
         name, session = "genesis-plus-gx-repeated-load", "e2e-genesis-run3"
@@ -2269,11 +2272,12 @@ class Runner:
         rc, result = self._genesis_plus_gx_launch(name, session,
                                                    GENESIS_PLUS_GX_RUN3_FRAMES)
         self.check(name, rc == 0, "exit code %r (want 0)" % rc)
-        if result:
-            chain = list(getattr(self, "genesis_plus_gx_chain", [])) + [result["frames"]]
-            if self.assert_genesis_plus_gx_result(
-                    name, result, session, GENESIS_PLUS_GX_RUN3_FRAMES, chain):
-                self.genesis_plus_gx_chain = chain
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        chain = list(getattr(self, "genesis_plus_gx_chain", [])) + [result["frames"]]
+        if self.assert_genesis_plus_gx_result(
+                name, result, session, GENESIS_PLUS_GX_RUN3_FRAMES, chain):
+            self.genesis_plus_gx_chain = chain
 
     def scenario_genesis_plus_gx_force_kill_lock_recovery(self):
         name, session = "genesis-plus-gx-force-kill-lock-recovery", "e2e-genesis-kill"
@@ -2301,10 +2305,11 @@ class Runner:
         rc, result = self._genesis_plus_gx_launch(name + "-relaunch", session,
                                                    GENESIS_PLUS_GX_RUN3_FRAMES)
         self.check(name, rc == 0, "relaunch exit code %r (want 0)" % rc)
-        if result:
-            self.assert_genesis_plus_gx_result(
-                name, result, session, GENESIS_PLUS_GX_RUN3_FRAMES,
-                [result["frames"]])
+        if not self.check(name, result is not None, "relaunch wrote no result JSON"):
+            return
+        self.assert_genesis_plus_gx_result(
+            name, result, session, GENESIS_PLUS_GX_RUN3_FRAMES,
+            [result["frames"]])
 
     # -- mGBA candidate scenarios (qualification gate) --------------------
 
@@ -2367,26 +2372,30 @@ class Runner:
         name, session = "mgba-valid-launch-completed", "e2e-mgba-run1"
         self.scenarios.append({"name": name, "passed": True})
         result = self._mgba_run(name, session, MGBA_RUN1_FRAMES)
-        if result and self.assert_mgba_result(name, result, session, MGBA_RUN1_FRAMES,
-                                              [result["frames"]]):
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        if self.assert_mgba_result(name, result, session, MGBA_RUN1_FRAMES,
+                                   [result["frames"]]):
             self.mgba_chain = [result["frames"]]
 
     def scenario_mgba_relaunch_persistence(self):
         name, session = "mgba-relaunch-persistence", "e2e-mgba-run2"
         self.scenarios.append({"name": name, "passed": True})
         result = self._mgba_run(name, session, MGBA_RUN2_FRAMES, "e2e-mgba-run1")
-        if result:
-            chain = list(getattr(self, "mgba_chain", [])) + [result["frames"]]
-            if self.assert_mgba_result(name, result, session, MGBA_RUN2_FRAMES, chain):
-                self.mgba_chain = chain
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        chain = list(getattr(self, "mgba_chain", [])) + [result["frames"]]
+        if self.assert_mgba_result(name, result, session, MGBA_RUN2_FRAMES, chain):
+            self.mgba_chain = chain
 
     def scenario_mgba_repeated_load(self):
         name, session = "mgba-repeated-load", "e2e-mgba-run3"
         self.scenarios.append({"name": name, "passed": True})
         result = self._mgba_run(name, session, MGBA_RUN3_FRAMES, "e2e-mgba-run2")
-        if result:
-            chain = list(getattr(self, "mgba_chain", [])) + [result["frames"]]
-            self.assert_mgba_result(name, result, session, MGBA_RUN3_FRAMES, chain)
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        chain = list(getattr(self, "mgba_chain", [])) + [result["frames"]]
+        self.assert_mgba_result(name, result, session, MGBA_RUN3_FRAMES, chain)
 
     def scenario_mgba_force_kill_lock_recovery(self):
         name, session = "mgba-force-kill-lock-recovery", "e2e-mgba-kill"
@@ -2410,9 +2419,10 @@ class Runner:
         if not self.discard_force_kill_save(name, save_path):
             return
         result = self._mgba_run(name + "-relaunch", session, MGBA_RUN3_FRAMES)
-        if result:
-            self.assert_mgba_result(name, result, session, MGBA_RUN3_FRAMES,
-                                    [result["frames"]])
+        if not self.check(name, result is not None, "relaunch wrote no result JSON"):
+            return
+        self.assert_mgba_result(name, result, session, MGBA_RUN3_FRAMES,
+                                [result["frames"]])
 
     # -- Snes9x candidate scenarios (qualification gate) -----------------
 
