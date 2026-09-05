@@ -40,7 +40,7 @@ def generate_rom():
         0xA9, 0x02, 0x85, 0x01,  # lda #2; sta VBLANK
         0xA2, 0x1E,              # ldx #30
         0x85, 0x02, 0xCA, 0xD0, 0xFB,  # WSYNC; dex; bne
-        0x4C, 0x19, 0xF0,        # jmp frame start
+        0x4C, 0x15, 0xF0,        # jmp frame start
     ])
     rom[ENTRY_OFFSET:ENTRY_OFFSET + len(program)] = program
     rom[PROVENANCE_OFFSET:PROVENANCE_OFFSET + len(PROVENANCE)] = PROVENANCE

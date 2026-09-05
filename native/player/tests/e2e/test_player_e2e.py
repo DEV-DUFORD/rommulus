@@ -62,7 +62,7 @@ PINNED_PROSYSTEM_ROM_SHA256 = (
     "1d6b8f17eb536b015f7f42fa6897aa765cfe4702b0681029bf625c9b868c8afc"
 )
 PINNED_STELLA_ROM_SHA256 = (
-    "23730b0c4ac62d68a0457c1cdddab0500db648c26d68d50279a9c9047038c279"
+    "a6456779ea64bf28bae72e4842bb896b7994b38e86c8074b5c4f5e0172fdc2c3"
 )
 
 # Pinned hash of the deterministic 512 KiB raw .ws ROM wswan_rom.py must
