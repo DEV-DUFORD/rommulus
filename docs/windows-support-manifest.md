@@ -313,7 +313,7 @@ gate).
 | Windows fragment | `native/cmake/cores/beetle_pce_fast-windows.cmake` |
 | Export control | `native/cmake/cores/beetle_pce_fast-windows.def` — exactly the 22 `retro_*` symbols required by `CoreLibrary` |
 | Compiler / build | MinGW-w64 UCRT64 + CMake + Ninja, `-O2 -DNDEBUG`, `-Wl,--no-undefined`; canonical `beetle_pce_fast_core.dll` |
-| Binary hash | **NOT RECORDED** — emitted into the hosted workflow's `import-audit.txt` |
+| Hosted Windows DLL SHA-256 | `72c2a79fbf7df452e3cffa76a2807e9e17164f7fb6dd42af118d350744d6ad75` |
 | Supported systems / extensions | PC Engine / TurboGrafx-16; `.pce` |
 | Required firmware | none for HuCard content; CD content remains outside this candidate scope |
 | Renderer | software, RGB565 |
@@ -322,6 +322,14 @@ gate).
 Candidate posture: the DLL is staged only under `cores-candidate/`. It is included in recursive
 PE32+/import-closure auditing, exact export auditing, provenance hashing, 50-cycle native load
 smoke, and the player E2E gate, but remains absent from every `windows-x86_64` supported ABI.
+
+**Windows-hosted qualification — passed.** Run
+[33972683164](https://github.com/DEV-DUFORD/rommulus/actions/runs/33972683164) passed all five
+`windows-2022` jobs and all 26 player E2E scenarios. The four Beetle PCE Fast scenarios passed:
+valid launch/checkpoint, relaunch persistence, repeated load, and force-kill lock recovery. The
+hosted artifact passed its SHA-256 manifest check, recursive PE/import audit, exact 22-export
+audit, and 50-cycle native load/init/deinit smoke. This is hosted evidence only; physical Windows
+10/11, controller, interactive audio/video, sleep/resume, and soak qualification remain pending.
 
 **Generated ROM (original content, hash-pinned).**
 `native/player/tests/e2e/pce_rom.py` generates an 8192-byte raw HuCard containing only
