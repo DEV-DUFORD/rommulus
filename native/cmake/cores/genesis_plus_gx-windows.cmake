@@ -55,7 +55,10 @@ target_compile_definitions(genesis_plus_gx_core PRIVATE
     _7ZIP_ST
     ZSTD_DISABLE_ASM
     MAXROMSIZE=16777216
-    INLINE=static\ inline
+    # libchdr declares helpers as `static INLINE`; unlike the Android
+    # fragment's standalone core helpers, its Win32 expansion must be plain
+    # `inline` to avoid `static static inline`.
+    INLINE=inline
     RETRO_API=
 )
 
