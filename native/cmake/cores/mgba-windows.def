@@ -1,6 +1,6 @@
 ; Exact PE export table for the Windows x86_64 CANDIDATE mGBA core.
-; The core has no ROMM save-image extensions: its standard
-; RETRO_MEMORY_SAVE_RAM interface represents the detected GBA save medium.
+; Deferred GBA save-medium detection requires the three ROMM save-image
+; extensions below so a restored variable-size image is available at setup.
 LIBRARY mgba_core
 EXPORTS
     retro_api_version
@@ -25,4 +25,6 @@ EXPORTS
     retro_set_video_refresh
     retro_unload_game
     retro_unserialize
-
+    romm_get_save_memory_data
+    romm_get_save_memory_size
+    romm_restore_save_memory

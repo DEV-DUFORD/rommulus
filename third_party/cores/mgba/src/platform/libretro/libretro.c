@@ -94,6 +94,7 @@ static size_t audioSampleBufferSize;
 static void* data;
 static size_t dataSize;
 static void* savedata;
+static size_t rommSaveRestoreSize;
 static struct mAVStream stream;
 static bool sensorsInitDone;
 static bool rumbleInitDone;
@@ -1273,7 +1274,8 @@ static void _doDeferredSetup(void) {
 	// On the off-hand chance that a core actually expects its buffers to be populated when
 	// you actually first get them, you're out of luck without workarounds. Yup, seriously.
 	// Here's that workaround, but really the API needs to be thrown out and rewritten.
-	struct VFile* save = VFileFromMemory(savedata, GBA_SIZE_FLASH1M);
+	struct VFile* save = VFileFromMemory(
+		savedata, rommSaveRestoreSize ? rommSaveRestoreSize : GBA_SIZE_FLASH1M);
 
     /* need to defer resetting the core on start so drivers are initialized */
     core->reset(core);
@@ -2083,6 +2085,7 @@ bool retro_load_game(const struct retro_game_info* game) {
 
 	savedata = anonymousMemoryMap(GBA_SIZE_FLASH1M);
 	memset(savedata, 0xFF, GBA_SIZE_FLASH1M);
+	rommSaveRestoreSize = 0;
 
 	_reloadSettings();
 	core->loadROM(core, rom);
@@ -2160,6 +2163,7 @@ void retro_unload_game(void) {
 	data = 0;
 	mappedMemoryFree(savedata, GBA_SIZE_FLASH1M);
 	savedata = 0;
+	rommSaveRestoreSize = 0;
 }
 
 size_t retro_serialize_size(void) {
@@ -2345,6 +2349,7 @@ size_t retro_get_memory_size(unsigned id) {
 			default:
 				return GBASavedataSize(&((struct GBA*) core->board)->memory.savedata);
 			}
+
 #endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
@@ -2377,6 +2382,24 @@ size_t retro_get_memory_size(unsigned id) {
 		break;
 	}
 	return 0;
+}
+
+void* romm_get_save_memory_data(void) {
+	return savedata;
+}
+
+size_t romm_get_save_memory_size(void) {
+	return retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+}
+
+bool romm_restore_save_memory(const void* data, size_t size) {
+	if (!savedata || !data || size == 0 || size > GBA_SIZE_FLASH1M) {
+		return false;
+	}
+	memset(savedata, 0xFF, GBA_SIZE_FLASH1M);
+	memcpy(savedata, data, size);
+	rommSaveRestoreSize = size;
+	return true;
 }
 
 void GBARetroLog(struct mLogger* logger, int category, enum mLogLevel level, const char* format, va_list args) {

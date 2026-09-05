@@ -784,6 +784,8 @@ jobs:
           expected_exports="$genesis_plus_gx_exports"
           audit_candidate_exports "$STAGE/cores-candidate/genesis_plus_gx_core.dll" genesis_plus_gx
           expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
+          mgba_exports="$(printf '%s\n' $expected_exports romm_get_save_memory_data romm_get_save_memory_size romm_restore_save_memory | LC_ALL=C sort)"
+          expected_exports="$mgba_exports"
           audit_candidate_exports "$STAGE/cores-candidate/mgba_core.dll" mgba
           # Candidate provenance/hashes recorded in the AUDIT ARTIFACT ONLY —
           # deliberately NOT in CoreManifest.kt supportedAbis (the validator
@@ -841,7 +843,7 @@ jobs:
              echo "upstream: libretro/mgba @ 32de792178a3662cd0402c8568fccfaad4a764a1"
              echo "sources: native/cmake/cores/mgba.cmake (guarded 98-source inventory)"
              echo "fragment: native/cmake/cores/mgba-windows.cmake"
-             echo "exports: exact 22 retro_* symbols"
+             echo "exports: 22 retro_* symbols plus three ROMM deferred-save extensions"
              echo "saves: standard detected GBA save medium via RETRO_MEMORY_SAVE_RAM"
              echo "sha256(cores-candidate/mgba_core.dll): $(sha256sum "$STAGE/cores-candidate/mgba_core.dll" | cut -d' ' -f1)"
           } >> "$AUDIT"
