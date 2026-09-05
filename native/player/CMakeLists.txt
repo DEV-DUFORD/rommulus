@@ -473,6 +473,10 @@ if(WIN32)
     # Snes9x (SNES): eighth candidate. Reuses the guarded upstream 54-source
     # C++14 inventory and standard Libretro battery SRAM.
     include(${ROMM_NATIVE_ROOT}/cmake/cores/snes9x-windows.cmake)
+    # Stella (Atari 2600): ninth candidate. Reuses the guarded upstream 7.0
+    # 148-source C++20 inventory. It exposes SYSTEM_RAM only, so its E2E gate
+    # asserts no persistent-save artifacts rather than an SRAM lifecycle.
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/stella-windows.cmake)
     set(ROMM_WIN32_CANDIDATE_CORE_TARGETS
         gambatte_core
         fceumm_core
@@ -482,6 +486,7 @@ if(WIN32)
         genesis_plus_gx_core
         mgba_core
         snes9x_core
+        stella_core
     )
 endif()
 

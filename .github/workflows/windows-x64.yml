@@ -41,9 +41,8 @@
   #   limit hook (ROMM_PLAYER_MAX_FRAMES → clean player-initiated completed
   #   exit at the presented-frame bound, checkpoint before stop; no new CLI)
    #   that all candidate E2Es in job 5 drive.
-   #   Job 4 builds and audits five CANDIDATE cores: gambatte_core.dll,
-   #   fceumm_core.dll, prosystem_core.dll, mednafen_wswan_core.dll, and
-   #   beetle_pce_fast_core.dll (canonical names, cores-candidate/ staging,
+   #   Job 4 builds and audits nine CANDIDATE cores, including Stella
+   #   (stella_core.dll), with canonical names and cores-candidate/ staging,
    #   recursive PE32+/import-closure audit, exact 22-symbol export
    #   per-core .def allowlists, provenance + hash in import-audit.txt, and
    #   repeated load/init/deinit smoke).
@@ -550,7 +549,11 @@ jobs:
             || { echo "::error::candidate snes9x_core.dll missing from $BUILD_DIR/bin"; exit 1; }
           [ ! -e "$BUILD_DIR/bin/libsnes9x_core.dll" ] \
             || { echo "::error::non-canonical libsnes9x_core.dll produced"; exit 1; }
-          echo "✓ player, test core, and eight candidate cores built with canonical names"
+          [ -f "$BUILD_DIR/bin/stella_core.dll" ] \
+            || { echo "::error::candidate stella_core.dll missing from $BUILD_DIR/bin"; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libstella_core.dll" ] \
+            || { echo "::error::non-canonical libstella_core.dll produced"; exit 1; }
+          echo "✓ player, test core, and nine candidate cores built with canonical names"
 
       - name: Stage unsigned artifact (SDL3.dll + libwinpthread closure beside the player)
         shell: msys2 {0}
@@ -578,6 +581,7 @@ jobs:
           cp "$BUILD_DIR/bin/genesis_plus_gx_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/mgba_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/snes9x_core.dll" "$STAGE/cores-candidate/"
+          cp "$BUILD_DIR/bin/stella_core.dll" "$STAGE/cores-candidate/"
           # libwinpthread-1.dll: the toolchain contract only guarantees static
           # libgcc/libstdc++ (-static-libgcc/-static-libstdc++); the mingw-w64
           # threading runtime is linked DYNAMICALLY by default, so threaded
@@ -606,6 +610,7 @@ jobs:
             closure_imports "$STAGE/cores-candidate/genesis_plus_gx_core.dll"
             closure_imports "$STAGE/cores-candidate/mgba_core.dll"
             closure_imports "$STAGE/cores-candidate/snes9x_core.dll"
+            closure_imports "$STAGE/cores-candidate/stella_core.dll"
           )"
           if grep -qi '^libwinpthread-1\.dll$' <<< "$imports"; then
             [ -f "$UCRT64_BIN/libwinpthread-1.dll" ] \
@@ -702,11 +707,11 @@ jobs:
           # import table is classified per DLL: system (OS-provided),
           # forbidden (fail), or non-system (must have an exact staged copy,
           # which is then audited in turn). Anything else fails the gate.
-          # The seven production-core candidates are staged under
+          # The candidate production cores are staged under
           # cores-candidate/): they enter the same recursive PE32+ /
           # import-closure audit as every shipped image, plus the exact
           # export-allowlist checks below.
-          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll mgba_core.dll snes9x_core.dll"
+          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll mgba_core.dll snes9x_core.dll stella_core.dll"
           seen=" "
           while [ -n "$queue" ]; do
             name="${queue%% *}"
@@ -760,8 +765,8 @@ jobs:
             fi
           done
 
-          # Exact PE export allowlist for all six candidate cores. The first
-          # five export exactly the 22 Libretro symbols CoreLibrary resolves;
+          # Exact PE export allowlist for every candidate core. All but
+          # Genesis Plus GX export exactly the 22 Libretro symbols CoreLibrary resolves;
           # Genesis Plus GX also has its four existing ROMM save-image
           # extensions. No unused upstream or internal symbol is allowed.
           expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
@@ -795,6 +800,7 @@ jobs:
           audit_candidate_exports "$STAGE/cores-candidate/mgba_core.dll" mgba
           expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
           audit_candidate_exports "$STAGE/cores-candidate/snes9x_core.dll" snes9x
+          audit_candidate_exports "$STAGE/cores-candidate/stella_core.dll" stella
           # Candidate provenance/hashes recorded in the AUDIT ARTIFACT ONLY —
           # deliberately NOT in CoreManifest.kt supportedAbis (the validator
           # packaging/validate-linux-targets.py keeps windows-x86_64 out of
@@ -862,6 +868,13 @@ jobs:
              echo "exports: native/cmake/cores/snes9x-windows.def (22 retro_* exports)"
              echo "saves: standard 2048-byte LoROM battery SRAM"
              echo "sha256(cores-candidate/snes9x_core.dll): $(sha256sum "$STAGE/cores-candidate/snes9x_core.dll" | cut -d' ' -f1)"
+             echo "=== stella candidate provenance (CANDIDATE — NOT advertised) ==="
+             echo "upstream: stella-emu/stella 7.0 @ d55b1aec0d067a4c901a6dcdf81cb8f579685659"
+             echo "sources: native/cmake/cores/stella-sources.cmake (shared guarded 148-source list)"
+             echo "fragment: native/cmake/cores/stella-windows.cmake"
+             echo "exports: native/cmake/cores/stella-windows.def (exact 22 retro_* exports)"
+             echo "save gate: SYSTEM_RAM only; E2E asserts no checkpoint or .srm artifacts"
+             echo "sha256(cores-candidate/stella_core.dll): $(sha256sum "$STAGE/cores-candidate/stella_core.dll" | cut -d' ' -f1)"
           } >> "$AUDIT"
 
           # Artifact layout + SHA256 of every staged file (the audit log
@@ -924,8 +937,7 @@ jobs:
           # must pass, so a smoke-harness regression fails here BEFORE the
           # candidates are judged.
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores/test_core.dll" 25
-          # The five candidate cores: 50 repeated load/api/init/deinit cycles
-          # each.
+          # Every candidate core: 50 repeated load/api/init/deinit cycles.
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/gambatte_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/fceumm_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/prosystem_core.dll" 50
@@ -934,7 +946,8 @@ jobs:
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/genesis_plus_gx_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/mgba_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/snes9x_core.dll" 50
-          echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + five candidates, no ROM content)"
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/stella_core.dll" 50
+          echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + nine candidates, no ROM content)"
 
       - name: Upload unsigned player artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -1021,6 +1034,13 @@ jobs:
    #      checkpointWritten false, saveSize/saveHash null, and zero .srm
    #      artifacts for the session (no adoption chain exists) — across valid
    #      launch, repeated load, and force-kill → lock release → relaunch.
+   #   10. CANDIDATE Stella qualification (cores-candidate/stella_core.dll,
+   #       passed via --stella-core; NOT advertised): the harness generates an
+   #       original 4 KiB BIOS-free Atari 2600 image (stella_rom.py), proves
+   #       bounded completed frames across valid/repeated/force-kill recovery,
+   #       and requires checkpointWritten=false, null save fields, and no
+   #       candidate or session .srm artifacts. Stella 7.0 exposes SYSTEM_RAM
+   #       only; this intentionally does not fake an SRAM lifecycle.
    #   10. CANDIDATE mednafen_wswan qualification (cores-candidate/
    #       mednafen_wswan_core.dll, passed via --wswan-core; NOT advertised in
    #       any manifest): the harness generates the original deterministic
@@ -1083,14 +1103,12 @@ jobs:
           # exact PIDs only.
           $env:PATH = "$stageBin;$env:SystemRoot\System32;$env:SystemRoot"
           Write-Host "sanitized loader PATH: $env:PATH"
-          # Candidate options pass all five cores explicitly.
-          # pass the CANDIDATE Gambatte, FCEUmm, ProSystem, mednafen_wswan,
-          # and Beetle PCE Fast
-          # cores explicitly (cores-candidate/ — never an enabled-core path):
+          # Candidate options pass every candidate core explicitly.
+          # Candidate cores use cores-candidate/ — never an enabled-core path:
           # the harness stages each into its trusted core root, generates the
           # original deterministic ROMs (32 KiB Game Boy image; 49168-byte
           # iNES mapper-0 NROM + battery; 16 KiB raw .a78; 512 KiB raw .ws)
-          # into the trusted cache root, and runs all five cores'
+          # into the trusted cache root, and runs every candidate core's
           # qualification scenarios (bounded presented-frame runs under the
           # ROMM_PLAYER_MAX_FRAMES hook compiled in by job 4; Gambatte/FCEUmm/
           # mednafen_wswan: 8192-byte battery SRAM + deterministic counter
@@ -1104,6 +1122,7 @@ jobs:
             --candidate-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/gambatte_core.dll") `
             --fceumm-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/fceumm_core.dll") `
             --prosystem-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/prosystem_core.dll") `
+            --stella-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/stella_core.dll") `
             --wswan-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mednafen_wswan_core.dll") `
             --pce-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/beetle_pce_fast_core.dll") `
             --genesis-plus-gx-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/genesis_plus_gx_core.dll") `

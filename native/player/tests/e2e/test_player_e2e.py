@@ -24,6 +24,7 @@ import pce_rom  # noqa: E402
 import player_e2e  # noqa: E402
 import prosystem_rom  # noqa: E402
 import snes9x_rom  # noqa: E402
+import stella_rom  # noqa: E402
 import wswan_rom  # noqa: E402
 from player_e2e import (  # noqa: E402
     build_request, expected_save_hash, validate_result_schema,
@@ -33,6 +34,7 @@ from player_e2e import (  # noqa: E402
     GAMBATTE_CORE_ID, GAMBATTE_REVISION, GAMBATTE_SRAM_SIZE,
     FCEUMM_CORE_ID, FCEUMM_REVISION, FCEUMM_SRAM_SIZE,
     PROSYSTEM_CORE_ID, PROSYSTEM_REVISION,
+    STELLA_CORE_ID, STELLA_REVISION,
     WSWAN_CORE_ID, WSWAN_REVISION, WSWAN_SRAM_SIZE,
     PCE_CORE_ID, PCE_REVISION, PCE_SRAM_SIZE,
     GENESIS_PLUS_GX_CORE_ID, GENESIS_PLUS_GX_REVISION,
@@ -58,6 +60,9 @@ PINNED_FCEUMM_ROM_SHA256 = (
 # produce (no header — ProSystem's CARTRIDGE_TYPE_NORMAL path).
 PINNED_PROSYSTEM_ROM_SHA256 = (
     "1d6b8f17eb536b015f7f42fa6897aa765cfe4702b0681029bf625c9b868c8afc"
+)
+PINNED_STELLA_ROM_SHA256 = (
+    "23730b0c4ac62d68a0457c1cdddab0500db648c26d68d50279a9c9047038c279"
 )
 
 # Pinned hash of the deterministic 512 KiB raw .ws ROM wswan_rom.py must
@@ -370,6 +375,33 @@ class ProsystemRomTest(unittest.TestCase):
         self.assertEqual(PROSYSTEM_CORE_ID, "prosystem")
         self.assertEqual(PROSYSTEM_REVISION,
                          "363b6dfbd3e240762e022c2b4897b4fe55722be3")
+
+
+class StellaRomTest(unittest.TestCase):
+    def test_size_determinism_and_pinned_sha256(self):
+        rom = stella_rom.generate_rom()
+        self.assertEqual(len(rom), stella_rom.ROM_SIZE)
+        self.assertEqual(rom, stella_rom.generate_rom())
+        self.assertEqual(stella_rom.rom_sha256(), PINNED_STELLA_ROM_SHA256)
+
+    def test_vectors_provenance_and_no_known_header(self):
+        rom = stella_rom.generate_rom()
+        self.assertEqual(
+            rom[stella_rom.RESET_VECTOR_OFFSET:stella_rom.RESET_VECTOR_OFFSET + 2],
+            bytes([0x00, 0xF0]))
+        self.assertEqual(rom[stella_rom.PROVENANCE_OFFSET:
+                             stella_rom.PROVENANCE_OFFSET + len(stella_rom.PROVENANCE)],
+                         stella_rom.PROVENANCE)
+        # A raw, original 2600 image has none of the familiar external-image
+        # container or BIOS signatures.
+        self.assertNotIn(b"ATARI7800", rom)
+        self.assertNotIn(b"CC2", rom)
+        self.assertNotIn(b"ELISA", rom)
+
+    def test_harness_constants_match_pin(self):
+        self.assertEqual(STELLA_CORE_ID, "stella")
+        self.assertEqual(STELLA_REVISION,
+                         "d55b1aec0d067a4c901a6dcdf81cb8f579685659")
 
 
 class WswanRomTest(unittest.TestCase):
@@ -784,6 +816,19 @@ class BuildRequestTest(unittest.TestCase):
         self.assertIsNone(req["expectedSaveSize"])
         self.assertNotIn("\\", req["contentPath"])
 
+    def test_stella_candidate_request(self):
+        req = build_request("s-stella", "/c/stella_core.dll", "/d/system",
+                            "/d/save.srm", "/st/cand.srm", "/st/result.json",
+                            core_build_revision=STELLA_REVISION,
+                            core_id=STELLA_CORE_ID,
+                            content_path="/cache état/rommulus-e2e-stella.bin")
+        self.assertEqual(req["coreId"], STELLA_CORE_ID)
+        self.assertEqual(req["coreBuildRevision"], STELLA_REVISION)
+        self.assertEqual(req["contentPath"],
+                         "/cache état/rommulus-e2e-stella.bin")
+        self.assertIsNone(req["expectedSaveSize"])
+        self.assertNotIn("\\", req["contentPath"])
+
     def test_wswan_candidate_request(self):
         # The mednafen_wswan candidate launch: real contentPath (the 512 KiB
         # .ws ROM staged under the trusted cache root) and the pinned
@@ -999,6 +1044,7 @@ class ProsystemNoSaveGateTest(unittest.TestCase):
             "unit", self.make_result(checkpointWritten=True), "s-a78", 240))
         self.assertFalse(runner.scenarios[-1]["passed"])
 
+
     def test_non_null_save_fields_rejected(self):
         runner = self.make_runner()
         self.assertFalse(runner.assert_prosystem_result(
@@ -1061,6 +1107,67 @@ class ProsystemNoSaveGateTest(unittest.TestCase):
             runner.assert_prosystem_result("unit", self.make_result(),
                                            "s-a78", 240))
         self.assertFalse(runner.scenarios[-1]["passed"])
+
+
+class StellaNoSaveGateTest(unittest.TestCase):
+    """Stella's SYSTEM_RAM-only result must satisfy the same strict gate."""
+
+    def make_runner(self):
+        runner = player_e2e.Runner("/stage", "/work", "/player", "/core", 90)
+        runner.scenarios.append({"name": "unit", "passed": True})
+        return runner
+
+    def make_result(self, **overrides):
+        result = {
+            "protocolVersion": PROTOCOL_VERSION, "sessionId": "s-stella",
+            "exitKind": "completed", "checkpointWritten": False,
+            "candidateSavePath": "/state/s-stella.candidate.srm",
+            "saveHash": None, "saveSize": None, "frames": 240,
+            "audioUnderrunFrames": 0, "audioOverrunFrames": 0,
+            "errorCode": None, "errorMessage": None,
+        }
+        result.update(overrides)
+        return result
+
+    def test_clean_no_save_result_passes(self):
+        runner = self.make_runner()
+        tmp = tempfile.mkdtemp(prefix="stella-gate-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        runner.state_root = os.path.join(tmp, "state")
+        runner.data_root = os.path.join(tmp, "data")
+        os.makedirs(runner.state_root)
+        os.makedirs(os.path.join(runner.data_root, "s-stella"))
+        self.assertTrue(runner.assert_stella_result(
+            "unit", self.make_result(), "s-stella", 240))
+
+    def test_checkpoint_save_fields_and_frame_bound_rejected(self):
+        for overrides in (
+                {"checkpointWritten": True},
+                {"saveSize": 1}, {"saveHash": "ab" * 32}, {"frames": 0},
+                {"frames": 243}):
+            with self.subTest(overrides=overrides):
+                runner = self.make_runner()
+                self.assertFalse(runner.assert_stella_result(
+                    "unit", self.make_result(**overrides), "s-stella", 240))
+
+    def test_candidate_and_session_artifacts_rejected(self):
+        runner = self.make_runner()
+        tmp = tempfile.mkdtemp(prefix="stella-gate-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        runner.state_root = os.path.join(tmp, "state")
+        runner.data_root = os.path.join(tmp, "data")
+        os.makedirs(runner.state_root)
+        session_dir = os.path.join(runner.data_root, "s-stella")
+        os.makedirs(session_dir)
+        with open(os.path.join(runner.state_root, "s-stella.candidate.srm"), "wb") as f:
+            f.write(b"x")
+        self.assertFalse(runner.assert_stella_result(
+            "unit", self.make_result(), "s-stella", 240))
+        os.unlink(os.path.join(runner.state_root, "s-stella.candidate.srm"))
+        with open(os.path.join(session_dir, "save.srm"), "wb") as f:
+            f.write(b"x")
+        self.assertFalse(runner.assert_stella_result(
+            "unit", self.make_result(), "s-stella", 240))
 
 
 if __name__ == "__main__":

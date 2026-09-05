@@ -117,6 +117,7 @@ import mgba_rom  # noqa: E402
 import pce_rom  # noqa: E402
 import prosystem_rom  # noqa: E402
 import snes9x_rom  # noqa: E402
+import stella_rom  # noqa: E402
 import wswan_rom  # noqa: E402
 
 IS_WINDOWS = os.name == "nt"
@@ -181,6 +182,14 @@ PROSYSTEM_ROM_NAME = "rommulus-e2e-prosystem.a78"
 # other candidates (reported frame count lands in [limit, limit + 2]).
 PROSYSTEM_RUN_FRAMES = 240     # ~4.0 s of emulated time per run
 PROSYSTEM_KILL_VICTIM_FRAMES = 3600  # ~60 s budget: alive when force-killed
+
+# Candidate Stella core (NOT advertised; staged under cores-candidate only).
+STELLA_CORE_ID = "stella"
+STELLA_REVISION = "d55b1aec0d067a4c901a6dcdf81cb8f579685659"
+STELLA_ROM_NAME = "rommulus-e2e-stella.bin"
+# Stella 7.0 exposes SYSTEM_RAM only, not RETRO_MEMORY_SAVE_RAM.
+STELLA_RUN_FRAMES = 240
+STELLA_KILL_VICTIM_FRAMES = 3600
 
 # Candidate mednafen_wswan core (NOT advertised in any manifest — staged
 # under cores-candidate/ and exercised here as a qualification gate only).
@@ -500,6 +509,7 @@ class Runner:
                  video_driver="offscreen", audio_driver="dummy",
                  render_driver="software", candidate_core=None,
                  fceumm_candidate_core=None, prosystem_candidate_core=None,
+                 stella_candidate_core=None,
                  wswan_candidate_core=None, pce_candidate_core=None,
                  genesis_plus_gx_candidate_core=None, mgba_candidate_core=None,
                  snes9x_candidate_core=None):
@@ -513,6 +523,8 @@ class Runner:
                                        if fceumm_candidate_core else None)
         self.prosystem_candidate_core = (os.path.abspath(prosystem_candidate_core)
                                           if prosystem_candidate_core else None)
+        self.stella_candidate_core = (os.path.abspath(stella_candidate_core)
+                                      if stella_candidate_core else None)
         self.wswan_candidate_core = (os.path.abspath(wswan_candidate_core)
                                       if wswan_candidate_core else None)
         self.pce_candidate_core = (os.path.abspath(pce_candidate_core)
@@ -577,6 +589,10 @@ class Runner:
             shutil.copyfile(self.prosystem_candidate_core,
                             os.path.join(self.core_root, self.prosystem_core_filename()))
             self.generate_prosystem_rom()
+        if self.stella_candidate_core:
+            shutil.copyfile(self.stella_candidate_core,
+                            os.path.join(self.core_root, self.stella_core_filename()))
+            self.generate_stella_rom()
         if self.wswan_candidate_core:
             # The candidate mednafen_wswan core is staged the same way
             # (canonical name under the trusted core root) and its generated
@@ -623,6 +639,13 @@ class Runner:
         if sys.platform == "darwin":
             return "libprosystem_core.dylib"
         return "libprosystem_core.so"
+
+    def stella_core_filename(self):
+        if IS_WINDOWS:
+            return "stella_core.dll"
+        if sys.platform == "darwin":
+            return "libstella_core.dylib"
+        return "libstella_core.so"
 
     def wswan_core_filename(self):
         if IS_WINDOWS:
@@ -683,6 +706,12 @@ class Runner:
             f.write(rom)
         return rom_path
 
+    def generate_stella_rom(self):
+        rom_path = os.path.join(self.cache_root, STELLA_ROM_NAME)
+        with open(rom_path, "wb") as f:
+            f.write(stella_rom.generate_rom())
+        return rom_path
+
     def generate_wswan_rom(self):
         """Generate the deterministic 512 KiB .ws ROM into the cache root."""
         rom_path = os.path.join(self.cache_root, WSWAN_ROM_NAME)
@@ -724,6 +753,9 @@ class Runner:
     def prosystem_core_path(self):
         return os.path.join(self.core_root, self.prosystem_core_filename())
 
+    def stella_core_path(self):
+        return os.path.join(self.core_root, self.stella_core_filename())
+
     def wswan_core_path(self):
         return os.path.join(self.core_root, self.wswan_core_filename())
 
@@ -764,7 +796,8 @@ class Runner:
             "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
             CORE_ID, CORE_REVISION, GAMBATTE_CORE_ID, GAMBATTE_REVISION,
             FCEUMM_CORE_ID, FCEUMM_REVISION, PROSYSTEM_CORE_ID,
-            PROSYSTEM_REVISION, WSWAN_CORE_ID, WSWAN_REVISION,
+            PROSYSTEM_REVISION, STELLA_CORE_ID, STELLA_REVISION,
+            WSWAN_CORE_ID, WSWAN_REVISION,
             PCE_CORE_ID, PCE_REVISION, GENESIS_PLUS_GX_CORE_ID,
             GENESIS_PLUS_GX_REVISION, MGBA_CORE_ID, MGBA_REVISION,
             SNES9X_CORE_ID, SNES9X_REVISION))
@@ -1579,7 +1612,7 @@ class Runner:
             return False
         return True
 
-    def _assert_no_save_artifacts(self, name, session_id):
+    def _assert_no_save_artifacts(self, name, session_id, core_label="ProSystem"):
         """No .srm may exist for this session anywhere in the fixture tree.
 
         The state root holds exactly one candidate file per session
@@ -1592,9 +1625,9 @@ class Runner:
         clean = True
         candidate = os.path.join(self.state_root, session_id + ".candidate.srm")
         if not self.check(name, not os.path.exists(candidate),
-                          "candidate save %r exists on disk — ProSystem "
-                          "exposes no save region and must never produce one"
-                          % candidate):
+                          "candidate save %r exists on disk — %s exposes no "
+                          "save region and must never produce one"
+                          % (candidate, core_label)):
             clean = False
         for dirpath, _dirnames, filenames in os.walk(
                 os.path.join(self.data_root, session_id)):
@@ -1755,6 +1788,109 @@ class Runner:
                           "relaunch wrote no result JSON"):
             return
         self.assert_prosystem_result(name, result, session, PROSYSTEM_RUN_FRAMES)
+
+    # -- Stella candidate (NO save RAM — no-persistent-save gate) -----------
+
+    def _require_stella_candidate(self, name):
+        if self.stella_candidate_core is None:
+            self.fail(name, "candidate Stella core not staged — nothing to qualify")
+            return False
+        return True
+
+    def assert_stella_result(self, name, result, session_id, limit):
+        """Assert Stella 7.0's SYSTEM_RAM-only no-persistent-save contract."""
+        problems = validate_result_schema(result)
+        self.check(name, not problems, "result schema: %s" % "; ".join(problems))
+        if problems:
+            return False
+        ok = True
+        if not self.check(name, result["sessionId"] == session_id,
+                          "sessionId %r != %r" % (result["sessionId"], session_id)):
+            ok = False
+        if not self.check(name, result["exitKind"] == "completed",
+                          "exitKind %r — qualification frame bound must complete"
+                          % result["exitKind"]):
+            ok = False
+        if not self.check(name, result["checkpointWritten"] is False,
+                          "checkpointWritten must be false: Stella exposes no save RAM"):
+            ok = False
+        if not self.check(name, result["saveSize"] is None,
+                          "saveSize %r must be null: no save region"
+                          % (result["saveSize"],)):
+            ok = False
+        if not self.check(name, result["saveHash"] is None,
+                          "saveHash %r must be null: no save region"
+                          % (result["saveHash"],)):
+            ok = False
+        frames = result["frames"]
+        if not self.check(name, limit <= frames <= limit + 2,
+                          "frames %r outside bounded range [%d, %d]"
+                          % (frames, limit, limit + 2)):
+            return False
+        return ok and self._assert_no_save_artifacts(name, session_id, "Stella")
+
+    def scenario_stella_valid_launch_completed(self):
+        name, session = "stella-valid-launch-completed", "e2e-stella-run1"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_stella_candidate(name):
+            return
+        rc, result = self.launch(
+            name, session, core_id=STELLA_CORE_ID,
+            core_build_revision=STELLA_REVISION, core_path=self.stella_core_path(),
+            content_path=os.path.join(self.cache_root, STELLA_ROM_NAME),
+            player_max_frames=STELLA_RUN_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0); see log" % rc)
+        if self.check(name, result is not None, "no result JSON written"):
+            self.assert_stella_result(name, result, session, STELLA_RUN_FRAMES)
+
+    def scenario_stella_repeated_load(self):
+        name = "stella-repeated-load"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_stella_candidate(name):
+            return
+        for i, session in enumerate(("e2e-stella-run2", "e2e-stella-run3"), start=2):
+            rc, result = self.launch(
+                name + "-load%d" % i, session, core_id=STELLA_CORE_ID,
+                core_build_revision=STELLA_REVISION, core_path=self.stella_core_path(),
+                content_path=os.path.join(self.cache_root, STELLA_ROM_NAME),
+                player_max_frames=STELLA_RUN_FRAMES)
+            self.check(name, rc == 0, "load%d exit code %r (want 0)" % (i, rc))
+            if not self.check(name, result is not None, "load%d wrote no result JSON" % i):
+                return
+            if not self.assert_stella_result(name, result, session, STELLA_RUN_FRAMES):
+                return
+
+    def scenario_stella_force_kill_lock_recovery(self):
+        name, session = "stella-force-kill-lock-recovery", "e2e-stella-kill"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_stella_candidate(name):
+            return
+        core_path = self.stella_core_path()
+        content_path = os.path.join(self.cache_root, STELLA_ROM_NAME)
+        request_path, _result_path, _ = self._write_request(
+            name + "-victim", session, core_path, STELLA_REVISION,
+            core_id=STELLA_CORE_ID, content_path=content_path)
+        victim = PlayerProcess(
+            self.player_exe, request_path,
+            self.env_for(player_max_frames=STELLA_KILL_VICTIM_FRAMES),
+            os.path.join(self.logs_dir, name + "-victim.log"))
+        victim.start()
+        pid = victim.pid()
+        self.spawned_pids.append(pid)
+        time.sleep(5)
+        if not self.check(name, victim.alive(), "victim exited before force-kill"):
+            return
+        victim.terminate()
+        if not self.check(name, not victim.alive(),
+                          "pid %d still alive after force-kill" % pid):
+            return
+        rc, result = self.launch(
+            name + "-relaunch", session, core_id=STELLA_CORE_ID,
+            core_build_revision=STELLA_REVISION, core_path=core_path,
+            content_path=content_path, player_max_frames=STELLA_RUN_FRAMES)
+        self.check(name, rc == 0, "relaunch exit code %r (want 0)" % rc)
+        if self.check(name, result is not None, "relaunch wrote no result JSON"):
+            self.assert_stella_result(name, result, session, STELLA_RUN_FRAMES)
 
     # -- mednafen_wswan candidate scenarios (qualification gate) -------------
 
@@ -2419,6 +2555,9 @@ class Runner:
                       self.scenario_prosystem_valid_launch_completed,
                       self.scenario_prosystem_repeated_load,
                       self.scenario_prosystem_force_kill_lock_recovery,
+                      self.scenario_stella_valid_launch_completed,
+                      self.scenario_stella_repeated_load,
+                      self.scenario_stella_force_kill_lock_recovery,
                       self.scenario_wswan_valid_launch_completed,
                       self.scenario_wswan_relaunch_persistence,
                       self.scenario_wswan_repeated_load,
@@ -2514,6 +2653,7 @@ def verify_artifact(stage_dir):
 def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                     explicit_candidate=None, explicit_fceumm_candidate=None,
                     explicit_prosystem_candidate=None,
+                    explicit_stella_candidate=None,
                     explicit_wswan_candidate=None,
                     explicit_pce_candidate=None,
                     explicit_genesis_plus_gx_candidate=None,
@@ -2532,6 +2672,8 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
             stage_dir, "cores-candidate", "fceumm_core.dll")
         prosystem_candidate = explicit_prosystem_candidate or os.path.join(
             stage_dir, "cores-candidate", "prosystem_core.dll")
+        stella_candidate = explicit_stella_candidate or os.path.join(
+            stage_dir, "cores-candidate", "stella_core.dll")
         wswan_candidate = explicit_wswan_candidate or os.path.join(
             stage_dir, "cores-candidate", "mednafen_wswan_core.dll")
         pce_candidate = explicit_pce_candidate or os.path.join(
@@ -2593,6 +2735,15 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                 if os.path.isfile(cand):
                     prosystem_candidate = cand
                     break
+        stella_candidate = explicit_stella_candidate
+        if not stella_candidate:
+            for cand in (os.path.join(stage_dir, "cores-candidate", "libstella_core.so"),
+                         os.path.join(stage_dir, "cores-candidate", "stella_core.dll"),
+                         os.path.join(stage_dir, "libstella_core.so"),
+                         os.path.join(stage_dir, "libstella_core.dylib")):
+                if os.path.isfile(cand):
+                    stella_candidate = cand
+                    break
         wswan_candidate = explicit_wswan_candidate
         if not wswan_candidate:
             for cand in (os.path.join(stage_dir, "cores-candidate", "libmednafen_wswan_core.so"),
@@ -2652,6 +2803,8 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
         fceumm_candidate = None
     if prosystem_candidate is not None and not os.path.isfile(prosystem_candidate):
         prosystem_candidate = None
+    if stella_candidate is not None and not os.path.isfile(stella_candidate):
+        stella_candidate = None
     if wswan_candidate is not None and not os.path.isfile(wswan_candidate):
         wswan_candidate = None
     if pce_candidate is not None and not os.path.isfile(pce_candidate):
@@ -2663,7 +2816,7 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
         mgba_candidate = None
     if snes9x_candidate is not None and not os.path.isfile(snes9x_candidate):
         snes9x_candidate = None
-    return (player, core, candidate, fceumm_candidate, prosystem_candidate,
+    return (player, core, candidate, fceumm_candidate, prosystem_candidate, stella_candidate,
             wswan_candidate, pce_candidate, genesis_plus_gx_candidate,
             mgba_candidate, snes9x_candidate)
 
@@ -2683,6 +2836,9 @@ def main(argv=None):
     ap.add_argument("--prosystem-core",
                     help="explicit candidate ProSystem core path "
                          "(default: cores-candidate/ in the stage dir)")
+    ap.add_argument("--stella-core",
+                    help="explicit candidate Stella core path "
+                    "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--wswan-core",
                     help="explicit candidate mednafen_wswan core path "
                          "(default: cores-candidate/ in the stage dir)")
@@ -2710,11 +2866,11 @@ def main(argv=None):
     if not args.stage or not args.workdir:
         ap.error("--stage and --workdir are required (or use --verify-artifact)")
 
-    player, core, candidate, fceumm_candidate, prosystem_candidate, \
+    player, core, candidate, fceumm_candidate, prosystem_candidate, stella_candidate, \
         wswan_candidate, pce_candidate, genesis_plus_gx_candidate, mgba_candidate, snes9x_candidate = discover_player(
             args.stage, args.player, args.core,
             args.candidate_core, args.fceumm_core,
-            args.prosystem_core, args.wswan_core, args.pce_core,
+            args.prosystem_core, args.stella_core, args.wswan_core, args.pce_core,
             args.genesis_plus_gx_core, args.mgba_core, args.snes9x_core)
     for label, path in (("player", player), ("test_core", core)):
         if not path or not os.path.isfile(path):
@@ -2745,6 +2901,12 @@ def main(argv=None):
         print("FAIL: candidate ProSystem core not found in %r (expected "
               "cores-candidate/prosystem_core.dll on Windows or "
               "libprosystem_core.so/.dylib on POSIX; pass --prosystem-core)"
+              % args.stage, file=sys.stderr)
+        return 2
+    if stella_candidate is None:
+        print("FAIL: candidate Stella core not found in %r (expected "
+              "cores-candidate/stella_core.dll on Windows or "
+              "libstella_core.so/.dylib on POSIX; pass --stella-core)"
               % args.stage, file=sys.stderr)
         return 2
     if wswan_candidate is None:
@@ -2785,6 +2947,7 @@ def main(argv=None):
                     candidate_core=candidate,
                     fceumm_candidate_core=fceumm_candidate,
                     prosystem_candidate_core=prosystem_candidate,
+                    stella_candidate_core=stella_candidate,
                     wswan_candidate_core=wswan_candidate,
                     pce_candidate_core=pce_candidate,
                     genesis_plus_gx_candidate_core=genesis_plus_gx_candidate,
@@ -2795,6 +2958,7 @@ def main(argv=None):
     print("candidate: %s" % candidate)
     print("fceumm candidate: %s" % fceumm_candidate)
     print("prosystem candidate: %s" % prosystem_candidate)
+    print("stella candidate: %s" % stella_candidate)
     print("wswan candidate: %s" % wswan_candidate)
     print("pce candidate: %s" % pce_candidate)
     print("genesis_plus_gx candidate: %s" % genesis_plus_gx_candidate)
