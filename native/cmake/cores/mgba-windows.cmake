@@ -5,6 +5,14 @@ set(ROMM_MGBA_SOURCES_ONLY ON)
 include(${CMAKE_CURRENT_LIST_DIR}/mgba.cmake)
 unset(ROMM_MGBA_SOURCES_ONLY)
 
+# Upstream's Windows profile selects the path-based VFS backend. The shared
+# Android/Linux list instead uses fd-backed VFS, which is unavailable without
+# its ENABLE_VFS_FD declaration on MinGW.
+list(REMOVE_ITEM ROMM_MGBA_SOURCES
+    ${MGBA_DIR}/src/util/vfs/vfs-fd.c)
+list(APPEND ROMM_MGBA_SOURCES
+    ${MGBA_DIR}/src/util/vfs/vfs-file.c)
+
 add_library(mgba_core SHARED
     ${ROMM_MGBA_SOURCES}
     ${CMAKE_CURRENT_LIST_DIR}/mgba-windows.def
@@ -33,6 +41,7 @@ target_compile_definitions(mgba_core PRIVATE
     M_CORE_GB
     ENABLE_VFS
     ENABLE_DIRECTORIES
+    ENABLE_VFS_FILE
     HAVE_STDINT_H
     HAVE_INTTYPES_H
     INLINE=inline
