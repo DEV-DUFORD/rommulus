@@ -113,6 +113,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
 import genesis_plus_gx_rom  # noqa: E402
+import mgba_rom  # noqa: E402
 import pce_rom  # noqa: E402
 import prosystem_rom  # noqa: E402
 import wswan_rom  # noqa: E402
@@ -231,6 +232,15 @@ GENESIS_PLUS_GX_RUN1_FRAMES = 240
 GENESIS_PLUS_GX_RUN2_FRAMES = 180
 GENESIS_PLUS_GX_RUN3_FRAMES = 60
 GENESIS_PLUS_GX_KILL_VICTIM_FRAMES = 3600
+
+MGBA_CORE_ID = "mgba"
+MGBA_REVISION = "32de792178a3662cd0402c8568fccfaad4a764a1"
+MGBA_SRAM_SIZE = mgba_rom.SRAM_SIZE
+MGBA_ROM_NAME = "rommulus-e2e-mgba.gba"
+MGBA_RUN1_FRAMES = 240
+MGBA_RUN2_FRAMES = 180
+MGBA_RUN3_FRAMES = 60
+MGBA_KILL_VICTIM_FRAMES = 3600
 
 
 def sram_byte_after_frames(frames):
@@ -481,7 +491,7 @@ class Runner:
                  render_driver="software", candidate_core=None,
                  fceumm_candidate_core=None, prosystem_candidate_core=None,
                  wswan_candidate_core=None, pce_candidate_core=None,
-                 genesis_plus_gx_candidate_core=None):
+                 genesis_plus_gx_candidate_core=None, mgba_candidate_core=None):
         self.stage_dir = os.path.abspath(stage_dir)
         self.workdir = os.path.abspath(workdir)
         self.player_exe = os.path.abspath(player_exe)
@@ -499,6 +509,8 @@ class Runner:
         self.genesis_plus_gx_candidate_core = (
             os.path.abspath(genesis_plus_gx_candidate_core)
             if genesis_plus_gx_candidate_core else None)
+        self.mgba_candidate_core = (os.path.abspath(mgba_candidate_core)
+                                    if mgba_candidate_core else None)
         self.timeout_sec = timeout_sec
         self.video_driver = video_driver
         self.audio_driver = audio_driver
@@ -568,6 +580,10 @@ class Runner:
                             os.path.join(self.core_root,
                                          self.genesis_plus_gx_core_filename()))
             self.generate_genesis_plus_gx_rom()
+        if self.mgba_candidate_core:
+            shutil.copyfile(self.mgba_candidate_core,
+                            os.path.join(self.core_root, self.mgba_core_filename()))
+            self.generate_mgba_rom()
 
     def core_filename(self):
         return "test_core.dll" if IS_WINDOWS else "libtest_core.so"
@@ -611,6 +627,13 @@ class Runner:
         if sys.platform == "darwin":
             return "libgenesis_plus_gx_core.dylib"
         return "libgenesis_plus_gx_core.so"
+
+    def mgba_core_filename(self):
+        if IS_WINDOWS:
+            return "mgba_core.dll"
+        if sys.platform == "darwin":
+            return "libmgba_core.dylib"
+        return "libmgba_core.so"
 
     def generate_rom(self):
         """Generate the deterministic 32 KiB ROM into the cache root."""
@@ -656,6 +679,12 @@ class Runner:
             f.write(genesis_plus_gx_rom.generate_rom())
         return rom_path
 
+    def generate_mgba_rom(self):
+        rom_path = os.path.join(self.cache_root, MGBA_ROM_NAME)
+        with open(rom_path, "wb") as f:
+            f.write(mgba_rom.generate_rom())
+        return rom_path
+
     def gambatte_core_path(self):
         return os.path.join(self.core_root, self.candidate_core_filename())
 
@@ -674,6 +703,9 @@ class Runner:
     def genesis_plus_gx_core_path(self):
         return os.path.join(self.core_root, self.genesis_plus_gx_core_filename())
 
+    def mgba_core_path(self):
+        return os.path.join(self.core_root, self.mgba_core_filename())
+
     def env_for(self, max_frames=None, player_max_frames=None):
         env = dict(os.environ)
         # Sanitized loader PATH (Windows): staged artifact bin + system dirs
@@ -690,18 +722,18 @@ class Runner:
         env["ROMM_PLAYER_CACHE_ROOT"] = as_posix(self.cache_root)
         env["ROMM_PLAYER_DATA_ROOT"] = as_posix(self.data_root)
         env["ROMM_PLAYER_STATE_ROOT"] = as_posix(self.state_root)
-        # All seven cores are allowed: the synthetic test_core (revision pin
+        # All eight cores are allowed: the synthetic test_core (revision pin
         # from CoreManifest.kt) and the CANDIDATE gambatte + fceumm +
         # prosystem + mednafen_wswan cores pinned to their vendored-tree
         # commits. The candidates appear in NO production manifest — this env
         # entry is the qualification gate's adoption.
         env["ROMM_PLAYER_ALLOWED_CORES"] = (
-            "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
+            "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
             CORE_ID, CORE_REVISION, GAMBATTE_CORE_ID, GAMBATTE_REVISION,
             FCEUMM_CORE_ID, FCEUMM_REVISION, PROSYSTEM_CORE_ID,
             PROSYSTEM_REVISION, WSWAN_CORE_ID, WSWAN_REVISION,
             PCE_CORE_ID, PCE_REVISION, GENESIS_PLUS_GX_CORE_ID,
-            GENESIS_PLUS_GX_REVISION))
+            GENESIS_PLUS_GX_REVISION, MGBA_CORE_ID, MGBA_REVISION))
         # Headless SDL for the GUI-less runner: offscreen video driver with a
         # real window framebuffer (the software renderer works against it),
         # forced software render backend (no GPU on the runner), dummy audio.

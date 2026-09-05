@@ -542,7 +542,11 @@ jobs:
             || { echo "::error::candidate genesis_plus_gx_core.dll missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
           [ ! -e "$BUILD_DIR/bin/libgenesis_plus_gx_core.dll" ] \
             || { echo "::error::non-canonical libgenesis_plus_gx_core.dll produced — the WIN32 PREFIX \"\" fix regressed"; exit 1; }
-          echo "✓ player, test core, and six candidate cores built with canonical names"
+          [ -f "$BUILD_DIR/bin/mgba_core.dll" ] \
+            || { echo "::error::candidate mgba_core.dll missing from $BUILD_DIR/bin"; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libmgba_core.dll" ] \
+            || { echo "::error::non-canonical libmgba_core.dll produced"; exit 1; }
+          echo "✓ player, test core, and seven candidate cores built with canonical names"
 
       - name: Stage unsigned artifact (SDL3.dll + libwinpthread closure beside the player)
         shell: msys2 {0}
@@ -568,6 +572,7 @@ jobs:
           cp "$BUILD_DIR/bin/mednafen_wswan_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/beetle_pce_fast_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/genesis_plus_gx_core.dll" "$STAGE/cores-candidate/"
+          cp "$BUILD_DIR/bin/mgba_core.dll" "$STAGE/cores-candidate/"
           # libwinpthread-1.dll: the toolchain contract only guarantees static
           # libgcc/libstdc++ (-static-libgcc/-static-libstdc++); the mingw-w64
           # threading runtime is linked DYNAMICALLY by default, so threaded
@@ -594,6 +599,7 @@ jobs:
             closure_imports "$STAGE/cores-candidate/mednafen_wswan_core.dll"
             closure_imports "$STAGE/cores-candidate/beetle_pce_fast_core.dll"
             closure_imports "$STAGE/cores-candidate/genesis_plus_gx_core.dll"
+            closure_imports "$STAGE/cores-candidate/mgba_core.dll"
           )"
           if grep -qi '^libwinpthread-1\.dll$' <<< "$imports"; then
             [ -f "$UCRT64_BIN/libwinpthread-1.dll" ] \
@@ -690,11 +696,11 @@ jobs:
           # import table is classified per DLL: system (OS-provided),
           # forbidden (fail), or non-system (must have an exact staged copy,
           # which is then audited in turn). Anything else fails the gate.
-          # The six production-core candidates are staged under
+          # The seven production-core candidates are staged under
           # cores-candidate/): they enter the same recursive PE32+ /
           # import-closure audit as every shipped image, plus the exact
           # export-allowlist checks below.
-          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll"
+          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll mgba_core.dll"
           seen=" "
           while [ -n "$queue" ]; do
             name="${queue%% *}"
@@ -777,6 +783,8 @@ jobs:
           genesis_plus_gx_exports="$(printf '%s\n' $expected_exports romm_apply_save_memory romm_get_save_memory_data romm_get_save_memory_size romm_restore_save_memory | LC_ALL=C sort)"
           expected_exports="$genesis_plus_gx_exports"
           audit_candidate_exports "$STAGE/cores-candidate/genesis_plus_gx_core.dll" genesis_plus_gx
+          expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
+          audit_candidate_exports "$STAGE/cores-candidate/mgba_core.dll" mgba
           # Candidate provenance/hashes recorded in the AUDIT ARTIFACT ONLY —
           # deliberately NOT in CoreManifest.kt supportedAbis (the validator
           # packaging/validate-linux-targets.py keeps windows-x86_64 out of
@@ -828,6 +836,14 @@ jobs:
              echo "exports:  22 retro_* symbols plus four existing romm_* save-image extensions"
              echo "saves:    normalized 65536-byte cartridge SRAM via ROMM save extensions"
              echo "sha256(cores-candidate/genesis_plus_gx_core.dll): $(sha256sum "$STAGE/cores-candidate/genesis_plus_gx_core.dll" | cut -d' ' -f1)"
+             echo "=== mgba candidate provenance (CANDIDATE — NOT advertised) ==="
+             echo "status: windows-x86_64 in NO supportedAbis; staged under cores-candidate/ only"
+             echo "upstream: libretro/mgba @ 32de792178a3662cd0402c8568fccfaad4a764a1"
+             echo "sources: native/cmake/cores/mgba.cmake (guarded 98-source inventory)"
+             echo "fragment: native/cmake/cores/mgba-windows.cmake"
+             echo "exports: exact 22 retro_* symbols"
+             echo "saves: standard detected GBA save medium via RETRO_MEMORY_SAVE_RAM"
+             echo "sha256(cores-candidate/mgba_core.dll): $(sha256sum "$STAGE/cores-candidate/mgba_core.dll" | cut -d' ' -f1)"
           } >> "$AUDIT"
 
           # Artifact layout + SHA256 of every staged file (the audit log
@@ -898,6 +914,7 @@ jobs:
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/mednafen_wswan_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/beetle_pce_fast_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/genesis_plus_gx_core.dll" 50
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/mgba_core.dll" 50
           echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + five candidates, no ROM content)"
 
       - name: Upload unsigned player artifact
