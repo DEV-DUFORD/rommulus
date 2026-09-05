@@ -453,6 +453,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$SDL_PREFIX" \
             -DCMAKE_C_FLAGS="-I$PWD/deps/angle/include" \
+            -DCMAKE_CXX_FLAGS="-I$PWD/deps/angle/include" \
             -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
             -DSDL_SHARED=ON \
             -DSDL_STATIC=OFF \
