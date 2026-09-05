@@ -36,8 +36,8 @@ def _program():
     code += b"\x00" * (ENTRY_OFFSET - len(code))
 
     start = len(code)
-    code += _word(0xE59F004C)  # ldr r0, [pc, #76] -> SRAM base
-    code += _word(0xE59F104C)  # ldr r1, [pc, #76] -> DISPSTAT
+    code += _word(0xE59F0048)  # ldr r0, [pc, #72] -> SRAM base
+    code += _word(0xE59F1048)  # ldr r1, [pc, #72] -> DISPSTAT
     code += _word(0xE5D02000)  # ldrb r2, [r0]
     code += _word(0xE3520052)  # cmp r2, #0x52
     initialized = ENTRY_OFFSET + 0x24
