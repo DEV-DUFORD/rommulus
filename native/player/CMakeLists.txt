@@ -404,7 +404,7 @@ if(NOT WIN32)
 endif()
 
 # Hosted graphics-spike executable. This is intentionally not a Libretro core
-# port: it proves the exact SDL3 -> EGL -> pinned ANGLE -> GLES 3.2 path and
+# port: it proves the exact SDL3 -> EGL -> pinned ANGLE -> GLES 3.0 path and
 # the framebuffer/shader operations used by SdlHardwareContext. Tier 2/3
 # candidates remain separate and disabled until their own gates exist.
 if(WIN32 AND NOT ROMM_WIN32_SOFTWARE_ONLY)

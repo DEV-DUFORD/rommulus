@@ -43,7 +43,7 @@ int main() {
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
     SDL_Window* window = SDL_CreateWindow(
@@ -77,10 +77,10 @@ int main() {
     const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
     const char* shading = reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION));
     const bool isAngle = renderer != nullptr && std::strstr(renderer, "ANGLE") != nullptr;
-    const bool isGles32 =
+    const bool isGles3 =
         profile == SDL_GL_CONTEXT_PROFILE_ES &&
-        (major > 3 || (major == 3 && minor >= 2));
-    if (!isAngle || !isGles32) {
+        major >= 3;
+    if (!isAngle || !isGles3) {
         std::fprintf(
             stderr,
             "ANGLE_GLES3_SMOKE_FAIL operation=context_identity profile=%d "
@@ -94,14 +94,14 @@ int main() {
     }
 
     static constexpr const char* kVertexShader = R"(
-        #version 320 es
+        #version 300 es
         const vec2 positions[3] = vec2[3](
             vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
         );
         void main() { gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0); }
     )";
     static constexpr const char* kFragmentShader = R"(
-        #version 320 es
+        #version 300 es
         precision highp float;
         out vec4 color;
         void main() { color = vec4(0.25, 0.5, 0.75, 1.0); }

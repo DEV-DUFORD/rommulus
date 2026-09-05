@@ -519,14 +519,14 @@ int main(int argc, char* argv[]) {
     if (useHardwareRendering) {
 #if defined(_WIN32)
         // ANGLE exposes OpenGL ES, never desktop OpenGL. Request its highest
-        // Libretro-relevant profile so Dolphin can negotiate ES 3.2 and so a
-        // future GLideN64 Windows candidate can use its explicit GLES build.
+        // Libretro-relevant profile so Dolphin can use its GLES3 fallback and
+        // a future GLideN64 Windows candidate can use its explicit GLES build.
         // lrps2 cannot use this path at its current pin (see the graphics
         // spike evidence); accepting its nominal ES3 request here does not
         // advertise or build that core.
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #else
         // N64 (GLideN64) and lrps2 use desktop OpenGL 3.3 on Linux. GLideN64's
         // GLES path targets mobile GPUs and produces incorrect depth ordering

@@ -61,7 +61,7 @@
 #   The same job also downloads the pinned ANGLE a96fca8d distribution,
 #   verifies its release SHA256, generates MinGW import libraries from the
 #   shipped PE exports, builds the full hardware-context player, and executes
-#   a hidden-window GLES 3.2 shader/FBO/blit smoke through SDL's forced EGL
+#   a hidden-window GLES 3.0 shader/FBO/blit smoke through SDL's forced EGL
 #   path. The separate artifact records ANGLE identity, renderer, hashes, and
 #   recursive PE closure. This qualifies the frontend contract only; it does
 #   not build or advertise a Tier 2/3 core.
@@ -1140,7 +1140,7 @@ jobs:
           cat "$AUDIT"
           echo "✓ ANGLE graphics-spike PE/import closure is complete"
 
-      - name: Run ANGLE GLES 3.2 graphics spike under sanitized PATH
+      - name: Run ANGLE GLES 3.0 graphics spike under sanitized PATH
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"

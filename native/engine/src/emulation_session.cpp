@@ -129,12 +129,7 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     catchUpAfterStall_ = isDolphin || isLrps2;
     if (isDolphin) {
-#ifdef _WIN32
-        // The Windows hardware player is ANGLE/GLES-only. Dolphin recognizes
-        // this preference and requests GLES 3.2, then 3.1, without silently
-        // changing its Libretro context type to desktop OpenGL.
-        environment_.setPreferredHardwareContext(kHwContextEsVersion);
-#else
+#ifndef _WIN32
         environment_.setPreferredHardwareContext(kHwContextOpenGlCore);
 #endif
     }
