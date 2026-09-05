@@ -396,3 +396,25 @@ This session ended after the FCEUmm candidate's local qualification passed. Cont
   `CoreManifest.supportedAbis`. Physical Windows 10/11, controller,
   interactive audio/video, sleep/resume, and soak qualification remain
   required before enablement.
+
+## Phase 3 candidate — mGBA (complete, candidate-only)
+
+- mGBA uses the guarded shared 98-source inventory and upstream's
+  MinGW-compatible file VFS backend. The candidate emits canonical
+  `mgba_core.dll` only under `cores-candidate/`.
+- The original 4 KiB ARM GBA fixture is pinned at SHA-256
+  `53b1633bdabf63b59f169d2ba971ed361e3d4018c3a368e17272fe6e5415745d`.
+  It selects the standard 32 KiB SRAM medium and counts VBlank transitions.
+- The core's deferred save loading required three ROMM extensions to retain a
+  restored variable-sized image until the actual save medium is detected.
+  Its exact export boundary is 22 `retro_*` symbols plus those three
+  extensions.
+- Hosted run `33985740463` passed all five jobs and all 34 E2E scenarios:
+  https://github.com/DEV-DUFORD/rommulus/actions/runs/33985740463
+- Hosted `mgba_core.dll` SHA-256:
+  `555e7e43bd3351ca126753409657b6710d574c4c67690b2cfa31b6c08dc5bb63`.
+  Canonical naming, recursive PE/import closure, exact exports, 50-cycle
+  smoke, checkpoint/adoption, repeated load, and force-kill recovery passed.
+- mGBA remains candidate-only and absent from `CoreManifest.supportedAbis`.
+  Physical Windows 10/11, controller, interactive audio/video, sleep/resume,
+  and soak qualification remain required before enablement.
