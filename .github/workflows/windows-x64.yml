@@ -478,10 +478,13 @@ jobs:
           # ROMM_PLAYER_QUALIFICATION=ON: the qualification-only generic
           # player frame-limit hook (ROMM_PLAYER_MAX_FRAMES → clean
           # player-initiated completed exit at the presented-frame bound,
-          # checkpoint before stop). OFF in production/normal presets; ON
-          # ONLY in this Windows software-only candidate CI build so the
-          # Gambatte candidate E2E (job 5) can drive bounded deterministic
-          # runs. No new CLI surface: the bound arrives via environment.
+          # checkpoint before stop) plus the mednafen_wswan 1:1
+          # presented/core-frame pin (wswan_60hz_mode=disabled, so the
+          # deterministic SRAM oracle holds on every host). OFF in
+          # production/normal presets; ON ONLY in this Windows software-only
+          # candidate CI build so the Gambatte and mednafen_wswan candidate
+          # E2Es (job 5) can drive bounded deterministic runs. No new CLI
+          # surface: the bound arrives via environment.
           cmake --preset windows-x86_64-software-only \
             -DSDL3_ROOT="$SDL_PREFIX" \
             -DROMM_PLAYER_QUALIFICATION=ON

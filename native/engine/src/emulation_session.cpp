@@ -122,6 +122,10 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         std::strcmp(systemInfo.library_name, "dolphin-emu") == 0;
     const bool isLrps2 = systemInfo.library_name != nullptr &&
         std::strcmp(systemInfo.library_name, "LRPS2") == 0;
+#ifdef ROMM_PLAYER_QUALIFICATION
+    const bool isMednafenWswan = systemInfo.library_name != nullptr &&
+        std::strcmp(systemInfo.library_name, "Beetle WonderSwan") == 0;
+#endif  // ROMM_PLAYER_QUALIFICATION
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     catchUpAfterStall_ = isDolphin || isLrps2;
     if (isDolphin) {
@@ -187,6 +191,21 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         // pcsx2/memcards (a stable slot-0 image for save sync).
         environment_.setCoreOptionOverride("pcsx2_use_external_gameindex", "enabled");
     }
+#ifdef ROMM_PLAYER_QUALIFICATION
+    if (isMednafenWswan) {
+        // Qualification-only pin (ROMM_PLAYER_QUALIFICATION=1, the Windows
+        // software-only candidate CI build): the core's default
+        // wswan_60hz_mode ("enabled") adds deterministic 5:4 extra emulation
+        // frames — once every four retro_run() calls a full extra Emulate()
+        // pass runs before the regular one (a fixed counter cadence, not
+        // wall-clock pacing), so CPU work per presented frame is not 1:1.
+        // Pinning it disabled keeps one presented frame == one Emulate() so
+        // the deterministic SRAM oracle (player_e2e.py) holds on every host.
+        // Ordinary builds (Android, Linux, deck) never define the seam and
+        // keep the core's upstream default untouched.
+        environment_.setCoreOptionOverride("wswan_60hz_mode", "disabled");
+    }
+#endif  // ROMM_PLAYER_QUALIFICATION
     if (isDolphin) {
         // Restore Dolphin's desktop default. The libretro core disables
         // precision timing on every platform, not only battery-powered ones.

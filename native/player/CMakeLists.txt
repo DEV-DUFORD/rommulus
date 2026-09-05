@@ -203,11 +203,16 @@ option(ROMM_PLAYER_DISABLE_HARDWARE_CONTEXT
 # (checkpoint written BEFORE session stop, exitKind=completed — the core
 # never requested it). No new CLI surface: the bound arrives only through
 # the environment, and a production build (hook not compiled) ignores the
-# variable entirely. Enabled only in the Windows software-only candidate
-# CI build (windows-x64.yml passes -DROMM_PLAYER_QUALIFICATION=ON) so the
-# Gambatte candidate E2E can drive bounded deterministic runs.
+# variable entirely. The same seam also compiles the mednafen_wswan
+# 1:1 presented-frame pin (emulation_session.cpp): qualification builds set
+# the core's wswan_60hz_mode to "disabled" so one presented frame == one
+# Emulate() and the deterministic SRAM oracle (player_e2e.py) holds on every
+# host; ordinary builds keep the core's upstream default ("enabled")
+# untouched. Enabled only in the Windows software-only candidate CI build
+# (windows-x64.yml passes -DROMM_PLAYER_QUALIFICATION=ON) so the Gambatte
+# and mednafen_wswan candidate E2Es can drive bounded deterministic runs.
 option(ROMM_PLAYER_QUALIFICATION
-    "Qualification-only: enable the ROMM_PLAYER_MAX_FRAMES presented-frame bound (CI candidate builds only)"
+    "Qualification-only: compile the ROMM_PLAYER_MAX_FRAMES presented-frame bound hook and pin mednafen_wswan's wswan_60hz_mode to disabled for 1:1 presented frames (CI candidate builds only)"
     OFF)
 if(WIN32 AND ROMM_WIN32_SOFTWARE_ONLY)
     set(ROMM_HARDWARE_CONTEXT_SOURCE
@@ -301,9 +306,13 @@ if(WIN32 AND ROMM_WIN32_SOFTWARE_ONLY)
 endif()
 if(ROMM_PLAYER_QUALIFICATION)
     # Qualification-only presented-frame bound (see the option above):
-    # main.cpp reads ROMM_PLAYER_MAX_FRAMES and exits cleanly at the bound.
-    # Deliberately scoped to rommulus_player only — the deck variant and
-    # every core target stay hook-free.
+    # main.cpp reads ROMM_PLAYER_MAX_FRAMES and exits cleanly at the bound,
+    # and emulation_session.cpp pins mednafen_wswan's wswan_60hz_mode to
+    # "disabled" for 1:1 presented/core frames. Deliberately scoped to
+    # rommulus_player only — the deck variant and every core target stay
+    # hook-free. (emulation_session.cpp is compiled into this executable, so
+    # the definition reaches it here; the Android romm_libretro_host library
+    # never defines it.)
     target_compile_definitions(rommulus_player PRIVATE ROMM_PLAYER_QUALIFICATION=1)
 endif()
 if(NOT WIN32)

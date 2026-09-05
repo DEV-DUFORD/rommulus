@@ -186,12 +186,20 @@ WSWAN_ROM_NAME = "rommulus-e2e-wswan.ws"
 # semantics as the other candidates: reported frame count lands in
 # [limit, limit + 2]). This core exposes a real 8 KiB battery region, so —
 # like Gambatte/FCEUmm — the gate asserts the deterministic SRAM oracle
-# across the adoption chain: each power-on of F reported frames executes
-# exactly wswan_rom.run_iterations(F) = 3392*F - 299 counter iterations
-# (first frame is a 145-line/37120-cycle warm-up after GfxReset's wsLine=0;
-# every later frame is 159 lines x 256 cycles = 40704, and the loop costs
- # exactly 12 core-model cycles); the counter LIVES IN battery SRAM at
- # SRAM[0x100] (mirrored to SRAM[0]), so restored saves keep counting.
+# across the adoption chain. Each launch is a FRESH process/core (reset CPU,
+# wsLine = 0) and restoreSaveRam() copies ONLY the 8192-byte SRAM image —
+# never retro_serialize state — so a chain [F1, F2, ...] models INDEPENDENT
+# fresh power-ons whose SRAM mutations accumulate, NOT one uninterrupted
+# power-on of sum(F_i) frames (each run re-runs the 145-line first frame).
+# The exact 8192-byte image is wswan_rom.expected_sram_image(): marker
+# SRAM[0x101] = sum(F_i) mod 256, counter SRAM[0x100] = sum of the per-run
+# fresh-power-on iteration counts mod 256 (data-dependent — frame 1 warms up
+# over 145 lines from GfxReset's wsLine=0, every later frame continues from
+# wsLine=145 over 159 lines — so the oracle simulates the real instruction
+# stream instead of using a closed formula), and mirror SRAM[0] = the last
+# run's final mirror write against the restored accumulator. The counter
+# LIVES IN battery SRAM, so restored saves keep counting — an un-restored
+# core would hash like this run alone.
 WSWAN_RUN1_FRAMES = 240     # ~4.0 s of emulated time
 WSWAN_RUN2_FRAMES = 180     # ~3.0 s (restored counters keep counting)
 WSWAN_RUN3_FRAMES = 60      # ~1.0 s (repeated load of the same save)
@@ -867,23 +875,31 @@ class Runner:
         8192-byte SRAM + the deterministic per-frame counter oracle.
 
         run_frames is the list of player-reported frame counts for every
-        power-on in this save chain. Unlike Gambatte/FCEUmm, the WonderSwan
-        core's per-power-on overhead is not a fixed dead-frame count: the
-        first frame after every retro_load_game() runs only 145 scanlines
-        (GfxReset leaves wsLine at 0 and the frame ends at line 144) while
-        LCDVtotal = 158 makes every later frame 159 lines, so one power-on
-        of F reported frames executes EXACTLY wswan_rom.run_iterations(F) =
-        3392*F - 299 counter iterations (the 12-cycle loop divides the
-        40704-cycle steady frame; the end-of-frame ICount residue is a fixed
-        point). The ROM's byte counter LIVES IN SRAM (offset 0x100, mirrored
-        to SRAM[0] every loop iteration; every run ends mid-iteration right
-        after its final increment, so SRAM[0] = total-1 mod 256), so restored
-        saves keep counting — an un-restored core would hash like this run
-        alone. The invariants are checked against the
-        player-REPORTED per-run frame counts, so the assertion is
-        frame-stable across frame boundaries: the ROM's SRAM state is an
-        exact function of the presented frames, never of instruction counts
-        or wall-clock timing.
+        power-on in this save chain. Each power-on is a FRESH process/core:
+        reset CPU state and wsLine = 0, with ONLY the previous candidate's
+        8192-byte SRAM image restored (restoreSaveRam() copies
+        RETRO_MEMORY_SAVE_RAM; retro_serialize state never carries over).
+        The chain therefore models independent fresh power-ons whose SRAM
+        mutations accumulate — explicitly NOT one uninterrupted power-on of
+        sum(F_i) frames (for n >= 2 runs the counter byte differs: each run
+        re-runs the 145-line first frame instead of continuing from
+        wsLine=145). The exact image is computed by
+        wswan_rom.expected_sram_image(): the loop (inc [si]; mirror; sample
+        wsLine via port 0x02; branch on line change / VBLANK entry) runs a
+        data-dependent number of iterations per fresh power-on (frame 1
+        warms up over 145 lines from GfxReset's wsLine=0; every later frame
+        continues from wsLine=145 over 159 lines), so the counter is a
+        simulation result, not a closed formula. The ROM's byte counter
+        LIVES IN SRAM (offset 0x100, mirrored to SRAM[0] every loop
+        iteration; each run continues from the restored byte and may end
+        mid-iteration, so SRAM[0] is the last run's final mirror write),
+        and the frame marker at SRAM[0x101] equals sum(F_i) mod 256 exactly
+        (one line-144 entry per Emulate, one Emulate per presented frame —
+        qualification builds pin wswan_60hz_mode=disabled). The invariants
+        are checked against the player-REPORTED per-run frame counts, so the
+        assertion is frame-stable across frame boundaries: the ROM's SRAM
+        state is an exact function of the presented frames, never of
+        instruction counts or wall-clock timing.
         """
         problems = validate_result_schema(result)
         self.check(name, not problems, "result schema: %s" % "; ".join(problems))
@@ -911,13 +927,13 @@ class Runner:
                    "saveSize %r != %d (mednafen_wswan must expose 8192 bytes "
                    "of battery SRAM for cart header code 0x01)"
                    % (result["saveSize"], WSWAN_SRAM_SIZE))
-        counted = sum(wswan_rom.run_iterations(f) for f in run_frames)
+        counted = want_image[wswan_rom.COUNTER_OFFSET]
         self.check(name, result["saveHash"] == want_hash,
-                   "saveHash %s != expected %s — SRAM counter oracle broken "
-                   "(expected %d total iterations over per-run reported "
-                   "frames %s; this run reported %d)"
-                   % (result["saveHash"], want_hash, counted, list(run_frames),
-                      frames))
+                    "saveHash %s != expected %s — SRAM counter oracle broken "
+                    "(expected counter byte %d over per-run reported frames "
+                    "%s; this run reported %d)"
+                    % (result["saveHash"], want_hash, counted, list(run_frames),
+                       frames))
         candidate = os.path.join(self.state_root, session_id + ".candidate.srm")
         if self.check(name, os.path.isfile(candidate),
                       "candidate save missing on disk"):
@@ -928,7 +944,9 @@ class Runner:
                        % (len(blob), WSWAN_SRAM_SIZE))
             self.check(name, blob == want_image,
                        "candidate file on disk != the deterministic SRAM "
-                       "image (counter %d over 0x00 fresh fill)"
+                       "image (expected counter byte %d for the reported "
+                       "per-run frame chain; relaunches restore prior SRAM "
+                       "rather than a fresh fill)"
                        % (counted % 256))
         return True
 

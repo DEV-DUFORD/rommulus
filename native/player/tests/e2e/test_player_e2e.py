@@ -56,7 +56,7 @@ PINNED_PROSYSTEM_ROM_SHA256 = (
 # produce (no header — mednafen_wswan's plain cartridge path; cart header
 # code 0x01 at the image tail selects 8 KiB battery SRAM).
 PINNED_WSWAN_ROM_SHA256 = (
-    "6a0857a6f787ac650e3b3be4191a2db59fc6c06ff7ad353188149945a8074d38"
+    "285040a46a2902422495289d531d005b9940b3118201ade531151fe9eaf01696"
 )
 
 
@@ -400,9 +400,9 @@ class WswanRomTest(unittest.TestCase):
         self.assertEqual(rom[wswan_rom.LOOP_OFFSET:
                               wswan_rom.LOOP_OFFSET + len(wswan_rom.LOOP)],
                           wswan_rom.LOOP)
-        # EB rel8 is relative to the byte after the operand; the 11-byte loop
+        # EB rel8 is relative to the byte after the operand; the 22-byte loop
         # must jump exactly back to its start.
-        rel = wswan_rom.LOOP[10]
+        rel = wswan_rom.LOOP[21]
         if rel > 127:
             rel -= 256
         pc_after_operand = (wswan_rom.LOOP_OFFSET + len(wswan_rom.LOOP)) \
@@ -410,11 +410,13 @@ class WswanRomTest(unittest.TestCase):
         self.assertEqual((pc_after_operand + rel) & 0xFFFF,
                          wswan_rom.LOOP_OFFSET - wswan_rom.BANK_F_BASE)
         # ModRM encodings must be the register forms: FE/4 = inc [si],
-        # 8A/4 = mov al,[si], 88/7 = mov [bx],al (rm=111; rm=011 would be
-        # [BP+DI] with the SS base, and mod=00/rm=110 a [disp16] form).
+        # 8A/4 = mov al,[si], 88/7 = mov [bx],al, FE/5 = inc [di] (the
+        # frame marker). rm=011 would be [BP+DI] with the SS base, and
+        # mod=00/rm=110 a [disp16] form.
         self.assertEqual(wswan_rom.LOOP[1], 0x04)
-        self.assertEqual(wswan_rom.LOOP[6], 0x04)
-        self.assertEqual(wswan_rom.LOOP[8], 0x07)
+        self.assertEqual(wswan_rom.LOOP[3], 0x04)
+        self.assertEqual(wswan_rom.LOOP[5], 0x07)
+        self.assertEqual(wswan_rom.LOOP[19], 0x05)
 
     def test_provenance_marker_and_fill(self):
         rom = wswan_rom.generate_rom()
@@ -437,59 +439,95 @@ class WswanRomTest(unittest.TestCase):
 
     def test_frame_budget_derivation(self):
         # The oracle's load-bearing arithmetic (wswan_rom.py facts 5+6+7),
-        # checked with the exact chunk-aware simulation of the core's ICount
-        # semantics: first frame = 145 lines x 256 runs exactly 3093
-        # increments; every steady frame (159 lines x 256) runs exactly 3392;
-        # every run ends at ICount -1 with the final increment unmirrored.
+        # checked with the exact chunk-aware simulation of the core's
+        # persistent-ICount semantics. Ground truth pinned from the real
+        # instrumented core: F=1 -> 1930 counter increments (byte 138,
+        # mirror 138); F=2 -> 4048 (byte 208, mirror 207 — that run ends
+        # right after a final inc [si], before its mirror write); F=3 ->
+        # 6165 (byte 21, mirror 21); F=60 -> 126843 (byte 123, mirror 123).
         self.assertEqual(wswan_rom.STEADY_FRAME_CYCLES, 159 * 256)
         self.assertEqual(wswan_rom.FIRST_FRAME_CYCLES, 145 * 256)
-        self.assertEqual(wswan_rom.STEADY_FRAME_CYCLES % wswan_rom.LOOP_COST, 0)
-        self.assertEqual(wswan_rom.ITERATIONS_PER_STEADY_FRAME, 3392)
-        self.assertEqual(wswan_rom.FIRST_RUN_ITERATIONS, 3093)
-        for frames in (1, 2, 3):
-            incs, ic, synced = wswan_rom._simulate_poweron(frames)
-            self.assertEqual(incs, wswan_rom.run_iterations(frames))
-            self.assertEqual(ic, -1)        # fixed point
-            self.assertFalse(synced)        # final increment unmirrored
-
-    def test_run_iterations_formula(self):
-        # iterations(F) = 3093 + 3392*(F-1) = 3392*F - 299 for F >= 1.
-        self.assertEqual(wswan_rom.run_iterations(1), 3093)
-        self.assertEqual(wswan_rom.run_iterations(60), 3392 * 60 - 299)
-        self.assertEqual(wswan_rom.run_iterations(240), 3392 * 240 - 299)
-        with self.assertRaises(ValueError):
-            wswan_rom.run_iterations(0)
+        for frames in (1, 2, 3, 60):
+            counter, mirror, marker, ic, mw = \
+                wswan_rom._simulate_poweron(frames)
+            self.assertEqual(marker, frames)   # one line-144 entry per frame
+            self.assertTrue(-6 <= ic <= 0)     # last-instruction overrun bound
+            self.assertIn(mirror, ((counter - 1) & 0xFF, counter & 0xFF))
+            self.assertIn(mw, (counter - 1, counter))
+        c1 = wswan_rom._simulate_poweron(1)
+        self.assertEqual((c1[0], c1[1]), (1930, 138))
+        c2 = wswan_rom._simulate_poweron(2)
+        self.assertEqual((c2[0], c2[1]), (4048, 207))
+        c3 = wswan_rom._simulate_poweron(3)
+        self.assertEqual(c3[0] & 0xFF, 21)
+        c60 = wswan_rom._simulate_poweron(60)
+        self.assertEqual((c60[0], c60[1]), (126843, 123))
 
     def test_expected_sram_image_fresh_and_chain(self):
-        # Fresh cart: the counter at SRAM[0x100] equals total-increments mod
-        # 256 and its mirror at SRAM[0] lags by one (every run ends mid-
-        # iteration, after the final inc but before its mirror write); every
-        # other byte is zero.
+        # Fresh cart: counter at SRAM[0x100], mirror at SRAM[0] (the final
+        # counter or one behind — a run may end mid-iteration), frame marker
+        # at SRAM[0x101] == frames mod 256; every other byte is zero.
         image = wswan_rom.expected_sram_image(240)
         self.assertEqual(len(image), wswan_rom.SRAM_SIZE)
-        want = (3392 * 240 - 299) % 256
-        self.assertEqual(image[wswan_rom.COUNTER_OFFSET], want)
-        self.assertEqual(image[0], (want - 1) % 256)
-        self.assertEqual(sum(1 for b in image if b), 2)
+        counter, mirror, marker, _ic, _mw = \
+            wswan_rom._simulate_poweron(240)
+        self.assertEqual(image[wswan_rom.COUNTER_OFFSET], counter & 0xFF)
+        self.assertEqual(image[0], mirror)
+        self.assertEqual(image[wswan_rom.MARKER_OFFSET], marker & 0xFF)
+        for off in range(wswan_rom.SRAM_SIZE):
+            if off not in (0, wswan_rom.COUNTER_OFFSET,
+                           wswan_rom.MARKER_OFFSET):
+                self.assertEqual(image[off], 0, "byte 0x%03X != 0" % off)
         # int and single-element list are equivalent.
         self.assertEqual(wswan_rom.expected_sram_image(240),
                          wswan_rom.expected_sram_image([240]))
-        # Single-frame run: 3093 increments, mirror one behind.
+        # Single-frame run: real-core ground truth (138 / mirror 138 / marker 1).
         single = wswan_rom.expected_sram_image(1)
-        self.assertEqual(single[wswan_rom.COUNTER_OFFSET], 3093 % 256)
-        self.assertEqual(single[0], 3092 % 256)
-        # Chain semantics: the counter lives IN SRAM, so restored saves keep
-        # counting and the chain total differs from any single run (what
-        # proves the restore in the E2E).
-        chain = wswan_rom.expected_sram_image([240, 180])
-        total = (wswan_rom.run_iterations(240)
-                 + wswan_rom.run_iterations(180))
-        self.assertEqual(chain[wswan_rom.COUNTER_OFFSET], total % 256)
-        self.assertEqual(chain[0], (total - 1) % 256)
-        self.assertNotEqual(chain[0],
-                            wswan_rom.expected_sram_image(180)[0])
-        self.assertNotEqual(chain[0],
-                            wswan_rom.expected_sram_image(240)[0])
+        self.assertEqual(single[wswan_rom.COUNTER_OFFSET], 138)
+        self.assertEqual(single[0], 138)
+        self.assertEqual(single[wswan_rom.MARKER_OFFSET], 1)
+        # Chain semantics (the player's REAL restore path): each launch is a
+        # fresh process/core and restoreSaveRam() copies ONLY the SRAM image,
+        # so [240, 180, 60] models THREE independent fresh power-ons whose
+        # SRAM mutations accumulate — explicitly NOT one uninterrupted
+        # 480-frame power-on. With Delta_i = the fresh F_i-frame iteration
+        # count (real-core ground truth: 507931 / 380902 / 126843):
+        #   SRAM[0x100] = (507931 + 380902 + 126843) mod 256 = 124
+        #   SRAM[0x101] = 480 mod 256 = 224
+        #   SRAM[0]     = 124 (the last, 60-frame run ends exactly on its
+        #                  final mirror write, so the mirror equals the
+        #                  restored accumulator plus Delta_3)
+        d240 = wswan_rom._simulate_poweron(240)[0]
+        d180 = wswan_rom._simulate_poweron(180)[0]
+        d60 = wswan_rom._simulate_poweron(60)[0]
+        self.assertEqual((d240, d180, d60), (507931, 380902, 126843))
+        chain = wswan_rom.expected_sram_image([240, 180, 60])
+        self.assertEqual(chain[wswan_rom.COUNTER_OFFSET],
+                         (d240 + d180 + d60) % 256)
+        self.assertEqual(chain[wswan_rom.COUNTER_OFFSET], 124)
+        self.assertEqual(chain[wswan_rom.MARKER_OFFSET], 480 % 256)
+        self.assertEqual(chain[0], 124)
+        # The uninterrupted model (the core's serialize/unserialize API,
+        # which the player never uses for save adoption) gives counter byte
+        # 241 / mirror 241 / marker 224 for 480 frames: same marker,
+        # different counter — the chain image must NOT equal it.
+        uninterrupted = wswan_rom.expected_sram_image(480)
+        self.assertNotEqual(chain, uninterrupted)
+        self.assertEqual(uninterrupted[wswan_rom.COUNTER_OFFSET], 241)
+        self.assertEqual(uninterrupted[0], 241)
+        self.assertEqual(uninterrupted[wswan_rom.MARKER_OFFSET], 224)
+        # Two-run chain: the 180-frame run ends one mirror behind, so
+        # SRAM[0] = (507931 + 380902 - 1) mod 256 = 0.
+        chain2 = wswan_rom.expected_sram_image([240, 180])
+        self.assertEqual(chain2[wswan_rom.COUNTER_OFFSET],
+                         (d240 + d180) % 256)
+        self.assertEqual(chain2[wswan_rom.COUNTER_OFFSET], 1)
+        self.assertEqual(chain2[0], 0)
+        self.assertEqual(chain2[wswan_rom.MARKER_OFFSET], 420 % 256)
+        # The chain image differs from any single run — what proves the
+        # restore in the E2E.
+        self.assertNotEqual(chain, wswan_rom.expected_sram_image(180))
+        self.assertNotEqual(chain, wswan_rom.expected_sram_image(240))
 
     def test_harness_constants_match_generator(self):
         self.assertEqual(WSWAN_CORE_ID, "mednafen_wswan")
