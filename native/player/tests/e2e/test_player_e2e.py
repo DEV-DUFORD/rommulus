@@ -69,7 +69,7 @@ PINNED_PCE_ROM_SHA256 = (
 )
 
 PINNED_GENESIS_PLUS_GX_ROM_SHA256 = (
-    "e0c184b579bb952ed63027b8822ad706a84ec10cbff17a200655f0d199688ed5"
+    "00a36ef98679e714baec5591af603a51e61579b1f5ab1749e802c3a76662fd2a"
 )
 
 
@@ -612,6 +612,8 @@ class GenesisPlusGxRomTest(unittest.TestCase):
             (genesis_plus_gx_rom.SRAM_START +
              genesis_plus_gx_rom.SRAM_SIZE - 1).to_bytes(4, "big"))
         self.assertIn(bytes((0x52, 0x39, 0x00, 0x20, 0x00, 0x01)),
+                      genesis_plus_gx_rom.PROGRAM)
+        self.assertIn(bytes((0x33, 0xfc, 0x81, 0x44, 0x00, 0xc0, 0x00, 0x04)),
                       genesis_plus_gx_rom.PROGRAM)
 
     def test_sram_oracle(self):

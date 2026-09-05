@@ -10,7 +10,7 @@ SRAM_MARKER = 0x52
 SRAM_MARKER_OFFSET = 0
 SRAM_COUNTER_OFFSET = 1
 PROVENANCE = b"ROMMULUS E2E GENESIS - original deterministic 68000 qualification ROM"
-PROVENANCE_OFFSET = 0x240
+PROVENANCE_OFFSET = 0x300
 HEADER_OFFSET = 0x100
 SRAM_START = 0x200000
 VDP_CONTROL_PORT = 0xC00004
@@ -27,9 +27,12 @@ def _word(value):
 def _program():
     # The VDP status register's bit 3 is set during vertical blank. Waiting
     # for it to rise and then clear prevents multiple counter updates in one
-    # VBlank interval. The core produces its ordinary RGB565 frame each run;
-    # this fixture only supplies a stable persistence oracle.
+    # VBlank interval. Enable display first: Genesis Plus GX correctly holds
+    # VBlank asserted while display is disabled. The core produces its
+    # ordinary RGB565 frame each run; this fixture only supplies a stable
+    # persistence oracle.
     code = bytearray()
+    code += b"\x33\xfc\x81\x44" + _long(VDP_CONTROL_PORT)          # VDP R1: display on
     code += b"\x0c\x39" + _word(SRAM_MARKER) + _long(SRAM_START)  # cmpi.b
     code += b"\x67\x10"                                           # beq initialized
     code += b"\x13\xfc" + _word(SRAM_MARKER) + _long(SRAM_START)  # move.b #$52
