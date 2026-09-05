@@ -687,6 +687,11 @@ class Snes9xRomTest(unittest.TestCase):
         self.assertEqual(image[:2], bytes((0x52, 480 & 0xff)))
         self.assertEqual(set(image[2:]), {snes9x_rom.SRAM_FILL})
 
+    def test_reported_frame_oracle(self):
+        self.assertEqual(
+            snes9x_rom.expected_sram_image_for_reported_frames([241, 181, 61]),
+            snes9x_rom.expected_sram_image([240, 180, 60]))
+
     def test_harness_constants_match_generator(self):
         self.assertEqual(SNES9X_CORE_ID, "snes9x")
         self.assertEqual(SNES9X_REVISION, "1.63")

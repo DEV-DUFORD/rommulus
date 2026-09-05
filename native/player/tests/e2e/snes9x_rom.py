@@ -6,7 +6,7 @@ import hashlib
 ROM_SIZE = 0x8000
 HEADER_OFFSET = 0x7FC0
 SRAM_SIZE = 0x800
-SRAM_FILL = 0x60
+SRAM_FILL = 0x00
 SRAM_MARKER = 0x52
 SRAM_MARKER_OFFSET = 0
 SRAM_COUNTER_OFFSET = 1
@@ -86,6 +86,16 @@ def expected_sram_image(run_frames):
     image[SRAM_MARKER_OFFSET] = SRAM_MARKER
     image[SRAM_COUNTER_OFFSET] = sum(run_frames) & 0xff
     return bytes(image)
+
+
+def expected_sram_image_for_reported_frames(run_frames):
+    """Map player reports to completed Snes9x VBlank NMI iterations."""
+    if isinstance(run_frames, int):
+        run_frames = (run_frames,)
+    if any(not isinstance(frames, int) or isinstance(frames, bool) or frames < 1
+           for frames in run_frames):
+        raise ValueError("each reported frame count must be an int >= 1")
+    return expected_sram_image(tuple(frames - 1 for frames in run_frames))
 
 
 def _validate(rom):

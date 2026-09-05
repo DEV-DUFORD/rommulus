@@ -2283,7 +2283,7 @@ class Runner:
         if not self.check(name, limit <= reported <= limit + 2,
                           "frames %r outside [%d, %d]" % (reported, limit, limit + 2)):
             return False
-        image = snes9x_rom.expected_sram_image(frames)
+        image = snes9x_rom.expected_sram_image_for_reported_frames(frames)
         self.check(name, result["saveSize"] == SNES9X_SRAM_SIZE,
                    "saveSize %r != %d" % (result["saveSize"], SNES9X_SRAM_SIZE))
         self.check(name, result["saveHash"] == hashlib.sha256(image).hexdigest(),
