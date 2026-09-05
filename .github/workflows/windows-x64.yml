@@ -1143,11 +1143,11 @@ jobs:
       - name: Run ANGLE GLES 3.0 graphics spike under sanitized PATH
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
           $stage = Join-Path $env:GITHUB_WORKSPACE "dist/angle-gles3-spike"
           $bin = Join-Path $stage "bin"
           $env:PATH = "$bin;$env:SystemRoot\System32"
-          $output = & (Join-Path $bin "angle_gles3_smoke.exe") 2>&1
+          $output = @(& (Join-Path $bin "angle_gles3_smoke.exe") 2>&1)
           $exitCode = $LASTEXITCODE
           $output | Tee-Object -FilePath (Join-Path $stage "angle-runtime.txt")
           if ($exitCode -ne 0) {

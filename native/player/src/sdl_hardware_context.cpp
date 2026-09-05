@@ -551,8 +551,7 @@ void SdlHardwareContext::uploadOverlayTextureLocked() {
 }
 
 bool SdlHardwareContext::createScanlineProgramLocked() {
-    static constexpr const char* kEsVertexShader = R"(
-        #version 300 es
+    static constexpr const char* kEsVertexShader = R"(#version 300 es
         const vec2 positions[3] = vec2[3](
             vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
         );
@@ -560,8 +559,7 @@ bool SdlHardwareContext::createScanlineProgramLocked() {
             gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
         }
     )";
-    static constexpr const char* kEsFragmentShader = R"(
-        #version 300 es
+    static constexpr const char* kEsFragmentShader = R"(#version 300 es
         precision mediump float;
         uniform float rowHeight;
         out vec4 color;

@@ -92,16 +92,20 @@ int main() {
         SDL_Quit();
         return 1;
     }
+    std::printf(
+        "ANGLE_GLES3_CONTEXT profile=ES version=%d.%d vendor=\"%s\" "
+        "renderer=\"%s\" gl_version=\"%s\" glsl=\"%s\"\n",
+        major, minor, vendor ? vendor : "(null)", renderer ? renderer : "(null)",
+        version ? version : "(null)", shading ? shading : "(null)");
+    std::fflush(stdout);
 
-    static constexpr const char* kVertexShader = R"(
-        #version 300 es
+    static constexpr const char* kVertexShader = R"(#version 300 es
         const vec2 positions[3] = vec2[3](
             vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
         );
         void main() { gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0); }
     )";
-    static constexpr const char* kFragmentShader = R"(
-        #version 300 es
+    static constexpr const char* kFragmentShader = R"(#version 300 es
         precision highp float;
         out vec4 color;
         void main() { color = vec4(0.25, 0.5, 0.75, 1.0); }
