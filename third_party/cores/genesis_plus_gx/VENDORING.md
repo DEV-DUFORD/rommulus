@@ -147,6 +147,12 @@ interacts with GPLv3 section 10, and the 2026-07-31 Phase 7 entry in
 - Same version-script (`libretro/link.T`) and vendored-code warning
   exemption convention as `sameboy_core`: not held to this project's own
   `-Wall -Wextra`.
+- The seven header-only libchdr helpers in `coretypes.h` and `cdrom.h` use
+  explicit `static inline` rather than `static INLINE`. Genesis Plus GX
+  defines `INLINE` as `static inline` for Musashi, while libchdr normally
+  redefines it to plain `inline` inside its own translation units. The
+  explicit spelling preserves internal linkage in both contexts and avoids
+  MinGW's invalid `static static inline` expansion without changing behavior.
 - `libretro/libretro.c` and `libretro/link.T` carry a small ROMM integration
   extension (`romm_get_save_memory_*` / `romm_apply_save_memory` /
   `romm_restore_save_memory`). It exposes Sega CD's non-contiguous 8 KiB
