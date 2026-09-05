@@ -2133,7 +2133,7 @@ class Runner:
                    "frames %r outside [%d, %d]" % (frames, limit, limit + 2))
         if not (limit <= frames <= limit + 2):
             return False
-        want_image = mgba_rom.expected_sram_image(run_frames)
+        want_image = mgba_rom.expected_sram_image_for_reported_frames(run_frames)
         self.check(name, result["saveSize"] == MGBA_SRAM_SIZE,
                    "saveSize %r != %d" % (result["saveSize"], MGBA_SRAM_SIZE))
         self.check(name, result["saveHash"] == hashlib.sha256(want_image).hexdigest(),

@@ -655,6 +655,11 @@ class MGbaRomTest(unittest.TestCase):
         self.assertEqual(image[:3], bytes((0xff, 0x52, 480 & 0xff)))
         self.assertEqual(set(image[3:]), {0xff})
 
+    def test_reported_frame_oracle(self):
+        self.assertEqual(
+            mgba_rom.expected_sram_image_for_reported_frames([241, 181, 61]),
+            mgba_rom.expected_sram_image([240, 180, 60]))
+
 
 class BuildRequestTest(unittest.TestCase):
     def test_has_exactly_the_strict_v2_key_set(self):
