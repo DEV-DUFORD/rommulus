@@ -20,6 +20,7 @@ import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
 import player_e2e  # noqa: E402
 import prosystem_rom  # noqa: E402
+import wswan_rom  # noqa: E402
 from player_e2e import (  # noqa: E402
     build_request, expected_save_hash, validate_result_schema,
     sram_byte_after_frames,
@@ -28,6 +29,7 @@ from player_e2e import (  # noqa: E402
     GAMBATTE_CORE_ID, GAMBATTE_REVISION, GAMBATTE_SRAM_SIZE,
     FCEUMM_CORE_ID, FCEUMM_REVISION, FCEUMM_SRAM_SIZE,
     PROSYSTEM_CORE_ID, PROSYSTEM_REVISION,
+    WSWAN_CORE_ID, WSWAN_REVISION, WSWAN_SRAM_SIZE,
 )
 
 # Pinned hash of the deterministic ROM the generator must produce. The
@@ -48,6 +50,13 @@ PINNED_FCEUMM_ROM_SHA256 = (
 # produce (no header — ProSystem's CARTRIDGE_TYPE_NORMAL path).
 PINNED_PROSYSTEM_ROM_SHA256 = (
     "1d6b8f17eb536b015f7f42fa6897aa765cfe4702b0681029bf625c9b868c8afc"
+)
+
+# Pinned hash of the deterministic 512 KiB raw .ws ROM wswan_rom.py must
+# produce (no header — mednafen_wswan's plain cartridge path; cart header
+# code 0x01 at the image tail selects 8 KiB battery SRAM).
+PINNED_WSWAN_ROM_SHA256 = (
+    "6a0857a6f787ac650e3b3be4191a2db59fc6c06ff7ad353188149945a8074d38"
 )
 
 
@@ -341,6 +350,154 @@ class ProsystemRomTest(unittest.TestCase):
                          "363b6dfbd3e240762e022c2b4897b4fe55722be3")
 
 
+class WswanRomTest(unittest.TestCase):
+    def test_size_and_determinism(self):
+        rom1 = wswan_rom.generate_rom()
+        rom2 = wswan_rom.generate_rom()
+        self.assertEqual(len(rom1), wswan_rom.ROM_SIZE)
+        self.assertEqual(len(rom1), 0x80000)  # exactly 512 KiB raw .ws/.wsc
+        self.assertEqual(rom1, rom2)          # fully deterministic
+
+    def test_pinned_sha256(self):
+        self.assertEqual(wswan_rom.rom_sha256(), PINNED_WSWAN_ROM_SHA256)
+
+    def test_cart_header_selects_8k_sram(self):
+        rom = wswan_rom.generate_rom()
+        # The cart header is the last 10 bytes of the image; header[5] must
+        # be 0x01 (8 KiB battery SRAM). The reset stub occupies only
+        # 0x7FFF0..0x7FFF4, so this byte sits in free fill before the header
+        # start (0x7FFF6) and is set explicitly by generate_rom().
+        self.assertEqual(rom[wswan_rom.SRAM_CODE_OFFSET], 0x01)
+        # The WonderWitch ELISA signature and the Detective Conan special
+        # case must not trigger (both would reclassify/patch the cart).
+        self.assertNotEqual(rom[wswan_rom.BANK_F_BASE:wswan_rom.BANK_F_BASE + 5],
+                            b"ELISA")
+        header = rom[wswan_rom.ROM_SIZE - 10:]
+        self.assertFalse((header[8] | (header[9] << 8)) == 0x8DE1
+                         and header[0] == 0x01 and header[2] == 0x27)
+
+    def test_reset_vector_stub(self):
+        rom = wswan_rom.generate_rom()
+        # The V30's first fetch after reset is physical 0xFFFF0 (PS=FFFF,
+        # PC=0), which for this cart is image offset 0x7FFF0: the stub.
+        self.assertEqual(rom[wswan_rom.STUB_OFFSET:
+                              wswan_rom.STUB_OFFSET + len(wswan_rom.STUB)],
+                          wswan_rom.STUB)
+        # Main code at image 0x70100 (physical 0xF0100), loop right after.
+        self.assertEqual(rom[wswan_rom.MAIN_OFFSET:
+                              wswan_rom.MAIN_OFFSET + len(wswan_rom.MAIN_CODE)],
+                          wswan_rom.MAIN_CODE)
+        self.assertEqual(wswan_rom.LOOP_OFFSET,
+                         wswan_rom.MAIN_OFFSET + len(wswan_rom.MAIN_CODE))
+        # Far-jump target (CS<<4)|IP must be the main code's physical address.
+        ip = wswan_rom.STUB[1] | (wswan_rom.STUB[2] << 8)
+        cs = wswan_rom.STUB[3] | (wswan_rom.STUB[4] << 8)
+        self.assertEqual(((cs << 4) + ip) & 0xFFFFF,
+                          0xF0000 + (wswan_rom.MAIN_OFFSET - wswan_rom.BANK_F_BASE))
+
+    def test_loop_placement_and_back_edge(self):
+        rom = wswan_rom.generate_rom()
+        self.assertEqual(rom[wswan_rom.LOOP_OFFSET:
+                              wswan_rom.LOOP_OFFSET + len(wswan_rom.LOOP)],
+                          wswan_rom.LOOP)
+        # EB rel8 is relative to the byte after the operand; the 11-byte loop
+        # must jump exactly back to its start.
+        rel = wswan_rom.LOOP[10]
+        if rel > 127:
+            rel -= 256
+        pc_after_operand = (wswan_rom.LOOP_OFFSET + len(wswan_rom.LOOP)) \
+            - wswan_rom.BANK_F_BASE
+        self.assertEqual((pc_after_operand + rel) & 0xFFFF,
+                         wswan_rom.LOOP_OFFSET - wswan_rom.BANK_F_BASE)
+        # ModRM encodings must be the register forms: FE/4 = inc [si],
+        # 8A/4 = mov al,[si], 88/7 = mov [bx],al (rm=111; rm=011 would be
+        # [BP+DI] with the SS base, and mod=00/rm=110 a [disp16] form).
+        self.assertEqual(wswan_rom.LOOP[1], 0x04)
+        self.assertEqual(wswan_rom.LOOP[6], 0x04)
+        self.assertEqual(wswan_rom.LOOP[8], 0x07)
+
+    def test_provenance_marker_and_fill(self):
+        rom = wswan_rom.generate_rom()
+        self.assertEqual(rom[wswan_rom.PROVENANCE_OFFSET:
+                              wswan_rom.PROVENANCE_OFFSET + len(wswan_rom.PROVENANCE)],
+                          wswan_rom.PROVENANCE)
+        # Everything outside stub, main code, loop, provenance, and the one
+        # header byte is 0x00 fill — no third-party bytes anywhere.
+        covered = bytearray(wswan_rom.ROM_SIZE)
+        for off, blob in ((wswan_rom.STUB_OFFSET, wswan_rom.STUB),
+                          (wswan_rom.MAIN_OFFSET, wswan_rom.MAIN_CODE),
+                          (wswan_rom.LOOP_OFFSET, wswan_rom.LOOP),
+                          (wswan_rom.PROVENANCE_OFFSET, wswan_rom.PROVENANCE)):
+            covered[off:off + len(blob)] = b"\x01" * len(blob)
+        covered[wswan_rom.SRAM_CODE_OFFSET] = 1
+        for i in range(wswan_rom.ROM_SIZE):
+            if not covered[i]:
+                self.assertEqual(rom[i], 0x00,
+                                 "non-fill byte at offset 0x%05X" % i)
+
+    def test_frame_budget_derivation(self):
+        # The oracle's load-bearing arithmetic (wswan_rom.py facts 5+6+7),
+        # checked with the exact chunk-aware simulation of the core's ICount
+        # semantics: first frame = 145 lines x 256 runs exactly 3093
+        # increments; every steady frame (159 lines x 256) runs exactly 3392;
+        # every run ends at ICount -1 with the final increment unmirrored.
+        self.assertEqual(wswan_rom.STEADY_FRAME_CYCLES, 159 * 256)
+        self.assertEqual(wswan_rom.FIRST_FRAME_CYCLES, 145 * 256)
+        self.assertEqual(wswan_rom.STEADY_FRAME_CYCLES % wswan_rom.LOOP_COST, 0)
+        self.assertEqual(wswan_rom.ITERATIONS_PER_STEADY_FRAME, 3392)
+        self.assertEqual(wswan_rom.FIRST_RUN_ITERATIONS, 3093)
+        for frames in (1, 2, 3):
+            incs, ic, synced = wswan_rom._simulate_poweron(frames)
+            self.assertEqual(incs, wswan_rom.run_iterations(frames))
+            self.assertEqual(ic, -1)        # fixed point
+            self.assertFalse(synced)        # final increment unmirrored
+
+    def test_run_iterations_formula(self):
+        # iterations(F) = 3093 + 3392*(F-1) = 3392*F - 299 for F >= 1.
+        self.assertEqual(wswan_rom.run_iterations(1), 3093)
+        self.assertEqual(wswan_rom.run_iterations(60), 3392 * 60 - 299)
+        self.assertEqual(wswan_rom.run_iterations(240), 3392 * 240 - 299)
+        with self.assertRaises(ValueError):
+            wswan_rom.run_iterations(0)
+
+    def test_expected_sram_image_fresh_and_chain(self):
+        # Fresh cart: the counter at SRAM[0x100] equals total-increments mod
+        # 256 and its mirror at SRAM[0] lags by one (every run ends mid-
+        # iteration, after the final inc but before its mirror write); every
+        # other byte is zero.
+        image = wswan_rom.expected_sram_image(240)
+        self.assertEqual(len(image), wswan_rom.SRAM_SIZE)
+        want = (3392 * 240 - 299) % 256
+        self.assertEqual(image[wswan_rom.COUNTER_OFFSET], want)
+        self.assertEqual(image[0], (want - 1) % 256)
+        self.assertEqual(sum(1 for b in image if b), 2)
+        # int and single-element list are equivalent.
+        self.assertEqual(wswan_rom.expected_sram_image(240),
+                         wswan_rom.expected_sram_image([240]))
+        # Single-frame run: 3093 increments, mirror one behind.
+        single = wswan_rom.expected_sram_image(1)
+        self.assertEqual(single[wswan_rom.COUNTER_OFFSET], 3093 % 256)
+        self.assertEqual(single[0], 3092 % 256)
+        # Chain semantics: the counter lives IN SRAM, so restored saves keep
+        # counting and the chain total differs from any single run (what
+        # proves the restore in the E2E).
+        chain = wswan_rom.expected_sram_image([240, 180])
+        total = (wswan_rom.run_iterations(240)
+                 + wswan_rom.run_iterations(180))
+        self.assertEqual(chain[wswan_rom.COUNTER_OFFSET], total % 256)
+        self.assertEqual(chain[0], (total - 1) % 256)
+        self.assertNotEqual(chain[0],
+                            wswan_rom.expected_sram_image(180)[0])
+        self.assertNotEqual(chain[0],
+                            wswan_rom.expected_sram_image(240)[0])
+
+    def test_harness_constants_match_generator(self):
+        self.assertEqual(WSWAN_CORE_ID, "mednafen_wswan")
+        self.assertEqual(WSWAN_REVISION,
+                         "4b01295838ea89e3f1355bbe4cb5cf98aa6108cd")
+        self.assertEqual(WSWAN_SRAM_SIZE, wswan_rom.SRAM_SIZE)
+
+
 class BuildRequestTest(unittest.TestCase):
     def test_has_exactly_the_strict_v2_key_set(self):
         req = build_request("s-1", "/c/core.dll", "/d/system", "/d/save.srm",
@@ -424,6 +581,22 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreBuildRevision"], PROSYSTEM_REVISION)
         self.assertEqual(req["contentPath"],
                          "/cache état/rommulus-e2e-prosystem.a78")
+        self.assertIsNone(req["expectedSaveSize"])
+        self.assertNotIn("\\", req["contentPath"])
+
+    def test_wswan_candidate_request(self):
+        # The mednafen_wswan candidate launch: real contentPath (the 512 KiB
+        # .ws ROM staged under the trusted cache root) and the pinned
+        # candidate revision.
+        req = build_request("s-ws", "/c/mednafen_wswan_core.dll", "/d/system",
+                            "/d/save.srm", "/st/cand.srm", "/st/result.json",
+                            core_build_revision=WSWAN_REVISION,
+                            core_id=WSWAN_CORE_ID,
+                            content_path="/cache état/rommulus-e2e-wswan.ws")
+        self.assertEqual(req["coreId"], WSWAN_CORE_ID)
+        self.assertEqual(req["coreBuildRevision"], WSWAN_REVISION)
+        self.assertEqual(req["contentPath"],
+                         "/cache état/rommulus-e2e-wswan.ws")
         self.assertIsNone(req["expectedSaveSize"])
         self.assertNotIn("\\", req["contentPath"])
 

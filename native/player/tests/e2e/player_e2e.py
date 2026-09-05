@@ -107,6 +107,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
 import prosystem_rom  # noqa: E402
+import wswan_rom  # noqa: E402
 
 IS_WINDOWS = os.name == "nt"
 
@@ -170,6 +171,31 @@ PROSYSTEM_ROM_NAME = "rommulus-e2e-prosystem.a78"
 # other candidates (reported frame count lands in [limit, limit + 2]).
 PROSYSTEM_RUN_FRAMES = 240     # ~4.0 s of emulated time per run
 PROSYSTEM_KILL_VICTIM_FRAMES = 3600  # ~60 s budget: alive when force-killed
+
+# Candidate mednafen_wswan core (NOT advertised in any manifest — staged
+# under cores-candidate/ and exercised here as a qualification gate only).
+WSWAN_CORE_ID = "mednafen_wswan"
+# The pinned vendored-tree commit (third_party/cores/mednafen_wswan,
+# libretro/beetle-wswan-libretro master HEAD) — the coreBuildRevision the
+# allowed-core entry and every mednafen_wswan launch request must carry.
+WSWAN_REVISION = "4b01295838ea89e3f1355bbe4cb5cf98aa6108cd"
+WSWAN_SRAM_SIZE = wswan_rom.SRAM_SIZE   # 8192 bytes of battery SRAM (cart header code 0x01)
+WSWAN_ROM_NAME = "rommulus-e2e-wswan.ws"
+
+# Presented-frame bounds for the mednafen_wswan qualification runs (same
+# semantics as the other candidates: reported frame count lands in
+# [limit, limit + 2]). This core exposes a real 8 KiB battery region, so —
+# like Gambatte/FCEUmm — the gate asserts the deterministic SRAM oracle
+# across the adoption chain: each power-on of F reported frames executes
+# exactly wswan_rom.run_iterations(F) = 3392*F - 299 counter iterations
+# (first frame is a 145-line/37120-cycle warm-up after GfxReset's wsLine=0;
+# every later frame is 159 lines x 256 cycles = 40704, and the loop costs
+ # exactly 12 core-model cycles); the counter LIVES IN battery SRAM at
+ # SRAM[0x100] (mirrored to SRAM[0]), so restored saves keep counting.
+WSWAN_RUN1_FRAMES = 240     # ~4.0 s of emulated time
+WSWAN_RUN2_FRAMES = 180     # ~3.0 s (restored counters keep counting)
+WSWAN_RUN3_FRAMES = 60      # ~1.0 s (repeated load of the same save)
+WSWAN_KILL_VICTIM_FRAMES = 3600  # ~60 s budget: alive when force-killed
 
 
 def sram_byte_after_frames(frames):
@@ -418,7 +444,8 @@ class Runner:
     def __init__(self, stage_dir, workdir, player_exe, core_dll, timeout_sec,
                  video_driver="offscreen", audio_driver="dummy",
                  render_driver="software", candidate_core=None,
-                 fceumm_candidate_core=None, prosystem_candidate_core=None):
+                 fceumm_candidate_core=None, prosystem_candidate_core=None,
+                 wswan_candidate_core=None):
         self.stage_dir = os.path.abspath(stage_dir)
         self.workdir = os.path.abspath(workdir)
         self.player_exe = os.path.abspath(player_exe)
@@ -426,9 +453,11 @@ class Runner:
         self.candidate_core = (os.path.abspath(candidate_core)
                                if candidate_core else None)
         self.fceumm_candidate_core = (os.path.abspath(fceumm_candidate_core)
-                                      if fceumm_candidate_core else None)
+                                       if fceumm_candidate_core else None)
         self.prosystem_candidate_core = (os.path.abspath(prosystem_candidate_core)
-                                         if prosystem_candidate_core else None)
+                                          if prosystem_candidate_core else None)
+        self.wswan_candidate_core = (os.path.abspath(wswan_candidate_core)
+                                      if wswan_candidate_core else None)
         self.timeout_sec = timeout_sec
         self.video_driver = video_driver
         self.audio_driver = audio_driver
@@ -482,6 +511,13 @@ class Runner:
             shutil.copyfile(self.prosystem_candidate_core,
                             os.path.join(self.core_root, self.prosystem_core_filename()))
             self.generate_prosystem_rom()
+        if self.wswan_candidate_core:
+            # The candidate mednafen_wswan core is staged the same way
+            # (canonical name under the trusted core root) and its generated
+            # 512 KiB .ws ROM into the trusted CACHE root.
+            shutil.copyfile(self.wswan_candidate_core,
+                            os.path.join(self.core_root, self.wswan_core_filename()))
+            self.generate_wswan_rom()
 
     def core_filename(self):
         return "test_core.dll" if IS_WINDOWS else "libtest_core.so"
@@ -504,6 +540,13 @@ class Runner:
         if sys.platform == "darwin":
             return "libprosystem_core.dylib"
         return "libprosystem_core.so"
+
+    def wswan_core_filename(self):
+        if IS_WINDOWS:
+            return "mednafen_wswan_core.dll"
+        if sys.platform == "darwin":
+            return "libmednafen_wswan_core.dylib"
+        return "libmednafen_wswan_core.so"
 
     def generate_rom(self):
         """Generate the deterministic 32 KiB ROM into the cache root."""
@@ -529,6 +572,14 @@ class Runner:
             f.write(rom)
         return rom_path
 
+    def generate_wswan_rom(self):
+        """Generate the deterministic 512 KiB .ws ROM into the cache root."""
+        rom_path = os.path.join(self.cache_root, WSWAN_ROM_NAME)
+        rom = wswan_rom.generate_rom()
+        with open(rom_path, "wb") as f:
+            f.write(rom)
+        return rom_path
+
     def gambatte_core_path(self):
         return os.path.join(self.core_root, self.candidate_core_filename())
 
@@ -537,6 +588,9 @@ class Runner:
 
     def prosystem_core_path(self):
         return os.path.join(self.core_root, self.prosystem_core_filename())
+
+    def wswan_core_path(self):
+        return os.path.join(self.core_root, self.wswan_core_filename())
 
     def env_for(self, max_frames=None, player_max_frames=None):
         env = dict(os.environ)
@@ -554,15 +608,15 @@ class Runner:
         env["ROMM_PLAYER_CACHE_ROOT"] = as_posix(self.cache_root)
         env["ROMM_PLAYER_DATA_ROOT"] = as_posix(self.data_root)
         env["ROMM_PLAYER_STATE_ROOT"] = as_posix(self.state_root)
-        # All four cores are allowed: the synthetic test_core (revision pin
+        # All five cores are allowed: the synthetic test_core (revision pin
         # from CoreManifest.kt) and the CANDIDATE gambatte + fceumm +
-        # prosystem cores pinned to their vendored-tree commits. The
-        # candidates appear in NO production manifest — this env entry is the
-        # qualification gate's adoption.
-        env["ROMM_PLAYER_ALLOWED_CORES"] = "%s=%s;%s=%s;%s=%s;%s=%s" % (
+        # prosystem + mednafen_wswan cores pinned to their vendored-tree
+        # commits. The candidates appear in NO production manifest — this env
+        # entry is the qualification gate's adoption.
+        env["ROMM_PLAYER_ALLOWED_CORES"] = ("%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
             CORE_ID, CORE_REVISION, GAMBATTE_CORE_ID, GAMBATTE_REVISION,
             FCEUMM_CORE_ID, FCEUMM_REVISION, PROSYSTEM_CORE_ID,
-            PROSYSTEM_REVISION)
+            PROSYSTEM_REVISION, WSWAN_CORE_ID, WSWAN_REVISION))
         # Headless SDL for the GUI-less runner: offscreen video driver with a
         # real window framebuffer (the software renderer works against it),
         # forced software render backend (no GPU on the runner), dummy audio.
@@ -805,6 +859,77 @@ class Runner:
                        "image (marker 0x52 + frame counter %d + 60-frame "
                        "counter %d over 0x00 fresh fill)"
                        % (counted % 60, counted // 60))
+        return True
+
+    def assert_wswan_result(self, name, result, session_id, limit, run_frames):
+        """mednafen_wswan qualification-run assertions: schema + session +
+        exitKind=completed (player-initiated) + bounded real frames +
+        8192-byte SRAM + the deterministic per-frame counter oracle.
+
+        run_frames is the list of player-reported frame counts for every
+        power-on in this save chain. Unlike Gambatte/FCEUmm, the WonderSwan
+        core's per-power-on overhead is not a fixed dead-frame count: the
+        first frame after every retro_load_game() runs only 145 scanlines
+        (GfxReset leaves wsLine at 0 and the frame ends at line 144) while
+        LCDVtotal = 158 makes every later frame 159 lines, so one power-on
+        of F reported frames executes EXACTLY wswan_rom.run_iterations(F) =
+        3392*F - 299 counter iterations (the 12-cycle loop divides the
+        40704-cycle steady frame; the end-of-frame ICount residue is a fixed
+        point). The ROM's byte counter LIVES IN SRAM (offset 0x100, mirrored
+        to SRAM[0] every loop iteration; every run ends mid-iteration right
+        after its final increment, so SRAM[0] = total-1 mod 256), so restored
+        saves keep counting — an un-restored core would hash like this run
+        alone. The invariants are checked against the
+        player-REPORTED per-run frame counts, so the assertion is
+        frame-stable across frame boundaries: the ROM's SRAM state is an
+        exact function of the presented frames, never of instruction counts
+        or wall-clock timing.
+        """
+        problems = validate_result_schema(result)
+        self.check(name, not problems, "result schema: %s" % "; ".join(problems))
+        if problems:
+            return False
+        self.check(name, result["sessionId"] == session_id,
+                   "sessionId %r != %r" % (result["sessionId"], session_id))
+        self.check(name, result["exitKind"] == "completed",
+                   "exitKind %r — the player's qualification frame bound must "
+                   "exit as a clean player-initiated completed run (the core "
+                   "never requested shutdown)" % result["exitKind"])
+        self.check(name, result["checkpointWritten"] is True,
+                   "checkpointWritten must be true (checkpoint-before-stop)")
+        frames = result["frames"]
+        self.check(name, limit <= frames <= limit + 2,
+                   "frames %r outside the bounded range [%d, %d] for the "
+                   "presented-frame bound (real frames must have been "
+                   "presented, and the bound must be honored)"
+                   % (frames, limit, limit + 2))
+        if not (limit <= frames <= limit + 2):
+            return False
+        want_image = wswan_rom.expected_sram_image(run_frames)
+        want_hash = hashlib.sha256(want_image).hexdigest()
+        self.check(name, result["saveSize"] == WSWAN_SRAM_SIZE,
+                   "saveSize %r != %d (mednafen_wswan must expose 8192 bytes "
+                   "of battery SRAM for cart header code 0x01)"
+                   % (result["saveSize"], WSWAN_SRAM_SIZE))
+        counted = sum(wswan_rom.run_iterations(f) for f in run_frames)
+        self.check(name, result["saveHash"] == want_hash,
+                   "saveHash %s != expected %s — SRAM counter oracle broken "
+                   "(expected %d total iterations over per-run reported "
+                   "frames %s; this run reported %d)"
+                   % (result["saveHash"], want_hash, counted, list(run_frames),
+                      frames))
+        candidate = os.path.join(self.state_root, session_id + ".candidate.srm")
+        if self.check(name, os.path.isfile(candidate),
+                      "candidate save missing on disk"):
+            with open(candidate, "rb") as f:
+                blob = f.read()
+            self.check(name, len(blob) == WSWAN_SRAM_SIZE,
+                       "candidate file is %d bytes (want %d)"
+                       % (len(blob), WSWAN_SRAM_SIZE))
+            self.check(name, blob == want_image,
+                       "candidate file on disk != the deterministic SRAM "
+                       "image (counter %d over 0x00 fresh fill)"
+                       % (counted % 256))
         return True
 
     def scenario_valid_launch_core_shutdown(self):
@@ -1435,6 +1560,152 @@ class Runner:
             return
         self.assert_prosystem_result(name, result, session, PROSYSTEM_RUN_FRAMES)
 
+    # -- mednafen_wswan candidate scenarios (qualification gate) -------------
+
+    def _require_wswan_candidate(self, name):
+        if self.wswan_candidate_core is None:
+            self.fail(name, "candidate mednafen_wswan core not staged — nothing to qualify")
+            return False
+        return True
+
+    def scenario_wswan_valid_launch_completed(self):
+        name = "wswan-valid-launch-completed"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_wswan_candidate(name):
+            return
+        session = "e2e-ws-run1"
+        rc, result = self.launch(
+            name, session,
+            core_id=WSWAN_CORE_ID, core_build_revision=WSWAN_REVISION,
+            core_path=self.wswan_core_path(),
+            content_path=os.path.join(self.cache_root, WSWAN_ROM_NAME),
+            player_max_frames=WSWAN_RUN1_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0); see log" % rc)
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        # Fresh cart: wsSRAM is zero-filled at load, so the counter starts
+        # from 0 and the save chain is just this run's reported count.
+        if not self.assert_wswan_result(
+                name, result, session, WSWAN_RUN1_FRAMES, [result["frames"]]):
+            return
+        self.wswan_chain = [result["frames"]]
+
+    def scenario_wswan_relaunch_persistence(self):
+        name = "wswan-relaunch-persistence"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_wswan_candidate(name):
+            return
+        # Candidate adoption: the desktop supervisor moves the previous
+        # run's candidate into the session's save path; mirror that exactly.
+        prev = os.path.join(self.state_root, "e2e-ws-run1.candidate.srm")
+        session = "e2e-ws-run2"
+        if not self.check(name, os.path.isfile(prev),
+                          "previous candidate missing — run1 failed?"):
+            return
+        save_path = os.path.join(self.data_root, session, "save.srm")
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        shutil.copyfile(prev, save_path)
+
+        rc, result = self.launch(
+            name, session,
+            core_id=WSWAN_CORE_ID, core_build_revision=WSWAN_REVISION,
+            core_path=self.wswan_core_path(),
+            content_path=os.path.join(self.cache_root, WSWAN_ROM_NAME),
+            player_max_frames=WSWAN_RUN2_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0); see log" % rc)
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        # Restore-on-launch must have applied run1's SRAM: the counter lives
+        # in battery SRAM at SRAM[0x100] (mirrored to SRAM[0]), so the
+        # restored save keeps counting from where run1 left off and the save
+        # chain is [run1, run2] of reported frames. A fresh (unrestored) core
+        # would hash like run2 alone — the difference is what proves the
+        # restore.
+        chain = list(getattr(self, "wswan_chain", [])) + [result["frames"]]
+        if not self.assert_wswan_result(name, result, session,
+                                        WSWAN_RUN2_FRAMES, chain):
+            return
+        self.wswan_chain = chain
+
+    def scenario_wswan_repeated_load(self):
+        name = "wswan-repeated-load"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_wswan_candidate(name):
+            return
+        # Third load of the SAME ROM + save chain (candidate adopted again):
+        # the deterministic invariants must hold on every repeated load.
+        prev = os.path.join(self.state_root, "e2e-ws-run2.candidate.srm")
+        session = "e2e-ws-run3"
+        if not self.check(name, os.path.isfile(prev),
+                          "previous candidate missing — run2 failed?"):
+            return
+        save_path = os.path.join(self.data_root, session, "save.srm")
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        shutil.copyfile(prev, save_path)
+
+        rc, result = self.launch(
+            name, session,
+            core_id=WSWAN_CORE_ID, core_build_revision=WSWAN_REVISION,
+            core_path=self.wswan_core_path(),
+            content_path=os.path.join(self.cache_root, WSWAN_ROM_NAME),
+            player_max_frames=WSWAN_RUN3_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0); see log" % rc)
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        chain = list(getattr(self, "wswan_chain", [])) + [result["frames"]]
+        if not self.assert_wswan_result(name, result, session,
+                                        WSWAN_RUN3_FRAMES, chain):
+            return
+        self.wswan_chain = chain
+
+    def scenario_wswan_force_kill_lock_recovery(self):
+        name = "wswan-force-kill-lock-recovery"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_wswan_candidate(name):
+            return
+        session = "e2e-ws-kill"
+        # Victim: large presented-frame budget so it is definitely mid-
+        # session when the exact pid is force-killed (no cleanup code runs;
+        # the kernel must release the byte-range lock when its handles
+        # close). The kill happens well before any autosave, so the
+        # relaunch starts from a FRESH cart.
+        core_path = self.wswan_core_path()
+        content_path = os.path.join(self.cache_root, WSWAN_ROM_NAME)
+        request_path, result_path, _ = self._write_request(
+            name + "-victim", session, core_path, WSWAN_REVISION,
+            core_id=WSWAN_CORE_ID, content_path=content_path)
+        victim = PlayerProcess(
+            self.player_exe, request_path,
+            self.env_for(player_max_frames=WSWAN_KILL_VICTIM_FRAMES),
+            os.path.join(self.logs_dir, name + "-victim.log"))
+        victim.start()
+        pid = victim.pid()
+        self.spawned_pids.append(pid)
+        time.sleep(5)  # settle: lock acquired, ROM running past its init
+        if not self.check(name, victim.alive(),
+                          "victim exited before the force-kill"):
+            return
+        victim.terminate()
+        if not self.check(name, not victim.alive(),
+                          "pid %d still alive after force-kill" % pid):
+            return
+        # Immediate relaunch of the SAME session: succeeds only if the lock
+        # was released when the victim died.
+        rc, result = self.launch(
+            name + "-relaunch", session,
+            core_id=WSWAN_CORE_ID, core_build_revision=WSWAN_REVISION,
+            core_path=core_path, content_path=content_path,
+            player_max_frames=WSWAN_RUN3_FRAMES)
+        self.check(name, rc == 0,
+                   "relaunch exit code %r (want 0) — lock not released?" % rc)
+        if not self.check(name, result is not None,
+                          "relaunch wrote no result JSON"):
+            return
+        # Fresh cart (the victim never checkpointed): the save chain is just
+        # the relaunch's own reported frame count.
+        self.assert_wswan_result(name, result, session,
+                                 WSWAN_RUN3_FRAMES, [result["frames"]])
+
     def scenario_negative_revision_mismatch(self):
         name = "negative-revision-mismatch"
         self.scenarios.append({"name": name, "passed": True})
@@ -1512,10 +1783,14 @@ class Runner:
                      self.scenario_fceumm_relaunch_persistence,
                      self.scenario_fceumm_repeated_load,
                      self.scenario_fceumm_force_kill_lock_recovery,
-                     self.scenario_prosystem_valid_launch_completed,
-                     self.scenario_prosystem_repeated_load,
-                     self.scenario_prosystem_force_kill_lock_recovery,
-                     self.scenario_negative_revision_mismatch,
+                      self.scenario_prosystem_valid_launch_completed,
+                      self.scenario_prosystem_repeated_load,
+                      self.scenario_prosystem_force_kill_lock_recovery,
+                      self.scenario_wswan_valid_launch_completed,
+                      self.scenario_wswan_relaunch_persistence,
+                      self.scenario_wswan_repeated_load,
+                      self.scenario_wswan_force_kill_lock_recovery,
+                      self.scenario_negative_revision_mismatch,
                    self.scenario_negative_core_outside_root,
                    self.scenario_no_orphans_tree_deletable):
             fn()
@@ -1589,11 +1864,12 @@ def verify_artifact(stage_dir):
 
 def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                     explicit_candidate=None, explicit_fceumm_candidate=None,
-                    explicit_prosystem_candidate=None):
+                    explicit_prosystem_candidate=None,
+                    explicit_wswan_candidate=None):
     """(player, test_core, gambatte candidate, fceumm candidate, prosystem
-    candidate) — a candidate is None when the stage carries no
-    cores-candidate/ build for it (the harness then fails that core's
-    scenarios: the qualification gate must not silently shrink)."""
+    candidate, mednafen_wswan candidate) — a candidate is None when the stage
+    carries no cores-candidate/ build for it (the harness then fails that
+    core's scenarios: the qualification gate must not silently shrink)."""
     if IS_WINDOWS:
         player = explicit_player or os.path.join(stage_dir, "bin", "rommulus-player.exe")
         core = explicit_core or os.path.join(stage_dir, "cores", "test_core.dll")
@@ -1603,6 +1879,8 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
             stage_dir, "cores-candidate", "fceumm_core.dll")
         prosystem_candidate = explicit_prosystem_candidate or os.path.join(
             stage_dir, "cores-candidate", "prosystem_core.dll")
+        wswan_candidate = explicit_wswan_candidate or os.path.join(
+            stage_dir, "cores-candidate", "mednafen_wswan_core.dll")
     else:
         player, core = explicit_player, explicit_core
         if not player:
@@ -1654,13 +1932,26 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                 if os.path.isfile(cand):
                     prosystem_candidate = cand
                     break
+        wswan_candidate = explicit_wswan_candidate
+        if not wswan_candidate:
+            for cand in (os.path.join(stage_dir, "cores-candidate", "libmednafen_wswan_core.so"),
+                          os.path.join(stage_dir, "cores-candidate", "mednafen_wswan_core.dll"),
+                          # POSIX player build trees emit the core at the
+                          # build-tree root (CMAKE_LIBRARY_OUTPUT_DIRECTORY).
+                          os.path.join(stage_dir, "libmednafen_wswan_core.so"),
+                          os.path.join(stage_dir, "libmednafen_wswan_core.dylib")):
+                if os.path.isfile(cand):
+                    wswan_candidate = cand
+                    break
     if candidate is not None and not os.path.isfile(candidate):
         candidate = None
     if fceumm_candidate is not None and not os.path.isfile(fceumm_candidate):
         fceumm_candidate = None
     if prosystem_candidate is not None and not os.path.isfile(prosystem_candidate):
         prosystem_candidate = None
-    return player, core, candidate, fceumm_candidate, prosystem_candidate
+    if wswan_candidate is not None and not os.path.isfile(wswan_candidate):
+        wswan_candidate = None
+    return player, core, candidate, fceumm_candidate, prosystem_candidate, wswan_candidate
 
 
 def main(argv=None):
@@ -1678,6 +1969,9 @@ def main(argv=None):
     ap.add_argument("--prosystem-core",
                     help="explicit candidate ProSystem core path "
                          "(default: cores-candidate/ in the stage dir)")
+    ap.add_argument("--wswan-core",
+                    help="explicit candidate mednafen_wswan core path "
+                         "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--verify-artifact", metavar="DIR",
                     help="verify DIR against its import-audit.txt and exit")
     ap.add_argument("--timeout-sec", type=int, default=90,
@@ -1692,10 +1986,11 @@ def main(argv=None):
     if not args.stage or not args.workdir:
         ap.error("--stage and --workdir are required (or use --verify-artifact)")
 
-    player, core, candidate, fceumm_candidate, prosystem_candidate = \
-        discover_player(args.stage, args.player, args.core,
-                        args.candidate_core, args.fceumm_core,
-                        args.prosystem_core)
+    player, core, candidate, fceumm_candidate, prosystem_candidate, \
+        wswan_candidate = discover_player(
+            args.stage, args.player, args.core,
+            args.candidate_core, args.fceumm_core,
+            args.prosystem_core, args.wswan_core)
     for label, path in (("player", player), ("test_core", core)):
         if not path or not os.path.isfile(path):
             print("FAIL: %s not found at %r" % (label, path), file=sys.stderr)
@@ -1720,11 +2015,20 @@ def main(argv=None):
         return 2
     if prosystem_candidate is None:
         # The ProSystem qualification scenarios cannot run without the
-        # candidate core; fail loudly (environment error) rather than silently
-        # shrinking the gate.
+        # candidate core; fail loudly (environment error) rather than
+        # silently shrinking the gate.
         print("FAIL: candidate ProSystem core not found in %r (expected "
               "cores-candidate/prosystem_core.dll on Windows or "
               "libprosystem_core.so/.dylib on POSIX; pass --prosystem-core)"
+              % args.stage, file=sys.stderr)
+        return 2
+    if wswan_candidate is None:
+        # The mednafen_wswan qualification scenarios cannot run without the
+        # candidate core; fail loudly (environment error) rather than
+        # silently shrinking the gate.
+        print("FAIL: candidate mednafen_wswan core not found in %r (expected "
+              "cores-candidate/mednafen_wswan_core.dll on Windows or "
+              "libmednafen_wswan_core.so/.dylib on POSIX; pass --wswan-core)"
               % args.stage, file=sys.stderr)
         return 2
 
@@ -1733,12 +2037,14 @@ def main(argv=None):
                     args.video_driver, args.audio_driver, args.render_driver,
                     candidate_core=candidate,
                     fceumm_candidate_core=fceumm_candidate,
-                    prosystem_candidate_core=prosystem_candidate)
+                    prosystem_candidate_core=prosystem_candidate,
+                    wswan_candidate_core=wswan_candidate)
     print("player:   %s" % player)
     print("core:     %s" % core)
     print("candidate: %s" % candidate)
     print("fceumm candidate: %s" % fceumm_candidate)
     print("prosystem candidate: %s" % prosystem_candidate)
+    print("wswan candidate: %s" % wswan_candidate)
     print("tree:     %s" % runner.base)
     return runner.run()
 

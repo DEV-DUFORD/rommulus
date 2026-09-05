@@ -5,28 +5,18 @@
 # Pure C target; no -fexceptions needed.
 # ---------------------------------------------------------------------------
 
+# Compiled source list: the shared fragment cmake/cores/mednafen_wswan-
+# sources.cmake — the single source of truth consumed by the Android, Linux,
+# and Windows candidate fragments so no platform can drift. 16 sources
+# exactly (pure C; see VENDORING.md). MEDNAFEN_WSWAN_DIR is set in
+# native/player/CMakeLists.txt before this fragment is included.
+include(${CMAKE_CURRENT_LIST_DIR}/mednafen_wswan-sources.cmake)
+
 add_library(mednafen_wswan_core SHARED
-    # libretro/ — main entry point
-    ${MEDNAFEN_WSWAN_DIR}/libretro.c
-    # mednafen/wswan/ — core emulation
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/sound.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/interrupt.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/comm.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/rtc.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/tcache.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/gfx.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/wswan-memory.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/v30mz.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/wswan/eeprom.c
-    # mednafen/sound/ — audio backend
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/sound/Blip_Buffer.c
-    # mednafen/ — shared utilities
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/mempatcher.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/state.c
-    ${MEDNAFEN_WSWAN_DIR}/mednafen/settings.c
-    # libretro-common/ — C helper utilities
-    ${MEDNAFEN_WSWAN_DIR}/libretro-common/compat/compat_strl.c
-    ${MEDNAFEN_WSWAN_DIR}/libretro-common/compat/compat_snprintf.c
+    # The exact curated 16-source set from the shared fragment (identical to
+    # Android and the Windows candidate; pure C — no C++ translation units at
+    # this pin).
+    ${ROMM_MEDNAFEN_WSWAN_SOURCES}
 )
 
 target_include_directories(mednafen_wswan_core SYSTEM PRIVATE

@@ -24,7 +24,7 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 | `prosystem` | 1 | `native/cmake/cores/prosystem-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
 | `handy` | 1 | — (no `handy-windows.cmake`) | NOT STARTED | no |
 | `mednafen_ngp` | 1 | — (no `mednafen_ngp-windows.cmake`) | NOT STARTED | no |
-| `mednafen_wswan` | 1 | — (no `mednafen_wswan-windows.cmake`) | NOT STARTED | no |
+| `mednafen_wswan` | 1 | `native/cmake/cores/mednafen_wswan-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
 | `stella` | 1 | — (no `stella-windows.cmake`) | NOT STARTED | no |
 | `beetle_pce_fast` | 1 | — (no `beetle_pce_fast-windows.cmake`) | NOT STARTED | no |
 | `mgba` | 1 | — (no `mgba-windows.cmake`) | NOT STARTED | no |
@@ -240,6 +240,68 @@ against the vendored core's actual opcode table (`core/Sally.c`), which deviates
 pure function of its commit-fixed constants, so any byte drift changes this digest and fails the
 gate).
 
+## mednafen_wswan — Windows x86_64 candidate build identity
+
+Provenance fields (coreId `mednafen_wswan`; the upstream pin is the vendored-tree master HEAD
+of `libretro/beetle-wswan-libretro`):
+
+| Field | Value |
+| --- | --- |
+| Upstream repository | https://github.com/libretro/beetle-wswan-libretro |
+| Exact commit | `4b01295838ea89e3f1355bbe4cb5cf98aa6108cd` (no upstream release tags; commitSha is the exact pin) |
+| Vendored source subset | `third_party/cores/mednafen_wswan/{libretro.c,mednafen,wswan sources,libretro-common/compat}` — the curated 16-source set from `native/cmake/cores/mednafen_wswan-sources.cmake` (identical to Android/Linux; network code excluded) |
+| Local patches | none |
+| Windows fragment | `native/cmake/cores/mednafen_wswan-windows.cmake` (WIN32 block of `native/player/CMakeLists.txt` only) |
+| Export control | `native/cmake/cores/mednafen_wswan-windows.def` — exactly the 22 `retro_*` exports the player's `CoreLibrary` resolves; no `romm_*` save extensions (this core defines none at this pin) |
+| Compiler / build | MinGW-w64 UCRT64 (MSYS2) + CMake + Ninja, `-O2 -DNDEBUG`, `-Wl,--no-undefined`; canonical output name `mednafen_wswan_core.dll` (`PREFIX ""` — never `libmednafen_wswan_core.dll`) |
+| Binary hash | **NOT RECORDED** — the SHA-256 of `mednafen_wswan_core.dll` is written only into the CI artifact's `import-audit.txt` by the pinned `windows-2022` run (job 4); no binary hash is committed here until that run produces it |
+| Supported systems | `wonderSwan`, `wonderSwanColor` |
+| Supported extensions | `.ws`, `.wsc` |
+| Required firmware | none (the E2E ROM is BIOS-free — the NEC V30's reset fetch at physical `0xFFFF0` lands in cart ROM) |
+| Renderer | software (no HW-render request — runs under the temporary software-only boundary) |
+| Saves | 8192-byte battery SRAM (`RETRO_MEMORY_SAVE_RAM`; cart header code `0x01`). The E2E drives a deterministic SRAM counter oracle against the player-reported per-run frame counts |
+
+Candidate posture: CI stages `mednafen_wswan_core.dll` separately under `cores-candidate/`
+(never an enabled-core path) and audits it (PE32+ machine, recursive import closure, exact
+22-symbol export allowlist, repeated load/`retro_api_version`/`retro_init`/`retro_deinit`
+smoke) **without promoting it**. `windows-x86_64` is in no `supportedAbis`, no package manifest
+entry, and no launch path.
+
+### Qualification evidence and generated test ROM
+
+- **Local (macOS host) — passed:** MinGW-w64 UCRT64 cross-build of `mednafen_wswan_core.dll` as
+  PE32+ x86_64 under the software-only preset (`build/player-windows-x86_64-software-only/`;
+  verified locally to export exactly the 22-symbol allowlist and to import only system DLLs), and
+  a direct dlopen oracle check of the real vendored core (the macOS dylib build) against the
+  generated ROM: fresh loads of 1/2/10/60 frames and restore chains of 1+2, 2+10, and 10+60
+  frames all match the exact counter oracle — proving both the deterministic per-frame iteration
+  count and SRAM persistence across power-ons (the restored counter keeps counting).
+- **Windows-hosted — pending:** the first live run of `.github/workflows/windows-x64.yml`
+  (jobs 4–5) on the pinned `windows-2022` runner has not happened yet; that run is the
+  target-runtime gate and will record the candidate DLL's SHA-256 in `import-audit.txt`.
+- **Physical Windows 10/11 — pending:** per-core gate `plans/WINDOWS_IMPL.md` §6.4 (15 criteria,
+  including item 15, physical qualification) is not complete. Hosted CI must not be treated as
+  physical qualification.
+
+**Generated ROM (original content, hash-pinned).** `native/player/tests/e2e/wswan_rom.py`
+deterministically generates a 524288-byte raw `.ws/.wsc` cartridge image — no WonderWitch
+"ELISA" firmware signature at the bank-F base, no Detective Conan header pattern, no third-party
+bytes. The program is entirely RomMulus-authored NEC V30 bytecode crafted against the vendored
+core's actual semantics: a 5-byte reset stub at physical `0xFFFF0` (far jump to the main code),
+a one-shot setup that loads `DS = 0x1000` (segment base `DS<<4 = 0x10000`, the bank-1 SRAM
+window) via `push ax`/`pop ds`, and an 11-byte / 12-cycle loop that increments a byte counter at
+`SRAM[0x100]` and mirrors it into `SRAM[0]`. The cart header's last-10-byte SRAM code selects the
+8 KiB battery region. Because the counter lives IN SRAM, restored saves keep counting across
+power-ons. Under the core's exact chunked ICount semantics (three `v30mz_execute(128/96/32)`
+calls per scanline with a continuous instruction stream), one power-on of F presented frames
+executes exactly `3392*F - 299` increments and every run ends mid-iteration after its final
+unmirrored increment — so the oracle is `SRAM[0x100] = total mod 256`, `SRAM[0] = (total-1) mod
+256`, all other bytes zero. **SHA-256 of the generated ROM:
+`6a0857a6f787ac650e3b3be4191a2db59fc6c06ff7ad353188149945a8074d38`** (pinned by
+`PINNED_WSWAN_ROM_SHA256` in `native/player/tests/e2e/test_player_e2e.py`; the generator is a
+pure function of its commit-fixed constants, so any byte drift changes this digest and fails the
+gate).
+
 ## Temporary software-only boundary (pre-ANGLE) — not yet qualified
 
 The Windows player currently builds under the `windows-x86_64-software-only` preset
@@ -249,8 +311,8 @@ import libraries, and include directory are excluded, a no-op `SdlHardwareContex
 instead (no unresolved GL API can exist), and the player **fails closed with `launch_failed`**
 for every known hardware-rendering core and every Libretro `SET_HW_RENDER` /
 `GET_HW_RENDER_INTERFACE` request — it never silently downgrades. SDL3 (video/audio/input)
-remains required; software cores such as `test_core`, `gambatte`, `fceumm`, and `prosystem` keep
-full functionality.
+remains required; software cores such as `test_core`, `gambatte`, `fceumm`, `prosystem`, and
+`mednafen_wswan` keep full functionality.
 
 The pinned ANGLE distribution is **not yet built, staged, or qualified** in Windows CI — the
 workflow explicitly does not yet build the player with the pinned ANGLE distribution — so the

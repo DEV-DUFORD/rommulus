@@ -443,7 +443,15 @@ if(WIN32)
     # Unlike the other two candidates this core exposes NO save RAM region:
     # the E2E gate asserts the no-persistent-save invariants instead.
     include(${ROMM_NATIVE_ROOT}/cmake/cores/prosystem-windows.cmake)
-    set(ROMM_WIN32_CANDIDATE_CORE_TARGETS gambatte_core fceumm_core prosystem_core)
+    # mednafen_wswan (WonderSwan / WonderSwan Color): fourth candidate
+    # production core for Win32. Same vendored 16-source set as Android/Linux
+    # (shared fragment), PE export table via .def, canonical output name
+    # mednafen_wswan_core.dll. Like Gambatte/FCEUmm this core exposes a real
+    # battery region (8 KiB SRAM for the E2E ROM's cart header code 0x01):
+    # the E2E gate asserts the deterministic per-frame SRAM oracle across the
+    # adoption chain.
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/mednafen_wswan-windows.cmake)
+    set(ROMM_WIN32_CANDIDATE_CORE_TARGETS gambatte_core fceumm_core prosystem_core mednafen_wswan_core)
 endif()
 
 # ---------------------------------------------------------------------------
