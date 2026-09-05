@@ -442,3 +442,29 @@ This session ended after the FCEUmm candidate's local qualification passed. Cont
   candidate-only and absent from `CoreManifest.supportedAbis`; physical
   Windows 10/11, controller, interactive audio/video, sleep/resume, and soak
   qualification remain required before enablement.
+
+## Phase 3 candidate — Stella (complete, candidate-only)
+
+- Stella 7.0 (`d55b1aec0d067a4c901a6dcdf81cb8f579685659`) uses a guarded
+  148-source inventory shared by Android, Linux, and the MinGW/UCRT64
+  candidate. Canonical `stella_core.dll` is staged exclusively under
+  `cores-candidate/`.
+- The original BIOS-free 4 KiB Atari 2600 fixture is pinned at SHA-256
+  `a6456779ea64bf28bae72e4842bb896b7994b38e86c8074b5c4f5e0172fdc2c3`.
+  It emits valid repeated NTSC VSYNC frame intervals, video, and audio.
+- Stella exposes `RETRO_MEMORY_SYSTEM_RAM` only, not
+  `RETRO_MEMORY_SAVE_RAM`; its rigorous E2E gate therefore asserts no
+  checkpoint, null save fields, and no candidate/session `.srm` artifacts
+  across valid launch, repeated load, and force-kill lock recovery.
+- Hosted run `33992192421` passed all five jobs:
+  https://github.com/DEV-DUFORD/rommulus/actions/runs/33992192421
+- Hosted `stella_core.dll` SHA-256:
+  `300c89d2ca6a74c5d1cfa061b345300663c4c9483b199dc28935d84ebdd628a2`.
+  Canonical naming, recursive PE/import closure, exact 22 exports,
+  provenance, 50-cycle load/init/deinit smoke, and all no-save E2E scenarios
+  passed.
+- Independent audit corrected the fixture's post-first-frame VSYNC loop before
+  the final hosted run. Stella remains candidate-only and absent from
+  `CoreManifest.supportedAbis`; physical Windows 10/11, controller,
+  interactive audio/video, sleep/resume, and soak qualification remain
+  required before enablement.

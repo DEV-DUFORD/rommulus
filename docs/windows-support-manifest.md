@@ -25,7 +25,7 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 | `handy` | 1 | — (no `handy-windows.cmake`) | NOT STARTED | no |
 | `mednafen_ngp` | 1 | — (no `mednafen_ngp-windows.cmake`) | NOT STARTED | no |
 | `mednafen_wswan` | 1 | `native/cmake/cores/mednafen_wswan-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
-| `stella` | 1 | — (no `stella-windows.cmake`) | NOT STARTED | no |
+| `stella` | 1 | `native/cmake/cores/stella-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 22-export boundary, no-persistent-save lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `beetle_pce_fast` | 1 | `native/cmake/cores/beetle_pce_fast-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows PE32+ cross-build, exact 22-export allowlist, deterministic original HuCard, and local BRAM lifecycle E2E passed; hosted `windows-2022` and physical Win10/11 qualification pending | no |
 | `mgba` | 1 | `native/cmake/cores/mgba-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 25-export boundary, 32 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `snes9x` | 1 | `native/cmake/cores/snes9x-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 22-export boundary, 2 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
@@ -59,6 +59,31 @@ Candidate posture: the canonical `snes9x_core.dll` is staged only under
   `54aeef176ac87c61d452af95be1f144bbe9c287556cc571895361fa8fbb497ac`.
 
 Snes9x remains candidate-only. Physical Windows 10/11, controller,
+interactive audio/video, sleep/resume, and soak qualification remain required
+before any `CoreManifest.supportedAbis` enablement.
+
+## stella — Windows x86_64 candidate build identity
+
+Candidate posture: the canonical `stella_core.dll` is staged only under
+`cores-candidate/`; it is not advertised by any production `CoreManifest`.
+
+- Upstream: `stella-emu/stella` 7.0
+  (`d55b1aec0d067a4c901a6dcdf81cb8f579685659`).
+- Shared sources: `native/cmake/cores/stella-sources.cmake` validates the
+  148-source inventory reused by Android, Linux, and the candidate target.
+- ABI and saves: `native/cmake/cores/stella-windows.def` permits exactly 22
+  `retro_*` exports. Stella exposes only `RETRO_MEMORY_SYSTEM_RAM`; its
+  original BIOS-free Atari 2600 fixture therefore verifies the strict
+  no-checkpoint/no-`.srm` lifecycle gate.
+- Hosted evidence: workflow
+  [33992192421](https://github.com/DEV-DUFORD/rommulus/actions/runs/33992192421)
+  passed all five `windows-2022` jobs, including recursive PE/import closure,
+  export/provenance audits, 50-cycle load/init/deinit smoke, and valid launch,
+  repeated-load, and force-kill recovery E2E coverage.
+  Hosted `stella_core.dll` SHA-256:
+  `300c89d2ca6a74c5d1cfa061b345300663c4c9483b199dc28935d84ebdd628a2`.
+
+Stella remains candidate-only. Physical Windows 10/11, controller,
 interactive audio/video, sleep/resume, and soak qualification remain required
 before any `CoreManifest.supportedAbis` enablement.
 
