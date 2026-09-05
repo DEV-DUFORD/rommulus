@@ -406,6 +406,32 @@ jobs:
           rm -f "deps/SDL3-${SDL_VERSION}.tar.gz"
           echo "✓ SDL3 ${SDL_VERSION} source verified (SHA256) and extracted to deps/sdl3"
 
+      - name: Download pinned ANGLE distribution and verify SHA256
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          ANGLE_REVISION="a96fca8d5ee2ca61e8de419e38cd577579281c9e"
+          ANGLE_ARCHIVE="angle-windows-x64-${ANGLE_REVISION}.tar.gz"
+          ANGLE_SHA256="82723e19795d683e6af2afadf39fb00d248d6a5a2cb2af9faeebc017a7f4f5d8"
+          ANGLE_URL="https://github.com/XCSoar/angle-libs/releases/download/a96fca8/${ANGLE_ARCHIVE}"
+          curl --fail --location --retry 3 --output "deps/${ANGLE_ARCHIVE}" "$ANGLE_URL"
+          echo "${ANGLE_SHA256}  deps/${ANGLE_ARCHIVE}" | sha256sum --check
+          rm -rf deps/angle
+          mkdir -p deps/angle
+          tar -xzf "deps/${ANGLE_ARCHIVE}" -C deps/angle --strip-components=1
+          rm -f "deps/${ANGLE_ARCHIVE}"
+          [ -f deps/angle/libEGL.dll ] \
+            && [ -f deps/angle/libGLESv2.dll ] \
+            && [ -f deps/angle/include/EGL/egl.h ] \
+            && [ -f deps/angle/include/GLES3/gl32.h ] \
+            && [ -f deps/angle/LICENSE ] \
+            || { echo "::error::pinned ANGLE distribution is incomplete"; exit 1; }
+          {
+            echo "ANGLE_REVISION=${ANGLE_REVISION}"
+            echo "ANGLE_ARCHIVE_SHA256=${ANGLE_SHA256}"
+          } >> "$GITHUB_ENV"
+          echo "✓ ANGLE ${ANGLE_REVISION} archive verified and extracted"
+
       - name: Build and install SDL3 (shared-only, job-local prefix)
         shell: msys2 {0}
         run: |
@@ -426,6 +452,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$PWD/native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$SDL_PREFIX" \
+            -DCMAKE_C_FLAGS="-I$PWD/deps/angle/include" \
             -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
             -DSDL_SHARED=ON \
             -DSDL_STATIC=OFF \
@@ -963,31 +990,6 @@ jobs:
           path: dist/player-win64-software-only
           if-no-files-found: error
           compression-level: 0
-
-      - name: Download pinned ANGLE distribution and verify SHA256
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          ANGLE_REVISION="a96fca8d5ee2ca61e8de419e38cd577579281c9e"
-          ANGLE_ARCHIVE="angle-windows-x64-${ANGLE_REVISION}.tar.gz"
-          ANGLE_SHA256="82723e19795d683e6af2afadf39fb00d248d6a5a2cb2af9faeebc017a7f4f5d8"
-          ANGLE_URL="https://github.com/XCSoar/angle-libs/releases/download/a96fca8/${ANGLE_ARCHIVE}"
-          curl --fail --location --retry 3 --output "deps/${ANGLE_ARCHIVE}" "$ANGLE_URL"
-          echo "${ANGLE_SHA256}  deps/${ANGLE_ARCHIVE}" | sha256sum --check
-          rm -rf deps/angle
-          mkdir -p deps/angle
-          tar -xzf "deps/${ANGLE_ARCHIVE}" -C deps/angle --strip-components=1
-          rm -f "deps/${ANGLE_ARCHIVE}"
-          [ -f deps/angle/libEGL.dll ] \
-            && [ -f deps/angle/libGLESv2.dll ] \
-            && [ -f deps/angle/include/GLES3/gl32.h ] \
-            && [ -f deps/angle/LICENSE ] \
-            || { echo "::error::pinned ANGLE distribution is incomplete"; exit 1; }
-          {
-            echo "ANGLE_REVISION=${ANGLE_REVISION}"
-            echo "ANGLE_ARCHIVE_SHA256=${ANGLE_SHA256}"
-          } >> "$GITHUB_ENV"
-          echo "✓ ANGLE ${ANGLE_REVISION} archive verified and extracted"
 
       - name: Generate MinGW import libraries from pinned ANGLE DLL exports
         shell: msys2 {0}
