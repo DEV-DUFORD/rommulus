@@ -112,6 +112,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
+import genesis_plus_gx_rom  # noqa: E402
 import pce_rom  # noqa: E402
 import prosystem_rom  # noqa: E402
 import wswan_rom  # noqa: E402
@@ -221,6 +222,15 @@ PCE_RUN1_FRAMES = 240
 PCE_RUN2_FRAMES = 180
 PCE_RUN3_FRAMES = 60
 PCE_KILL_VICTIM_FRAMES = 3600
+
+GENESIS_PLUS_GX_CORE_ID = "genesis_plus_gx"
+GENESIS_PLUS_GX_REVISION = "ca93fec870378f3bff65931bcd828d5e756cce75"
+GENESIS_PLUS_GX_SRAM_SIZE = genesis_plus_gx_rom.SRAM_SIZE
+GENESIS_PLUS_GX_ROM_NAME = "rommulus-e2e-genesis-plus-gx.bin"
+GENESIS_PLUS_GX_RUN1_FRAMES = 240
+GENESIS_PLUS_GX_RUN2_FRAMES = 180
+GENESIS_PLUS_GX_RUN3_FRAMES = 60
+GENESIS_PLUS_GX_KILL_VICTIM_FRAMES = 3600
 
 
 def sram_byte_after_frames(frames):
@@ -470,7 +480,8 @@ class Runner:
                  video_driver="offscreen", audio_driver="dummy",
                  render_driver="software", candidate_core=None,
                  fceumm_candidate_core=None, prosystem_candidate_core=None,
-                 wswan_candidate_core=None, pce_candidate_core=None):
+                 wswan_candidate_core=None, pce_candidate_core=None,
+                 genesis_plus_gx_candidate_core=None):
         self.stage_dir = os.path.abspath(stage_dir)
         self.workdir = os.path.abspath(workdir)
         self.player_exe = os.path.abspath(player_exe)
@@ -485,6 +496,9 @@ class Runner:
                                       if wswan_candidate_core else None)
         self.pce_candidate_core = (os.path.abspath(pce_candidate_core)
                                     if pce_candidate_core else None)
+        self.genesis_plus_gx_candidate_core = (
+            os.path.abspath(genesis_plus_gx_candidate_core)
+            if genesis_plus_gx_candidate_core else None)
         self.timeout_sec = timeout_sec
         self.video_driver = video_driver
         self.audio_driver = audio_driver
@@ -549,6 +563,11 @@ class Runner:
             shutil.copyfile(self.pce_candidate_core,
                             os.path.join(self.core_root, self.pce_core_filename()))
             self.generate_pce_rom()
+        if self.genesis_plus_gx_candidate_core:
+            shutil.copyfile(self.genesis_plus_gx_candidate_core,
+                            os.path.join(self.core_root,
+                                         self.genesis_plus_gx_core_filename()))
+            self.generate_genesis_plus_gx_rom()
 
     def core_filename(self):
         return "test_core.dll" if IS_WINDOWS else "libtest_core.so"
@@ -585,6 +604,13 @@ class Runner:
         if sys.platform == "darwin":
             return "libbeetle_pce_fast_core.dylib"
         return "libbeetle_pce_fast_core.so"
+
+    def genesis_plus_gx_core_filename(self):
+        if IS_WINDOWS:
+            return "genesis_plus_gx_core.dll"
+        if sys.platform == "darwin":
+            return "libgenesis_plus_gx_core.dylib"
+        return "libgenesis_plus_gx_core.so"
 
     def generate_rom(self):
         """Generate the deterministic 32 KiB ROM into the cache root."""
@@ -624,6 +650,12 @@ class Runner:
             f.write(pce_rom.generate_rom())
         return rom_path
 
+    def generate_genesis_plus_gx_rom(self):
+        rom_path = os.path.join(self.cache_root, GENESIS_PLUS_GX_ROM_NAME)
+        with open(rom_path, "wb") as f:
+            f.write(genesis_plus_gx_rom.generate_rom())
+        return rom_path
+
     def gambatte_core_path(self):
         return os.path.join(self.core_root, self.candidate_core_filename())
 
@@ -638,6 +670,9 @@ class Runner:
 
     def pce_core_path(self):
         return os.path.join(self.core_root, self.pce_core_filename())
+
+    def genesis_plus_gx_core_path(self):
+        return os.path.join(self.core_root, self.genesis_plus_gx_core_filename())
 
     def env_for(self, max_frames=None, player_max_frames=None):
         env = dict(os.environ)
@@ -655,17 +690,18 @@ class Runner:
         env["ROMM_PLAYER_CACHE_ROOT"] = as_posix(self.cache_root)
         env["ROMM_PLAYER_DATA_ROOT"] = as_posix(self.data_root)
         env["ROMM_PLAYER_STATE_ROOT"] = as_posix(self.state_root)
-        # All six cores are allowed: the synthetic test_core (revision pin
+        # All seven cores are allowed: the synthetic test_core (revision pin
         # from CoreManifest.kt) and the CANDIDATE gambatte + fceumm +
         # prosystem + mednafen_wswan cores pinned to their vendored-tree
         # commits. The candidates appear in NO production manifest — this env
         # entry is the qualification gate's adoption.
         env["ROMM_PLAYER_ALLOWED_CORES"] = (
-            "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
+            "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
             CORE_ID, CORE_REVISION, GAMBATTE_CORE_ID, GAMBATTE_REVISION,
             FCEUMM_CORE_ID, FCEUMM_REVISION, PROSYSTEM_CORE_ID,
             PROSYSTEM_REVISION, WSWAN_CORE_ID, WSWAN_REVISION,
-            PCE_CORE_ID, PCE_REVISION))
+            PCE_CORE_ID, PCE_REVISION, GENESIS_PLUS_GX_CORE_ID,
+            GENESIS_PLUS_GX_REVISION))
         # Headless SDL for the GUI-less runner: offscreen video driver with a
         # real window framebuffer (the software renderer works against it),
         # forced software render backend (no GPU on the runner), dummy audio.
@@ -1906,6 +1942,137 @@ class Runner:
         self.assert_pce_result(name, result, session,
                                PCE_RUN3_FRAMES, [result["frames"]])
 
+    # -- Genesis Plus GX candidate scenarios (qualification gate) ----------
+
+    def _require_genesis_plus_gx_candidate(self, name):
+        if self.genesis_plus_gx_candidate_core is None:
+            self.fail(name, "candidate Genesis Plus GX core not staged")
+            return False
+        return True
+
+    def assert_genesis_plus_gx_result(self, name, result, session_id, limit,
+                                      run_frames):
+        problems = validate_result_schema(result)
+        self.check(name, not problems, "result schema: %s" % "; ".join(problems))
+        if problems:
+            return False
+        self.check(name, result["sessionId"] == session_id,
+                   "sessionId %r != %r" % (result["sessionId"], session_id))
+        self.check(name, result["exitKind"] == "completed",
+                   "exitKind %r (want completed)" % result["exitKind"])
+        self.check(name, result["checkpointWritten"] is True,
+                   "checkpointWritten must be true")
+        frames = result["frames"]
+        self.check(name, limit <= frames <= limit + 2,
+                   "frames %r outside [%d, %d]" % (frames, limit, limit + 2))
+        if not (limit <= frames <= limit + 2):
+            return False
+        want_image = genesis_plus_gx_rom.expected_sram_image(run_frames)
+        want_hash = hashlib.sha256(want_image).hexdigest()
+        self.check(name, result["saveSize"] == GENESIS_PLUS_GX_SRAM_SIZE,
+                   "saveSize %r != %d" % (result["saveSize"],
+                                           GENESIS_PLUS_GX_SRAM_SIZE))
+        self.check(name, result["saveHash"] == want_hash,
+                   "saveHash %s != expected %s for run chain %s"
+                   % (result["saveHash"], want_hash, list(run_frames)))
+        candidate = os.path.join(self.state_root, session_id + ".candidate.srm")
+        if self.check(name, os.path.isfile(candidate),
+                      "candidate save missing on disk"):
+            with open(candidate, "rb") as f:
+                self.check(name, f.read() == want_image,
+                           "candidate file does not match deterministic 64 KiB SRAM")
+        return True
+
+    def _genesis_plus_gx_launch(self, name, session, limit):
+        return self.launch(
+            name, session, core_id=GENESIS_PLUS_GX_CORE_ID,
+            core_build_revision=GENESIS_PLUS_GX_REVISION,
+            core_path=self.genesis_plus_gx_core_path(),
+            content_path=os.path.join(self.cache_root, GENESIS_PLUS_GX_ROM_NAME),
+            player_max_frames=limit)
+
+    def scenario_genesis_plus_gx_valid_launch_completed(self):
+        name, session = "genesis-plus-gx-valid-launch-completed", "e2e-genesis-run1"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_genesis_plus_gx_candidate(name):
+            return
+        rc, result = self._genesis_plus_gx_launch(name, session,
+                                                   GENESIS_PLUS_GX_RUN1_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0)" % rc)
+        if result and self.assert_genesis_plus_gx_result(
+                name, result, session, GENESIS_PLUS_GX_RUN1_FRAMES,
+                [result["frames"]]):
+            self.genesis_plus_gx_chain = [result["frames"]]
+
+    def scenario_genesis_plus_gx_relaunch_persistence(self):
+        name, session = "genesis-plus-gx-relaunch-persistence", "e2e-genesis-run2"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_genesis_plus_gx_candidate(name):
+            return
+        prev = os.path.join(self.state_root, "e2e-genesis-run1.candidate.srm")
+        if not self.check(name, os.path.isfile(prev), "previous candidate missing"):
+            return
+        save_path = os.path.join(self.data_root, session, "save.srm")
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        shutil.copyfile(prev, save_path)
+        rc, result = self._genesis_plus_gx_launch(name, session,
+                                                   GENESIS_PLUS_GX_RUN2_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0)" % rc)
+        if result:
+            chain = list(getattr(self, "genesis_plus_gx_chain", [])) + [result["frames"]]
+            if self.assert_genesis_plus_gx_result(
+                    name, result, session, GENESIS_PLUS_GX_RUN2_FRAMES, chain):
+                self.genesis_plus_gx_chain = chain
+
+    def scenario_genesis_plus_gx_repeated_load(self):
+        name, session = "genesis-plus-gx-repeated-load", "e2e-genesis-run3"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_genesis_plus_gx_candidate(name):
+            return
+        prev = os.path.join(self.state_root, "e2e-genesis-run2.candidate.srm")
+        if not self.check(name, os.path.isfile(prev), "previous candidate missing"):
+            return
+        save_path = os.path.join(self.data_root, session, "save.srm")
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        shutil.copyfile(prev, save_path)
+        rc, result = self._genesis_plus_gx_launch(name, session,
+                                                   GENESIS_PLUS_GX_RUN3_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0)" % rc)
+        if result:
+            chain = list(getattr(self, "genesis_plus_gx_chain", [])) + [result["frames"]]
+            if self.assert_genesis_plus_gx_result(
+                    name, result, session, GENESIS_PLUS_GX_RUN3_FRAMES, chain):
+                self.genesis_plus_gx_chain = chain
+
+    def scenario_genesis_plus_gx_force_kill_lock_recovery(self):
+        name, session = "genesis-plus-gx-force-kill-lock-recovery", "e2e-genesis-kill"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_genesis_plus_gx_candidate(name):
+            return
+        request_path, _, _ = self._write_request(
+            name + "-victim", session, self.genesis_plus_gx_core_path(),
+            GENESIS_PLUS_GX_REVISION, core_id=GENESIS_PLUS_GX_CORE_ID,
+            content_path=os.path.join(self.cache_root, GENESIS_PLUS_GX_ROM_NAME))
+        victim = PlayerProcess(
+            self.player_exe, request_path,
+            self.env_for(player_max_frames=GENESIS_PLUS_GX_KILL_VICTIM_FRAMES),
+            os.path.join(self.logs_dir, name + "-victim.log"))
+        victim.start()
+        self.spawned_pids.append(victim.pid())
+        time.sleep(5)
+        if not self.check(name, victim.alive(), "victim exited before force-kill"):
+            return
+        victim.terminate()
+        if not self.check(name, not victim.alive(), "victim still alive after force-kill"):
+            return
+        rc, result = self._genesis_plus_gx_launch(name + "-relaunch", session,
+                                                   GENESIS_PLUS_GX_RUN3_FRAMES)
+        self.check(name, rc == 0, "relaunch exit code %r (want 0)" % rc)
+        if result:
+            self.assert_genesis_plus_gx_result(
+                name, result, session, GENESIS_PLUS_GX_RUN3_FRAMES,
+                [result["frames"]])
+
     def scenario_negative_revision_mismatch(self):
         name = "negative-revision-mismatch"
         self.scenarios.append({"name": name, "passed": True})
@@ -1994,6 +2161,10 @@ class Runner:
                       self.scenario_pce_relaunch_persistence,
                       self.scenario_pce_repeated_load,
                       self.scenario_pce_force_kill_lock_recovery,
+                      self.scenario_genesis_plus_gx_valid_launch_completed,
+                      self.scenario_genesis_plus_gx_relaunch_persistence,
+                      self.scenario_genesis_plus_gx_repeated_load,
+                      self.scenario_genesis_plus_gx_force_kill_lock_recovery,
                       self.scenario_negative_revision_mismatch,
                    self.scenario_negative_core_outside_root,
                    self.scenario_no_orphans_tree_deletable):
@@ -2070,8 +2241,9 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                     explicit_candidate=None, explicit_fceumm_candidate=None,
                     explicit_prosystem_candidate=None,
                     explicit_wswan_candidate=None,
-                    explicit_pce_candidate=None):
-    """Return player, test core, and all five candidate core paths.
+                    explicit_pce_candidate=None,
+                    explicit_genesis_plus_gx_candidate=None):
+    """Return player, test core, and all six candidate core paths.
 
     A candidate is None when the stage carries no cores-candidate/ build for
     it; main then fails rather than silently shrinking the qualification gate.
@@ -2089,6 +2261,8 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
             stage_dir, "cores-candidate", "mednafen_wswan_core.dll")
         pce_candidate = explicit_pce_candidate or os.path.join(
             stage_dir, "cores-candidate", "beetle_pce_fast_core.dll")
+        genesis_plus_gx_candidate = explicit_genesis_plus_gx_candidate or os.path.join(
+            stage_dir, "cores-candidate", "genesis_plus_gx_core.dll")
     else:
         player, core = explicit_player, explicit_core
         if not player:
@@ -2163,6 +2337,18 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                 if os.path.isfile(cand):
                     pce_candidate = cand
                     break
+        genesis_plus_gx_candidate = explicit_genesis_plus_gx_candidate
+        if not genesis_plus_gx_candidate:
+            for cand in (
+                    os.path.join(stage_dir, "cores-candidate",
+                                 "libgenesis_plus_gx_core.so"),
+                    os.path.join(stage_dir, "cores-candidate",
+                                 "genesis_plus_gx_core.dll"),
+                    os.path.join(stage_dir, "libgenesis_plus_gx_core.so"),
+                    os.path.join(stage_dir, "libgenesis_plus_gx_core.dylib")):
+                if os.path.isfile(cand):
+                    genesis_plus_gx_candidate = cand
+                    break
     if candidate is not None and not os.path.isfile(candidate):
         candidate = None
     if fceumm_candidate is not None and not os.path.isfile(fceumm_candidate):
@@ -2173,8 +2359,11 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
         wswan_candidate = None
     if pce_candidate is not None and not os.path.isfile(pce_candidate):
         pce_candidate = None
+    if (genesis_plus_gx_candidate is not None and
+            not os.path.isfile(genesis_plus_gx_candidate)):
+        genesis_plus_gx_candidate = None
     return (player, core, candidate, fceumm_candidate, prosystem_candidate,
-            wswan_candidate, pce_candidate)
+            wswan_candidate, pce_candidate, genesis_plus_gx_candidate)
 
 
 def main(argv=None):
@@ -2198,6 +2387,9 @@ def main(argv=None):
     ap.add_argument("--pce-core",
                     help="explicit candidate Beetle PCE Fast core path "
                          "(default: cores-candidate/ in the stage dir)")
+    ap.add_argument("--genesis-plus-gx-core",
+                    help="explicit candidate Genesis Plus GX core path "
+                         "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--verify-artifact", metavar="DIR",
                     help="verify DIR against its import-audit.txt and exit")
     ap.add_argument("--timeout-sec", type=int, default=90,
@@ -2213,10 +2405,11 @@ def main(argv=None):
         ap.error("--stage and --workdir are required (or use --verify-artifact)")
 
     player, core, candidate, fceumm_candidate, prosystem_candidate, \
-        wswan_candidate, pce_candidate = discover_player(
+        wswan_candidate, pce_candidate, genesis_plus_gx_candidate = discover_player(
             args.stage, args.player, args.core,
             args.candidate_core, args.fceumm_core,
-            args.prosystem_core, args.wswan_core, args.pce_core)
+            args.prosystem_core, args.wswan_core, args.pce_core,
+            args.genesis_plus_gx_core)
     for label, path in (("player", player), ("test_core", core)):
         if not path or not os.path.isfile(path):
             print("FAIL: %s not found at %r" % (label, path), file=sys.stderr)
@@ -2263,6 +2456,12 @@ def main(argv=None):
               "libbeetle_pce_fast_core.so/.dylib on POSIX; pass --pce-core)"
               % args.stage, file=sys.stderr)
         return 2
+    if genesis_plus_gx_candidate is None:
+        print("FAIL: candidate Genesis Plus GX core not found in %r (expected "
+              "cores-candidate/genesis_plus_gx_core.dll on Windows or "
+              "libgenesis_plus_gx_core.so/.dylib on POSIX; pass "
+              "--genesis-plus-gx-core)" % args.stage, file=sys.stderr)
+        return 2
 
     os.makedirs(args.workdir, exist_ok=True)
     runner = Runner(args.stage, args.workdir, player, core, args.timeout_sec,
@@ -2271,7 +2470,8 @@ def main(argv=None):
                     fceumm_candidate_core=fceumm_candidate,
                     prosystem_candidate_core=prosystem_candidate,
                     wswan_candidate_core=wswan_candidate,
-                    pce_candidate_core=pce_candidate)
+                    pce_candidate_core=pce_candidate,
+                    genesis_plus_gx_candidate_core=genesis_plus_gx_candidate)
     print("player:   %s" % player)
     print("core:     %s" % core)
     print("candidate: %s" % candidate)
@@ -2279,6 +2479,7 @@ def main(argv=None):
     print("prosystem candidate: %s" % prosystem_candidate)
     print("wswan candidate: %s" % wswan_candidate)
     print("pce candidate: %s" % pce_candidate)
+    print("genesis_plus_gx candidate: %s" % genesis_plus_gx_candidate)
     print("tree:     %s" % runner.base)
     return runner.run()
 

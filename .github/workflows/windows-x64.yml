@@ -538,7 +538,11 @@ jobs:
             || { echo "::error::candidate beetle_pce_fast_core.dll missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
           [ ! -e "$BUILD_DIR/bin/libbeetle_pce_fast_core.dll" ] \
             || { echo "::error::non-canonical libbeetle_pce_fast_core.dll produced — the WIN32 PREFIX \"\" fix regressed"; exit 1; }
-          echo "✓ player, test core, and five candidate cores built with canonical names"
+          [ -f "$BUILD_DIR/bin/genesis_plus_gx_core.dll" ] \
+            || { echo "::error::candidate genesis_plus_gx_core.dll missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libgenesis_plus_gx_core.dll" ] \
+            || { echo "::error::non-canonical libgenesis_plus_gx_core.dll produced — the WIN32 PREFIX \"\" fix regressed"; exit 1; }
+          echo "✓ player, test core, and six candidate cores built with canonical names"
 
       - name: Stage unsigned artifact (SDL3.dll + libwinpthread closure beside the player)
         shell: msys2 {0}
@@ -563,6 +567,7 @@ jobs:
           cp "$BUILD_DIR/bin/prosystem_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/mednafen_wswan_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/beetle_pce_fast_core.dll" "$STAGE/cores-candidate/"
+          cp "$BUILD_DIR/bin/genesis_plus_gx_core.dll" "$STAGE/cores-candidate/"
           # libwinpthread-1.dll: the toolchain contract only guarantees static
           # libgcc/libstdc++ (-static-libgcc/-static-libstdc++); the mingw-w64
           # threading runtime is linked DYNAMICALLY by default, so threaded
@@ -588,6 +593,7 @@ jobs:
             closure_imports "$STAGE/cores-candidate/prosystem_core.dll"
             closure_imports "$STAGE/cores-candidate/mednafen_wswan_core.dll"
             closure_imports "$STAGE/cores-candidate/beetle_pce_fast_core.dll"
+            closure_imports "$STAGE/cores-candidate/genesis_plus_gx_core.dll"
           )"
           if grep -qi '^libwinpthread-1\.dll$' <<< "$imports"; then
             [ -f "$UCRT64_BIN/libwinpthread-1.dll" ] \
@@ -687,7 +693,7 @@ jobs:
           # cores-candidate/): they enter the same recursive PE32+ /
           # import-closure audit as every shipped image, plus the exact
           # export-allowlist checks below.
-          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll"
+          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll"
           seen=" "
           while [ -n "$queue" ]; do
             name="${queue%% *}"
@@ -774,6 +780,9 @@ jobs:
           audit_candidate_exports "$STAGE/cores-candidate/prosystem_core.dll" prosystem
           audit_candidate_exports "$STAGE/cores-candidate/mednafen_wswan_core.dll" mednafen_wswan
           audit_candidate_exports "$STAGE/cores-candidate/beetle_pce_fast_core.dll" beetle_pce_fast
+          genesis_plus_gx_exports="$(printf '%s\n' $expected_exports romm_apply_save_memory romm_get_save_memory_data romm_get_save_memory_size romm_restore_save_memory | LC_ALL=C sort)"
+          expected_exports="$genesis_plus_gx_exports"
+          audit_candidate_exports "$STAGE/cores-candidate/genesis_plus_gx_core.dll" genesis_plus_gx
           # Candidate provenance/hashes recorded in the AUDIT ARTIFACT ONLY —
           # deliberately NOT in CoreManifest.kt supportedAbis (the validator
           # packaging/validate-linux-targets.py keeps windows-x86_64 out of
@@ -817,6 +826,14 @@ jobs:
              echo "exports:  native/cmake/cores/beetle_pce_fast-windows.def (22 retro_* exports; no romm_* save extensions present in this core)"
              echo "saves:    2048-byte BRAM (E2E preserves the HUBM header and drives a deterministic VBlank counter oracle from pce_rom.py)"
              echo "sha256(cores-candidate/beetle_pce_fast_core.dll): $(sha256sum "$STAGE/cores-candidate/beetle_pce_fast_core.dll" | cut -d' ' -f1)"
+             echo "=== genesis_plus_gx candidate provenance (CANDIDATE — NOT advertised) ==="
+             echo "status: windows-x86_64 in NO supportedAbis; staged under cores-candidate/ only"
+             echo "upstream: libretro/Genesis-Plus-GX @ ca93fec870378f3bff65931bcd828d5e756cce75 (pinned tree: third_party/cores/genesis_plus_gx)"
+             echo "sources: native/cmake/cores/genesis_plus_gx.cmake (shared 115-source cartridge inventory)"
+             echo "fragment: native/cmake/cores/genesis_plus_gx-windows.cmake"
+             echo "exports:  22 retro_* symbols plus four existing romm_* save-image extensions"
+             echo "saves:    normalized 65536-byte cartridge SRAM via ROMM save extensions"
+             echo "sha256(cores-candidate/genesis_plus_gx_core.dll): $(sha256sum "$STAGE/cores-candidate/genesis_plus_gx_core.dll" | cut -d' ' -f1)"
           } >> "$AUDIT"
 
           # Artifact layout + SHA256 of every staged file (the audit log
@@ -886,6 +903,7 @@ jobs:
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/prosystem_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/mednafen_wswan_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/beetle_pce_fast_core.dll" 50
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/genesis_plus_gx_core.dll" 50
           echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + five candidates, no ROM content)"
 
       - name: Upload unsigned player artifact
@@ -1057,7 +1075,8 @@ jobs:
             --fceumm-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/fceumm_core.dll") `
             --prosystem-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/prosystem_core.dll") `
             --wswan-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mednafen_wswan_core.dll") `
-            --pce-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/beetle_pce_fast_core.dll")
+            --pce-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/beetle_pce_fast_core.dll") `
+            --genesis-plus-gx-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/genesis_plus_gx_core.dll")
           if ($LASTEXITCODE -ne 0) { throw "player E2E harness failed (exit $LASTEXITCODE)" }
 
       - name: Upload E2E results and logs (always)

@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
+import genesis_plus_gx_rom  # noqa: E402
 import pce_rom  # noqa: E402
 import player_e2e  # noqa: E402
 import prosystem_rom  # noqa: E402
@@ -32,6 +33,8 @@ from player_e2e import (  # noqa: E402
     PROSYSTEM_CORE_ID, PROSYSTEM_REVISION,
     WSWAN_CORE_ID, WSWAN_REVISION, WSWAN_SRAM_SIZE,
     PCE_CORE_ID, PCE_REVISION, PCE_SRAM_SIZE,
+    GENESIS_PLUS_GX_CORE_ID, GENESIS_PLUS_GX_REVISION,
+    GENESIS_PLUS_GX_SRAM_SIZE,
 )
 
 # Pinned hash of the deterministic ROM the generator must produce. The
@@ -63,6 +66,10 @@ PINNED_WSWAN_ROM_SHA256 = (
 
 PINNED_PCE_ROM_SHA256 = (
     "db6dce97515cb1730e927358dcbffb55acbadaecc9e320efdc07499d262b342f"
+)
+
+PINNED_GENESIS_PLUS_GX_ROM_SHA256 = (
+    "e0c184b579bb952ed63027b8822ad706a84ec10cbff17a200655f0d199688ed5"
 )
 
 
@@ -584,6 +591,36 @@ class PceRomTest(unittest.TestCase):
         self.assertEqual(PCE_SRAM_SIZE, pce_rom.SRAM_SIZE)
 
 
+class GenesisPlusGxRomTest(unittest.TestCase):
+    def test_size_determinism_and_pinned_hash(self):
+        rom1 = genesis_plus_gx_rom.generate_rom()
+        rom2 = genesis_plus_gx_rom.generate_rom()
+        self.assertEqual(len(rom1), genesis_plus_gx_rom.ROM_SIZE)
+        self.assertEqual(rom1, rom2)
+        self.assertEqual(genesis_plus_gx_rom.rom_sha256(),
+                         PINNED_GENESIS_PLUS_GX_ROM_SHA256)
+
+    def test_header_vectors_and_sram_contract(self):
+        rom = genesis_plus_gx_rom.generate_rom()
+        self.assertEqual(rom[4:8],
+                         genesis_plus_gx_rom.ENTRY_ADDRESS.to_bytes(4, "big"))
+        self.assertEqual(rom[0x1b0:0x1b4], b"RA\xf8\x20")
+        self.assertEqual(rom[0x1b4:0x1b8],
+                         genesis_plus_gx_rom.SRAM_START.to_bytes(4, "big"))
+        self.assertEqual(
+            rom[0x1b8:0x1bc],
+            (genesis_plus_gx_rom.SRAM_START +
+             genesis_plus_gx_rom.SRAM_SIZE - 1).to_bytes(4, "big"))
+        self.assertIn(bytes((0x52, 0x39, 0x00, 0x20, 0x00, 0x01)),
+                      genesis_plus_gx_rom.PROGRAM)
+
+    def test_sram_oracle(self):
+        image = genesis_plus_gx_rom.expected_sram_image([240, 180, 60])
+        self.assertEqual(len(image), genesis_plus_gx_rom.SRAM_SIZE)
+        self.assertEqual(image[:2], bytes((0x52, 480 & 0xff)))
+        self.assertEqual(set(image[2:]), {0xff})
+
+
 class BuildRequestTest(unittest.TestCase):
     def test_has_exactly_the_strict_v2_key_set(self):
         req = build_request("s-1", "/c/core.dll", "/d/system", "/d/save.srm",
@@ -698,6 +735,18 @@ class BuildRequestTest(unittest.TestCase):
             req["contentPath"],
             "/cache état/rommulus-e2e-beetle-pce-fast.pce")
         self.assertNotIn("\\", req["contentPath"])
+
+    def test_genesis_plus_gx_candidate_request(self):
+        req = build_request(
+            "s-genesis", "/c/genesis_plus_gx_core.dll", "/d/system",
+            "/d/save.srm", "/st/cand.srm", "/st/result.json",
+            core_build_revision=GENESIS_PLUS_GX_REVISION,
+            core_id=GENESIS_PLUS_GX_CORE_ID,
+            content_path="/cache état/rommulus-e2e-genesis-plus-gx.bin")
+        self.assertEqual(req["coreId"], GENESIS_PLUS_GX_CORE_ID)
+        self.assertEqual(req["coreBuildRevision"], GENESIS_PLUS_GX_REVISION)
+        self.assertEqual(req["contentPath"],
+                         "/cache état/rommulus-e2e-genesis-plus-gx.bin")
 
     def test_paths_are_forward_slash(self):
         req = build_request("s-1", r"C:\cores\test_core.dll", r"D:\data\system",
