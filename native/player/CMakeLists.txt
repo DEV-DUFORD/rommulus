@@ -467,6 +467,9 @@ if(WIN32)
     # guarded 115-source Android/Linux inventory and exports the normal
     # Libretro ABI plus the existing four romm_* save-image extensions.
     include(${ROMM_NATIVE_ROOT}/cmake/cores/genesis_plus_gx-windows.cmake)
+    # mGBA (GBA): seventh candidate. Reuses the guarded 98-source inventory
+    # and the upstream MinGW-compatible source/define surface.
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/mgba-windows.cmake)
     set(ROMM_WIN32_CANDIDATE_CORE_TARGETS
         gambatte_core
         fceumm_core
@@ -474,6 +477,7 @@ if(WIN32)
         mednafen_wswan_core
         beetle_pce_fast_core
         genesis_plus_gx_core
+        mgba_core
     )
 endif()
 

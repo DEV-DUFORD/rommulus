@@ -9,9 +9,11 @@
 # Source list and preprocessor flags mirror upstream's own
 # libretro/jni/Android.mk (COREFLAGS) exactly.
 # ---------------------------------------------------------------------------
-set(MGBA_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/mgba)
+if(NOT DEFINED MGBA_DIR)
+    set(MGBA_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/mgba)
+endif()
 
-add_library(mgba_core SHARED
+set(ROMM_MGBA_SOURCES
     ${MGBA_DIR}/src/arm/arm.c
     ${MGBA_DIR}/src/arm/decoder-arm.c
     ${MGBA_DIR}/src/arm/decoder-thumb.c
@@ -110,6 +112,27 @@ add_library(mgba_core SHARED
     ${MGBA_DIR}/src/util/vfs.c
     ${MGBA_DIR}/src/util/vfs/vfs-fd.c
     ${MGBA_DIR}/src/util/vfs/vfs-mem.c
+)
+
+list(LENGTH ROMM_MGBA_SOURCES ROMM_MGBA_SOURCE_COUNT)
+if(NOT ROMM_MGBA_SOURCE_COUNT EQUAL 98)
+    message(FATAL_ERROR
+        "mGBA source inventory drifted: expected 98 files, found "
+        "${ROMM_MGBA_SOURCE_COUNT}")
+endif()
+foreach(ROMM_MGBA_SOURCE IN LISTS ROMM_MGBA_SOURCES)
+    if(NOT EXISTS "${ROMM_MGBA_SOURCE}")
+        message(FATAL_ERROR "mGBA source inventory file is missing: ${ROMM_MGBA_SOURCE}")
+    endif()
+endforeach()
+unset(ROMM_MGBA_SOURCE)
+
+if(ROMM_MGBA_SOURCES_ONLY)
+    return()
+endif()
+
+add_library(mgba_core SHARED
+    ${ROMM_MGBA_SOURCES}
 )
 
 # Upstream's own libretro/jni/Android.mk builds this core with -std=c99
