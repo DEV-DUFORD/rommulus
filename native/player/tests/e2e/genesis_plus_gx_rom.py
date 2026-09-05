@@ -95,6 +95,21 @@ def expected_sram_image(run_frames):
     return bytes(image)
 
 
+def expected_sram_image_for_reported_frames(run_frames):
+    """Map player frame reports to completed Genesis VBlank-loop iterations.
+
+    The player records a frame after the core's `retro_run()` returns; our
+    fixture increments while that call executes. Hosted evidence therefore
+    has exactly one trailing presented frame per fresh core process.
+    """
+    if isinstance(run_frames, int):
+        run_frames = (run_frames,)
+    if any(not isinstance(frames, int) or isinstance(frames, bool) or frames < 1
+           for frames in run_frames):
+        raise ValueError("each reported frame count must be an int >= 1")
+    return expected_sram_image(tuple(frames - 1 for frames in run_frames))
+
+
 def _validate(rom):
     if len(rom) != ROM_SIZE:
         raise ValueError("unexpected ROM size")

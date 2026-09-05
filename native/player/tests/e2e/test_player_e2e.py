@@ -622,6 +622,12 @@ class GenesisPlusGxRomTest(unittest.TestCase):
         self.assertEqual(image[:2], bytes((0x52, 480 & 0xff)))
         self.assertEqual(set(image[2:]), {0xff})
 
+    def test_reported_frame_oracle(self):
+        image = genesis_plus_gx_rom.expected_sram_image_for_reported_frames(
+            [241, 181, 61])
+        self.assertEqual(image, genesis_plus_gx_rom.expected_sram_image(
+            [240, 180, 60]))
+
 
 class BuildRequestTest(unittest.TestCase):
     def test_has_exactly_the_strict_v2_key_set(self):

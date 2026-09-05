@@ -847,15 +847,12 @@ class Runner:
         self.check(name, result["checkpointWritten"] is True,
                    "checkpointWritten must be true (checkpoint-before-stop)")
         frames = result["frames"]
-        # The player exits from its asynchronous rendered-frame callback.
-        # A Windows scheduler handoff can admit a third already-submitted
-        # WonderSwan frame before the stop is observed.
-        self.check(name, limit <= frames <= limit + 3,
+        self.check(name, limit <= frames <= limit + 2,
                    "frames %r outside the bounded range [%d, %d] for the "
                    "presented-frame bound (real frames must have been "
                    "presented, and the bound must be honored)"
-                   % (frames, limit, limit + 3))
-        if not (limit <= frames <= limit + 3):
+                   % (frames, limit, limit + 2))
+        if not (limit <= frames <= limit + 2):
             return False
         want_image = gambatte_rom.expected_sram_image(total_frames)
         want_hash = hashlib.sha256(want_image).hexdigest()
@@ -994,12 +991,15 @@ class Runner:
         self.check(name, result["checkpointWritten"] is True,
                    "checkpointWritten must be true (checkpoint-before-stop)")
         frames = result["frames"]
-        self.check(name, limit <= frames <= limit + 2,
+        # The player exits from its asynchronous rendered-frame callback.
+        # A Windows scheduler handoff can admit a third already-submitted
+        # WonderSwan frame before the stop is observed.
+        self.check(name, limit <= frames <= limit + 3,
                    "frames %r outside the bounded range [%d, %d] for the "
                    "presented-frame bound (real frames must have been "
                    "presented, and the bound must be honored)"
-                   % (frames, limit, limit + 2))
-        if not (limit <= frames <= limit + 2):
+                   % (frames, limit, limit + 3))
+        if not (limit <= frames <= limit + 3):
             return False
         want_image = wswan_rom.expected_sram_image(run_frames)
         want_hash = hashlib.sha256(want_image).hexdigest()
@@ -1970,13 +1970,14 @@ class Runner:
                    "frames %r outside [%d, %d]" % (frames, limit, limit + 2))
         if not (limit <= frames <= limit + 2):
             return False
-        want_image = genesis_plus_gx_rom.expected_sram_image(run_frames)
+        want_image = genesis_plus_gx_rom.expected_sram_image_for_reported_frames(
+            run_frames)
         want_hash = hashlib.sha256(want_image).hexdigest()
         self.check(name, result["saveSize"] == GENESIS_PLUS_GX_SRAM_SIZE,
                    "saveSize %r != %d" % (result["saveSize"],
                                            GENESIS_PLUS_GX_SRAM_SIZE))
         self.check(name, result["saveHash"] == want_hash,
-                   "saveHash %s != expected %s for run chain %s"
+                   "saveHash %s != expected %s for reported run chain %s"
                    % (result["saveHash"], want_hash, list(run_frames)))
         candidate = os.path.join(self.state_root, session_id + ".candidate.srm")
         if self.check(name, os.path.isfile(candidate),
