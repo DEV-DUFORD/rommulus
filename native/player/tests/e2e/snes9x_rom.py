@@ -23,11 +23,9 @@ def _program():
         0xC2, 0x30,              # rep #$30 (16-bit index/accumulator)
         0xA2, 0xFF, 0x1F, 0x9A,  # ldx #$1fff; txs
         0xE2, 0x20,              # sep #$20 (8-bit accumulator)
-        0xAF, 0x00, 0x00, 0x70,  # lda.l $700000
-        0xC9, SRAM_MARKER,       # cmp #marker
-        0xF0, 0x0C,              # beq setup
+        # The fresh core clears SRAM; every boot reinstates its marker while
+        # deliberately preserving byte 1, which is the restored counter.
         0xA9, SRAM_MARKER, 0x8F, 0x00, 0x00, 0x70,
-        0xA9, 0x00, 0x8F, 0x01, 0x00, 0x70,
         0xA9, 0x0F, 0x8D, 0x00, 0x21,  # brightness on
         0xA9, 0x80, 0x8D, 0x00, 0x42,  # enable VBlank NMI
         0xCB, 0x80, 0xFD,        # wai; bra wait
