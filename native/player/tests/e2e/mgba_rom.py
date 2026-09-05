@@ -7,10 +7,11 @@ ROM_SIZE = 0x1000
 ENTRY_OFFSET = 0xC0
 SRAM_SIZE = 0x8000
 SRAM_BASE = 0x0E000000
+SRAM_WRITE_BASE = SRAM_BASE + 1
 DISPSTAT = 0x04000004
 SRAM_MARKER = 0x52
-SRAM_MARKER_OFFSET = 0
-SRAM_COUNTER_OFFSET = 1
+SRAM_MARKER_OFFSET = 1
+SRAM_COUNTER_OFFSET = 2
 PROVENANCE = b"ROMMULUS E2E MGBA - original deterministic ARM qualification ROM"
 PROVENANCE_OFFSET = 0x200
 
@@ -60,7 +61,9 @@ def _program():
     code += _word(0xE3120001)  # tst r2, #1
     code += _branch(len(code), wait_active, condition=0x1)
     code += _branch(len(code), wait_vblank)
-    code += _word(SRAM_BASE)
+    # mGBA identifies a first write at SRAM_BASE as Flash. Begin at +1 so
+    # this original cartridge deliberately selects its standard SRAM path.
+    code += _word(SRAM_WRITE_BASE)
     code += _word(DISPSTAT)
     return bytes(code)
 
