@@ -470,6 +470,9 @@ if(WIN32)
     # mGBA (GBA): seventh candidate. Reuses the guarded 98-source inventory
     # and the upstream MinGW-compatible source/define surface.
     include(${ROMM_NATIVE_ROOT}/cmake/cores/mgba-windows.cmake)
+    # Snes9x (SNES): eighth candidate. Reuses the guarded upstream 54-source
+    # C++14 inventory and standard Libretro battery SRAM.
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/snes9x-windows.cmake)
     set(ROMM_WIN32_CANDIDATE_CORE_TARGETS
         gambatte_core
         fceumm_core
@@ -478,6 +481,7 @@ if(WIN32)
         beetle_pce_fast_core
         genesis_plus_gx_core
         mgba_core
+        snes9x_core
     )
 endif()
 

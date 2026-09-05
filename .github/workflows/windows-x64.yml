@@ -546,7 +546,11 @@ jobs:
             || { echo "::error::candidate mgba_core.dll missing from $BUILD_DIR/bin"; exit 1; }
           [ ! -e "$BUILD_DIR/bin/libmgba_core.dll" ] \
             || { echo "::error::non-canonical libmgba_core.dll produced"; exit 1; }
-          echo "✓ player, test core, and seven candidate cores built with canonical names"
+          [ -f "$BUILD_DIR/bin/snes9x_core.dll" ] \
+            || { echo "::error::candidate snes9x_core.dll missing from $BUILD_DIR/bin"; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libsnes9x_core.dll" ] \
+            || { echo "::error::non-canonical libsnes9x_core.dll produced"; exit 1; }
+          echo "✓ player, test core, and eight candidate cores built with canonical names"
 
       - name: Stage unsigned artifact (SDL3.dll + libwinpthread closure beside the player)
         shell: msys2 {0}
@@ -573,6 +577,7 @@ jobs:
           cp "$BUILD_DIR/bin/beetle_pce_fast_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/genesis_plus_gx_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/mgba_core.dll" "$STAGE/cores-candidate/"
+          cp "$BUILD_DIR/bin/snes9x_core.dll" "$STAGE/cores-candidate/"
           # libwinpthread-1.dll: the toolchain contract only guarantees static
           # libgcc/libstdc++ (-static-libgcc/-static-libstdc++); the mingw-w64
           # threading runtime is linked DYNAMICALLY by default, so threaded
@@ -600,6 +605,7 @@ jobs:
             closure_imports "$STAGE/cores-candidate/beetle_pce_fast_core.dll"
             closure_imports "$STAGE/cores-candidate/genesis_plus_gx_core.dll"
             closure_imports "$STAGE/cores-candidate/mgba_core.dll"
+            closure_imports "$STAGE/cores-candidate/snes9x_core.dll"
           )"
           if grep -qi '^libwinpthread-1\.dll$' <<< "$imports"; then
             [ -f "$UCRT64_BIN/libwinpthread-1.dll" ] \
@@ -700,7 +706,7 @@ jobs:
           # cores-candidate/): they enter the same recursive PE32+ /
           # import-closure audit as every shipped image, plus the exact
           # export-allowlist checks below.
-          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll mgba_core.dll"
+          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll mgba_core.dll snes9x_core.dll"
           seen=" "
           while [ -n "$queue" ]; do
             name="${queue%% *}"
@@ -787,6 +793,8 @@ jobs:
           mgba_exports="$(printf '%s\n' $expected_exports romm_get_save_memory_data romm_get_save_memory_size romm_restore_save_memory | LC_ALL=C sort)"
           expected_exports="$mgba_exports"
           audit_candidate_exports "$STAGE/cores-candidate/mgba_core.dll" mgba
+          expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
+          audit_candidate_exports "$STAGE/cores-candidate/snes9x_core.dll" snes9x
           # Candidate provenance/hashes recorded in the AUDIT ARTIFACT ONLY —
           # deliberately NOT in CoreManifest.kt supportedAbis (the validator
           # packaging/validate-linux-targets.py keeps windows-x86_64 out of
@@ -846,6 +854,14 @@ jobs:
              echo "exports: 22 retro_* symbols plus three ROMM deferred-save extensions"
              echo "saves: standard detected GBA save medium via RETRO_MEMORY_SAVE_RAM"
              echo "sha256(cores-candidate/mgba_core.dll): $(sha256sum "$STAGE/cores-candidate/mgba_core.dll" | cut -d' ' -f1)"
+             echo "=== snes9x candidate provenance (CANDIDATE — NOT advertised) ==="
+             echo "status: windows-x86_64 in NO supportedAbis; staged under cores-candidate/ only"
+             echo "upstream: snes9xgit/snes9x @ 1.63 (921f9f7b83660eb44ad263022a57a4a029057c37)"
+             echo "sources: native/cmake/cores/snes9x-sources.cmake (shared 54-source list)"
+             echo "fragment: native/cmake/cores/snes9x-windows.cmake"
+             echo "exports: native/cmake/cores/snes9x-windows.def (22 retro_* exports)"
+             echo "saves: standard 2048-byte LoROM battery SRAM"
+             echo "sha256(cores-candidate/snes9x_core.dll): $(sha256sum "$STAGE/cores-candidate/snes9x_core.dll" | cut -d' ' -f1)"
           } >> "$AUDIT"
 
           # Artifact layout + SHA256 of every staged file (the audit log
@@ -917,6 +933,7 @@ jobs:
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/beetle_pce_fast_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/genesis_plus_gx_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/mgba_core.dll" 50
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/snes9x_core.dll" 50
           echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + five candidates, no ROM content)"
 
       - name: Upload unsigned player artifact
@@ -1090,7 +1107,8 @@ jobs:
             --wswan-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mednafen_wswan_core.dll") `
             --pce-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/beetle_pce_fast_core.dll") `
             --genesis-plus-gx-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/genesis_plus_gx_core.dll") `
-            --mgba-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mgba_core.dll")
+            --mgba-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mgba_core.dll") `
+            --snes9x-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/snes9x_core.dll")
           if ($LASTEXITCODE -ne 0) { throw "player E2E harness failed (exit $LASTEXITCODE)" }
 
       - name: Upload E2E results and logs (always)

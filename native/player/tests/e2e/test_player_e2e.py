@@ -23,6 +23,7 @@ import mgba_rom  # noqa: E402
 import pce_rom  # noqa: E402
 import player_e2e  # noqa: E402
 import prosystem_rom  # noqa: E402
+import snes9x_rom  # noqa: E402
 import wswan_rom  # noqa: E402
 from player_e2e import (  # noqa: E402
     build_request, expected_save_hash, validate_result_schema,
@@ -36,6 +37,7 @@ from player_e2e import (  # noqa: E402
     PCE_CORE_ID, PCE_REVISION, PCE_SRAM_SIZE,
     GENESIS_PLUS_GX_CORE_ID, GENESIS_PLUS_GX_REVISION,
     GENESIS_PLUS_GX_SRAM_SIZE,
+    SNES9X_CORE_ID, SNES9X_REVISION, SNES9X_SRAM_SIZE,
 )
 
 # Pinned hash of the deterministic ROM the generator must produce. The
@@ -74,6 +76,9 @@ PINNED_GENESIS_PLUS_GX_ROM_SHA256 = (
 )
 PINNED_MGBA_ROM_SHA256 = (
     "53b1633bdabf63b59f169d2ba971ed361e3d4018c3a368e17272fe6e5415745d"
+)
+PINNED_SNES9X_ROM_SHA256 = (
+    "693f87f33f6e5660451fd1282de1009e90f179ebfb7989342bfc142f0ee2214d"
 )
 
 
@@ -659,6 +664,33 @@ class MGbaRomTest(unittest.TestCase):
         self.assertEqual(
             mgba_rom.expected_sram_image_for_reported_frames([241, 181, 61]),
             mgba_rom.expected_sram_image([240, 180, 60]))
+
+
+class Snes9xRomTest(unittest.TestCase):
+    def test_size_determinism_and_pinned_hash(self):
+        rom = snes9x_rom.generate_rom()
+        self.assertEqual(len(rom), snes9x_rom.ROM_SIZE)
+        self.assertEqual(rom, snes9x_rom.generate_rom())
+        self.assertEqual(snes9x_rom.rom_sha256(), PINNED_SNES9X_ROM_SHA256)
+
+    def test_header_vectors_and_sram_contract(self):
+        rom = snes9x_rom.generate_rom()
+        header = snes9x_rom.HEADER_OFFSET
+        self.assertEqual(rom[header + 0x15:header + 0x1A], bytes((0x20, 0x02, 5, 1, 1)))
+        self.assertEqual(rom[0x7FEA:0x7FEC],
+                         (0x8000 + snes9x_rom.NMI_OFFSET).to_bytes(2, "little"))
+        self.assertEqual(rom[0x7FFC:0x7FFE], b"\x00\x80")
+
+    def test_sram_oracle(self):
+        image = snes9x_rom.expected_sram_image([240, 180, 60])
+        self.assertEqual(len(image), snes9x_rom.SRAM_SIZE)
+        self.assertEqual(image[:2], bytes((0x52, 480 & 0xff)))
+        self.assertEqual(set(image[2:]), {snes9x_rom.SRAM_FILL})
+
+    def test_harness_constants_match_generator(self):
+        self.assertEqual(SNES9X_CORE_ID, "snes9x")
+        self.assertEqual(SNES9X_REVISION, "1.63")
+        self.assertEqual(SNES9X_SRAM_SIZE, snes9x_rom.SRAM_SIZE)
 
 
 class BuildRequestTest(unittest.TestCase):

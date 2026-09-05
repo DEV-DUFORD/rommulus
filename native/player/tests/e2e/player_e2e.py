@@ -116,6 +116,7 @@ import genesis_plus_gx_rom  # noqa: E402
 import mgba_rom  # noqa: E402
 import pce_rom  # noqa: E402
 import prosystem_rom  # noqa: E402
+import snes9x_rom  # noqa: E402
 import wswan_rom  # noqa: E402
 
 IS_WINDOWS = os.name == "nt"
@@ -241,6 +242,15 @@ MGBA_RUN1_FRAMES = 240
 MGBA_RUN2_FRAMES = 180
 MGBA_RUN3_FRAMES = 60
 MGBA_KILL_VICTIM_FRAMES = 3600
+
+SNES9X_CORE_ID = "snes9x"
+SNES9X_REVISION = "1.63"
+SNES9X_SRAM_SIZE = snes9x_rom.SRAM_SIZE
+SNES9X_ROM_NAME = "rommulus-e2e-snes9x.sfc"
+SNES9X_RUN1_FRAMES = 240
+SNES9X_RUN2_FRAMES = 180
+SNES9X_RUN3_FRAMES = 60
+SNES9X_KILL_VICTIM_FRAMES = 3600
 
 
 def sram_byte_after_frames(frames):
@@ -491,7 +501,8 @@ class Runner:
                  render_driver="software", candidate_core=None,
                  fceumm_candidate_core=None, prosystem_candidate_core=None,
                  wswan_candidate_core=None, pce_candidate_core=None,
-                 genesis_plus_gx_candidate_core=None, mgba_candidate_core=None):
+                 genesis_plus_gx_candidate_core=None, mgba_candidate_core=None,
+                 snes9x_candidate_core=None):
         self.stage_dir = os.path.abspath(stage_dir)
         self.workdir = os.path.abspath(workdir)
         self.player_exe = os.path.abspath(player_exe)
@@ -511,6 +522,8 @@ class Runner:
             if genesis_plus_gx_candidate_core else None)
         self.mgba_candidate_core = (os.path.abspath(mgba_candidate_core)
                                     if mgba_candidate_core else None)
+        self.snes9x_candidate_core = (os.path.abspath(snes9x_candidate_core)
+                                      if snes9x_candidate_core else None)
         self.timeout_sec = timeout_sec
         self.video_driver = video_driver
         self.audio_driver = audio_driver
@@ -584,6 +597,10 @@ class Runner:
             shutil.copyfile(self.mgba_candidate_core,
                             os.path.join(self.core_root, self.mgba_core_filename()))
             self.generate_mgba_rom()
+        if self.snes9x_candidate_core:
+            shutil.copyfile(self.snes9x_candidate_core,
+                            os.path.join(self.core_root, self.snes9x_core_filename()))
+            self.generate_snes9x_rom()
 
     def core_filename(self):
         return "test_core.dll" if IS_WINDOWS else "libtest_core.so"
@@ -635,6 +652,13 @@ class Runner:
             return "libmgba_core.dylib"
         return "libmgba_core.so"
 
+    def snes9x_core_filename(self):
+        if IS_WINDOWS:
+            return "snes9x_core.dll"
+        if sys.platform == "darwin":
+            return "libsnes9x_core.dylib"
+        return "libsnes9x_core.so"
+
     def generate_rom(self):
         """Generate the deterministic 32 KiB ROM into the cache root."""
         rom_path = os.path.join(self.cache_root, GAMBATTE_ROM_NAME)
@@ -685,6 +709,12 @@ class Runner:
             f.write(mgba_rom.generate_rom())
         return rom_path
 
+    def generate_snes9x_rom(self):
+        rom_path = os.path.join(self.cache_root, SNES9X_ROM_NAME)
+        with open(rom_path, "wb") as f:
+            f.write(snes9x_rom.generate_rom())
+        return rom_path
+
     def gambatte_core_path(self):
         return os.path.join(self.core_root, self.candidate_core_filename())
 
@@ -705,6 +735,9 @@ class Runner:
 
     def mgba_core_path(self):
         return os.path.join(self.core_root, self.mgba_core_filename())
+
+    def snes9x_core_path(self):
+        return os.path.join(self.core_root, self.snes9x_core_filename())
 
     def env_for(self, max_frames=None, player_max_frames=None):
         env = dict(os.environ)
@@ -728,12 +761,13 @@ class Runner:
         # commits. The candidates appear in NO production manifest — this env
         # entry is the qualification gate's adoption.
         env["ROMM_PLAYER_ALLOWED_CORES"] = (
-            "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
+            "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
             CORE_ID, CORE_REVISION, GAMBATTE_CORE_ID, GAMBATTE_REVISION,
             FCEUMM_CORE_ID, FCEUMM_REVISION, PROSYSTEM_CORE_ID,
             PROSYSTEM_REVISION, WSWAN_CORE_ID, WSWAN_REVISION,
             PCE_CORE_ID, PCE_REVISION, GENESIS_PLUS_GX_CORE_ID,
-            GENESIS_PLUS_GX_REVISION, MGBA_CORE_ID, MGBA_REVISION))
+            GENESIS_PLUS_GX_REVISION, MGBA_CORE_ID, MGBA_REVISION,
+            SNES9X_CORE_ID, SNES9X_REVISION))
         # Headless SDL for the GUI-less runner: offscreen video driver with a
         # real window framebuffer (the software renderer works against it),
         # forced software render backend (no GPU on the runner), dummy audio.
@@ -2215,6 +2249,96 @@ class Runner:
             self.assert_mgba_result(name, result, session, MGBA_RUN3_FRAMES,
                                     [result["frames"]])
 
+    # -- Snes9x candidate scenarios (qualification gate) -----------------
+
+    def _snes9x_run(self, name, session, limit, prior_session=None):
+        if self.snes9x_candidate_core is None:
+            self.fail(name, "candidate Snes9x core not staged")
+            return None
+        if prior_session:
+            previous = os.path.join(self.state_root, prior_session + ".candidate.srm")
+            if not self.check(name, os.path.isfile(previous), "previous candidate missing"):
+                return None
+            save_path = os.path.join(self.data_root, session, "save.srm")
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            shutil.copyfile(previous, save_path)
+        rc, result = self.launch(
+            name, session, core_id=SNES9X_CORE_ID,
+            core_build_revision=SNES9X_REVISION, core_path=self.snes9x_core_path(),
+            content_path=os.path.join(self.cache_root, SNES9X_ROM_NAME),
+            player_max_frames=limit)
+        self.check(name, rc == 0, "exit code %r (want 0)" % rc)
+        return result
+
+    def _assert_snes9x_result(self, name, result, session, limit, frames):
+        if not self.check(name, result is not None, "no result JSON written"):
+            return False
+        problems = validate_result_schema(result)
+        if not self.check(name, not problems, "result schema: %s" % "; ".join(problems)):
+            return False
+        self.check(name, result["sessionId"] == session, "unexpected sessionId")
+        self.check(name, result["exitKind"] == "completed", "exitKind must be completed")
+        self.check(name, result["checkpointWritten"] is True, "checkpoint missing")
+        reported = result["frames"]
+        if not self.check(name, limit <= reported <= limit + 2,
+                          "frames %r outside [%d, %d]" % (reported, limit, limit + 2)):
+            return False
+        image = snes9x_rom.expected_sram_image(frames)
+        self.check(name, result["saveSize"] == SNES9X_SRAM_SIZE,
+                   "saveSize %r != %d" % (result["saveSize"], SNES9X_SRAM_SIZE))
+        self.check(name, result["saveHash"] == hashlib.sha256(image).hexdigest(),
+                   "saveHash does not match deterministic 2 KiB SRAM")
+        candidate = os.path.join(self.state_root, session + ".candidate.srm")
+        if self.check(name, os.path.isfile(candidate), "candidate save missing"):
+            with open(candidate, "rb") as f:
+                self.check(name, f.read() == image, "candidate SRAM image drifted")
+        return True
+
+    def scenario_snes9x_valid_launch_completed(self):
+        name, session = "snes9x-valid-launch-completed", "e2e-snes-run1"
+        self.scenarios.append({"name": name, "passed": True})
+        result = self._snes9x_run(name, session, SNES9X_RUN1_FRAMES)
+        if self._assert_snes9x_result(name, result, session, SNES9X_RUN1_FRAMES,
+                                      [result["frames"]] if result else []):
+            self.snes9x_frames = [result["frames"]]
+
+    def scenario_snes9x_relaunch_persistence(self):
+        name, session = "snes9x-relaunch-persistence", "e2e-snes-run2"
+        self.scenarios.append({"name": name, "passed": True})
+        result = self._snes9x_run(name, session, SNES9X_RUN2_FRAMES, "e2e-snes-run1")
+        chain = list(getattr(self, "snes9x_frames", [])) + ([result["frames"]] if result else [])
+        if self._assert_snes9x_result(name, result, session, SNES9X_RUN2_FRAMES, chain):
+            self.snes9x_frames = chain
+
+    def scenario_snes9x_repeated_load(self):
+        name, session = "snes9x-repeated-load", "e2e-snes-run3"
+        self.scenarios.append({"name": name, "passed": True})
+        result = self._snes9x_run(name, session, SNES9X_RUN3_FRAMES, "e2e-snes-run2")
+        chain = list(getattr(self, "snes9x_frames", [])) + ([result["frames"]] if result else [])
+        self._assert_snes9x_result(name, result, session, SNES9X_RUN3_FRAMES, chain)
+
+    def scenario_snes9x_force_kill_lock_recovery(self):
+        name, session = "snes9x-force-kill-lock-recovery", "e2e-snes-kill"
+        self.scenarios.append({"name": name, "passed": True})
+        if self.snes9x_candidate_core is None:
+            self.fail(name, "candidate Snes9x core not staged")
+            return
+        request_path, _, _ = self._write_request(
+            name + "-victim", session, self.snes9x_core_path(), SNES9X_REVISION,
+            core_id=SNES9X_CORE_ID, content_path=os.path.join(self.cache_root, SNES9X_ROM_NAME))
+        victim = PlayerProcess(self.player_exe, request_path,
+                               self.env_for(player_max_frames=SNES9X_KILL_VICTIM_FRAMES),
+                               os.path.join(self.logs_dir, name + "-victim.log"))
+        victim.start()
+        self.spawned_pids.append(victim.pid())
+        time.sleep(5)
+        if not self.check(name, victim.alive(), "victim exited before force-kill"):
+            return
+        victim.terminate()
+        result = self._snes9x_run(name + "-relaunch", session, SNES9X_RUN3_FRAMES)
+        self._assert_snes9x_result(name, result, session, SNES9X_RUN3_FRAMES,
+                                   [result["frames"]] if result else [])
+
     def scenario_negative_revision_mismatch(self):
         name = "negative-revision-mismatch"
         self.scenarios.append({"name": name, "passed": True})
@@ -2311,6 +2435,10 @@ class Runner:
                       self.scenario_mgba_relaunch_persistence,
                       self.scenario_mgba_repeated_load,
                       self.scenario_mgba_force_kill_lock_recovery,
+                      self.scenario_snes9x_valid_launch_completed,
+                      self.scenario_snes9x_relaunch_persistence,
+                      self.scenario_snes9x_repeated_load,
+                      self.scenario_snes9x_force_kill_lock_recovery,
                       self.scenario_negative_revision_mismatch,
                    self.scenario_negative_core_outside_root,
                    self.scenario_no_orphans_tree_deletable):
@@ -2389,7 +2517,7 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                     explicit_wswan_candidate=None,
                     explicit_pce_candidate=None,
                     explicit_genesis_plus_gx_candidate=None,
-                    explicit_mgba_candidate=None):
+                    explicit_mgba_candidate=None, explicit_snes9x_candidate=None):
     """Return player, test core, and all seven candidate core paths.
 
     A candidate is None when the stage carries no cores-candidate/ build for
@@ -2412,6 +2540,8 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
             stage_dir, "cores-candidate", "genesis_plus_gx_core.dll")
         mgba_candidate = explicit_mgba_candidate or os.path.join(
             stage_dir, "cores-candidate", "mgba_core.dll")
+        snes9x_candidate = explicit_snes9x_candidate or os.path.join(
+            stage_dir, "cores-candidate", "snes9x_core.dll")
     else:
         player, core = explicit_player, explicit_core
         if not player:
@@ -2507,6 +2637,15 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                 if os.path.isfile(cand):
                     mgba_candidate = cand
                     break
+        snes9x_candidate = explicit_snes9x_candidate
+        if not snes9x_candidate:
+            for cand in (os.path.join(stage_dir, "cores-candidate", "libsnes9x_core.so"),
+                         os.path.join(stage_dir, "cores-candidate", "snes9x_core.dll"),
+                         os.path.join(stage_dir, "libsnes9x_core.so"),
+                         os.path.join(stage_dir, "libsnes9x_core.dylib")):
+                if os.path.isfile(cand):
+                    snes9x_candidate = cand
+                    break
     if candidate is not None and not os.path.isfile(candidate):
         candidate = None
     if fceumm_candidate is not None and not os.path.isfile(fceumm_candidate):
@@ -2522,9 +2661,11 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
         genesis_plus_gx_candidate = None
     if mgba_candidate is not None and not os.path.isfile(mgba_candidate):
         mgba_candidate = None
+    if snes9x_candidate is not None and not os.path.isfile(snes9x_candidate):
+        snes9x_candidate = None
     return (player, core, candidate, fceumm_candidate, prosystem_candidate,
             wswan_candidate, pce_candidate, genesis_plus_gx_candidate,
-            mgba_candidate)
+            mgba_candidate, snes9x_candidate)
 
 
 def main(argv=None):
@@ -2553,6 +2694,8 @@ def main(argv=None):
                          "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--mgba-core", help="explicit candidate mGBA core path "
                     "(default: cores-candidate/ in the stage dir)")
+    ap.add_argument("--snes9x-core", help="explicit candidate Snes9x core path "
+                    "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--verify-artifact", metavar="DIR",
                     help="verify DIR against its import-audit.txt and exit")
     ap.add_argument("--timeout-sec", type=int, default=90,
@@ -2568,11 +2711,11 @@ def main(argv=None):
         ap.error("--stage and --workdir are required (or use --verify-artifact)")
 
     player, core, candidate, fceumm_candidate, prosystem_candidate, \
-        wswan_candidate, pce_candidate, genesis_plus_gx_candidate, mgba_candidate = discover_player(
+        wswan_candidate, pce_candidate, genesis_plus_gx_candidate, mgba_candidate, snes9x_candidate = discover_player(
             args.stage, args.player, args.core,
             args.candidate_core, args.fceumm_core,
             args.prosystem_core, args.wswan_core, args.pce_core,
-            args.genesis_plus_gx_core, args.mgba_core)
+            args.genesis_plus_gx_core, args.mgba_core, args.snes9x_core)
     for label, path in (("player", player), ("test_core", core)):
         if not path or not os.path.isfile(path):
             print("FAIL: %s not found at %r" % (label, path), file=sys.stderr)
@@ -2630,6 +2773,11 @@ def main(argv=None):
               "cores-candidate/mgba_core.dll on Windows; pass --mgba-core)"
               % args.stage, file=sys.stderr)
         return 2
+    if snes9x_candidate is None:
+        print("FAIL: candidate Snes9x core not found in %r (expected "
+              "cores-candidate/snes9x_core.dll on Windows; pass --snes9x-core)"
+              % args.stage, file=sys.stderr)
+        return 2
 
     os.makedirs(args.workdir, exist_ok=True)
     runner = Runner(args.stage, args.workdir, player, core, args.timeout_sec,
@@ -2640,7 +2788,8 @@ def main(argv=None):
                     wswan_candidate_core=wswan_candidate,
                     pce_candidate_core=pce_candidate,
                     genesis_plus_gx_candidate_core=genesis_plus_gx_candidate,
-                    mgba_candidate_core=mgba_candidate)
+                    mgba_candidate_core=mgba_candidate,
+                    snes9x_candidate_core=snes9x_candidate)
     print("player:   %s" % player)
     print("core:     %s" % core)
     print("candidate: %s" % candidate)
@@ -2650,6 +2799,7 @@ def main(argv=None):
     print("pce candidate: %s" % pce_candidate)
     print("genesis_plus_gx candidate: %s" % genesis_plus_gx_candidate)
     print("mgba candidate: %s" % mgba_candidate)
+    print("snes9x candidate: %s" % snes9x_candidate)
     print("tree:     %s" % runner.base)
     return runner.run()
 
