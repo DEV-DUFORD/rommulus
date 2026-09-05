@@ -1023,11 +1023,12 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf ../../build/player-windows-x86_64
+          ANGLE_ROOT="$(cygpath -u "$GITHUB_WORKSPACE")/deps/angle"
           cmake --preset windows-x86_64 \
             -DSDL3_ROOT="$SDL_PREFIX" \
-            -DROMM_ANGLE_EGL_LIBRARY="$GITHUB_WORKSPACE/deps/angle/lib-mingw/libEGL.dll.a" \
-            -DROMM_ANGLE_GLESV2_LIBRARY="$GITHUB_WORKSPACE/deps/angle/lib-mingw/libGLESv2.dll.a" \
-            -DROMM_ANGLE_INCLUDE_DIR="$GITHUB_WORKSPACE/deps/angle/include"
+            -DROMM_ANGLE_EGL_LIBRARY="$ANGLE_ROOT/lib-mingw/libEGL.dll.a" \
+            -DROMM_ANGLE_GLESV2_LIBRARY="$ANGLE_ROOT/lib-mingw/libGLESv2.dll.a" \
+            -DROMM_ANGLE_INCLUDE_DIR="$ANGLE_ROOT/include"
           cmake --build --preset windows-x86_64 \
             --target rommulus_player angle_gles3_smoke \
             -j"$(nproc)"
