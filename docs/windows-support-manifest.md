@@ -26,7 +26,7 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 | `mednafen_ngp` | 1 | — (no `mednafen_ngp-windows.cmake`) | NOT STARTED | no |
 | `mednafen_wswan` | 1 | `native/cmake/cores/mednafen_wswan-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
 | `stella` | 1 | — (no `stella-windows.cmake`) | NOT STARTED | no |
-| `beetle_pce_fast` | 1 | — (no `beetle_pce_fast-windows.cmake`) | NOT STARTED | no |
+| `beetle_pce_fast` | 1 | `native/cmake/cores/beetle_pce_fast-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows PE32+ cross-build, exact 22-export allowlist, deterministic original HuCard, and local BRAM lifecycle E2E passed; hosted `windows-2022` and physical Win10/11 qualification pending | no |
 | `mgba` | 1 | — (no `mgba-windows.cmake`) | NOT STARTED | no |
 | `snes9x` | 1 | — (no `snes9x-windows.cmake`) | NOT STARTED | no |
 | `genesis_plus_gx` | 1 | — (no `genesis_plus_gx-windows.cmake`) | NOT STARTED | no |
@@ -302,6 +302,36 @@ unmirrored increment — so the oracle is `SRAM[0x100] = total mod 256`, `SRAM[0
 pure function of its commit-fixed constants, so any byte drift changes this digest and fails the
 gate).
 
+## beetle_pce_fast — Windows x86_64 candidate build identity
+
+| Field | Value |
+| --- | --- |
+| Upstream repository | https://github.com/libretro/beetle-pce-fast-libretro |
+| Exact commit | `b211204c7026dff6e86e79b00185512e2421fff8` |
+| Vendored source subset | `third_party/cores/beetle_pce_fast/{libretro.c,mednafen,libretro-common}` — the guarded 60-source cartridge build in `native/cmake/cores/beetle_pce_fast-sources.cmake`, shared unchanged by Android, Linux, and Windows |
+| Local patches | none |
+| Windows fragment | `native/cmake/cores/beetle_pce_fast-windows.cmake` |
+| Export control | `native/cmake/cores/beetle_pce_fast-windows.def` — exactly the 22 `retro_*` symbols required by `CoreLibrary` |
+| Compiler / build | MinGW-w64 UCRT64 + CMake + Ninja, `-O2 -DNDEBUG`, `-Wl,--no-undefined`; canonical `beetle_pce_fast_core.dll` |
+| Binary hash | **NOT RECORDED** — emitted into the hosted workflow's `import-audit.txt` |
+| Supported systems / extensions | PC Engine / TurboGrafx-16; `.pce` |
+| Required firmware | none for HuCard content; CD content remains outside this candidate scope |
+| Renderer | software, RGB565 |
+| Saves | 2048-byte BRAM via `RETRO_MEMORY_SAVE_RAM` |
+
+Candidate posture: the DLL is staged only under `cores-candidate/`. It is included in recursive
+PE32+/import-closure auditing, exact export auditing, provenance hashing, 50-cycle native load
+smoke, and the player E2E gate, but remains absent from every `windows-x86_64` supported ABI.
+
+**Generated ROM (original content, hash-pinned).**
+`native/player/tests/e2e/pce_rom.py` generates an 8192-byte raw HuCard containing only
+RomMulus-authored HuC6280 bytecode and deterministic fill. It boots from the physical bank-zero
+reset vector without firmware, maps physical bank `0xF7` into CPU page 2, preserves the core's
+required `HUBM\x00\x88\x10\x80` BRAM prefix, generates software video and PSG audio, and counts
+VBlank events into BRAM offsets 8–10. The lifecycle gate covers checkpoint creation, adoption and
+restore into fresh processes, repeated load, and force-kill lock recovery.
+**SHA-256: `db6dce97515cb1730e927358dcbffb55acbadaecc9e320efdc07499d262b342f`.**
+
 ## Temporary software-only boundary (pre-ANGLE) — not yet qualified
 
 The Windows player currently builds under the `windows-x86_64-software-only` preset
@@ -311,8 +341,8 @@ import libraries, and include directory are excluded, a no-op `SdlHardwareContex
 instead (no unresolved GL API can exist), and the player **fails closed with `launch_failed`**
 for every known hardware-rendering core and every Libretro `SET_HW_RENDER` /
 `GET_HW_RENDER_INTERFACE` request — it never silently downgrades. SDL3 (video/audio/input)
-remains required; software cores such as `test_core`, `gambatte`, `fceumm`, `prosystem`, and
-`mednafen_wswan` keep full functionality.
+remains required; software cores such as `test_core`, `gambatte`, `fceumm`, `prosystem`,
+`mednafen_wswan`, and `beetle_pce_fast` keep full functionality.
 
 The pinned ANGLE distribution is **not yet built, staged, or qualified** in Windows CI — the
 workflow explicitly does not yet build the player with the pinned ANGLE distribution — so the

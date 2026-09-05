@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
+import pce_rom  # noqa: E402
 import player_e2e  # noqa: E402
 import prosystem_rom  # noqa: E402
 import wswan_rom  # noqa: E402
@@ -30,6 +31,7 @@ from player_e2e import (  # noqa: E402
     FCEUMM_CORE_ID, FCEUMM_REVISION, FCEUMM_SRAM_SIZE,
     PROSYSTEM_CORE_ID, PROSYSTEM_REVISION,
     WSWAN_CORE_ID, WSWAN_REVISION, WSWAN_SRAM_SIZE,
+    PCE_CORE_ID, PCE_REVISION, PCE_SRAM_SIZE,
 )
 
 # Pinned hash of the deterministic ROM the generator must produce. The
@@ -57,6 +59,10 @@ PINNED_PROSYSTEM_ROM_SHA256 = (
 # code 0x01 at the image tail selects 8 KiB battery SRAM).
 PINNED_WSWAN_ROM_SHA256 = (
     "285040a46a2902422495289d531d005b9940b3118201ade531151fe9eaf01696"
+)
+
+PINNED_PCE_ROM_SHA256 = (
+    "db6dce97515cb1730e927358dcbffb55acbadaecc9e320efdc07499d262b342f"
 )
 
 
@@ -536,6 +542,48 @@ class WswanRomTest(unittest.TestCase):
         self.assertEqual(WSWAN_SRAM_SIZE, wswan_rom.SRAM_SIZE)
 
 
+class PceRomTest(unittest.TestCase):
+    def test_size_determinism_and_pinned_hash(self):
+        rom1 = pce_rom.generate_rom()
+        rom2 = pce_rom.generate_rom()
+        self.assertEqual(len(rom1), 0x2000)
+        self.assertEqual(rom1, rom2)
+        self.assertEqual(pce_rom.rom_sha256(), PINNED_PCE_ROM_SHA256)
+
+    def test_vectors_and_original_provenance(self):
+        rom = pce_rom.generate_rom()
+        vector = bytes((pce_rom.ENTRY_ADDRESS & 0xFF,
+                        pce_rom.ENTRY_ADDRESS >> 8))
+        for offset in range(0x1FF6, 0x2000, 2):
+            self.assertEqual(rom[offset:offset + 2], vector)
+        self.assertEqual(
+            rom[pce_rom.PROVENANCE_OFFSET:
+                pce_rom.PROVENANCE_OFFSET + len(pce_rom.PROVENANCE)],
+            pce_rom.PROVENANCE)
+
+    def test_program_maps_bram_and_polls_vblank(self):
+        program = pce_rom.PROGRAM
+        self.assertIn(bytes((0xA9, 0xF7, 0x53, 0x04)), program)
+        self.assertIn(bytes((0xAD, 0x00, 0x00, 0x29, 0x20)), program)
+        self.assertIn(bytes((0xEE, 0x09, 0x40)), program)
+
+    def test_sram_oracle(self):
+        image = pce_rom.expected_sram_image([240, 180, 60])
+        self.assertEqual(len(image), pce_rom.SRAM_SIZE)
+        self.assertEqual(image[:8], pce_rom.SRAM_PREFIX)
+        self.assertEqual(image[pce_rom.SRAM_MARKER_OFFSET],
+                         pce_rom.SRAM_MARKER)
+        self.assertEqual(image[pce_rom.SRAM_FRAME_COUNTER], 57)
+        self.assertEqual(image[pce_rom.SRAM_60FRAME_COUNTER], 7)
+        self.assertEqual(set(image[11:]), {0})
+
+    def test_harness_constants_match_generator(self):
+        self.assertEqual(PCE_CORE_ID, "beetle_pce_fast")
+        self.assertEqual(PCE_REVISION,
+                         "b211204c7026dff6e86e79b00185512e2421fff8")
+        self.assertEqual(PCE_SRAM_SIZE, pce_rom.SRAM_SIZE)
+
+
 class BuildRequestTest(unittest.TestCase):
     def test_has_exactly_the_strict_v2_key_set(self):
         req = build_request("s-1", "/c/core.dll", "/d/system", "/d/save.srm",
@@ -636,6 +684,19 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["contentPath"],
                          "/cache état/rommulus-e2e-wswan.ws")
         self.assertIsNone(req["expectedSaveSize"])
+        self.assertNotIn("\\", req["contentPath"])
+
+    def test_pce_candidate_request(self):
+        req = build_request(
+            "s-pce", "/c/beetle_pce_fast_core.dll", "/d/system",
+            "/d/save.srm", "/st/cand.srm", "/st/result.json",
+            core_build_revision=PCE_REVISION, core_id=PCE_CORE_ID,
+            content_path="/cache état/rommulus-e2e-beetle-pce-fast.pce")
+        self.assertEqual(req["coreId"], PCE_CORE_ID)
+        self.assertEqual(req["coreBuildRevision"], PCE_REVISION)
+        self.assertEqual(
+            req["contentPath"],
+            "/cache état/rommulus-e2e-beetle-pce-fast.pce")
         self.assertNotIn("\\", req["contentPath"])
 
     def test_paths_are_forward_slash(self):

@@ -460,7 +460,16 @@ if(WIN32)
     # the E2E gate asserts the deterministic per-frame SRAM oracle across the
     # adoption chain.
     include(${ROMM_NATIVE_ROOT}/cmake/cores/mednafen_wswan-windows.cmake)
-    set(ROMM_WIN32_CANDIDATE_CORE_TARGETS gambatte_core fceumm_core prosystem_core mednafen_wswan_core)
+    # Beetle PCE Fast (PC Engine): fifth candidate, with a shared 60-source
+    # inventory and standard 2 KiB battery-backed BRAM.
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/beetle_pce_fast-windows.cmake)
+    set(ROMM_WIN32_CANDIDATE_CORE_TARGETS
+        gambatte_core
+        fceumm_core
+        prosystem_core
+        mednafen_wswan_core
+        beetle_pce_fast_core
+    )
 endif()
 
 # ---------------------------------------------------------------------------
@@ -528,5 +537,10 @@ if(WIN32)
     # Candidate cores install to their own destination so a future Windows
     # package step can never confuse them with enabled cores (packaging is
     # not wired for Windows yet — this rule only fixes the intended layout).
-    install(TARGETS ${ROMM_WIN32_CANDIDATE_CORE_TARGETS} LIBRARY DESTINATION lib/cores-candidate)
+    # PE DLLs are CMake RUNTIME artifacts; LIBRARY alone would silently send
+    # them to the default bin destination.
+    install(TARGETS ${ROMM_WIN32_CANDIDATE_CORE_TARGETS}
+        RUNTIME DESTINATION lib/cores-candidate
+        LIBRARY DESTINATION lib/cores-candidate
+    )
 endif()

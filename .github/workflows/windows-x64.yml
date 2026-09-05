@@ -40,14 +40,13 @@
   #   only candidate CI build): the qualification-only generic player frame-
   #   limit hook (ROMM_PLAYER_MAX_FRAMES → clean player-initiated completed
   #   exit at the presented-frame bound, checkpoint before stop; no new CLI)
-   #   that the Gambatte + FCEUmm + ProSystem candidate E2Es in job 5 drive.
-   #   Job 4 also builds and audits the CANDIDATE cores fceumm_core.dll,
-   #   prosystem_core.dll, and mednafen_wswan_core.dll (same treatment as
-   #   gambatte_core.dll: canonical name check, cores-candidate/ staging,
+   #   that all candidate E2Es in job 5 drive.
+   #   Job 4 builds and audits five CANDIDATE cores: gambatte_core.dll,
+   #   fceumm_core.dll, prosystem_core.dll, mednafen_wswan_core.dll, and
+   #   beetle_pce_fast_core.dll (canonical names, cores-candidate/ staging,
    #   recursive PE32+/import-closure audit, exact 22-symbol export
-   #   allowlist via native/cmake/cores/fceumm-windows.def /
-   #   prosystem-windows.def / mednafen_wswan-windows.def, provenance + hash
-   #   in import-audit.txt, repeated load/init/deinit smoke).
+   #   per-core .def allowlists, provenance + hash in import-audit.txt, and
+   #   repeated load/init/deinit smoke).
  #   Job 5 (player-win64-e2e) is the Phase 3b synthetic-core gate: it
  #   downloads that artifact (pinned download-artifact), verifies every file
  #   against import-audit.txt's SHA256 section, and runs the committed
@@ -534,7 +533,12 @@ jobs:
             || { echo "::error::candidate mednafen_wswan_core.dll missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
           [ ! -e "$BUILD_DIR/bin/libmednafen_wswan_core.dll" ] \
             || { echo "::error::non-canonical libmednafen_wswan_core.dll produced — the WIN32 PREFIX \"\" fix regressed"; exit 1; }
-          echo "✓ rommulus-player.exe + test_core.dll + candidate gambatte_core.dll + candidate fceumm_core.dll + candidate prosystem_core.dll + candidate mednafen_wswan_core.dll built with canonical names"
+          # Candidate Beetle PCE Fast core (NOT advertised in any manifest).
+          [ -f "$BUILD_DIR/bin/beetle_pce_fast_core.dll" ] \
+            || { echo "::error::candidate beetle_pce_fast_core.dll missing from $BUILD_DIR/bin"; ls -la "$BUILD_DIR/bin" 2>/dev/null; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libbeetle_pce_fast_core.dll" ] \
+            || { echo "::error::non-canonical libbeetle_pce_fast_core.dll produced — the WIN32 PREFIX \"\" fix regressed"; exit 1; }
+          echo "✓ player, test core, and five candidate cores built with canonical names"
 
       - name: Stage unsigned artifact (SDL3.dll + libwinpthread closure beside the player)
         shell: msys2 {0}
@@ -549,7 +553,8 @@ jobs:
           # the PE loader resolves it from the application directory.
           cp "$SDL_PREFIX/bin/SDL3.dll" "$STAGE/bin/"
           cp "$BUILD_DIR/bin/test_core.dll" "$STAGE/cores/"
-          # Candidate Gambatte + FCEUmm + ProSystem + mednafen_wswan cores
+          # Candidate Gambatte + FCEUmm + ProSystem + mednafen_wswan + Beetle
+          # PCE Fast cores
           # staged SEPARATELY from enabled cores: cores-candidate/ keeps the
           # candidates fully auditable while no current path can load them as
           # shipped (enabled) cores.
@@ -557,6 +562,7 @@ jobs:
           cp "$BUILD_DIR/bin/fceumm_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/prosystem_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/mednafen_wswan_core.dll" "$STAGE/cores-candidate/"
+          cp "$BUILD_DIR/bin/beetle_pce_fast_core.dll" "$STAGE/cores-candidate/"
           # libwinpthread-1.dll: the toolchain contract only guarantees static
           # libgcc/libstdc++ (-static-libgcc/-static-libstdc++); the mingw-w64
           # threading runtime is linked DYNAMICALLY by default, so threaded
@@ -581,6 +587,7 @@ jobs:
             closure_imports "$STAGE/cores-candidate/fceumm_core.dll"
             closure_imports "$STAGE/cores-candidate/prosystem_core.dll"
             closure_imports "$STAGE/cores-candidate/mednafen_wswan_core.dll"
+            closure_imports "$STAGE/cores-candidate/beetle_pce_fast_core.dll"
           )"
           if grep -qi '^libwinpthread-1\.dll$' <<< "$imports"; then
             [ -f "$UCRT64_BIN/libwinpthread-1.dll" ] \
@@ -676,12 +683,11 @@ jobs:
           # import table is classified per DLL: system (OS-provided),
           # forbidden (fail), or non-system (must have an exact staged copy,
           # which is then audited in turn). Anything else fails the gate.
-          # gambatte_core.dll, fceumm_core.dll, prosystem_core.dll, and
-          # mednafen_wswan_core.dll are the CANDIDATE cores (staged under
+          # The five production-core candidates are staged under
           # cores-candidate/): they enter the same recursive PE32+ /
           # import-closure audit as every shipped image, plus the exact
           # export-allowlist checks below.
-          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll"
+          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll"
           seen=" "
           while [ -n "$queue" ]; do
             name="${queue%% *}"
@@ -735,15 +741,16 @@ jobs:
             fi
           done
 
-          # Exact PE export allowlist for ALL FOUR candidate cores: each DLL
+          # Exact PE export allowlist for all five candidate cores: each DLL
           # must export EXACTLY the 22 Libretro symbols the player's
           # CoreLibrary resolves (native/engine/src/core_library.cpp) — no
           # romm_* save extensions (none of the cores defines any at its pin),
           # no unused upstream extras, no internal symbols. The .def files
           # that produce these tables: native/cmake/cores/gambatte-windows.def,
-          # fceumm-windows.def, prosystem-windows.def, and
-          # mednafen_wswan-windows.def (RETRO_API is neutralized to empty in
-          # all four Windows fragments so the .def is the sole export
+          # fceumm-windows.def, prosystem-windows.def,
+          # mednafen_wswan-windows.def, and beetle_pce_fast-windows.def
+          # (RETRO_API is neutralized to empty in all Windows fragments, so
+          # the .def is the sole export
           # authority).
           expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
           audit_candidate_exports() { # $1 = staged DLL path, $2 = core name
@@ -766,6 +773,7 @@ jobs:
           audit_candidate_exports "$STAGE/cores-candidate/fceumm_core.dll" fceumm
           audit_candidate_exports "$STAGE/cores-candidate/prosystem_core.dll" prosystem
           audit_candidate_exports "$STAGE/cores-candidate/mednafen_wswan_core.dll" mednafen_wswan
+          audit_candidate_exports "$STAGE/cores-candidate/beetle_pce_fast_core.dll" beetle_pce_fast
           # Candidate provenance/hashes recorded in the AUDIT ARTIFACT ONLY —
           # deliberately NOT in CoreManifest.kt supportedAbis (the validator
           # packaging/validate-linux-targets.py keeps windows-x86_64 out of
@@ -801,6 +809,14 @@ jobs:
              echo "exports:  native/cmake/cores/mednafen_wswan-windows.def (22 retro_* exports; no romm_* save extensions present in this core)"
              echo "saves:    8192-byte battery SRAM (cart header code 0x01; E2E drives the deterministic SRAM counter oracle from wswan_rom.py)"
              echo "sha256(cores-candidate/mednafen_wswan_core.dll): $(sha256sum "$STAGE/cores-candidate/mednafen_wswan_core.dll" | cut -d' ' -f1)"
+             echo "=== beetle_pce_fast candidate provenance (CANDIDATE — NOT advertised) ==="
+             echo "status: windows-x86_64 in NO supportedAbis; staged under cores-candidate/ only"
+             echo "upstream: libretro/beetle-pce-fast-libretro @ b211204c7026dff6e86e79b00185512e2421fff8 (pinned tree: third_party/cores/beetle_pce_fast)"
+             echo "sources: native/cmake/cores/beetle_pce_fast-sources.cmake (shared 60-source cartridge build)"
+             echo "fragment: native/cmake/cores/beetle_pce_fast-windows.cmake"
+             echo "exports:  native/cmake/cores/beetle_pce_fast-windows.def (22 retro_* exports; no romm_* save extensions present in this core)"
+             echo "saves:    2048-byte BRAM (E2E preserves the HUBM header and drives a deterministic VBlank counter oracle from pce_rom.py)"
+             echo "sha256(cores-candidate/beetle_pce_fast_core.dll): $(sha256sum "$STAGE/cores-candidate/beetle_pce_fast_core.dll" | cut -d' ' -f1)"
           } >> "$AUDIT"
 
           # Artifact layout + SHA256 of every staged file (the audit log
@@ -863,13 +879,14 @@ jobs:
           # must pass, so a smoke-harness regression fails here BEFORE the
           # candidates are judged.
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores/test_core.dll" 25
-          # The candidate Gambatte + FCEUmm + ProSystem + mednafen_wswan
-          # cores: 50 repeated load/api/init/deinit cycles each.
+          # The five candidate cores: 50 repeated load/api/init/deinit cycles
+          # each.
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/gambatte_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/fceumm_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/prosystem_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/mednafen_wswan_core.dll" 50
-          echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + gambatte + fceumm + prosystem + mednafen_wswan candidates, no ROM content)"
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/beetle_pce_fast_core.dll" 50
+          echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + five candidates, no ROM content)"
 
       - name: Upload unsigned player artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -1018,13 +1035,14 @@ jobs:
           # exact PIDs only.
           $env:PATH = "$stageBin;$env:SystemRoot\System32;$env:SystemRoot"
           Write-Host "sanitized loader PATH: $env:PATH"
-          # --candidate-core / --fceumm-core / --prosystem-core / --wswan-core
-          # pass the CANDIDATE Gambatte, FCEUmm, ProSystem, and mednafen_wswan
+          # Candidate options pass all five cores explicitly.
+          # pass the CANDIDATE Gambatte, FCEUmm, ProSystem, mednafen_wswan,
+          # and Beetle PCE Fast
           # cores explicitly (cores-candidate/ — never an enabled-core path):
           # the harness stages each into its trusted core root, generates the
           # original deterministic ROMs (32 KiB Game Boy image; 49168-byte
           # iNES mapper-0 NROM + battery; 16 KiB raw .a78; 512 KiB raw .ws)
-          # into the trusted cache root, and runs all four cores'
+          # into the trusted cache root, and runs all five cores'
           # qualification scenarios (bounded presented-frame runs under the
           # ROMM_PLAYER_MAX_FRAMES hook compiled in by job 4; Gambatte/FCEUmm/
           # mednafen_wswan: 8192-byte battery SRAM + deterministic counter
@@ -1038,7 +1056,8 @@ jobs:
             --candidate-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/gambatte_core.dll") `
             --fceumm-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/fceumm_core.dll") `
             --prosystem-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/prosystem_core.dll") `
-            --wswan-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mednafen_wswan_core.dll")
+            --wswan-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mednafen_wswan_core.dll") `
+            --pce-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/beetle_pce_fast_core.dll")
           if ($LASTEXITCODE -ne 0) { throw "player E2E harness failed (exit $LASTEXITCODE)" }
 
       - name: Upload E2E results and logs (always)
