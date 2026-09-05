@@ -28,7 +28,7 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 | `stella` | 1 | — (no `stella-windows.cmake`) | NOT STARTED | no |
 | `beetle_pce_fast` | 1 | `native/cmake/cores/beetle_pce_fast-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows PE32+ cross-build, exact 22-export allowlist, deterministic original HuCard, and local BRAM lifecycle E2E passed; hosted `windows-2022` and physical Win10/11 qualification pending | no |
 | `mgba` | 1 | `native/cmake/cores/mgba-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 25-export boundary, 32 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
-| `snes9x` | 1 | — (no `snes9x-windows.cmake`) | NOT STARTED | no |
+| `snes9x` | 1 | `native/cmake/cores/snes9x-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 22-export boundary, 2 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `genesis_plus_gx` | 1 | `native/cmake/cores/genesis_plus_gx-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 26-export boundary, 64 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `pcsx_rearmed` | 2 | — (no `pcsx_rearmed-windows.cmake`) | NOT STARTED | no |
 | `mupen64plus_next` | 2 | — (no `mupen64plus_next-windows.cmake`) | NOT STARTED | no |
@@ -37,6 +37,30 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 
 Counts: Tier 0 = 1, Tier 1 = 11, Tier 2 = 2, Tier 3 = 2 (16 total, matching the 16 rows of
 `docs/linux-support-manifest.md`).
+
+## snes9x — Windows x86_64 candidate build identity
+
+Candidate posture: the canonical `snes9x_core.dll` is staged only under
+`cores-candidate/`; it is not advertised by any production `CoreManifest`.
+
+- Upstream: `snes9xgit/snes9x` 1.63
+  (`921f9f7b83660eb44ad263022a57a4a029057c37`).
+- Shared sources: `native/cmake/cores/snes9x-sources.cmake` validates the
+  54-source inventory reused by Android, Linux, and the candidate target.
+- ABI and saves: `native/cmake/cores/snes9x-windows.def` permits exactly 22
+  `retro_*` exports. The original 32 KiB LoROM fixture uses standard 2 KiB
+  battery SRAM through `RETRO_MEMORY_SAVE_RAM`.
+- Hosted evidence: workflow
+  [33989376162](https://github.com/DEV-DUFORD/rommulus/actions/runs/33989376162)
+  passed all five `windows-2022` jobs, including recursive PE/import closure,
+  export/provenance audits, 50-cycle load/init/deinit smoke, and the complete
+  save adoption/restore, repeated-load, and force-kill recovery E2E path.
+  Hosted `snes9x_core.dll` SHA-256:
+  `54aeef176ac87c61d452af95be1f144bbe9c287556cc571895361fa8fbb497ac`.
+
+Snes9x remains candidate-only. Physical Windows 10/11, controller,
+interactive audio/video, sleep/resume, and soak qualification remain required
+before any `CoreManifest.supportedAbis` enablement.
 
 ## Platform foundation and desktop shell (Phase 1)
 

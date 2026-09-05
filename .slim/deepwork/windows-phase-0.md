@@ -418,3 +418,27 @@ This session ended after the FCEUmm candidate's local qualification passed. Cont
 - mGBA remains candidate-only and absent from `CoreManifest.supportedAbis`.
   Physical Windows 10/11, controller, interactive audio/video, sleep/resume,
   and soak qualification remain required before enablement.
+
+## Phase 3 candidate — Snes9x (complete, candidate-only)
+
+- Snes9x 1.63 (`921f9f7b83660eb44ad263022a57a4a029057c37`) uses a guarded
+  shared 54-source inventory for Android, Linux, and the MinGW/UCRT64
+  candidate. The canonical `snes9x_core.dll` is staged exclusively under
+  `cores-candidate/`.
+- The original deterministic 32 KiB LoROM fixture is pinned at SHA-256
+  `74718b64e00e86a26058d08c6b0bb2f9ff82d67ba495e0b294b6cd437172c8a7`.
+  It exposes standard 2 KiB battery SRAM and preserves its VBlank counter
+  over player SRAM-only adoption/restore.
+- The exact Windows boundary is the standard 22 `retro_*` exports. No ROMM
+  save extension was required.
+- Hosted run `33989376162` passed all five jobs and the full player E2E
+  suite: https://github.com/DEV-DUFORD/rommulus/actions/runs/33989376162
+- Hosted `snes9x_core.dll` SHA-256:
+  `54aeef176ac87c61d452af95be1f144bbe9c287556cc571895361fa8fbb497ac`.
+  Canonical naming, recursive PE/import closure, exact exports, provenance,
+  50-cycle load/init/deinit smoke, valid launch, checkpoint/adoption restore,
+  repeated load, and force-kill lock recovery passed.
+- A separate read-only audit found no candidate defects. Snes9x remains
+  candidate-only and absent from `CoreManifest.supportedAbis`; physical
+  Windows 10/11, controller, interactive audio/video, sleep/resume, and soak
+  qualification remain required before enablement.
