@@ -463,12 +463,17 @@ if(WIN32)
     # Beetle PCE Fast (PC Engine): fifth candidate, with a shared 60-source
     # inventory and standard 2 KiB battery-backed BRAM.
     include(${ROMM_NATIVE_ROOT}/cmake/cores/beetle_pce_fast-windows.cmake)
+    # Genesis Plus GX (Genesis / Mega Drive): sixth candidate. It reuses the
+    # guarded 115-source Android/Linux inventory and exports the normal
+    # Libretro ABI plus the existing four romm_* save-image extensions.
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/genesis_plus_gx-windows.cmake)
     set(ROMM_WIN32_CANDIDATE_CORE_TARGETS
         gambatte_core
         fceumm_core
         prosystem_core
         mednafen_wswan_core
         beetle_pce_fast_core
+        genesis_plus_gx_core
     )
 endif()
 

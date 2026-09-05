@@ -13,10 +13,12 @@
 # Source list and preprocessor flags mirror upstream's own
 # libretro/jni/Android.mk (COREFLAGS), including USE_LIBCHDR.
 # ---------------------------------------------------------------------------
-set(GENESIS_PLUS_GX_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/genesis_plus_gx)
+if(NOT DEFINED GENESIS_PLUS_GX_DIR)
+    set(GENESIS_PLUS_GX_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/genesis_plus_gx)
+endif()
 set(GENESIS_PLUS_GX_DEPS_DIR ${GENESIS_PLUS_GX_DIR}/libretro/deps)
 
-add_library(genesis_plus_gx_core SHARED
+set(ROMM_GENESIS_PLUS_GX_SOURCES
     ${GENESIS_PLUS_GX_DIR}/core/genesis.c
     ${GENESIS_PLUS_GX_DIR}/core/io_ctrl.c
     ${GENESIS_PLUS_GX_DIR}/core/loadrom.c
@@ -132,6 +134,31 @@ add_library(genesis_plus_gx_core SHARED
     ${GENESIS_PLUS_GX_DEPS_DIR}/zstd/lib/decompress/zstd_ddict.c
     ${GENESIS_PLUS_GX_DEPS_DIR}/zstd/lib/decompress/zstd_decompress.c
     ${GENESIS_PLUS_GX_DEPS_DIR}/zstd/lib/decompress/zstd_decompress_block.c
+)
+
+list(LENGTH ROMM_GENESIS_PLUS_GX_SOURCES ROMM_GENESIS_PLUS_GX_SOURCE_COUNT)
+if(NOT ROMM_GENESIS_PLUS_GX_SOURCE_COUNT EQUAL 115)
+    message(FATAL_ERROR
+        "genesis_plus_gx.cmake: expected 115 sources, found "
+        "${ROMM_GENESIS_PLUS_GX_SOURCE_COUNT}")
+endif()
+foreach(_romm_genesis_plus_gx_src IN LISTS ROMM_GENESIS_PLUS_GX_SOURCES)
+    if(NOT EXISTS ${_romm_genesis_plus_gx_src})
+        message(FATAL_ERROR
+            "genesis_plus_gx.cmake: missing vendored source: "
+            "${_romm_genesis_plus_gx_src}")
+    endif()
+endforeach()
+
+# The Android/Linux target and the Win32 candidate must compile this exact
+# curated inventory. The source-only mode lets the candidate reuse it without
+# inheriting Android's log link library or ELF version-script flags.
+if(ROMM_GENESIS_PLUS_GX_SOURCES_ONLY)
+    return()
+endif()
+
+add_library(genesis_plus_gx_core SHARED
+    ${ROMM_GENESIS_PLUS_GX_SOURCES}
 )
 
 target_include_directories(genesis_plus_gx_core SYSTEM PRIVATE
