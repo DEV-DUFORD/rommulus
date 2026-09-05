@@ -1314,9 +1314,11 @@ class DesktopAppCoordinatorTest {
         assertThat(event.report).isInstanceOf(PlayerExitReport.CrashInterrupted::class.java)
         assertThat(c.activePlayerSessionId.value).isNull()
 
-        // A new launch resets the flow to null (a stale Ended must not clear a fresh status).
+        // A new launch replaces the stale Ended event. The fake pid is invalid, so its own
+        // Ended event is published synchronously rather than exposing a transient running state.
         val second = c.launchPlayer(romId = 7L) as PlayerLaunchResult.Started
-        assertThat(c.playerSessionEvents.value).isNull()
+        val secondEvent = c.playerSessionEvents.value as PlayerSessionEvent.Ended
+        assertThat(secondEvent.sessionId).isEqualTo(second.sessionId)
         waitForReconciled(supervisor, second.sessionId)
     }
 

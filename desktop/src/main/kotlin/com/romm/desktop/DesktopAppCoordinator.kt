@@ -1490,6 +1490,10 @@ class DesktopAppCoordinator(
      */
     private fun watchPlayerExit(launch: LaunchOutcome, sessionId: String) {
         val pid = (launch as? LaunchOutcome.Started)?.pid ?: return
+        if (pid <= 0L) {
+            onPlayerProcessExited(sessionId, UNKNOWN_PLAYER_EXIT_CODE)
+            return
+        }
         Thread {
             try {
                 // Wait for the player to exit (completes immediately if it already has).
