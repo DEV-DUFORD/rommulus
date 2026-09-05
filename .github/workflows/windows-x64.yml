@@ -1087,7 +1087,8 @@ jobs:
             --prosystem-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/prosystem_core.dll") `
             --wswan-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mednafen_wswan_core.dll") `
             --pce-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/beetle_pce_fast_core.dll") `
-            --genesis-plus-gx-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/genesis_plus_gx_core.dll")
+            --genesis-plus-gx-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/genesis_plus_gx_core.dll") `
+            --mgba-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mgba_core.dll")
           if ($LASTEXITCODE -ne 0) { throw "player E2E harness failed (exit $LASTEXITCODE)" }
 
       - name: Upload E2E results and logs (always)

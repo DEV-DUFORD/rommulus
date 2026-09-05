@@ -2109,6 +2109,112 @@ class Runner:
                 name, result, session, GENESIS_PLUS_GX_RUN3_FRAMES,
                 [result["frames"]])
 
+    # -- mGBA candidate scenarios (qualification gate) --------------------
+
+    def _require_mgba_candidate(self, name):
+        if self.mgba_candidate_core is None:
+            self.fail(name, "candidate mGBA core not staged")
+            return False
+        return True
+
+    def assert_mgba_result(self, name, result, session_id, limit, run_frames):
+        problems = validate_result_schema(result)
+        self.check(name, not problems, "result schema: %s" % "; ".join(problems))
+        if problems:
+            return False
+        self.check(name, result["sessionId"] == session_id,
+                   "sessionId %r != %r" % (result["sessionId"], session_id))
+        self.check(name, result["exitKind"] == "completed",
+                   "exitKind %r (want completed)" % result["exitKind"])
+        self.check(name, result["checkpointWritten"] is True,
+                   "checkpointWritten must be true")
+        frames = result["frames"]
+        self.check(name, limit <= frames <= limit + 2,
+                   "frames %r outside [%d, %d]" % (frames, limit, limit + 2))
+        if not (limit <= frames <= limit + 2):
+            return False
+        want_image = mgba_rom.expected_sram_image(run_frames)
+        self.check(name, result["saveSize"] == MGBA_SRAM_SIZE,
+                   "saveSize %r != %d" % (result["saveSize"], MGBA_SRAM_SIZE))
+        self.check(name, result["saveHash"] == hashlib.sha256(want_image).hexdigest(),
+                   "saveHash does not match the deterministic 32 KiB SRAM image")
+        candidate = os.path.join(self.state_root, session_id + ".candidate.srm")
+        if self.check(name, os.path.isfile(candidate), "candidate save missing on disk"):
+            with open(candidate, "rb") as f:
+                self.check(name, f.read() == want_image,
+                           "candidate file does not match deterministic 32 KiB SRAM")
+        return True
+
+    def _mgba_launch(self, name, session, limit):
+        return self.launch(
+            name, session, core_id=MGBA_CORE_ID,
+            core_build_revision=MGBA_REVISION, core_path=self.mgba_core_path(),
+            content_path=os.path.join(self.cache_root, MGBA_ROM_NAME),
+            player_max_frames=limit)
+
+    def _mgba_run(self, name, session, limit, prior_session=None):
+        if not self._require_mgba_candidate(name):
+            return None
+        if prior_session:
+            previous = os.path.join(self.state_root, prior_session + ".candidate.srm")
+            if not self.check(name, os.path.isfile(previous), "previous candidate missing"):
+                return None
+            save_path = os.path.join(self.data_root, session, "save.srm")
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            shutil.copyfile(previous, save_path)
+        rc, result = self._mgba_launch(name, session, limit)
+        self.check(name, rc == 0, "exit code %r (want 0)" % rc)
+        return result
+
+    def scenario_mgba_valid_launch_completed(self):
+        name, session = "mgba-valid-launch-completed", "e2e-mgba-run1"
+        self.scenarios.append({"name": name, "passed": True})
+        result = self._mgba_run(name, session, MGBA_RUN1_FRAMES)
+        if result and self.assert_mgba_result(name, result, session, MGBA_RUN1_FRAMES,
+                                              [result["frames"]]):
+            self.mgba_chain = [result["frames"]]
+
+    def scenario_mgba_relaunch_persistence(self):
+        name, session = "mgba-relaunch-persistence", "e2e-mgba-run2"
+        self.scenarios.append({"name": name, "passed": True})
+        result = self._mgba_run(name, session, MGBA_RUN2_FRAMES, "e2e-mgba-run1")
+        if result:
+            chain = list(getattr(self, "mgba_chain", [])) + [result["frames"]]
+            if self.assert_mgba_result(name, result, session, MGBA_RUN2_FRAMES, chain):
+                self.mgba_chain = chain
+
+    def scenario_mgba_repeated_load(self):
+        name, session = "mgba-repeated-load", "e2e-mgba-run3"
+        self.scenarios.append({"name": name, "passed": True})
+        result = self._mgba_run(name, session, MGBA_RUN3_FRAMES, "e2e-mgba-run2")
+        if result:
+            chain = list(getattr(self, "mgba_chain", [])) + [result["frames"]]
+            self.assert_mgba_result(name, result, session, MGBA_RUN3_FRAMES, chain)
+
+    def scenario_mgba_force_kill_lock_recovery(self):
+        name, session = "mgba-force-kill-lock-recovery", "e2e-mgba-kill"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_mgba_candidate(name):
+            return
+        request_path, _, _ = self._write_request(
+            name + "-victim", session, self.mgba_core_path(), MGBA_REVISION,
+            core_id=MGBA_CORE_ID, content_path=os.path.join(self.cache_root, MGBA_ROM_NAME))
+        victim = PlayerProcess(self.player_exe, request_path,
+                               self.env_for(player_max_frames=MGBA_KILL_VICTIM_FRAMES),
+                               os.path.join(self.logs_dir, name + "-victim.log"))
+        victim.start()
+        self.spawned_pids.append(victim.pid())
+        time.sleep(5)
+        if not self.check(name, victim.alive(), "victim exited before force-kill"):
+            return
+        victim.terminate()
+        if not self.check(name, not victim.alive(), "victim still alive after force-kill"):
+            return
+        result = self._mgba_run(name + "-relaunch", session, MGBA_RUN3_FRAMES)
+        if result:
+            self.assert_mgba_result(name, result, session, MGBA_RUN3_FRAMES,
+                                    [result["frames"]])
+
     def scenario_negative_revision_mismatch(self):
         name = "negative-revision-mismatch"
         self.scenarios.append({"name": name, "passed": True})
@@ -2201,6 +2307,10 @@ class Runner:
                       self.scenario_genesis_plus_gx_relaunch_persistence,
                       self.scenario_genesis_plus_gx_repeated_load,
                       self.scenario_genesis_plus_gx_force_kill_lock_recovery,
+                      self.scenario_mgba_valid_launch_completed,
+                      self.scenario_mgba_relaunch_persistence,
+                      self.scenario_mgba_repeated_load,
+                      self.scenario_mgba_force_kill_lock_recovery,
                       self.scenario_negative_revision_mismatch,
                    self.scenario_negative_core_outside_root,
                    self.scenario_no_orphans_tree_deletable):
@@ -2278,8 +2388,9 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                     explicit_prosystem_candidate=None,
                     explicit_wswan_candidate=None,
                     explicit_pce_candidate=None,
-                    explicit_genesis_plus_gx_candidate=None):
-    """Return player, test core, and all six candidate core paths.
+                    explicit_genesis_plus_gx_candidate=None,
+                    explicit_mgba_candidate=None):
+    """Return player, test core, and all seven candidate core paths.
 
     A candidate is None when the stage carries no cores-candidate/ build for
     it; main then fails rather than silently shrinking the qualification gate.
@@ -2299,6 +2410,8 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
             stage_dir, "cores-candidate", "beetle_pce_fast_core.dll")
         genesis_plus_gx_candidate = explicit_genesis_plus_gx_candidate or os.path.join(
             stage_dir, "cores-candidate", "genesis_plus_gx_core.dll")
+        mgba_candidate = explicit_mgba_candidate or os.path.join(
+            stage_dir, "cores-candidate", "mgba_core.dll")
     else:
         player, core = explicit_player, explicit_core
         if not player:
@@ -2385,6 +2498,15 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                 if os.path.isfile(cand):
                     genesis_plus_gx_candidate = cand
                     break
+        mgba_candidate = explicit_mgba_candidate
+        if not mgba_candidate:
+            for cand in (os.path.join(stage_dir, "cores-candidate", "libmgba_core.so"),
+                         os.path.join(stage_dir, "cores-candidate", "mgba_core.dll"),
+                         os.path.join(stage_dir, "libmgba_core.so"),
+                         os.path.join(stage_dir, "libmgba_core.dylib")):
+                if os.path.isfile(cand):
+                    mgba_candidate = cand
+                    break
     if candidate is not None and not os.path.isfile(candidate):
         candidate = None
     if fceumm_candidate is not None and not os.path.isfile(fceumm_candidate):
@@ -2398,8 +2520,11 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
     if (genesis_plus_gx_candidate is not None and
             not os.path.isfile(genesis_plus_gx_candidate)):
         genesis_plus_gx_candidate = None
+    if mgba_candidate is not None and not os.path.isfile(mgba_candidate):
+        mgba_candidate = None
     return (player, core, candidate, fceumm_candidate, prosystem_candidate,
-            wswan_candidate, pce_candidate, genesis_plus_gx_candidate)
+            wswan_candidate, pce_candidate, genesis_plus_gx_candidate,
+            mgba_candidate)
 
 
 def main(argv=None):
@@ -2426,6 +2551,8 @@ def main(argv=None):
     ap.add_argument("--genesis-plus-gx-core",
                     help="explicit candidate Genesis Plus GX core path "
                          "(default: cores-candidate/ in the stage dir)")
+    ap.add_argument("--mgba-core", help="explicit candidate mGBA core path "
+                    "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--verify-artifact", metavar="DIR",
                     help="verify DIR against its import-audit.txt and exit")
     ap.add_argument("--timeout-sec", type=int, default=90,
@@ -2441,11 +2568,11 @@ def main(argv=None):
         ap.error("--stage and --workdir are required (or use --verify-artifact)")
 
     player, core, candidate, fceumm_candidate, prosystem_candidate, \
-        wswan_candidate, pce_candidate, genesis_plus_gx_candidate = discover_player(
+        wswan_candidate, pce_candidate, genesis_plus_gx_candidate, mgba_candidate = discover_player(
             args.stage, args.player, args.core,
             args.candidate_core, args.fceumm_core,
             args.prosystem_core, args.wswan_core, args.pce_core,
-            args.genesis_plus_gx_core)
+            args.genesis_plus_gx_core, args.mgba_core)
     for label, path in (("player", player), ("test_core", core)):
         if not path or not os.path.isfile(path):
             print("FAIL: %s not found at %r" % (label, path), file=sys.stderr)
@@ -2498,6 +2625,11 @@ def main(argv=None):
               "libgenesis_plus_gx_core.so/.dylib on POSIX; pass "
               "--genesis-plus-gx-core)" % args.stage, file=sys.stderr)
         return 2
+    if mgba_candidate is None:
+        print("FAIL: candidate mGBA core not found in %r (expected "
+              "cores-candidate/mgba_core.dll on Windows; pass --mgba-core)"
+              % args.stage, file=sys.stderr)
+        return 2
 
     os.makedirs(args.workdir, exist_ok=True)
     runner = Runner(args.stage, args.workdir, player, core, args.timeout_sec,
@@ -2507,7 +2639,8 @@ def main(argv=None):
                     prosystem_candidate_core=prosystem_candidate,
                     wswan_candidate_core=wswan_candidate,
                     pce_candidate_core=pce_candidate,
-                    genesis_plus_gx_candidate_core=genesis_plus_gx_candidate)
+                    genesis_plus_gx_candidate_core=genesis_plus_gx_candidate,
+                    mgba_candidate_core=mgba_candidate)
     print("player:   %s" % player)
     print("core:     %s" % core)
     print("candidate: %s" % candidate)
@@ -2516,6 +2649,7 @@ def main(argv=None):
     print("wswan candidate: %s" % wswan_candidate)
     print("pce candidate: %s" % pce_candidate)
     print("genesis_plus_gx candidate: %s" % genesis_plus_gx_candidate)
+    print("mgba candidate: %s" % mgba_candidate)
     print("tree:     %s" % runner.base)
     return runner.run()
 
