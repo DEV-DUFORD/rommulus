@@ -17,7 +17,8 @@
 #   Job 3 (native-win64-tests) is the Phase 2 native gate: it configures,
 #   builds, and runs the standalone engine test suite (native/tests, preset
 #   windows-x86_64) with MinGW-w64 UCRT64 + Ninja under MSYS2 — tests only.
-#   Job 4 (native-player-win64) is the Phase 3 SDL3 boundary: it builds the
+#   Job 4 (native-player-win64) is the Phase 3 SDL3 boundary plus the bounded
+#   ANGLE/GLES3 graphics spike. It builds the
 #   pinned release-3.4.16 SDL3 source archive (SHA256-verified before use;
 #   data download only, no script execution over the network) shared-only
 #   under the same UCRT64 toolchain into a job-local prefix ($RUNNER_TEMP),
@@ -57,10 +58,16 @@
  #   lock rejection, force-kill → lock release → relaunch, negative request
  #   validation, no orphans + deletable state tree. Results/logs upload
  #   always.
+#   The same job also downloads the pinned ANGLE a96fca8d distribution,
+#   verifies its release SHA256, generates MinGW import libraries from the
+#   shipped PE exports, builds the full hardware-context player, and executes
+#   a hidden-window GLES 3.2 shader/FBO/blit smoke through SDL's forced EGL
+#   path. The separate artifact records ANGLE identity, renderer, hashes, and
+#   recursive PE closure. This qualifies the frontend contract only; it does
+#   not build or advertise a Tier 2/3 core.
 #   This workflow still does NOT:
-#     • build the player with the pinned ANGLE distribution (§8.1)
 #     • package an MSI/EXE/ZIP, sign, or run jpackage
-#     • launch a Compose window or run any GUI/headless smoke
+#     • launch a Compose window
 # -------------------------------------------------------------------
 
 name: Windows x64 CI
@@ -295,7 +302,7 @@ jobs:
           echo "✓ ${pass_count} test executables reported PASS"
 
   # =================================================================
-  # 4. native-player-win64  — Phase 3 (SDL3 software-only player build)
+  # 4. native-player-win64  — Phase 3 + ANGLE/GLES3 graphics spike
   # =================================================================
   # Builds the SDL3-backed rommulus-player.exe + test_core.dll for Windows
   # x86_64 under the SAME pinned MinGW-w64 UCRT64 toolchain as job 3, using
@@ -319,7 +326,7 @@ jobs:
  # lane). The E2E scenarios that consume this artifact live in job 5
  # (player-win64-e2e, below) and its committed harness.
   native-player-win64:
-    name: Native Win64 player (SDL3, software-only)
+    name: Native Win64 player (SDL3 + ANGLE spike)
     runs-on: windows-2022
     timeout-minutes: 60
 
@@ -423,8 +430,8 @@ jobs:
             -DSDL_SHARED=ON \
             -DSDL_STATIC=OFF \
             -DSDL_GPU=OFF \
-            -DSDL_OPENGL=OFF \
-            -DSDL_OPENGLES=OFF \
+            -DSDL_OPENGL=ON \
+            -DSDL_OPENGLES=ON \
             -DSDL_VULKAN=OFF \
             -DSDL_TESTS=OFF
           cmake --build build/sdl-windows-x86_64 -j"$(nproc)"
@@ -954,6 +961,204 @@ jobs:
         with:
           name: rommulus-player-windows-x86_64-software-only
           path: dist/player-win64-software-only
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Download pinned ANGLE distribution and verify SHA256
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          ANGLE_REVISION="a96fca8d5ee2ca61e8de419e38cd577579281c9e"
+          ANGLE_ARCHIVE="angle-windows-x64-${ANGLE_REVISION}.tar.gz"
+          ANGLE_SHA256="82723e19795d683e6af2afadf39fb00d248d6a5a2cb2af9faeebc017a7f4f5d8"
+          ANGLE_URL="https://github.com/XCSoar/angle-libs/releases/download/a96fca8/${ANGLE_ARCHIVE}"
+          curl --fail --location --retry 3 --output "deps/${ANGLE_ARCHIVE}" "$ANGLE_URL"
+          echo "${ANGLE_SHA256}  deps/${ANGLE_ARCHIVE}" | sha256sum --check
+          rm -rf deps/angle
+          mkdir -p deps/angle
+          tar -xzf "deps/${ANGLE_ARCHIVE}" -C deps/angle --strip-components=1
+          rm -f "deps/${ANGLE_ARCHIVE}"
+          [ -f deps/angle/libEGL.dll ] \
+            && [ -f deps/angle/libGLESv2.dll ] \
+            && [ -f deps/angle/include/GLES3/gl32.h ] \
+            && [ -f deps/angle/LICENSE ] \
+            || { echo "::error::pinned ANGLE distribution is incomplete"; exit 1; }
+          {
+            echo "ANGLE_REVISION=${ANGLE_REVISION}"
+            echo "ANGLE_ARCHIVE_SHA256=${ANGLE_SHA256}"
+          } >> "$GITHUB_ENV"
+          echo "✓ ANGLE ${ANGLE_REVISION} archive verified and extracted"
+
+      - name: Generate MinGW import libraries from pinned ANGLE DLL exports
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p deps/angle/lib-mingw
+          for dll in libEGL libGLESv2; do
+            def="deps/angle/lib-mingw/${dll}.def"
+            {
+              echo EXPORTS
+              objdump -p "deps/angle/${dll}.dll" \
+                | sed -n '/\[Ordinal\/Name Pointer\] Table/,/^$/p' \
+                | awk '$NF ~ /^[A-Za-z_][A-Za-z0-9_@?]*$/ {print $NF}'
+            } > "$def"
+            dlltool \
+              --input-def "$def" \
+              --dllname "${dll}.dll" \
+              --output-lib "deps/angle/lib-mingw/${dll}.dll.a" \
+              --machine i386:x86-64
+          done
+          grep -qx 'glGetString' deps/angle/lib-mingw/libGLESv2.def \
+            || { echo "::error::generated GLES import definition lacks glGetString"; exit 1; }
+          grep -qx 'eglGetDisplay' deps/angle/lib-mingw/libEGL.def \
+            || { echo "::error::generated EGL import definition lacks eglGetDisplay"; exit 1; }
+          echo "✓ MinGW import libraries generated from the verified DLL export tables"
+
+      - name: Configure and build ANGLE hardware-context player
+        working-directory: native/player
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf ../../build/player-windows-x86_64
+          cmake --preset windows-x86_64 \
+            -DSDL3_ROOT="$SDL_PREFIX" \
+            -DROMM_ANGLE_EGL_LIBRARY="$GITHUB_WORKSPACE/deps/angle/lib-mingw/libEGL.dll.a" \
+            -DROMM_ANGLE_GLESV2_LIBRARY="$GITHUB_WORKSPACE/deps/angle/lib-mingw/libGLESv2.dll.a" \
+            -DROMM_ANGLE_INCLUDE_DIR="$GITHUB_WORKSPACE/deps/angle/include"
+          cmake --build --preset windows-x86_64 \
+            --target rommulus_player angle_gles3_smoke \
+            -j"$(nproc)"
+
+      - name: Stage and audit ANGLE graphics-spike closure
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          BUILD_DIR="build/player-windows-x86_64"
+          STAGE="dist/angle-gles3-spike"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/bin" "$STAGE/licenses"
+          cp "$BUILD_DIR/bin/rommulus-player.exe" "$STAGE/bin/"
+          cp "$BUILD_DIR/bin/angle_gles3_smoke.exe" "$STAGE/bin/"
+          cp "$SDL_PREFIX/bin/SDL3.dll" "$STAGE/bin/"
+          cp deps/angle/libEGL.dll deps/angle/libGLESv2.dll "$STAGE/bin/"
+          cp deps/angle/LICENSE "$STAGE/licenses/ANGLE-LICENSE.txt"
+
+          imports_of() {
+            objdump -p "$1" | grep 'DLL Name:' | sed 's/.*DLL Name: *//' | tr -d '\r'
+          }
+          UCRT64_BIN="$(dirname "$(command -v x86_64-w64-mingw32-gcc)")"
+          initial_imports="$(
+            for image in "$STAGE"/bin/*.exe "$STAGE"/bin/*.dll; do
+              imports_of "$image"
+            done
+          )"
+          if grep -qi '^libwinpthread-1\.dll$' <<< "$initial_imports"; then
+            cp "$UCRT64_BIN/libwinpthread-1.dll" "$STAGE/bin/"
+          fi
+
+          is_system_dll() {
+            case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+              kernel32.dll|ntdll.dll|kernelbase.dll|user32.dll|gdi32.dll|gdiplus.dll \
+              |advapi32.dll|shell32.dll|ole32.dll|oleaut32.dll|psapi.dll \
+              |setupapi.dll|version.dll|winmm.dll|imm32.dll|ucrtbase.dll \
+              |bcrypt.dll|cfgmgr32.dll|avrt.dll|shcore.dll|dwmapi.dll \
+              |dxgi.dll|d3d11.dll|d3d12.dll|d3dcompiler_47.dll \
+              |dinput8.dll) return 0 ;;
+              api-ms-win-*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          staged_copy_of() {
+            local want="$1" f
+            for f in "$STAGE"/bin/*; do
+              [ -f "$f" ] || continue
+              if [ "$(basename "$f" | tr '[:upper:]' '[:lower:]')" = "$want" ]; then
+                printf '%s\n' "$f"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          AUDIT="$STAGE/graphics-spike.txt"
+          {
+            echo "ANGLE revision: ${ANGLE_REVISION}"
+            echo "ANGLE archive SHA-256: ${ANGLE_ARCHIVE_SHA256}"
+            echo "ANGLE distribution: XCSoar/angle-libs release a96fca8"
+            echo "scope: SDL3/EGL/GLES frontend only; no Tier 2/3 core built or advertised"
+          } > "$AUDIT"
+          queue="rommulus-player.exe angle_gles3_smoke.exe SDL3.dll libEGL.dll libGLESv2.dll"
+          seen=" "
+          while [ -n "$queue" ]; do
+            name="${queue%% *}"
+            case "$queue" in
+              *" "*) queue="${queue#* }" ;;
+              *) queue="" ;;
+            esac
+            case "$seen" in *" $name "*) continue ;; esac
+            seen="$seen$name "
+            path="$STAGE/bin/$name"
+            [ -f "$path" ] \
+              || { echo "::error::graphics closure member $name is missing"; exit 1; }
+            objdump -f "$path" | grep -Eq 'file format (pei|pe)-x86-64' \
+              || { echo "::error::$path is not PE32+ x86-64"; exit 1; }
+            echo "=== $name imports ===" >> "$AUDIT"
+            imports="$(imports_of "$path")"
+            printf '%s\n' "$imports" >> "$AUDIT"
+            for dll in $imports; do
+              low="$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')"
+              case "$low" in
+                libgcc*|libstdc++*|msys-2.0.dll)
+                  echo "::error::$path imports forbidden runtime $dll"
+                  exit 1
+                  ;;
+              esac
+              if ! is_system_dll "$low"; then
+                staged="$(staged_copy_of "$low" || true)"
+                [ -n "$staged" ] \
+                  || { echo "::error::$path imports unstaged DLL $dll"; exit 1; }
+                case "$seen" in
+                  *" $(basename "$staged") "*) : ;;
+                  *) queue="$queue $(basename "$staged")" ;;
+                esac
+              fi
+            done
+          done
+          imports_of "$STAGE/bin/rommulus-player.exe" | grep -qi '^libGLESv2\.dll$' \
+            || { echo "::error::hardware player does not import the pinned GLES runtime"; exit 1; }
+          imports_of "$STAGE/bin/angle_gles3_smoke.exe" | grep -qi '^libGLESv2\.dll$' \
+            || { echo "::error::ANGLE smoke does not import the pinned GLES runtime"; exit 1; }
+          {
+            echo "=== SHA-256 ==="
+            ( cd "$STAGE" && find . -type f ! -name graphics-spike.txt \
+                | LC_ALL=C sort | xargs sha256sum )
+          } >> "$AUDIT"
+          cat "$AUDIT"
+          echo "✓ ANGLE graphics-spike PE/import closure is complete"
+
+      - name: Run ANGLE GLES 3.2 graphics spike under sanitized PATH
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:GITHUB_WORKSPACE "dist/angle-gles3-spike"
+          $bin = Join-Path $stage "bin"
+          $env:PATH = "$bin;$env:SystemRoot\System32"
+          $output = & (Join-Path $bin "angle_gles3_smoke.exe") 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath (Join-Path $stage "angle-runtime.txt")
+          if ($exitCode -ne 0) {
+            throw "ANGLE GLES3 smoke failed (exit $exitCode)"
+          }
+          if (-not ($output -match "ANGLE_GLES3_SMOKE_PASS")) {
+            throw "ANGLE GLES3 smoke did not emit its PASS marker"
+          }
+
+      - name: Upload ANGLE graphics-spike evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-angle-gles3-spike
+          path: dist/angle-gles3-spike
           if-no-files-found: error
           compression-level: 0
 

@@ -489,6 +489,13 @@ int main(int argc, char* argv[]) {
     // Steam and Quick Access own their system buttons and overlays. Never
     // keep consuming gameplay input after the player loses focus to them.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
+#if defined(_WIN32) && !defined(ROMM_WIN32_SOFTWARE_ONLY)
+    // The Windows hardware build ships a pinned ANGLE runtime beside the
+    // executable. Force SDL through EGL instead of accepting a vendor WGL ES
+    // extension, so every supported GPU follows the same audited loader path.
+    SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");
+    SDL_SetHint(SDL_HINT_VIDEO_WIN_D3DCOMPILER, "none");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         const std::string error = std::string("SDL_Init failed: ") + SDL_GetError();
         std::fprintf(stderr, "error: %s\n", error.c_str());
@@ -510,6 +517,17 @@ int main(int argc, char* argv[]) {
 #endif
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (useHardwareRendering) {
+#if defined(_WIN32)
+        // ANGLE exposes OpenGL ES, never desktop OpenGL. Request its highest
+        // Libretro-relevant profile so Dolphin can negotiate ES 3.2 and so a
+        // future GLideN64 Windows candidate can use its explicit GLES build.
+        // lrps2 cannot use this path at its current pin (see the graphics
+        // spike evidence); accepting its nominal ES3 request here does not
+        // advertise or build that core.
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+#else
         // N64 (GLideN64) and lrps2 use desktop OpenGL 3.3 on Linux. GLideN64's
         // GLES path targets mobile GPUs and produces incorrect depth ordering
         // on desktop drivers. Dolphin uses desktop GL 4.5 so its backend can
@@ -537,6 +555,7 @@ int main(int argc, char* argv[]) {
         SDL_GL_SetAttribute(
             SDL_GL_CONTEXT_MINOR_VERSION,
             useDolphinDesktopGl ? 5 : (useDesktopGlProfile ? 3 : 0));
+#endif
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
@@ -606,7 +625,7 @@ int main(int argc, char* argv[]) {
         std::fprintf(
             stderr, "info: hardware presentation path: %s\n",
             useSteamDeckHardwarePath ? "Steam Deck direct framebuffer"
-                                     : "Linux offscreen compositor");
+                                     : "offscreen compositor");
     }
 
     // Give the window manager one chance to deliver an early close/quit

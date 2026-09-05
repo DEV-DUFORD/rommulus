@@ -350,6 +350,13 @@ if(WIN32)
                 "Point it at the include directory of the pinned ANGLE distribution "
                 "(plans/WINDOWS_IMPL.md section 5.6).")
         endif()
+        if(NOT EXISTS "${ROMM_ANGLE_EGL_LIBRARY}"
+                OR NOT EXISTS "${ROMM_ANGLE_GLESV2_LIBRARY}")
+            message(FATAL_ERROR
+                "The pinned ANGLE import libraries do not exist: "
+                "EGL=${ROMM_ANGLE_EGL_LIBRARY}, "
+                "GLESv2=${ROMM_ANGLE_GLESV2_LIBRARY}.")
+        endif()
         target_link_libraries(rommulus_player PRIVATE
             SDL3::SDL3
             ${ROMM_ANGLE_EGL_LIBRARY}
@@ -394,6 +401,23 @@ endif()
 romm_apply_warning_flags(rommulus_player)
 if(NOT WIN32)
     romm_apply_warning_flags(rommulus_player_deck)
+endif()
+
+# Hosted graphics-spike executable. This is intentionally not a Libretro core
+# port: it proves the exact SDL3 -> EGL -> pinned ANGLE -> GLES 3.2 path and
+# the framebuffer/shader operations used by SdlHardwareContext. Tier 2/3
+# candidates remain separate and disabled until their own gates exist.
+if(WIN32 AND NOT ROMM_WIN32_SOFTWARE_ONLY)
+    add_executable(angle_gles3_smoke
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/angle_gles3_smoke.cpp
+    )
+    target_include_directories(angle_gles3_smoke PRIVATE ${ROMM_ANGLE_INCLUDE_DIR})
+    target_link_libraries(angle_gles3_smoke PRIVATE
+        SDL3::SDL3
+        ${ROMM_ANGLE_EGL_LIBRARY}
+        ${ROMM_ANGLE_GLESV2_LIBRARY}
+    )
+    romm_apply_warning_flags(angle_gles3_smoke)
 endif()
 
 # ---------------------------------------------------------------------------
