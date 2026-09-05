@@ -787,13 +787,13 @@ class Runner:
         env["ROMM_PLAYER_CACHE_ROOT"] = as_posix(self.cache_root)
         env["ROMM_PLAYER_DATA_ROOT"] = as_posix(self.data_root)
         env["ROMM_PLAYER_STATE_ROOT"] = as_posix(self.state_root)
-        # All eight cores are allowed: the synthetic test_core (revision pin
+        # All ten cores are allowed: the synthetic test_core (revision pin
         # from CoreManifest.kt) and the CANDIDATE gambatte + fceumm +
         # prosystem + mednafen_wswan cores pinned to their vendored-tree
         # commits. The candidates appear in NO production manifest — this env
         # entry is the qualification gate's adoption.
         env["ROMM_PLAYER_ALLOWED_CORES"] = (
-            "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
+            "%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s;%s=%s" % (
             CORE_ID, CORE_REVISION, GAMBATTE_CORE_ID, GAMBATTE_REVISION,
             FCEUMM_CORE_ID, FCEUMM_REVISION, PROSYSTEM_CORE_ID,
             PROSYSTEM_REVISION, STELLA_CORE_ID, STELLA_REVISION,
