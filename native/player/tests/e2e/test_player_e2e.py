@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
 import genesis_plus_gx_rom  # noqa: E402
+import mgba_rom  # noqa: E402
 import pce_rom  # noqa: E402
 import player_e2e  # noqa: E402
 import prosystem_rom  # noqa: E402
@@ -70,6 +71,9 @@ PINNED_PCE_ROM_SHA256 = (
 
 PINNED_GENESIS_PLUS_GX_ROM_SHA256 = (
     "00a36ef98679e714baec5591af603a51e61579b1f5ab1749e802c3a76662fd2a"
+)
+PINNED_MGBA_ROM_SHA256 = (
+    "8a1d67fab3162c278fa6534d7c7d236ae6feb5ac308e2967fd8e720ddcf71f28"
 )
 
 
@@ -627,6 +631,29 @@ class GenesisPlusGxRomTest(unittest.TestCase):
             [241, 181, 61])
         self.assertEqual(image, genesis_plus_gx_rom.expected_sram_image(
             [240, 180, 60]))
+
+
+class MGbaRomTest(unittest.TestCase):
+    def test_size_determinism_and_pinned_hash(self):
+        rom = mgba_rom.generate_rom()
+        self.assertEqual(len(rom), mgba_rom.ROM_SIZE)
+        self.assertEqual(rom, mgba_rom.generate_rom())
+        self.assertEqual(mgba_rom.rom_sha256(), PINNED_MGBA_ROM_SHA256)
+
+    def test_entry_and_sram_contract(self):
+        rom = mgba_rom.generate_rom()
+        self.assertEqual(rom[:4], mgba_rom._branch(0, mgba_rom.ENTRY_OFFSET))
+        self.assertIn(mgba_rom.SRAM_BASE.to_bytes(4, "little"),
+                      mgba_rom.PROGRAM)
+        self.assertIn(mgba_rom.DISPSTAT.to_bytes(4, "little"),
+                      mgba_rom.PROGRAM)
+        self.assertIn(bytes((0x01, 0x20, 0xc0, 0xe5)), mgba_rom.PROGRAM)
+
+    def test_sram_oracle(self):
+        image = mgba_rom.expected_sram_image([240, 180, 60])
+        self.assertEqual(len(image), mgba_rom.SRAM_SIZE)
+        self.assertEqual(image[:2], bytes((0x52, 480 & 0xff)))
+        self.assertEqual(set(image[2:]), {0xff})
 
 
 class BuildRequestTest(unittest.TestCase):
