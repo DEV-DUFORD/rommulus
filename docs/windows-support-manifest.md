@@ -29,7 +29,7 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 | `beetle_pce_fast` | 1 | `native/cmake/cores/beetle_pce_fast-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows PE32+ cross-build, exact 22-export allowlist, deterministic original HuCard, and local BRAM lifecycle E2E passed; hosted `windows-2022` and physical Win10/11 qualification pending | no |
 | `mgba` | 1 | — (no `mgba-windows.cmake`) | NOT STARTED | no |
 | `snes9x` | 1 | — (no `snes9x-windows.cmake`) | NOT STARTED | no |
-| `genesis_plus_gx` | 1 | — (no `genesis_plus_gx-windows.cmake`) | NOT STARTED | no |
+| `genesis_plus_gx` | 1 | `native/cmake/cores/genesis_plus_gx-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 26-export boundary, 64 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `pcsx_rearmed` | 2 | — (no `pcsx_rearmed-windows.cmake`) | NOT STARTED | no |
 | `mupen64plus_next` | 2 | — (no `mupen64plus_next-windows.cmake`) | NOT STARTED | no |
 | `dolphin` | 3 | — (no `dolphin-windows.cmake`) | NOT STARTED | no |

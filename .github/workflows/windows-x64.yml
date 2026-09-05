@@ -650,11 +650,12 @@ jobs:
             esac
           }
 
-          # Exact staged copy of a non-system import (bin/ or cores/,
+          # Exact staged copy of a non-system import (bin/, cores/, or
+          # cores-candidate/,
           # case-insensitive — PE DLL names are). Prints the path or fails.
           staged_copy_of() {
             local want="$1" f base
-            for f in "$STAGE"/bin/* "$STAGE"/cores/*; do
+            for f in "$STAGE"/bin/* "$STAGE"/cores/* "$STAGE"/cores-candidate/*; do
               [ -f "$f" ] || continue
               base="$(basename "$f" | tr '[:upper:]' '[:lower:]')"
               if [ "$base" = "$want" ]; then printf '%s\n' "$f"; return 0; fi
@@ -689,7 +690,7 @@ jobs:
           # import table is classified per DLL: system (OS-provided),
           # forbidden (fail), or non-system (must have an exact staged copy,
           # which is then audited in turn). Anything else fails the gate.
-          # The five production-core candidates are staged under
+          # The six production-core candidates are staged under
           # cores-candidate/): they enter the same recursive PE32+ /
           # import-closure audit as every shipped image, plus the exact
           # export-allowlist checks below.
@@ -747,17 +748,10 @@ jobs:
             fi
           done
 
-          # Exact PE export allowlist for all five candidate cores: each DLL
-          # must export EXACTLY the 22 Libretro symbols the player's
-          # CoreLibrary resolves (native/engine/src/core_library.cpp) — no
-          # romm_* save extensions (none of the cores defines any at its pin),
-          # no unused upstream extras, no internal symbols. The .def files
-          # that produce these tables: native/cmake/cores/gambatte-windows.def,
-          # fceumm-windows.def, prosystem-windows.def,
-          # mednafen_wswan-windows.def, and beetle_pce_fast-windows.def
-          # (RETRO_API is neutralized to empty in all Windows fragments, so
-          # the .def is the sole export
-          # authority).
+          # Exact PE export allowlist for all six candidate cores. The first
+          # five export exactly the 22 Libretro symbols CoreLibrary resolves;
+          # Genesis Plus GX also has its four existing ROMM save-image
+          # extensions. No unused upstream or internal symbol is allowed.
           expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
           audit_candidate_exports() { # $1 = staged DLL path, $2 = core name
             local dll="$1" label="$2" actual_exports
@@ -773,7 +767,7 @@ jobs:
               | grep -E '^[[:space:]]*\[[[:space:]]*[0-9]+\] \+base\[' \
               | awk '{print $NF}' | LC_ALL=C sort)"
             [ "$expected_exports" = "$actual_exports" ] \
-              || { echo "::error::${label}_core.dll export table does not match the exact 22-symbol allowlist"; printf 'expected:\n%s\n--- actual:\n%s\n' "$expected_exports" "$actual_exports"; exit 1; }
+              || { echo "::error::${label}_core.dll export table does not match its exact allowlist"; printf 'expected:\n%s\n--- actual:\n%s\n' "$expected_exports" "$actual_exports"; exit 1; }
           }
           audit_candidate_exports "$STAGE/cores-candidate/gambatte_core.dll" gambatte
           audit_candidate_exports "$STAGE/cores-candidate/fceumm_core.dll" fceumm
