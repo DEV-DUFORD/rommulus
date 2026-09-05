@@ -899,6 +899,18 @@ class Runner:
         entry.setdefault("failures", []).append(detail)
         print("FAIL [%s] %s" % (name, detail), file=sys.stderr)
 
+    def discard_force_kill_save(self, name, save_path):
+        """Remove a focus-loss checkpoint left by a force-killed victim."""
+        try:
+            os.remove(save_path)
+        except FileNotFoundError:
+            return True
+        except OSError as exc:
+            return self.check(
+                name, False,
+                "could not remove victim checkpoint %s: %s" % (save_path, exc))
+        return True
+
     def assert_clean_result(self, name, result, session_id, want_frames):
         """Schema + session + exitKind + frame-count assertions for a run
         that must have ended in the core's own requested shutdown."""
@@ -1291,7 +1303,7 @@ class Runner:
         # release the byte-range lock when its handles close).
         victim_frames = 3600
         core_path = os.path.join(self.core_root, self.core_filename())
-        request_path, result_path, _ = self._write_request(
+        request_path, result_path, save_path = self._write_request(
             name + "-victim", session, core_path, CORE_REVISION)
         victim = PlayerProcess(self.player_exe, request_path,
                                self.env_for(max_frames=victim_frames),
@@ -1305,6 +1317,8 @@ class Runner:
         victim.terminate()
         if not self.check(name, not victim.alive(),
                           "pid %d still alive after force-kill" % pid):
+            return
+        if not self.discard_force_kill_save(name, save_path):
             return
         # Immediate relaunch of the SAME session: succeeds only if the lock
         # was released when the victim died.
@@ -1420,11 +1434,12 @@ class Runner:
         # Victim: large presented-frame budget so it is definitely mid-
         # session when the exact pid is force-killed (no cleanup code runs;
         # the kernel must release the byte-range lock when its handles
-        # close). The kill happens well before any autosave, so the
-        # relaunch starts from a FRESH cart.
+        # close). SDL may deliver a focus-loss event before the kill and
+        # checkpoint savePath; discard that victim state after termination
+        # so this lock test's relaunch always starts from a fresh cart.
         core_path = self.gambatte_core_path()
         content_path = os.path.join(self.cache_root, GAMBATTE_ROM_NAME)
-        request_path, result_path, _ = self._write_request(
+        request_path, result_path, save_path = self._write_request(
             name + "-victim", session, core_path, GAMBATTE_REVISION,
             core_id=GAMBATTE_CORE_ID, content_path=content_path)
         victim = PlayerProcess(
@@ -1441,6 +1456,8 @@ class Runner:
         victim.terminate()
         if not self.check(name, not victim.alive(),
                           "pid %d still alive after force-kill" % pid):
+            return
+        if not self.discard_force_kill_save(name, save_path):
             return
         # Immediate relaunch of the SAME session: succeeds only if the lock
         # was released when the victim died.
@@ -1565,11 +1582,12 @@ class Runner:
         # Victim: large presented-frame budget so it is definitely mid-
         # session when the exact pid is force-killed (no cleanup code runs;
         # the kernel must release the byte-range lock when its handles
-        # close). The kill happens well before any autosave, so the
-        # relaunch starts from a FRESH cart.
+        # close). SDL may deliver a focus-loss event before the kill and
+        # checkpoint savePath; discard that victim state after termination
+        # so this lock test's relaunch always starts from a fresh cart.
         core_path = self.fceumm_core_path()
         content_path = os.path.join(self.cache_root, FCEUMM_ROM_NAME)
-        request_path, result_path, _ = self._write_request(
+        request_path, result_path, save_path = self._write_request(
             name + "-victim", session, core_path, FCEUMM_REVISION,
             core_id=FCEUMM_CORE_ID, content_path=content_path)
         victim = PlayerProcess(
@@ -1586,6 +1604,8 @@ class Runner:
         victim.terminate()
         if not self.check(name, not victim.alive(),
                           "pid %d still alive after force-kill" % pid):
+            return
+        if not self.discard_force_kill_save(name, save_path):
             return
         # Immediate relaunch of the SAME session: succeeds only if the lock
         # was released when the victim died.
@@ -1999,11 +2019,12 @@ class Runner:
         # Victim: large presented-frame budget so it is definitely mid-
         # session when the exact pid is force-killed (no cleanup code runs;
         # the kernel must release the byte-range lock when its handles
-        # close). The kill happens well before any autosave, so the
-        # relaunch starts from a FRESH cart.
+        # close). SDL may deliver a focus-loss event before the kill and
+        # checkpoint savePath; discard that victim state after termination
+        # so this lock test's relaunch always starts from a fresh cart.
         core_path = self.wswan_core_path()
         content_path = os.path.join(self.cache_root, WSWAN_ROM_NAME)
-        request_path, result_path, _ = self._write_request(
+        request_path, result_path, save_path = self._write_request(
             name + "-victim", session, core_path, WSWAN_REVISION,
             core_id=WSWAN_CORE_ID, content_path=content_path)
         victim = PlayerProcess(
@@ -2020,6 +2041,8 @@ class Runner:
         victim.terminate()
         if not self.check(name, not victim.alive(),
                           "pid %d still alive after force-kill" % pid):
+            return
+        if not self.discard_force_kill_save(name, save_path):
             return
         # Immediate relaunch of the SAME session: succeeds only if the lock
         # was released when the victim died.
@@ -2120,7 +2143,7 @@ class Runner:
         session = "e2e-pce-kill"
         core_path = self.pce_core_path()
         content_path = os.path.join(self.cache_root, PCE_ROM_NAME)
-        request_path, _, _ = self._write_request(
+        request_path, _, save_path = self._write_request(
             name + "-victim", session, core_path, PCE_REVISION,
             core_id=PCE_CORE_ID, content_path=content_path)
         victim = PlayerProcess(
@@ -2136,6 +2159,8 @@ class Runner:
         victim.terminate()
         if not self.check(name, not victim.alive(),
                           "pid %d still alive after force-kill" % pid):
+            return
+        if not self.discard_force_kill_save(name, save_path):
             return
         rc, result = self.launch(
             name + "-relaunch", session, core_id=PCE_CORE_ID,
@@ -2255,7 +2280,7 @@ class Runner:
         self.scenarios.append({"name": name, "passed": True})
         if not self._require_genesis_plus_gx_candidate(name):
             return
-        request_path, _, _ = self._write_request(
+        request_path, _, save_path = self._write_request(
             name + "-victim", session, self.genesis_plus_gx_core_path(),
             GENESIS_PLUS_GX_REVISION, core_id=GENESIS_PLUS_GX_CORE_ID,
             content_path=os.path.join(self.cache_root, GENESIS_PLUS_GX_ROM_NAME))
@@ -2270,6 +2295,8 @@ class Runner:
             return
         victim.terminate()
         if not self.check(name, not victim.alive(), "victim still alive after force-kill"):
+            return
+        if not self.discard_force_kill_save(name, save_path):
             return
         rc, result = self._genesis_plus_gx_launch(name + "-relaunch", session,
                                                    GENESIS_PLUS_GX_RUN3_FRAMES)
@@ -2366,7 +2393,7 @@ class Runner:
         self.scenarios.append({"name": name, "passed": True})
         if not self._require_mgba_candidate(name):
             return
-        request_path, _, _ = self._write_request(
+        request_path, _, save_path = self._write_request(
             name + "-victim", session, self.mgba_core_path(), MGBA_REVISION,
             core_id=MGBA_CORE_ID, content_path=os.path.join(self.cache_root, MGBA_ROM_NAME))
         victim = PlayerProcess(self.player_exe, request_path,
@@ -2379,6 +2406,8 @@ class Runner:
             return
         victim.terminate()
         if not self.check(name, not victim.alive(), "victim still alive after force-kill"):
+            return
+        if not self.discard_force_kill_save(name, save_path):
             return
         result = self._mgba_run(name + "-relaunch", session, MGBA_RUN3_FRAMES)
         if result:
@@ -2459,7 +2488,7 @@ class Runner:
         if self.snes9x_candidate_core is None:
             self.fail(name, "candidate Snes9x core not staged")
             return
-        request_path, _, _ = self._write_request(
+        request_path, _, save_path = self._write_request(
             name + "-victim", session, self.snes9x_core_path(), SNES9X_REVISION,
             core_id=SNES9X_CORE_ID, content_path=os.path.join(self.cache_root, SNES9X_ROM_NAME))
         victim = PlayerProcess(self.player_exe, request_path,
@@ -2471,6 +2500,10 @@ class Runner:
         if not self.check(name, victim.alive(), "victim exited before force-kill"):
             return
         victim.terminate()
+        if not self.check(name, not victim.alive(), "victim still alive after force-kill"):
+            return
+        if not self.discard_force_kill_save(name, save_path):
+            return
         result = self._snes9x_run(name + "-relaunch", session, SNES9X_RUN3_FRAMES)
         self._assert_snes9x_result(name, result, session, SNES9X_RUN3_FRAMES,
                                    [result["frames"]] if result else [])

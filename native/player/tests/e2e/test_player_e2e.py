@@ -992,6 +992,36 @@ class AsPosixTest(unittest.TestCase):
         self.assertTrue(out.startswith(("/", os.sep[0])))
 
 
+class ForceKillSaveCleanupTest(unittest.TestCase):
+    def make_runner(self):
+        runner = player_e2e.Runner("/tmp/stage", "/tmp/work",
+                                   "/tmp/rommulus-player", "/tmp/test_core.so",
+                                   90)
+        runner.scenarios.append({"name": "unit", "passed": True})
+        return runner
+
+    def test_removes_focus_loss_checkpoint(self):
+        runner = self.make_runner()
+        tmp = tempfile.mkdtemp(prefix="force-kill-save-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        save_path = os.path.join(tmp, "save.srm")
+        with open(save_path, "wb") as f:
+            f.write(b"victim checkpoint")
+
+        self.assertTrue(runner.discard_force_kill_save("unit", save_path))
+        self.assertFalse(os.path.exists(save_path))
+        self.assertTrue(runner.scenarios[-1]["passed"])
+
+    def test_missing_checkpoint_is_valid(self):
+        runner = self.make_runner()
+        tmp = tempfile.mkdtemp(prefix="force-kill-save-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+
+        self.assertTrue(runner.discard_force_kill_save(
+            "unit", os.path.join(tmp, "missing.srm")))
+        self.assertTrue(runner.scenarios[-1]["passed"])
+
+
 class ProsystemNoSaveGateTest(unittest.TestCase):
     """Unit tests for the runner's rigorous no-persistent-save gate (pure
     Python — no player binary). This pin's ProSystem core exposes no save
