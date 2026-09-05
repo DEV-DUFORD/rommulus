@@ -4,45 +4,19 @@
 # repo has no release tags). BIOS-free (optional 7800 BIOS only used if found).
 # Pure C target (15 core/ units + 4 bupboop/coretone/ units + 13 libretro-common/
 # units) — all 32 units are the SOURCES_C set from upstream Makefile.common.
+#
+# Compiled source list: the shared fragment cmake/cores/prosystem-sources.cmake
+# — the single source of truth consumed by the Android, Linux, and Windows
+# candidate fragments so no platform can drift (identical 32-source set).
 # ---------------------------------------------------------------------------
 set(PROSYSTEM_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/prosystem)
 
+include(${CMAKE_CURRENT_LIST_DIR}/prosystem-sources.cmake)
+
 add_library(prosystem_core SHARED
-    # core/ — Libretro driver + emulator engine (SOURCES_C from Makefile.common)
-    ${PROSYSTEM_DIR}/core/libretro.c
-    ${PROSYSTEM_DIR}/core/Bios.c
-    ${PROSYSTEM_DIR}/core/BupChip.c
-    ${PROSYSTEM_DIR}/core/Cartridge.c
-    ${PROSYSTEM_DIR}/core/Database.c
-    ${PROSYSTEM_DIR}/core/Hash.c
-    ${PROSYSTEM_DIR}/core/Maria.c
-    ${PROSYSTEM_DIR}/core/Memory.c
-    ${PROSYSTEM_DIR}/core/Palette.c
-    ${PROSYSTEM_DIR}/core/Pokey.c
-    ${PROSYSTEM_DIR}/core/ProSystem.c
-    ${PROSYSTEM_DIR}/core/Region.c
-    ${PROSYSTEM_DIR}/core/Riot.c
-    ${PROSYSTEM_DIR}/core/Sally.c
-    ${PROSYSTEM_DIR}/core/Tia.c
-    # bupboop/coretone/ — zlib audio synthesis (SOURCES_C from Makefile.common)
-    ${PROSYSTEM_DIR}/bupboop/coretone/channel.c
-    ${PROSYSTEM_DIR}/bupboop/coretone/coretone.c
-    ${PROSYSTEM_DIR}/bupboop/coretone/music.c
-    ${PROSYSTEM_DIR}/bupboop/coretone/sample.c
-    # libretro-common/ — C helper utilities (SOURCES_C from Makefile.common)
-    ${PROSYSTEM_DIR}/libretro-common/compat/compat_posix_string.c
-    ${PROSYSTEM_DIR}/libretro-common/compat/compat_snprintf.c
-    ${PROSYSTEM_DIR}/libretro-common/compat/compat_strcasestr.c
-    ${PROSYSTEM_DIR}/libretro-common/compat/compat_strl.c
-    ${PROSYSTEM_DIR}/libretro-common/compat/fopen_utf8.c
-    ${PROSYSTEM_DIR}/libretro-common/encodings/encoding_utf.c
-    ${PROSYSTEM_DIR}/libretro-common/file/file_path.c
-    ${PROSYSTEM_DIR}/libretro-common/file/file_path_io.c
-    ${PROSYSTEM_DIR}/libretro-common/streams/file_stream.c
-    ${PROSYSTEM_DIR}/libretro-common/streams/file_stream_transforms.c
-    ${PROSYSTEM_DIR}/libretro-common/string/stdstring.c
-    ${PROSYSTEM_DIR}/libretro-common/time/rtime.c
-    ${PROSYSTEM_DIR}/libretro-common/vfs/vfs_implementation.c
+    # The exact curated 32-source set from the shared fragment (identical to
+    # Linux and the Windows candidate; pure C, network-free by construction).
+    ${ROMM_PROSYSTEM_SOURCES}
 )
 
 # Upstream's Makefile builds C with gnu11; match it exactly.

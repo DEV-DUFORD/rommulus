@@ -21,7 +21,7 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 | `test_core` | 0 | `native/player/CMakeLists.txt` (WIN32 block, `add_library(test_core SHARED …)`, `PREFIX ""` → `test_core.dll`) | IMPLEMENTED — Win32 player foundation + `test_core.dll` complete; local MinGW-w64 UCRT64 PE32+ cross-build and local macOS synthetic-core E2E passed; **awaiting first live `windows-2022` run** (CI jobs 3–5) | no |
 | `gambatte` | 1 | `native/cmake/cores/gambatte-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
 | `fceumm` | 1 | `native/cmake/cores/fceumm-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
-| `prosystem` | 1 | — (no `prosystem-windows.cmake`) | NOT STARTED | no |
+| `prosystem` | 1 | `native/cmake/cores/prosystem-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
 | `handy` | 1 | — (no `handy-windows.cmake`) | NOT STARTED | no |
 | `mednafen_ngp` | 1 | — (no `mednafen_ngp-windows.cmake`) | NOT STARTED | no |
 | `mednafen_wswan` | 1 | — (no `mednafen_wswan-windows.cmake`) | NOT STARTED | no |
@@ -180,6 +180,66 @@ frame), 8 KiB battery WRAM exposed as `RETRO_MEMORY_SAVE_RAM`, and no third-part
 generator is a pure function of its commit-fixed constants, so any byte drift changes this digest
 and fails the gate).
 
+## prosystem — Windows x86_64 candidate build identity
+
+Provenance fields (coreId `prosystem`; the upstream pin is the vendored-tree
+master HEAD of `libretro/prosystem-libretro`):
+
+| Field | Value |
+| --- | --- |
+| Upstream repository | https://github.com/libretro/prosystem-libretro |
+| Exact commit | `363b6dfbd3e240762e022c2b4897b4fe55722be3` (no upstream release tags; commitSha is the exact pin) |
+| Vendored source subset | `third_party/cores/prosystem/{core,bupboop/coretone,libretro-common}` — the curated 32-source set from `native/cmake/cores/prosystem-sources.cmake` (identical to Android/Linux; network code excluded) — see `third_party/cores/prosystem/VENDORING.md` |
+| Local patches | none |
+| Windows fragment | `native/cmake/cores/prosystem-windows.cmake` (WIN32 block of `native/player/CMakeLists.txt` only) |
+| Export control | `native/cmake/cores/prosystem-windows.def` — exactly the 22 `retro_*` exports the player's `CoreLibrary` resolves; no `romm_*` save extensions (this core defines none at this pin); the three upstream extras (`retro_cheat_reset`, `retro_cheat_set`, `retro_load_game_special`) stay local to the DLL |
+| Compiler / build | MinGW-w64 UCRT64 (MSYS2) + CMake + Ninja, `-O2 -DNDEBUG`, `-Wl,--no-undefined`; canonical output name `prosystem_core.dll` (`PREFIX ""` — never `libprosystem_core.dll`) |
+| Binary hash | **NOT RECORDED** — the SHA-256 of `prosystem_core.dll` is written only into the CI artifact's `import-audit.txt` by the pinned `windows-2022` run (job 4); no binary hash is committed here until that run produces it |
+| Supported systems | `atari7800` |
+| Supported extensions | `.a78` |
+| Required firmware | none (the optional BIOS is only consulted when present in the system directory; the E2E ROM is BIOS-free) |
+| Renderer | software (Maria/TIA emulation; no HW-render request — runs under the temporary software-only boundary) |
+| Saves | **none** — this pin exposes no `RETRO_MEMORY_SAVE_RAM` region (`retro_get_memory_size(RETRO_MEMORY_SAVE_RAM)` returns 0; only SYSTEM_RAM). The E2E asserts a rigorous no-persistent-save gate instead of SRAM invariants |
+
+Candidate posture: CI stages `prosystem_core.dll` separately under `cores-candidate/` (never an
+enabled-core path) and audits it (PE32+ machine, recursive import closure, exact 22-symbol export
+allowlist, repeated load/`retro_api_version`/`retro_init`/`retro_deinit` smoke) **without
+promoting it**. `windows-x86_64` is in no `supportedAbis`, no package manifest entry, and no
+launch path.
+
+### Qualification evidence and generated test ROM
+
+- **Local (macOS host) — passed:** MinGW-w64 UCRT64 cross-build of `prosystem_core.dll` as PE32+
+  x86_64 under the software-only preset (`build/player-windows-x86_64-software-only/`; verified
+  locally to export exactly the 22-symbol allowlist and to import only system DLLs), and a full
+  **real-core E2E** of the native macOS player + ProSystem core via the host-portable harness
+  `native/player/tests/e2e/player_e2e.py` (`--video-driver cocoa`, software render, dummy audio):
+  bounded-frame runs, result schema, and the rigorous no-persistent-save gate (checkpointWritten
+  false, saveSize/saveHash null, zero `.srm` artifacts — no adoption chain exists) across valid
+  launch, repeated load, and force-kill lock recovery — all three ProSystem qualification
+  scenarios green alongside every test_core/Gambatte/FCEUmm scenario (report
+  `build/reports/prosystem-e2e-local/e2e-report.json`, `passed: true` on macOS arm64).
+- **Windows-hosted — pending:** the first live run of `.github/workflows/windows-x64.yml`
+  (jobs 4–5) on the pinned `windows-2022` runner has not happened yet; that run is the
+  target-runtime gate and will record the candidate DLL's SHA-256 in `import-audit.txt`.
+- **Physical Windows 10/11 — pending:** per-core gate `plans/WINDOWS_IMPL.md` §6.4 (15 criteria,
+  including item 15, physical qualification) is not complete. Hosted CI must not be treated as
+  physical qualification.
+
+**Generated ROM (original content, hash-pinned).** `native/player/tests/e2e/prosystem_rom.py`
+deterministically generates a 16384-byte raw `.a78` cartridge image — no "ATARI7800" header and
+no CC2 marker (ProSystem's `CARTRIDGE_TYPE_NORMAL` path, whole image mapped to CPU
+`$C000-$FFFF`), an original RomMulus-authored 6502 program at the `$C000` entry with the in-cart
+reset vector at file offsets `0x3FFC/0x3FFD` pointing at that entry, a 4-color palette +
+deterministic pattern fill + Maria display program + 242-header chain (ROM-resident template
+copied into RAM at boot) + TIA audio tone, and no third-party bytes. The program is assembled
+against the vendored core's actual opcode table (`core/Sally.c`), which deviates from a stock
+6502 in exactly the spots the program touches. **SHA-256 of the generated ROM:
+`1d6b8f17eb536b015f7f42fa6897aa765cfe4702b0681029bf625c9b868c8afc`** (pinned by
+`PINNED_PROSYSTEM_ROM_SHA256` in `native/player/tests/e2e/test_player_e2e.py`; the generator is a
+pure function of its commit-fixed constants, so any byte drift changes this digest and fails the
+gate).
+
 ## Temporary software-only boundary (pre-ANGLE) — not yet qualified
 
 The Windows player currently builds under the `windows-x86_64-software-only` preset
@@ -189,7 +249,8 @@ import libraries, and include directory are excluded, a no-op `SdlHardwareContex
 instead (no unresolved GL API can exist), and the player **fails closed with `launch_failed`**
 for every known hardware-rendering core and every Libretro `SET_HW_RENDER` /
 `GET_HW_RENDER_INTERFACE` request — it never silently downgrades. SDL3 (video/audio/input)
-remains required; software cores such as `test_core` and `gambatte` keep full functionality.
+remains required; software cores such as `test_core`, `gambatte`, `fceumm`, and `prosystem` keep
+full functionality.
 
 The pinned ANGLE distribution is **not yet built, staged, or qualified** in Windows CI — the
 workflow explicitly does not yet build the player with the pinned ANGLE distribution — so the

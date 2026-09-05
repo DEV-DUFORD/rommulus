@@ -106,6 +106,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
+import prosystem_rom  # noqa: E402
 
 IS_WINDOWS = os.name == "nt"
 
@@ -149,6 +150,26 @@ FCEUMM_RUN1_FRAMES = 240     # ~4.0 s of emulated time
 FCEUMM_RUN2_FRAMES = 180     # ~3.0 s (restored counters keep counting)
 FCEUMM_RUN3_FRAMES = 60      # ~1.0 s (repeated load of the same save)
 FCEUMM_KILL_VICTIM_FRAMES = 3600  # ~60 s budget: alive when force-killed
+
+# Candidate ProSystem core (NOT advertised in any manifest — staged under
+# cores-candidate/ and exercised here as a qualification gate only).
+PROSYSTEM_CORE_ID = "prosystem"
+# The pinned vendored-tree commit (third_party/cores/prosystem,
+# libretro/prosystem-libretro master HEAD) — the coreBuildRevision the
+# allowed-core entry and every ProSystem launch request must carry.
+PROSYSTEM_REVISION = "363b6dfbd3e240762e022c2b4897b4fe55722be3"
+PROSYSTEM_ROM_NAME = "rommulus-e2e-prosystem.a78"
+
+# ProSystem exposes NO save RAM at this pin: retro_get_memory_size(
+# RETRO_MEMORY_SAVE_RAM) returns 0 (only SYSTEM_RAM). The qualification runs
+# therefore assert a rigorous NO-PERSISTENT-SAVE gate instead of SRAM
+# invariants: checkpointWritten false, saveSize/saveHash null, and zero .srm
+# artifacts anywhere for the session. There is no adoption chain because no
+# run ever produces a candidate save — repeated loads are fresh, independent
+# runs of the same ROM. Presented-frame bounds keep the same semantics as the
+# other candidates (reported frame count lands in [limit, limit + 2]).
+PROSYSTEM_RUN_FRAMES = 240     # ~4.0 s of emulated time per run
+PROSYSTEM_KILL_VICTIM_FRAMES = 3600  # ~60 s budget: alive when force-killed
 
 
 def sram_byte_after_frames(frames):
@@ -397,7 +418,7 @@ class Runner:
     def __init__(self, stage_dir, workdir, player_exe, core_dll, timeout_sec,
                  video_driver="offscreen", audio_driver="dummy",
                  render_driver="software", candidate_core=None,
-                 fceumm_candidate_core=None):
+                 fceumm_candidate_core=None, prosystem_candidate_core=None):
         self.stage_dir = os.path.abspath(stage_dir)
         self.workdir = os.path.abspath(workdir)
         self.player_exe = os.path.abspath(player_exe)
@@ -406,6 +427,8 @@ class Runner:
                                if candidate_core else None)
         self.fceumm_candidate_core = (os.path.abspath(fceumm_candidate_core)
                                       if fceumm_candidate_core else None)
+        self.prosystem_candidate_core = (os.path.abspath(prosystem_candidate_core)
+                                         if prosystem_candidate_core else None)
         self.timeout_sec = timeout_sec
         self.video_driver = video_driver
         self.audio_driver = audio_driver
@@ -452,6 +475,13 @@ class Runner:
             shutil.copyfile(self.fceumm_candidate_core,
                             os.path.join(self.core_root, self.fceumm_core_filename()))
             self.generate_fceumm_rom()
+        if self.prosystem_candidate_core:
+            # The candidate ProSystem core is staged the same way (canonical
+            # name under the trusted core root) and its generated 16 KiB
+            # .a78 ROM into the trusted CACHE root.
+            shutil.copyfile(self.prosystem_candidate_core,
+                            os.path.join(self.core_root, self.prosystem_core_filename()))
+            self.generate_prosystem_rom()
 
     def core_filename(self):
         return "test_core.dll" if IS_WINDOWS else "libtest_core.so"
@@ -467,6 +497,13 @@ class Runner:
         if sys.platform == "darwin":
             return "libfceumm_core.dylib"
         return "libfceumm_core.so"
+
+    def prosystem_core_filename(self):
+        if IS_WINDOWS:
+            return "prosystem_core.dll"
+        if sys.platform == "darwin":
+            return "libprosystem_core.dylib"
+        return "libprosystem_core.so"
 
     def generate_rom(self):
         """Generate the deterministic 32 KiB ROM into the cache root."""
@@ -484,11 +521,22 @@ class Runner:
             f.write(rom)
         return rom_path
 
+    def generate_prosystem_rom(self):
+        """Generate the deterministic 16 KiB .a78 ROM into the cache root."""
+        rom_path = os.path.join(self.cache_root, PROSYSTEM_ROM_NAME)
+        rom = prosystem_rom.generate_rom()
+        with open(rom_path, "wb") as f:
+            f.write(rom)
+        return rom_path
+
     def gambatte_core_path(self):
         return os.path.join(self.core_root, self.candidate_core_filename())
 
     def fceumm_core_path(self):
         return os.path.join(self.core_root, self.fceumm_core_filename())
+
+    def prosystem_core_path(self):
+        return os.path.join(self.core_root, self.prosystem_core_filename())
 
     def env_for(self, max_frames=None, player_max_frames=None):
         env = dict(os.environ)
@@ -506,14 +554,15 @@ class Runner:
         env["ROMM_PLAYER_CACHE_ROOT"] = as_posix(self.cache_root)
         env["ROMM_PLAYER_DATA_ROOT"] = as_posix(self.data_root)
         env["ROMM_PLAYER_STATE_ROOT"] = as_posix(self.state_root)
-        # All three cores are allowed: the synthetic test_core (revision pin
-        # from CoreManifest.kt) and the CANDIDATE gambatte + fceumm cores
-        # pinned to their vendored-tree commits. The candidates appear in NO
-        # production manifest — this env entry is the qualification gate's
-        # adoption.
-        env["ROMM_PLAYER_ALLOWED_CORES"] = "%s=%s;%s=%s;%s=%s" % (
+        # All four cores are allowed: the synthetic test_core (revision pin
+        # from CoreManifest.kt) and the CANDIDATE gambatte + fceumm +
+        # prosystem cores pinned to their vendored-tree commits. The
+        # candidates appear in NO production manifest — this env entry is the
+        # qualification gate's adoption.
+        env["ROMM_PLAYER_ALLOWED_CORES"] = "%s=%s;%s=%s;%s=%s;%s=%s" % (
             CORE_ID, CORE_REVISION, GAMBATTE_CORE_ID, GAMBATTE_REVISION,
-            FCEUMM_CORE_ID, FCEUMM_REVISION)
+            FCEUMM_CORE_ID, FCEUMM_REVISION, PROSYSTEM_CORE_ID,
+            PROSYSTEM_REVISION)
         # Headless SDL for the GUI-less runner: offscreen video driver with a
         # real window framebuffer (the software renderer works against it),
         # forced software render backend (no GPU on the runner), dummy audio.
@@ -1201,6 +1250,191 @@ class Runner:
         self.assert_fceumm_result(name, result, session,
                                   FCEUMM_RUN3_FRAMES, [result["frames"]])
 
+    # -- ProSystem candidate (NO save RAM — no-persistent-save gate) --------
+
+    def _require_prosystem_candidate(self, name):
+        if self.prosystem_candidate_core is None:
+            self.fail(name, "candidate ProSystem core not staged — nothing to qualify")
+            return False
+        return True
+
+    def _assert_no_save_artifacts(self, name, session_id):
+        """No .srm may exist for this session anywhere in the fixture tree.
+
+        The state root holds exactly one candidate file per session
+        (<session>.candidate.srm) and the data root holds the session's own
+        save path — both must be absent, and nothing else under the session
+        directory may carry a .srm either. Other sessions' legitimate
+        artifacts (test_core/Gambatte/FCEUmm runs) are out of scope by design.
+        Returns True only when no artifact exists anywhere.
+        """
+        clean = True
+        candidate = os.path.join(self.state_root, session_id + ".candidate.srm")
+        if not self.check(name, not os.path.exists(candidate),
+                          "candidate save %r exists on disk — ProSystem "
+                          "exposes no save region and must never produce one"
+                          % candidate):
+            clean = False
+        for dirpath, _dirnames, filenames in os.walk(
+                os.path.join(self.data_root, session_id)):
+            for fn in filenames:
+                if fn.endswith(".srm"):
+                    if not self.check(name, False,
+                                      "unexpected .srm artifact under the "
+                                      "session tree: %r"
+                                      % os.path.join(dirpath, fn)):
+                        clean = False
+        return clean
+
+    def assert_prosystem_result(self, name, result, session_id, limit):
+        """ProSystem qualification-run assertions: schema + session +
+        exitKind=completed (player-initiated) + bounded real frames + the
+        rigorous NO-PERSISTENT-SAVE gate.
+
+        This pin's ProSystem core exposes no save RAM at all
+        (retro_get_memory_size(RETRO_MEMORY_SAVE_RAM) == 0; only SYSTEM_RAM),
+        so a correct run must not write any checkpoint: checkpointWritten
+        false, saveSize and saveHash null, and zero .srm artifacts for the
+        session. This is the no-save analogue of the SRAM invariant checks
+        the Gambatte/FCEUmm runs perform — it proves the player did not
+        fabricate a save region for a core that has none (and, by absence,
+        that there is no adoption chain: nothing ever becomes a candidate).
+        """
+        problems = validate_result_schema(result)
+        self.check(name, not problems, "result schema: %s" % "; ".join(problems))
+        if problems:
+            return False
+        ok = True
+        if not self.check(name, result["sessionId"] == session_id,
+                          "sessionId %r != %r"
+                          % (result["sessionId"], session_id)):
+            ok = False
+        if not self.check(name, result["exitKind"] == "completed",
+                          "exitKind %r — the player's qualification frame "
+                          "bound must exit as a clean player-initiated "
+                          "completed run (the core never requested shutdown)"
+                          % result["exitKind"]):
+            ok = False
+        if not self.check(name, result["checkpointWritten"] is False,
+                          "checkpointWritten must be false (this pin's "
+                          "ProSystem exposes no save RAM — nothing may be "
+                          "checkpointed)"):
+            ok = False
+        if not self.check(name, result["saveSize"] is None,
+                          "saveSize %r must be null — the core exposes no "
+                          "save region" % (result["saveSize"],)):
+            ok = False
+        if not self.check(name, result["saveHash"] is None,
+                          "saveHash %r must be null — nothing was "
+                          "checkpointed" % (result["saveHash"],)):
+            ok = False
+        frames = result["frames"]
+        if not self.check(name, limit <= frames <= limit + 2,
+                          "frames %r outside the bounded range [%d, %d] for "
+                          "the presented-frame bound (real frames must have "
+                          "been presented, and the bound must be honored)"
+                          % (frames, limit, limit + 2)):
+            return False
+        return ok and self._assert_no_save_artifacts(name, session_id)
+
+    def scenario_prosystem_valid_launch_completed(self):
+        name = "prosystem-valid-launch-completed"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_prosystem_candidate(name):
+            return
+        session = "e2e-a78-run1"
+        rc, result = self.launch(
+            name, session,
+            core_id=PROSYSTEM_CORE_ID, core_build_revision=PROSYSTEM_REVISION,
+            core_path=self.prosystem_core_path(),
+            content_path=os.path.join(self.cache_root, PROSYSTEM_ROM_NAME),
+            player_max_frames=PROSYSTEM_RUN_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0); see log" % rc)
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        # No save chain exists: the core has no save region to persist, so
+        # the gate is pure absence — null save fields, false checkpoint, and
+        # zero .srm files for the session.
+        self.assert_prosystem_result(name, result, session, PROSYSTEM_RUN_FRAMES)
+
+    def scenario_prosystem_repeated_load(self):
+        name = "prosystem-repeated-load"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_prosystem_candidate(name):
+            return
+        # Second and third loads of the SAME ROM. With no save region there is
+        # nothing to adopt (the supervisor's candidate→save move has no input),
+        # so each load is a fresh, independent run — and the no-save gate must
+        # hold on every repeated load, including the absence of any candidate
+        # from the previous one.
+        for i, session in enumerate(("e2e-a78-run2", "e2e-a78-run3"), start=2):
+            prev = os.path.join(
+                self.state_root, "e2e-a78-run%d.candidate.srm" % (i - 1))
+            if not self.check(name, not os.path.exists(prev),
+                              "previous candidate %r exists — ProSystem must "
+                              "never produce one" % prev):
+                return
+            rc, result = self.launch(
+                name + "-load%d" % i, session,
+                core_id=PROSYSTEM_CORE_ID, core_build_revision=PROSYSTEM_REVISION,
+                core_path=self.prosystem_core_path(),
+                content_path=os.path.join(self.cache_root, PROSYSTEM_ROM_NAME),
+                player_max_frames=PROSYSTEM_RUN_FRAMES)
+            self.check(name, rc == 0,
+                       "load%d exit code %r (want 0); see log" % (i, rc))
+            if not self.check(name, result is not None,
+                              "load%d wrote no result JSON" % i):
+                return
+            if not self.assert_prosystem_result(
+                    name, result, session, PROSYSTEM_RUN_FRAMES):
+                return
+
+    def scenario_prosystem_force_kill_lock_recovery(self):
+        name = "prosystem-force-kill-lock-recovery"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self._require_prosystem_candidate(name):
+            return
+        session = "e2e-a78-kill"
+        # Victim: large presented-frame budget so it is definitely mid-
+        # session when the exact pid is force-killed (no cleanup code runs;
+        # the kernel must release the byte-range lock when its handles
+        # close). With no save region at all, the victim could never have
+        # checkpointed anything — the relaunch starts from a fresh cart by
+        # construction, and the no-save gate must still hold afterwards.
+        core_path = self.prosystem_core_path()
+        content_path = os.path.join(self.cache_root, PROSYSTEM_ROM_NAME)
+        request_path, result_path, _ = self._write_request(
+            name + "-victim", session, core_path, PROSYSTEM_REVISION,
+            core_id=PROSYSTEM_CORE_ID, content_path=content_path)
+        victim = PlayerProcess(
+            self.player_exe, request_path,
+            self.env_for(player_max_frames=PROSYSTEM_KILL_VICTIM_FRAMES),
+            os.path.join(self.logs_dir, name + "-victim.log"))
+        victim.start()
+        pid = victim.pid()
+        self.spawned_pids.append(pid)
+        time.sleep(5)  # settle: lock acquired, ROM running past its init
+        if not self.check(name, victim.alive(),
+                          "victim exited before the force-kill"):
+            return
+        victim.terminate()
+        if not self.check(name, not victim.alive(),
+                          "pid %d still alive after force-kill" % pid):
+            return
+        # Immediate relaunch of the SAME session: succeeds only if the lock
+        # was released when the victim died.
+        rc, result = self.launch(
+            name + "-relaunch", session,
+            core_id=PROSYSTEM_CORE_ID, core_build_revision=PROSYSTEM_REVISION,
+            core_path=core_path, content_path=content_path,
+            player_max_frames=PROSYSTEM_RUN_FRAMES)
+        self.check(name, rc == 0,
+                   "relaunch exit code %r (want 0) — lock not released?" % rc)
+        if not self.check(name, result is not None,
+                          "relaunch wrote no result JSON"):
+            return
+        self.assert_prosystem_result(name, result, session, PROSYSTEM_RUN_FRAMES)
+
     def scenario_negative_revision_mismatch(self):
         name = "negative-revision-mismatch"
         self.scenarios.append({"name": name, "passed": True})
@@ -1274,11 +1508,14 @@ class Runner:
                     self.scenario_gambatte_relaunch_persistence,
                     self.scenario_gambatte_repeated_load,
                     self.scenario_gambatte_force_kill_lock_recovery,
-                    self.scenario_fceumm_valid_launch_completed,
-                    self.scenario_fceumm_relaunch_persistence,
-                    self.scenario_fceumm_repeated_load,
-                    self.scenario_fceumm_force_kill_lock_recovery,
-                    self.scenario_negative_revision_mismatch,
+                     self.scenario_fceumm_valid_launch_completed,
+                     self.scenario_fceumm_relaunch_persistence,
+                     self.scenario_fceumm_repeated_load,
+                     self.scenario_fceumm_force_kill_lock_recovery,
+                     self.scenario_prosystem_valid_launch_completed,
+                     self.scenario_prosystem_repeated_load,
+                     self.scenario_prosystem_force_kill_lock_recovery,
+                     self.scenario_negative_revision_mismatch,
                    self.scenario_negative_core_outside_root,
                    self.scenario_no_orphans_tree_deletable):
             fn()
@@ -1351,11 +1588,12 @@ def verify_artifact(stage_dir):
 # ---------------------------------------------------------------------------
 
 def discover_player(stage_dir, explicit_player=None, explicit_core=None,
-                    explicit_candidate=None, explicit_fceumm_candidate=None):
-    """(player, test_core, gambatte candidate, fceumm candidate) — a
-    candidate is None when the stage carries no cores-candidate/ build for
-    it (the harness then fails that core's scenarios: the qualification gate
-    must not silently shrink)."""
+                    explicit_candidate=None, explicit_fceumm_candidate=None,
+                    explicit_prosystem_candidate=None):
+    """(player, test_core, gambatte candidate, fceumm candidate, prosystem
+    candidate) — a candidate is None when the stage carries no
+    cores-candidate/ build for it (the harness then fails that core's
+    scenarios: the qualification gate must not silently shrink)."""
     if IS_WINDOWS:
         player = explicit_player or os.path.join(stage_dir, "bin", "rommulus-player.exe")
         core = explicit_core or os.path.join(stage_dir, "cores", "test_core.dll")
@@ -1363,6 +1601,8 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
             stage_dir, "cores-candidate", "gambatte_core.dll")
         fceumm_candidate = explicit_fceumm_candidate or os.path.join(
             stage_dir, "cores-candidate", "fceumm_core.dll")
+        prosystem_candidate = explicit_prosystem_candidate or os.path.join(
+            stage_dir, "cores-candidate", "prosystem_core.dll")
     else:
         player, core = explicit_player, explicit_core
         if not player:
@@ -1403,11 +1643,24 @@ def discover_player(stage_dir, explicit_player=None, explicit_core=None,
                 if os.path.isfile(cand):
                     fceumm_candidate = cand
                     break
+        prosystem_candidate = explicit_prosystem_candidate
+        if not prosystem_candidate:
+            for cand in (os.path.join(stage_dir, "cores-candidate", "libprosystem_core.so"),
+                          os.path.join(stage_dir, "cores-candidate", "prosystem_core.dll"),
+                          # POSIX player build trees emit the core at the
+                          # build-tree root (CMAKE_LIBRARY_OUTPUT_DIRECTORY).
+                          os.path.join(stage_dir, "libprosystem_core.so"),
+                          os.path.join(stage_dir, "libprosystem_core.dylib")):
+                if os.path.isfile(cand):
+                    prosystem_candidate = cand
+                    break
     if candidate is not None and not os.path.isfile(candidate):
         candidate = None
     if fceumm_candidate is not None and not os.path.isfile(fceumm_candidate):
         fceumm_candidate = None
-    return player, core, candidate, fceumm_candidate
+    if prosystem_candidate is not None and not os.path.isfile(prosystem_candidate):
+        prosystem_candidate = None
+    return player, core, candidate, fceumm_candidate, prosystem_candidate
 
 
 def main(argv=None):
@@ -1421,6 +1674,9 @@ def main(argv=None):
                          "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--fceumm-core",
                     help="explicit candidate FCEUmm core path "
+                         "(default: cores-candidate/ in the stage dir)")
+    ap.add_argument("--prosystem-core",
+                    help="explicit candidate ProSystem core path "
                          "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--verify-artifact", metavar="DIR",
                     help="verify DIR against its import-audit.txt and exit")
@@ -1436,9 +1692,10 @@ def main(argv=None):
     if not args.stage or not args.workdir:
         ap.error("--stage and --workdir are required (or use --verify-artifact)")
 
-    player, core, candidate, fceumm_candidate = discover_player(
-        args.stage, args.player, args.core, args.candidate_core,
-        args.fceumm_core)
+    player, core, candidate, fceumm_candidate, prosystem_candidate = \
+        discover_player(args.stage, args.player, args.core,
+                        args.candidate_core, args.fceumm_core,
+                        args.prosystem_core)
     for label, path in (("player", player), ("test_core", core)):
         if not path or not os.path.isfile(path):
             print("FAIL: %s not found at %r" % (label, path), file=sys.stderr)
@@ -1461,16 +1718,27 @@ def main(argv=None):
               "libfceumm_core.so/.dylib on POSIX; pass --fceumm-core)"
               % args.stage, file=sys.stderr)
         return 2
+    if prosystem_candidate is None:
+        # The ProSystem qualification scenarios cannot run without the
+        # candidate core; fail loudly (environment error) rather than silently
+        # shrinking the gate.
+        print("FAIL: candidate ProSystem core not found in %r (expected "
+              "cores-candidate/prosystem_core.dll on Windows or "
+              "libprosystem_core.so/.dylib on POSIX; pass --prosystem-core)"
+              % args.stage, file=sys.stderr)
+        return 2
 
     os.makedirs(args.workdir, exist_ok=True)
     runner = Runner(args.stage, args.workdir, player, core, args.timeout_sec,
                     args.video_driver, args.audio_driver, args.render_driver,
                     candidate_core=candidate,
-                    fceumm_candidate_core=fceumm_candidate)
+                    fceumm_candidate_core=fceumm_candidate,
+                    prosystem_candidate_core=prosystem_candidate)
     print("player:   %s" % player)
     print("core:     %s" % core)
     print("candidate: %s" % candidate)
     print("fceumm candidate: %s" % fceumm_candidate)
+    print("prosystem candidate: %s" % prosystem_candidate)
     print("tree:     %s" % runner.base)
     return runner.run()
 

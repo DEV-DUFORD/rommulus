@@ -9,7 +9,9 @@
 
 import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fceumm_rom  # noqa: E402
 import gambatte_rom  # noqa: E402
 import player_e2e  # noqa: E402
+import prosystem_rom  # noqa: E402
 from player_e2e import (  # noqa: E402
     build_request, expected_save_hash, validate_result_schema,
     sram_byte_after_frames,
@@ -24,6 +27,7 @@ from player_e2e import (  # noqa: E402
     RESULT_REQUIRED_KEYS, RESULT_KNOWN_KEYS, EXIT_KINDS,
     GAMBATTE_CORE_ID, GAMBATTE_REVISION, GAMBATTE_SRAM_SIZE,
     FCEUMM_CORE_ID, FCEUMM_REVISION, FCEUMM_SRAM_SIZE,
+    PROSYSTEM_CORE_ID, PROSYSTEM_REVISION,
 )
 
 # Pinned hash of the deterministic ROM the generator must produce. The
@@ -38,6 +42,12 @@ PINNED_GAMBATTE_ROM_SHA256 = (
 # (16-byte header + 32 KiB PRG + 8 KiB CHR = 40976 bytes).
 PINNED_FCEUMM_ROM_SHA256 = (
     "d1d4869696dcf53aeb7f207890d6f0cc7ad87fdcbc3054064fd935f042c281ea"
+)
+
+# Pinned hash of the deterministic 16 KiB raw .a78 ROM prosystem_rom.py must
+# produce (no header — ProSystem's CARTRIDGE_TYPE_NORMAL path).
+PINNED_PROSYSTEM_ROM_SHA256 = (
+    "1d6b8f17eb536b015f7f42fa6897aa765cfe4702b0681029bf625c9b868c8afc"
 )
 
 
@@ -261,6 +271,76 @@ class FceummRomTest(unittest.TestCase):
                          "b5e3566515c27dc66c9c20572171673126532e06")
 
 
+class ProsystemRomTest(unittest.TestCase):
+    def test_size_and_determinism(self):
+        rom1 = prosystem_rom.generate_rom()
+        rom2 = prosystem_rom.generate_rom()
+        self.assertEqual(len(rom1), prosystem_rom.ROM_SIZE)
+        self.assertEqual(len(rom1), 0x4000)  # exactly 16 KiB raw .a78
+        self.assertEqual(rom1, rom2)         # fully deterministic
+
+    def test_pinned_sha256(self):
+        self.assertEqual(prosystem_rom.rom_sha256(), PINNED_PROSYSTEM_ROM_SHA256)
+
+    def test_no_atari7800_header_no_cc2_marker(self):
+        rom = prosystem_rom.generate_rom()
+        # cartridge_Load() only reclassifies on an "ATARI7800" magic at bytes
+        # 1..9 or a ">>" CC2 marker at bytes 1..2; the plain .a78 form must
+        # carry neither, so the cart stays CARTRIDGE_TYPE_NORMAL (the whole
+        # image maps to CPU $C000-$FFFF).
+        self.assertNotEqual(rom[1:10], b"ATARI7800")
+        self.assertNotEqual(rom[1:3], b">>")
+
+    def test_in_cart_reset_vector(self):
+        rom = prosystem_rom.generate_rom()
+        # sally_ExecuteRES loads PC from memory_ram[$FFFC]/memory_ram[$FFFD]
+        # on every power-on/reset; for a NORMAL cart that is the in-cart
+        # vector at file offsets 0x3FFC (LOW) / 0x3FFD (HIGH). It must hold
+        # $C000 — the CPU address of file offset 0 where the program starts.
+        self.assertEqual(rom[prosystem_rom.RESET_VECTOR_OFFSET:
+                             prosystem_rom.RESET_VECTOR_OFFSET + 2],
+                         bytes([0x00, 0xC0]))
+
+    def test_entry_sei_and_program_tail(self):
+        rom = prosystem_rom.generate_rom()
+        # Entry at file offset 0 must be `sei` — 0x78 in the vendored core's
+        # opcode table (0x06 is ASL zero-page there).
+        self.assertEqual(rom[prosystem_rom.ENTRY_OFFSET], 0x78)
+        # Program tail: the WSYNC loop's `jmp $C0AB`.
+        self.assertEqual(rom[0xB0:0xB3], bytes([0x4C, 0xAB, 0xC0]))
+
+    def test_header_chain_template(self):
+        rom = prosystem_rom.generate_rom()
+        # The 726-byte template [0x00, 0x14, 0x00] x 242 at file offset 0x200
+        # (CPU $C200..$C4D5): the program copies it into RAM $1420..$16F5 in
+        # three passes. Each header is [flags=0, dp high=0x14, dp low=0x00]
+        # → DPP chains 3 bytes per scanline over 242 StoreLineRAM calls and
+        # every header points the display program at $1400.
+        self.assertEqual(
+            rom[prosystem_rom.TEMPLATE_OFFSET:
+                prosystem_rom.TEMPLATE_OFFSET + len(prosystem_rom.TEMPLATE_BYTES)],
+            prosystem_rom.TEMPLATE_BYTES)
+        self.assertEqual(len(prosystem_rom.TEMPLATE_BYTES), 3 * 242)
+
+    def test_provenance_marker_and_fill(self):
+        rom = prosystem_rom.generate_rom()
+        # Provenance marker in the never-executed ROM region.
+        self.assertEqual(rom[prosystem_rom.PROVENANCE_OFFSET:
+                             prosystem_rom.PROVENANCE_OFFSET + len(prosystem_rom.PROVENANCE)],
+                         prosystem_rom.PROVENANCE)
+        # Everything outside program (0..0xB2), provenance (0x100..0x143),
+        # template (0x200..0x4D5), and reset vector (0x3FFC..0x3FFD) is 0xFF
+        # fill — no third-party bytes anywhere in the image.
+        for start, end in ((0xB3, 0x100), (0x145, 0x200), (0x4D6, 0x3FFC)):
+            self.assertEqual(set(rom[start:end]), {0xFF},
+                             "fill gap 0x%04X..0x%04X" % (start, end))
+
+    def test_harness_constants_match_generator(self):
+        self.assertEqual(PROSYSTEM_CORE_ID, "prosystem")
+        self.assertEqual(PROSYSTEM_REVISION,
+                         "363b6dfbd3e240762e022c2b4897b4fe55722be3")
+
+
 class BuildRequestTest(unittest.TestCase):
     def test_has_exactly_the_strict_v2_key_set(self):
         req = build_request("s-1", "/c/core.dll", "/d/system", "/d/save.srm",
@@ -328,6 +408,23 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreBuildRevision"], FCEUMM_REVISION)
         self.assertEqual(req["contentPath"],
                          "/cache état/rommulus-e2e-fceumm.nes")
+        self.assertNotIn("\\", req["contentPath"])
+
+    def test_prosystem_candidate_request(self):
+        # The ProSystem candidate launch: real contentPath (the 16 KiB .a78
+        # ROM staged under the trusted cache root) and the pinned candidate
+        # revision. expectedSaveSize stays null — the core exposes no save
+        # region, so there is nothing to pre-declare.
+        req = build_request("s-a78", "/c/prosystem_core.dll", "/d/system",
+                            "/d/save.srm", "/st/cand.srm", "/st/result.json",
+                            core_build_revision=PROSYSTEM_REVISION,
+                            core_id=PROSYSTEM_CORE_ID,
+                            content_path="/cache état/rommulus-e2e-prosystem.a78")
+        self.assertEqual(req["coreId"], PROSYSTEM_CORE_ID)
+        self.assertEqual(req["coreBuildRevision"], PROSYSTEM_REVISION)
+        self.assertEqual(req["contentPath"],
+                         "/cache état/rommulus-e2e-prosystem.a78")
+        self.assertIsNone(req["expectedSaveSize"])
         self.assertNotIn("\\", req["contentPath"])
 
     def test_paths_are_forward_slash(self):
@@ -450,6 +547,122 @@ class AsPosixTest(unittest.TestCase):
         out = player_e2e.as_posix(os.path.join("a", "b c", "тест"))
         self.assertNotIn("\\", out)
         self.assertTrue(out.startswith(("/", os.sep[0])))
+
+
+class ProsystemNoSaveGateTest(unittest.TestCase):
+    """Unit tests for the runner's rigorous no-persistent-save gate (pure
+    Python — no player binary). This pin's ProSystem core exposes no save
+    RAM at all, so a correct result must report null save fields, a false
+    checkpoint flag, and zero .srm artifacts for the session; any deviation
+    means the player fabricated a save region for a core that has none."""
+
+    def make_runner(self):
+        runner = player_e2e.Runner("/tmp/stage", "/tmp/work",
+                                   "/tmp/rommulus-player", "/tmp/test_core.so",
+                                   90)
+        runner.scenarios.append({"name": "unit", "passed": True})
+        return runner
+
+    def make_result(self, **overrides):
+        obj = {
+            "protocolVersion": PROTOCOL_VERSION,
+            "sessionId": "s-a78",
+            "exitKind": "completed",
+            "checkpointWritten": False,
+            "candidateSavePath": "/st/c.srm",
+            "saveHash": None,
+            "saveSize": None,
+            "frames": 240,
+            "audioUnderrunFrames": 0,
+            "audioOverrunFrames": 0,
+            "errorCode": None,
+            "errorMessage": None,
+        }
+        obj.update(overrides)
+        return obj
+
+    def test_clean_no_save_result_passes(self):
+        runner = self.make_runner()
+        # Point the artifact checks at an empty temp tree (no .srm anywhere).
+        tmp = tempfile.mkdtemp(prefix="prosystem-gate-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        runner.state_root = os.path.join(tmp, "state état")
+        runner.data_root = os.path.join(tmp, "data données")
+        os.makedirs(runner.state_root)
+        os.makedirs(os.path.join(runner.data_root, "s-a78"))
+        self.assertTrue(
+            runner.assert_prosystem_result("unit", self.make_result(),
+                                           "s-a78", 240))
+        self.assertTrue(runner.scenarios[-1]["passed"])
+
+    def test_checkpoint_written_true_rejected(self):
+        runner = self.make_runner()
+        self.assertFalse(runner.assert_prosystem_result(
+            "unit", self.make_result(checkpointWritten=True), "s-a78", 240))
+        self.assertFalse(runner.scenarios[-1]["passed"])
+
+    def test_non_null_save_fields_rejected(self):
+        runner = self.make_runner()
+        self.assertFalse(runner.assert_prosystem_result(
+            "unit", self.make_result(saveSize=8192, saveHash="ab" * 32),
+            "s-a78", 240))
+        self.assertFalse(runner.scenarios[-1]["passed"])
+
+    def test_wrong_exit_kind_rejected(self):
+        runner = self.make_runner()
+        self.assertFalse(runner.assert_prosystem_result(
+            "unit",
+            self.make_result(exitKind="core_requested_shutdown"),
+            "s-a78", 240))
+        self.assertFalse(runner.scenarios[-1]["passed"])
+
+    def test_frames_out_of_bounds_rejected(self):
+        for frames in (0, 100, 243):
+            with self.subTest(frames=frames):
+                runner = self.make_runner()
+                self.assertFalse(runner.assert_prosystem_result(
+                    "unit", self.make_result(frames=frames), "s-a78", 240))
+                self.assertFalse(runner.scenarios[-1]["passed"])
+
+    def test_schema_violation_rejected(self):
+        runner = self.make_runner()
+        bad = self.make_result()
+        del bad["frames"]
+        self.assertFalse(
+            runner.assert_prosystem_result("unit", bad, "s-a78", 240))
+        self.assertFalse(runner.scenarios[-1]["passed"])
+
+    def test_candidate_artifact_on_disk_rejected(self):
+        runner = self.make_runner()
+        tmp = tempfile.mkdtemp(prefix="prosystem-gate-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        runner.state_root = os.path.join(tmp, "state état")
+        runner.data_root = os.path.join(tmp, "data données")
+        os.makedirs(runner.state_root)
+        os.makedirs(os.path.join(runner.data_root, "s-a78"))
+        with open(os.path.join(runner.state_root, "s-a78.candidate.srm"),
+                  "wb") as f:
+            f.write(b"\x00" * 16)
+        self.assertFalse(
+            runner.assert_prosystem_result("unit", self.make_result(),
+                                           "s-a78", 240))
+        self.assertFalse(runner.scenarios[-1]["passed"])
+
+    def test_session_save_artifact_on_disk_rejected(self):
+        runner = self.make_runner()
+        tmp = tempfile.mkdtemp(prefix="prosystem-gate-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        runner.state_root = os.path.join(tmp, "state état")
+        runner.data_root = os.path.join(tmp, "data données")
+        os.makedirs(runner.state_root)
+        session_dir = os.path.join(runner.data_root, "s-a78")
+        os.makedirs(session_dir)
+        with open(os.path.join(session_dir, "save.srm"), "wb") as f:
+            f.write(b"\x00" * 16)
+        self.assertFalse(
+            runner.assert_prosystem_result("unit", self.make_result(),
+                                           "s-a78", 240))
+        self.assertFalse(runner.scenarios[-1]["passed"])
 
 
 if __name__ == "__main__":

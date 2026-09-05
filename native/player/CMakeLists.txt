@@ -437,7 +437,13 @@ if(WIN32)
     # Win32. Same vendored 505-source set as Android/Linux (shared fragment),
     # PE export table via .def, canonical output name fceumm_core.dll.
     include(${ROMM_NATIVE_ROOT}/cmake/cores/fceumm-windows.cmake)
-    set(ROMM_WIN32_CANDIDATE_CORE_TARGETS gambatte_core fceumm_core)
+    # ProSystem (Atari 7800): third candidate production core for Win32.
+    # Same vendored 32-source set as Android/Linux (shared fragment), PE
+    # export table via .def, canonical output name prosystem_core.dll.
+    # Unlike the other two candidates this core exposes NO save RAM region:
+    # the E2E gate asserts the no-persistent-save invariants instead.
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/prosystem-windows.cmake)
+    set(ROMM_WIN32_CANDIDATE_CORE_TARGETS gambatte_core fceumm_core prosystem_core)
 endif()
 
 # ---------------------------------------------------------------------------
