@@ -18,7 +18,7 @@ concurrency:
 jobs:
   prepare:
     name: Validate release
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.version.outputs.source_sha }}
       tag: ${{ steps.version.outputs.tag }}
@@ -211,7 +211,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/sdl-install" \
             -DSDL_SHARED=OFF \
             -DSDL_STATIC=ON
-          cmake --build build/sdl -j"$(( $(nproc) / 4 ))"
+          cmake --build build/sdl -j"$(( $(nproc) / 2 ))"
           cmake --install build/sdl
 
       - name: Build player and cores
@@ -222,7 +222,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install"
-          cmake --build build/player -j"$(( $(nproc) / 4 ))"
+          cmake --build build/player -j"$(( $(nproc) / 2 ))"
 
       - name: Apply desktop release version
         run: |
@@ -321,7 +321,7 @@ jobs:
       - prepare
       - android
       - linux-x86_64
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
       VERSION: ${{ needs.prepare.outputs.version }}

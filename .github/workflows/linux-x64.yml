@@ -72,7 +72,7 @@ jobs:
   # =================================================================
   shared-jvm-tests:
     name: Shared JVM tests
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -145,7 +145,7 @@ jobs:
   # =================================================================
   desktop-tests:
     name: Desktop tests
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -219,7 +219,7 @@ jobs:
   # enables desktop login.
   secret-service-conformance:
     name: Secret Service conformance
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -332,7 +332,7 @@ jobs:
       - name: Build engine tests
         run: |
           set -euo pipefail
-          cmake --build build -j"$(( $(nproc) / 4 ))"
+          cmake --build build -j"$(( $(nproc) / 2 ))"
 
       - name: Run engine tests (CTest, ASan/UBSan)
         run: |
@@ -393,7 +393,7 @@ jobs:
       - name: Build engine tests
         run: |
           set -euo pipefail
-          cmake --build build -j"$(( $(nproc) / 4 ))"
+          cmake --build build -j"$(( $(nproc) / 2 ))"
 
       - name: Run engine tests (CTest)
         run: |
@@ -493,7 +493,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr/local \
             -DSDL_SHARED=OFF \
             -DSDL_STATIC=ON
-          cmake --build build/sdl -j"$(( $(nproc) / 4 ))"
+          cmake --build build/sdl -j"$(( $(nproc) / 2 ))"
           sudo cmake --install build/sdl
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
@@ -515,7 +515,7 @@ jobs:
           set -euo pipefail
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
-          cmake --build build/player -j"$(( $(nproc) / 4 ))"
+          cmake --build build/player -j"$(( $(nproc) / 2 ))"
 
       - name: Verify rommulus_player binary exists
         run: |
@@ -532,6 +532,14 @@ jobs:
           [ -x build/player/rommulus-player-deck ] \
             || { echo "::error::Steam Deck player binary is missing"; exit 1; }
 
+      - name: Upload player build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-linux-x86_64-player-build
+          path: build/player
+          if-no-files-found: error
+          retention-days: 1
+
   # =================================================================
   # 8. core-smoke-tier-1  — STUBBED (Phase 8+)
   # =================================================================
@@ -547,7 +555,7 @@ jobs:
   #     • launch schema compatibility fixtures pass (§15)
   core-smoke-tier-1:
     name: Core smoke (Tier 1)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     if: false  # TODO(phase 8+): remove this guard when Linux core builds land (Phase 8+, not Phase 7)
 
@@ -614,6 +622,7 @@ jobs:
     name: Package tarball
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
+    needs: player-build
     env:
       ROMMULUS_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.version || '0.1.0-dev' }}
 
@@ -630,95 +639,34 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Install native dev packages (SDL3 build deps + nasm + zstd)
+      - name: Download player build artifact (from player-build)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rommulus-linux-x86_64-player-build
+          path: build/player
+
+      - name: Restore player binary permissions
+        run: |
+          set -euo pipefail
+          # Artifact upload/download does not preserve the executable bit.
+          chmod +x build/player/rommulus_player build/player/rommulus-player-deck
+
+      - name: Install packaging dependencies (zstd + xvfb)
         run: |
           set -euo pipefail
           flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get update
-          # Same SDL3 source-build dependency set as player-build, plus nasm
-          # (N64 x86_64 dynarec) and zstd (tarball compression).
+          # SDL3/player are now built once by player-build and reused here
+          # via artifact download — only packaging/smoke-test deps remain.
           flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get install -y \
-            clang-18 \
-            cmake \
-            ninja-build \
-            nasm \
-            libsqlite3-dev \
-            pkg-config \
-            wget \
-            build-essential \
-            git \
             zstd \
-            libasound2-dev \
-            libaudio-dev \
-            libfribidi-dev \
-            libjack-dev \
-            libsndio-dev \
-            libx11-dev \
-            libxext-dev \
-            libxinerama-dev \
-            libxrandr-dev \
-            libxcursor-dev \
-            libxfixes-dev \
-            libxi-dev \
-            libxkbcommon-dev \
-            libxss-dev \
-            libxtst-dev \
-            libdrm-dev \
-            libgbm-dev \
-            libgl1-mesa-dev \
-            libgles2-mesa-dev \
-            libegl1-mesa-dev \
-            libdbus-1-dev \
-            libibus-1.0-dev \
-            libudev-dev \
-            libthai-dev \
-            libusb-1.0-0-dev \
-            libpipewire-0.3-dev \
-            libwayland-dev \
-            libdecor-0-dev \
-            liburing-dev \
             xvfb
 
       - name: Verify toolchain versions
         run: |
           set -euo pipefail
           echo "=== Toolchain versions ==="
-          clang-18 --version | head -1
-          cmake --version | head -1
-          ninja --version
-          nasm --version
           zstd --version
-          pkg-config --modversion sqlite3
           echo "=========================="
-
-      - name: Build and install SDL3 from source (release-3.4.14)
-        run: |
-          set -euo pipefail
-          SDL_VERSION="3.4.14"
-          SDL_TAG="release-${SDL_VERSION}"
-          mkdir -p deps/sdl3
-          echo "Downloading SDL3 ${SDL_TAG}..."
-          wget -qO- "https://github.com/libsdl-org/SDL/releases/download/${SDL_TAG}/SDL3-${SDL_VERSION}.tar.gz" \
-            | tar -xz -C deps/sdl3 --strip-components=1
-          echo "Configuring SDL3 Release build (prefix=/usr/local)..."
-          cmake -S deps/sdl3 -B build/sdl \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr/local \
-            -DSDL_SHARED=OFF \
-            -DSDL_STATIC=ON
-          cmake --build build/sdl -j"$(( $(nproc) / 4 ))"
-          sudo cmake --install build/sdl
-          pkg-config --modversion SDL3 2>/dev/null && echo "✓ SDL3 pkg-config OK" || echo "⚠ SDL3 pkg-config not found"
-
-      - name: Configure and build player + cores (Release)
-        run: |
-          set -euo pipefail
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
-          export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
-          cmake -S native/player -B build/player \
-            -DCMAKE_C_COMPILER=clang-18 \
-            -DCMAKE_CXX_COMPILER=clang++-18 \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/player -j"$(( $(nproc) / 4 ))"
 
       - name: Verify player binary and core libraries
         run: |
@@ -940,7 +888,7 @@ jobs:
   #   • desktop bundle starts with bundled runtime — needs a display; see desktop-tests
   license-and-provenance-audit:
     name: License and provenance audit
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: package-tarball
 
