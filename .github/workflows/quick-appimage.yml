@@ -92,7 +92,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/sdl-install" \
             -DSDL_SHARED=OFF \
-            -DSDL_STATIC=ON
+            -DSDL_STATIC=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
           cmake --build build/sdl -j"$(( $(nproc) / 2 ))"
           cmake --install build/sdl
 
@@ -102,6 +103,8 @@ jobs:
           cmake -S native/player -B build/player -G Ninja \
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install" \
             -DDOLPHIN_BUILD_PARALLEL_JOBS=16

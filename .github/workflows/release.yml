@@ -187,7 +187,7 @@ jobs:
           set -euo pipefail
           flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get update
           flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get install -y --no-install-recommends \
-            clang-18 g++ cmake ninja-build nasm pkg-config wget zstd xvfb \
+            clang-18 g++ cmake ninja-build nasm pkg-config wget zstd xvfb ccache \
             libsqlite3-dev \
             libasound2-dev libaudio-dev libdbus-1-dev libdecor-0-dev \
             libdrm-dev libegl1-mesa-dev libfribidi-dev libgbm-dev \
@@ -217,7 +217,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/sdl-install" \
             -DSDL_SHARED=OFF \
-            -DSDL_STATIC=ON
+            -DSDL_STATIC=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
           cmake --build build/sdl -j"$(( $(nproc) / 2 ))"
           cmake --install build/sdl
 
@@ -227,6 +228,8 @@ jobs:
           cmake -S native/player -B build/player -G Ninja \
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install" \
             -DDOLPHIN_BUILD_PARALLEL_JOBS=16
