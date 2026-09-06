@@ -18,7 +18,7 @@ concurrency:
 jobs:
   prepare:
     name: Validate release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     outputs:
       source_sha: ${{ steps.version.outputs.source_sha }}
       tag: ${{ steps.version.outputs.tag }}
@@ -75,7 +75,7 @@ jobs:
   android:
     name: Build signed Android release
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 90
     env:
       RELEASE_STORE_FILE: ${{ github.workspace }}/rommulus-release.jks
@@ -155,7 +155,7 @@ jobs:
   linux-x86_64:
     name: Build Linux AppImage
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
     env:
       SDL_VERSION: 3.4.14
@@ -211,7 +211,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/sdl-install" \
             -DSDL_SHARED=OFF \
             -DSDL_STATIC=ON
-          cmake --build build/sdl
+          cmake --build build/sdl -j"$(nproc)"
           cmake --install build/sdl
 
       - name: Build player and cores
@@ -222,7 +222,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install"
-          cmake --build build/player
+          cmake --build build/player -j"$(nproc)"
 
       - name: Apply desktop release version
         run: |
@@ -321,7 +321,7 @@ jobs:
       - prepare
       - android
       - linux-x86_64
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
       VERSION: ${{ needs.prepare.outputs.version }}

@@ -28,7 +28,7 @@ env:
 jobs:
   build:
     name: Build AppImage and debug APK
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 75
 
     steps:
@@ -93,7 +93,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/sdl-install" \
             -DSDL_SHARED=OFF \
             -DSDL_STATIC=ON
-          cmake --build build/sdl
+          cmake --build build/sdl -j"$(nproc)"
           cmake --install build/sdl
 
       - name: Build player and cores
@@ -104,7 +104,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install"
-          cmake --build build/player
+          cmake --build build/player -j"$(nproc)"
 
       - name: Build desktop application
         run: |
