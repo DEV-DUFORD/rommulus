@@ -453,6 +453,9 @@ int main(int argc, char* argv[]) {
                      "info: qualification frame bound active: %lld presented frames\n",
                      static_cast<long long>(qualificationMaxFrames));
     }
+    const bool qualificationTestFocusLoss =
+            envVar("ROMM_PLAYER_TEST_FOCUS_LOSS") == "1";
+    bool qualificationFocusLossInjected = false;
 #endif  // ROMM_PLAYER_QUALIFICATION
 
 #ifdef ROMM_WIN32_SOFTWARE_ONLY
@@ -820,7 +823,9 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "info: no existing save at %s; starting with fresh SRAM\n",
                          request.savePath.c_str());
         }
-        session.configureAutosave(request.savePath, std::chrono::seconds(30));
+        // The standalone player never adopts saves. All checkpoints remain
+        // candidates until the desktop supervisor validates and adopts them.
+        session.configureAutosave(request.candidateSavePath, std::chrono::seconds(30));
     }
 
     // 10. Attach the video surface. Software cores do not wait for this in
@@ -1079,6 +1084,21 @@ int main(int argc, char* argv[]) {
     };
 
     while (running) {
+#ifdef ROMM_PLAYER_QUALIFICATION
+        if (qualificationTestFocusLoss && !qualificationFocusLossInjected &&
+            session.diagnostics().frameCount.load() >= 30) {
+            SDL_Event focusEvent{};
+            focusEvent.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+            focusEvent.window.windowID = SDL_GetWindowID(window);
+            const bool lostQueued = SDL_PushEvent(&focusEvent);
+            focusEvent.type = SDL_EVENT_WINDOW_FOCUS_GAINED;
+            const bool gainedQueued = SDL_PushEvent(&focusEvent);
+            std::fprintf(stderr,
+                         "info: qualification focus-loss events queued: lost=%d gained=%d\n",
+                         lostQueued, gainedQueued);
+            qualificationFocusLossInjected = true;
+        }
+#endif
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
@@ -1155,11 +1175,11 @@ int main(int argc, char* argv[]) {
                     session.setPaused(true);
                     if (!request.savePath.empty() &&
                         session.memorySize(RETRO_MEMORY_SAVE_RAM) > 0 &&
-                        !session.checkpointSaveRam(request.savePath)) {
+                        !session.checkpointSaveRam(request.candidateSavePath)) {
                         std::fprintf(
                             stderr,
                             "error: focus-loss SRAM checkpoint failed for %s\n",
-                            request.savePath.c_str());
+                            request.candidateSavePath.c_str());
                     }
                     break;
                 case SDL_EVENT_WINDOW_FOCUS_GAINED:

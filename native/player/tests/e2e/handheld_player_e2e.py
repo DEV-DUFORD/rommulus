@@ -29,6 +29,31 @@ REVISIONS = {
 }
 
 
+def assert_save_unchanged(label, before, after, report, logs):
+    details = {
+        "name": label,
+        "beforeSize": len(before),
+        "afterSize": len(after),
+        "beforeSha256": hashlib.sha256(before).hexdigest(),
+        "afterSha256": hashlib.sha256(after).hexdigest(),
+    }
+    report.setdefault("authoritativeSaveChecks", []).append(details)
+    if before != after:
+        differences = []
+        for offset in range(max(len(before), len(after))):
+            left = before[offset] if offset < len(before) else None
+            right = after[offset] if offset < len(after) else None
+            if left != right:
+                differences.append({"offset": offset, "before": left, "after": right})
+            if len(differences) == 32:
+                break
+        details["firstDifferences"] = differences
+        (logs / (label + ".save-before.bin")).write_bytes(before)
+        (logs / (label + ".save-after.bin")).write_bytes(after)
+        raise AssertionError(label + ": authoritative save overwritten: " +
+                             json.dumps(details, sort_keys=True))
+
+
 def qualify(args):
     root = Path(args.work_dir).resolve() / ("handheld-тест état-" + uuid.uuid4().hex)
     roots = {name: root / name for name in ("cores", "cache", "data", "state", "logs")}
@@ -60,6 +85,7 @@ def qualify(args):
     env["SDL_VIDEODRIVER"] = args.video_driver
     env["SDL_AUDIODRIVER"] = "dummy"
     env["SDL_RENDER_DRIVER"] = "software"
+    env["ROMM_PLAYER_TEST_FOCUS_LOSS"] = "1"
     env.pop("ROMM_TEST_CORE_MAX_FRAMES", None)
     if os.name == "nt":
         windows = Path(os.environ.get("SystemRoot", r"C:\Windows"))
@@ -97,7 +123,10 @@ def qualify(args):
             assert result["saveSize"] == len(expected), result
             assert result["saveHash"] == hashlib.sha256(expected).hexdigest(), result
             assert candidate.read_bytes() == expected, label + ": wrong save bytes"
-            assert save.read_bytes() == before, label + ": authoritative save overwritten"
+            assert_save_unchanged(label, before, save.read_bytes(), report, roots["logs"])
+            log = Path(process.log_path).read_text(encoding="utf-8", errors="replace")
+            assert "qualification focus-loss events queued: lost=1 gained=1" in log, (
+                label + ": qualification player did not inject focus-loss events")
             os.replace(candidate, save)
             report["scenarios"].append({"name": label, "result": result})
         finally:
@@ -125,7 +154,7 @@ def qualify(args):
             victim.terminate()
             victim.wait(args.timeout)
         assert not victim.alive(), "force-kill victim survived"
-        assert save.read_bytes() == before, "force-kill altered authoritative save"
+        assert_save_unchanged("force-kill", before, save.read_bytes(), report, roots["logs"])
         launch("same-session-after-force-kill", before)
         report["passed"] = True
     except Exception as error:

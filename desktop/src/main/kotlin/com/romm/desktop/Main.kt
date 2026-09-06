@@ -57,7 +57,7 @@ fun main(args: Array<String>) {
 
     // Logger first: install from the selected AppPaths before ordinary logging begins, so every
     // record lands under this host's real state dir (plans/WINDOWS_IMPL.md §4.4).
-    DesktopLogger.install(adapters.appPaths)
+    DesktopLogger.install(adapters.appPaths, adapters.securityPolicy)
     val nativeBundle = WindowsNativeBundle.fromLauncher(adapters.layout)
     nativeBundle?.verify()
     val smokeReport = if (args.size == 2 && args[0] == "--smoke-report") Path.of(args[1]) else null

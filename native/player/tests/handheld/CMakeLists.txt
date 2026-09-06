@@ -43,3 +43,6 @@ add_test(NAME handheld_save_contract
         "ROMM_HANDHELD_EXPECT_WINDOWS=$<IF:$<BOOL:${WIN32}>,1,0>"
         "${Python3_EXECUTABLE}" -X faulthandler -u
         "${CMAKE_CURRENT_LIST_DIR}/../e2e/test_handheld_saves.py" -v)
+add_test(NAME handheld_player_save_integrity
+    COMMAND "${Python3_EXECUTABLE}" -X faulthandler -u
+        "${CMAKE_CURRENT_LIST_DIR}/../e2e/test_handheld_player_e2e.py" -v)

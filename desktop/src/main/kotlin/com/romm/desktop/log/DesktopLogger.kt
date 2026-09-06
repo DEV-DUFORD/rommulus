@@ -64,6 +64,13 @@ object DesktopLogger {
     /** Install from an [AppPaths]: logs resolve under its state dir (`state/logs`). */
     fun install(appPaths: AppPaths): Logger = install(appPaths.logsDir())
 
+    /** Install with the same host-specific security policy that owns [appPaths]. */
+    fun install(appPaths: AppPaths, securityPolicy: FileSecurityPolicy): Logger {
+        val logger = newLogger(appPaths.logsDir(), securityPolicy)
+        Holder.instance = logger
+        return logger
+    }
+
     /**
      * Create a fully configured Logger bound to [logsDir] (or the historical default).
      *
