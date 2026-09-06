@@ -504,7 +504,7 @@
         "arm64-v8a": "2004b2c61a04e3c2be97ba056750b45cd5aa7d4094e63d1d2f8fc5bc3fb8a144",
         "linux-x86_64": null
       },
-      "notes": "Lightrec (commit 505ad11d) is vendored as a pinned Linux dependency, not a patch to upstream PCSX-ReARMed. PSX BIOS files are user-supplied (requiredFirmware above); they are never bundled."
+      "notes": "Lightrec (commit a173cf409e11fbbdd4801aacc683a3d7592f499c) is vendored as a pinned Linux dependency, not a patch to upstream PCSX-ReARMed. PSX BIOS files are user-supplied (requiredFirmware above); they are never bundled."
     },
     {
       "coreId": "mupen64plus_next",
