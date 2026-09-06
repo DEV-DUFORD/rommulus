@@ -79,6 +79,12 @@
 #     counts VBlank events into BRAM. The same checkpoint/adoption/repeated-
 #     load/force-kill lifecycle gate verifies persistence across fresh
 #     processes without enabling the core in any production manifest.
+#   - optionally qualifies PCSX-ReARMed (--pcsx-rearmed-core) using an
+#     original PS-X EXE, an initialized 128 KiB card with a restore token,
+#     and HLE BIOS in qualification builds only. The isolated core probe
+#     checks actual RGB565 pixels, non-silent PCM, and delayed restoration;
+#     player scenarios check exact card images across adoption/repeated
+#     loads and force-kill recovery. --only-ps1 runs this focused gate.
 #
 # Scenarios are bounded by per-launch timeouts; cleanup targets the EXACT
 # PIDs this harness spawned (Windows: TerminateProcess via ctypes; POSIX:
@@ -104,7 +110,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 
@@ -115,6 +120,7 @@ import gambatte_rom  # noqa: E402
 import genesis_plus_gx_rom  # noqa: E402
 import mgba_rom  # noqa: E402
 import pce_rom  # noqa: E402
+import pcsx_rearmed_rom  # noqa: E402
 import prosystem_rom  # noqa: E402
 import snes9x_rom  # noqa: E402
 import stella_rom  # noqa: E402
@@ -125,6 +131,9 @@ IS_WINDOWS = os.name == "nt"
 PROTOCOL_VERSION = 2
 CORE_ID = "test_core"
 CORE_REVISION = "1"          # CoreManifest.kt releaseTag pin ("test_core=1")
+PCSX_REARMED_CORE_ID = "pcsx_rearmed"
+PCSX_REARMED_REVISION = "da2cb8ecd17fd0932ab6d94774c0522beebce6e3"
+PCSX_REARMED_RUN_FRAMES = 180
 SRAM_SIZE = 64               # test_core TEST_CORE_SRAM_SIZE
 SHUTDOWN_MAX_FRAMES = 400    # frames rendered before the core requests shutdown
 
@@ -446,10 +455,11 @@ class PlayerProcess:
     def _pump_output(self):
         with open(self.log_path, "wb") as log:
             while True:
-                chunk = self.proc.stdout.read(4096)
+                chunk = self.proc.stdout.read1(4096)
                 if not chunk:
                     break
                 log.write(chunk)
+                log.flush()
 
     def alive(self):
         return self.proc is not None and self.proc.poll() is None
@@ -512,7 +522,8 @@ class Runner:
                  stella_candidate_core=None,
                  wswan_candidate_core=None, pce_candidate_core=None,
                  genesis_plus_gx_candidate_core=None, mgba_candidate_core=None,
-                 snes9x_candidate_core=None):
+                 snes9x_candidate_core=None, pcsx_rearmed_candidate_core=None,
+                 only_ps1=False):
         self.stage_dir = os.path.abspath(stage_dir)
         self.workdir = os.path.abspath(workdir)
         self.player_exe = os.path.abspath(player_exe)
@@ -537,6 +548,10 @@ class Runner:
         self.snes9x_candidate_core = (os.path.abspath(snes9x_candidate_core)
                                       if snes9x_candidate_core else None)
         self.timeout_sec = timeout_sec
+        self.pcsx_rearmed_candidate_core = (
+            os.path.abspath(pcsx_rearmed_candidate_core)
+            if pcsx_rearmed_candidate_core else None)
+        self.only_ps1 = only_ps1
         self.video_driver = video_driver
         self.audio_driver = audio_driver
         self.render_driver = render_driver
@@ -544,7 +559,7 @@ class Runner:
         # that path handling (UTF-8 env contract, request JSON, lock paths)
         # survives "тест état" on both platforms.
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        self.base = os.path.join(tempfile.gettempdir(),
+        self.base = os.path.join(self.workdir,
                                  "rommulus-e2e-%s-тест état" % stamp)
         self.core_root = os.path.join(self.base, "cores тест")
         self.cache_root = os.path.join(self.base, "cache état")
@@ -617,6 +632,10 @@ class Runner:
             shutil.copyfile(self.snes9x_candidate_core,
                             os.path.join(self.core_root, self.snes9x_core_filename()))
             self.generate_snes9x_rom()
+        if self.pcsx_rearmed_candidate_core:
+            shutil.copyfile(self.pcsx_rearmed_candidate_core, self.pcsx_rearmed_core_path())
+            with open(os.path.join(self.cache_root, pcsx_rearmed_rom.ROM_NAME), "wb") as f:
+                f.write(pcsx_rearmed_rom.generate_rom())
 
     def core_filename(self):
         return "test_core.dll" if IS_WINDOWS else "libtest_core.so"
@@ -771,6 +790,10 @@ class Runner:
     def snes9x_core_path(self):
         return os.path.join(self.core_root, self.snes9x_core_filename())
 
+    def pcsx_rearmed_core_path(self):
+        filename = "pcsx_rearmed_core.dll" if IS_WINDOWS else "libpcsx_rearmed_core.so"
+        return os.path.join(self.core_root, filename)
+
     def env_for(self, max_frames=None, player_max_frames=None):
         env = dict(os.environ)
         # Sanitized loader PATH (Windows): staged artifact bin + system dirs
@@ -801,6 +824,8 @@ class Runner:
             PCE_CORE_ID, PCE_REVISION, GENESIS_PLUS_GX_CORE_ID,
             GENESIS_PLUS_GX_REVISION, MGBA_CORE_ID, MGBA_REVISION,
             SNES9X_CORE_ID, SNES9X_REVISION))
+        env["ROMM_PLAYER_ALLOWED_CORES"] += ";%s=%s" % (
+            PCSX_REARMED_CORE_ID, PCSX_REARMED_REVISION)
         # Headless SDL for the GUI-less runner: offscreen video driver with a
         # real window framebuffer (the software renderer works against it),
         # forced software render backend (no GPU on the runner), dummy audio.
@@ -2518,6 +2543,134 @@ class Runner:
         self._assert_snes9x_result(name, result, session, SNES9X_RUN3_FRAMES,
                                    [result["frames"]] if result else [])
 
+    # -- PCSX-ReARMed: a complete card transaction per fresh process ------
+
+    def scenario_pcsx_rearmed_video_audio(self):
+        name = "pcsx-rearmed-video-audio-delayed-restore"
+        self.scenarios.append({"name": name, "passed": True})
+        probe = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "pcsx_rearmed_probe.py")
+        log_path = os.path.join(self.logs_dir, name + ".log")
+        with open(log_path, "wb") as log:
+            try:
+                result = subprocess.run(
+                    [sys.executable, probe, "--core", self.pcsx_rearmed_candidate_core,
+                     "--workdir", os.path.join(self.cache_root, "ps1 probe")],
+                    env=self.env_for(), stdout=log, stderr=subprocess.STDOUT,
+                    timeout=self.timeout_sec, check=False)
+                self.check(name, result.returncode == 0,
+                           "video/PCM/delayed-restore probe failed; see %s" % log_path)
+            except subprocess.TimeoutExpired:
+                self.fail(name, "video/PCM probe timed out")
+
+    def _pcsx_rearmed_seed(self, session, prior_session=None):
+        save = os.path.join(self.data_root, session, "save.srm")
+        os.makedirs(os.path.dirname(save), exist_ok=True)
+        if prior_session:
+            shutil.copyfile(os.path.join(
+                self.state_root, prior_session + ".candidate.srm"), save)
+        else:
+            with open(save, "wb") as f:
+                f.write(pcsx_rearmed_rom.blank_card())
+        return save
+
+    def _pcsx_rearmed_run(self, name, session, boots, prior_session=None):
+        if not self.check(name, self.pcsx_rearmed_candidate_core is not None,
+                          "PCSX-ReARMed candidate not staged"):
+            return
+        if prior_session and not self.check(
+                name, os.path.isfile(os.path.join(
+                    self.state_root, prior_session + ".candidate.srm")),
+                "previous candidate card missing"):
+            return
+        self._pcsx_rearmed_seed(session, prior_session)
+        rc, result = self.launch(
+            name, session, core_id=PCSX_REARMED_CORE_ID,
+            core_build_revision=PCSX_REARMED_REVISION,
+            core_path=self.pcsx_rearmed_core_path(),
+            content_path=os.path.join(self.cache_root, pcsx_rearmed_rom.ROM_NAME),
+            player_max_frames=PCSX_REARMED_RUN_FRAMES)
+        self.check(name, rc == 0, "exit code %r (want 0)" % rc)
+        if not self.check(name, result is not None, "no result JSON written"):
+            return
+        problems = validate_result_schema(result)
+        if not self.check(name, not problems, "result schema: %s" % "; ".join(problems)):
+            return
+        self.check(name, result["sessionId"] == session, "unexpected sessionId")
+        self.check(name, result["exitKind"] == "completed", "exitKind must be completed")
+        self.check(name, result["checkpointWritten"] is True, "checkpoint missing")
+        self.check(name, PCSX_REARMED_RUN_FRAMES <= result["frames"] <=
+                   PCSX_REARMED_RUN_FRAMES + 2, "presented frame bound not met")
+        image = pcsx_rearmed_rom.expected_card(boots)
+        self.check(name, result["saveSize"] == len(image), "expected complete 128 KiB card")
+        self.check(name, result["saveHash"] == hashlib.sha256(image).hexdigest(),
+                   "card transaction/restore counter differs from oracle")
+        candidate = os.path.join(self.state_root, session + ".candidate.srm")
+        if self.check(name, os.path.isfile(candidate), "candidate card missing"):
+            with open(candidate, "rb") as f:
+                self.check(name, f.read() == image, "candidate card differs from exact oracle")
+
+    def scenario_pcsx_rearmed_valid_launch_completed(self):
+        name = "pcsx-rearmed-valid-launch-completed"
+        self.scenarios.append({"name": name, "passed": True})
+        self._pcsx_rearmed_run(name, "e2e-ps1-run1", 1)
+
+    def scenario_pcsx_rearmed_relaunch_persistence(self):
+        name = "pcsx-rearmed-relaunch-persistence"
+        self.scenarios.append({"name": name, "passed": True})
+        self._pcsx_rearmed_run(name, "e2e-ps1-run2", 2, "e2e-ps1-run1")
+
+    def scenario_pcsx_rearmed_repeated_load(self):
+        name = "pcsx-rearmed-repeated-load"
+        self.scenarios.append({"name": name, "passed": True})
+        self._pcsx_rearmed_run(name, "e2e-ps1-run3", 3, "e2e-ps1-run2")
+
+    def scenario_pcsx_rearmed_force_kill_lock_recovery(self):
+        name, session = "pcsx-rearmed-force-kill-lock-recovery", "e2e-ps1-kill"
+        self.scenarios.append({"name": name, "passed": True})
+        if not self.check(name, os.path.isfile(os.path.join(
+                self.state_root, "e2e-ps1-run3.candidate.srm")),
+                "previous candidate card missing"):
+            return
+        self._pcsx_rearmed_seed(session, "e2e-ps1-run3")
+        request, _, save = self._write_request(
+            name + "-victim", session, self.pcsx_rearmed_core_path(),
+            PCSX_REARMED_REVISION, core_id=PCSX_REARMED_CORE_ID,
+            content_path=os.path.join(self.cache_root, pcsx_rearmed_rom.ROM_NAME))
+        victim = PlayerProcess(
+            self.player_exe, request, self.env_for(player_max_frames=3600),
+            os.path.join(self.logs_dir, name + "-victim.log"))
+        victim.start()
+        self.spawned_pids.append(victim.pid())
+        pump = threading.Thread(target=victim._pump_output, daemon=True)
+        pump.start()
+        deadline = time.monotonic() + min(self.timeout_sec, 30)
+        ready = False
+        while victim.alive() and time.monotonic() < deadline:
+            if os.path.isfile(victim.log_path):
+                with open(victim.log_path, "rb") as log:
+                    ready = b"session started, core=" in log.read()
+                if ready:
+                    break
+            time.sleep(0.1)
+        if not self.check(name, ready, "victim never loaded PS1 content and acquired its lock"):
+            victim.terminate()
+            pump.join(timeout=5)
+            return
+        time.sleep(2)
+        if not self.check(name, victim.alive(), "victim exited before force-kill"):
+            pump.join(timeout=5)
+            return
+        victim.terminate()
+        pump.join(timeout=5)
+        if not self.check(name, not victim.alive(), "victim survived force-kill"):
+            return
+        # Ignore the killed process's unadopted checkpoint; restore the last
+        # accepted card, then reacquire the exact same session lock.
+        if not self.discard_force_kill_save(name, save):
+            return
+        self._pcsx_rearmed_run(name + "-relaunch", session, 4, "e2e-ps1-run3")
+
     def scenario_negative_revision_mismatch(self):
         name = "negative-revision-mismatch"
         self.scenarios.append({"name": name, "passed": True})
@@ -2583,7 +2736,7 @@ class Runner:
     def run(self):
         t0 = time.monotonic()
         self.create_tree()
-        for fn in (self.scenario_valid_launch_core_shutdown,
+        scenarios = (self.scenario_valid_launch_core_shutdown,
                    self.scenario_relaunch_save_restore,
                    self.scenario_concurrent_same_session_rejected,
                    self.scenario_force_kill_lock_release_relaunch,
@@ -2623,7 +2776,19 @@ class Runner:
                       self.scenario_snes9x_force_kill_lock_recovery,
                       self.scenario_negative_revision_mismatch,
                    self.scenario_negative_core_outside_root,
-                   self.scenario_no_orphans_tree_deletable):
+                   )
+        ps1_scenarios = (
+            self.scenario_pcsx_rearmed_video_audio,
+            self.scenario_pcsx_rearmed_valid_launch_completed,
+            self.scenario_pcsx_rearmed_relaunch_persistence,
+            self.scenario_pcsx_rearmed_repeated_load,
+            self.scenario_pcsx_rearmed_force_kill_lock_recovery,
+        )
+        if self.only_ps1:
+            scenarios = ps1_scenarios
+        elif self.pcsx_rearmed_candidate_core:
+            scenarios += ps1_scenarios
+        for fn in scenarios + (self.scenario_no_orphans_tree_deletable,):
             fn()
         elapsed = time.monotonic() - t0
         report = {
@@ -2895,6 +3060,9 @@ def main(argv=None):
                     "(default: cores-candidate/ in the stage dir)")
     ap.add_argument("--snes9x-core", help="explicit candidate Snes9x core path "
                     "(default: cores-candidate/ in the stage dir)")
+    ap.add_argument("--pcsx-rearmed-core", help="PCSX-ReARMed core to qualify with HLE BIOS")
+    ap.add_argument("--only-ps1", action="store_true",
+                    help="run only PS1 lifecycle and cleanup (requires --pcsx-rearmed-core)")
     ap.add_argument("--verify-artifact", metavar="DIR",
                     help="verify DIR against its import-audit.txt and exit")
     ap.add_argument("--timeout-sec", type=int, default=90,
@@ -2919,6 +3087,18 @@ def main(argv=None):
         if not path or not os.path.isfile(path):
             print("FAIL: %s not found at %r" % (label, path), file=sys.stderr)
             return 2
+    if args.pcsx_rearmed_core and not os.path.isfile(args.pcsx_rearmed_core):
+        print("FAIL: PCSX-ReARMed core not found: %s" % args.pcsx_rearmed_core,
+              file=sys.stderr)
+        return 2
+    if args.only_ps1:
+        if not args.pcsx_rearmed_core:
+            ap.error("--only-ps1 requires --pcsx-rearmed-core")
+        runner = Runner(
+            args.stage, args.workdir, player, core, args.timeout_sec,
+            args.video_driver, args.audio_driver, args.render_driver,
+            pcsx_rearmed_candidate_core=args.pcsx_rearmed_core, only_ps1=True)
+        return runner.run()
     if candidate is None:
         # The Gambatte qualification scenarios cannot run without the
         # candidate core; fail loudly (environment error) rather than
@@ -2995,7 +3175,8 @@ def main(argv=None):
                     pce_candidate_core=pce_candidate,
                     genesis_plus_gx_candidate_core=genesis_plus_gx_candidate,
                     mgba_candidate_core=mgba_candidate,
-                    snes9x_candidate_core=snes9x_candidate)
+                    snes9x_candidate_core=snes9x_candidate,
+                    pcsx_rearmed_candidate_core=args.pcsx_rearmed_core)
     print("player:   %s" % player)
     print("core:     %s" % core)
     print("candidate: %s" % candidate)

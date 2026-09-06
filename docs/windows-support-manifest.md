@@ -476,11 +476,11 @@ Lightrec/Lightning emitters are linked and initialized. Upstream defaults
 `LIGHTREC_THREADED_COMPILER=0`, so this follow-up does not additionally inherit
 a background compiler thread.
 
-The interpreter target reuses the already-vendored common Linux source
-inventory while excluding the exact Lightrec/Lightning sources already
-removed by the existing Apple verification fallback. It uses the portable
-SSSE3 software GPU, CHD/miniz and Libretro VFS support, retain asynchronous CD
-and GPU workers through libretro-common's Win32 thread backend, and disable
+The interpreter target uses the shared desktop source inventory in
+`native/cmake/cores/pcsx_rearmed-desktop-sources.cmake`, without including a Linux
+adapter, and excludes Lightrec/Lightning. It uses the portable
+SSSE3 software GPU, CHD/miniz and Libretro VFS support, retains asynchronous CD
+and GPU workers through libretro-common's Win32 thread backend, and disables
 the asynchronous SPU path as upstream does on Windows because that path uses
 POSIX semaphores. Physical CD-ROM access is excluded: the Windows adapter
 accepts content files only and does not need host-device access in the player.
@@ -508,28 +508,33 @@ The frontend already forces `pcsx_rearmed_memcard1=libretro` and
 That exact 128 KiB image fits the existing checkpoint, adoption, restore, and
 server-sync contract; disabling slot 2 prevents an unsynchronized shared card.
 
-Qualification content will be a generated, hash-pinned PS-X EXE containing
-only project-authored MIPS instructions and data. The pinned core directly
-loads `.exe` payloads after the 0x800-byte PS-X EXE header, so no licensed CD
-sectors, boot logo, game data, SDK runtime, or BIOS bytes are needed. The E2E
-harness will also generate a hash-pinned standard blank 131072-byte card image
-and restore it during launch. This is required because Libretro card mode
-intentionally starts with a zero-filled `Mcd1Data` buffer and gives
-`Config.Mcd1` no file path, so HLE `format("bu00:")` is a no-op and file
-creation cannot find the `0xa0` free-directory frames on an all-zero card.
+Qualification content is an original, hash-pinned 4096-byte PS-X EXE containing
+project-authored MIPS instructions and data. It drives solid RGB GPU output and
+looping original SPU ADPCM audio. The pinned core directly loads `.exe` payloads
+after the 0x800-byte PS-X EXE header, so no licensed CD sectors, boot logo, game
+data, SDK runtime, or BIOS bytes are needed.
 
-The player currently starts the software-core run loop before applying the
-save restore, so the fixture must tolerate that ordering. It will poll sector
-zero through HLE `B0:4F _card_read_sector` until the restored `MC` signature
-appears and perform no card mutation while the buffer is zero-filled. It will
-then call `B0:4A InitCARD(1)`, `B0:4B StartCARD`, and `A0:70 _bu_init` before
-using the `B0:32`-`B0:36` open/lseek/read/write/close calls to create, read,
-and update a marker and counter in slot 1. The E2E oracle will wait for a
-fixture completion signal before sampling the image. Video and audio
-assertions will use Windows-specific goldens because the Windows candidate
-disables async SPU while other targets do not. The oracle must validate the
-exact card image and mutation across fresh launch from the generated blank
-image, adoption/restore, repeated load, and force-kill recovery.
+The vendored `init_memcard` formats the default card with its `MC` signature and
+free-directory entries; it does **not** leave the default card zero-filled.
+The fixture restores a valid initialized 131072-byte card carrying a `ROMMPSX1`
+token in unallocated sector 64. Since the player starts the software-core loop
+before applying save restoration, the EXE polls that token—not the generic `MC`
+signature—before making any mutation. It uses direct HLE `B0:4F`/`B0:4E` sector
+read/write calls and increments a uint32 boot counter exactly once per launch;
+it does not depend on the higher-level card file APIs.
+
+The isolated probe checks that both default and zero-filled cards remain
+unchanged before restoration, then verifies the exact restored card, real colored
+video, and non-silent PCM using portable invariants rather than Windows-specific
+goldens. The player gate uses a 180-frame bound, exact full-card size/hash/bytes,
+adoption counters 1 → 2 → 3, and force-kill accepted-save recovery to counter 4.
+
+Local macOS build/probe/save-chain validation passed. The combined local
+force-kill invocation was blocked by traced exited processes retaining locks;
+separate-invocation recovery passed. This is not a claim that the complete
+combined gate passed. Hosted Windows content execution and physical interpreter
+performance remain unqualified. No engine or production BIOS-policy changes
+were needed for this fixture.
 
 Interpreter performance is not inferred from hosted correctness. Sustained
 frame pacing, audio stability, and soak behavior on representative legal

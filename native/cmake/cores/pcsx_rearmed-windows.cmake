@@ -1,34 +1,9 @@
-# PCSX-ReARMed Windows x86_64 interpreter candidate. This target remains
-# isolated under cores-candidate/ until physical Windows qualification.
-set(ROMM_PCSX_REARMED_SOURCES_ONLY ON)
-include(${CMAKE_CURRENT_LIST_DIR}/pcsx_rearmed-linux.cmake)
-unset(ROMM_PCSX_REARMED_SOURCES_ONLY)
+# PCSX-ReARMed Windows x86_64 interpreter core. Qualification staging may
+# use cores-candidate/; this target has no preview-only runtime gate.
+include(${CMAKE_CURRENT_LIST_DIR}/pcsx_rearmed-desktop-sources.cmake)
 
 # The first Windows candidate deliberately excludes Lightrec/GNU Lightning,
 # executable memory, and host physical-CD access.
-list(REMOVE_ITEM PCSX_REARMED_SOURCES
-    ${PCSX_CORE_DIR}/lightrec/mem.c
-    ${PCSX_CORE_DIR}/lightrec/plugin.c
-    ${PCSX_LIGHTREC_DIR}/tlsf/tlsf.c
-    ${PCSX_LIGHTREC_DIR}/blockcache.c
-    ${PCSX_LIGHTREC_DIR}/constprop.c
-    ${PCSX_LIGHTREC_DIR}/disassembler.c
-    ${PCSX_LIGHTREC_DIR}/emitter.c
-    ${PCSX_LIGHTREC_DIR}/interpreter.c
-    ${PCSX_LIGHTREC_DIR}/lightrec.c
-    ${PCSX_LIGHTREC_DIR}/memmanager.c
-    ${PCSX_LIGHTREC_DIR}/optimizer.c
-    ${PCSX_LIGHTREC_DIR}/regcache.c
-    ${PCSX_LIGHTNING_DIR}/lib/jit_disasm.c
-    ${PCSX_LIGHTNING_DIR}/lib/jit_memory.c
-    ${PCSX_LIGHTNING_DIR}/lib/jit_names.c
-    ${PCSX_LIGHTNING_DIR}/lib/jit_note.c
-    ${PCSX_LIGHTNING_DIR}/lib/jit_print.c
-    ${PCSX_LIGHTNING_DIR}/lib/jit_size.c
-    ${PCSX_LIGHTNING_DIR}/lib/lightning.c
-    ${PCSX_FRONTEND_DIR}/libretro-cdrom.c
-    ${PCSX_COMMON_DIR}/vfs/vfs_implementation_cdrom.c
-)
 
 add_library(pcsx_rearmed_core SHARED
     ${PCSX_REARMED_SOURCES}

@@ -8,11 +8,13 @@
 # deterministic save-hash oracle, and the strict result-schema validator.
 
 import json
+import hashlib
 import os
 import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -21,6 +23,7 @@ import gambatte_rom  # noqa: E402
 import genesis_plus_gx_rom  # noqa: E402
 import mgba_rom  # noqa: E402
 import pce_rom  # noqa: E402
+import pcsx_rearmed_rom  # noqa: E402
 import player_e2e  # noqa: E402
 import prosystem_rom  # noqa: E402
 import snes9x_rom  # noqa: E402
@@ -990,6 +993,97 @@ class AsPosixTest(unittest.TestCase):
         out = player_e2e.as_posix(os.path.join("a", "b c", "тест"))
         self.assertNotIn("\\", out)
         self.assertTrue(out.startswith(("/", os.sep[0])))
+
+
+class PcsxRearmedFixtureTest(unittest.TestCase):
+    def test_original_executable_hash_and_header(self):
+        import struct
+        rom = pcsx_rearmed_rom.generate_rom()
+        self.assertEqual(hashlib.sha256(rom).hexdigest(),
+                         "ba0025f478cbea3c2af529ee5db99c5316ed7584daf9e27edf677946f7b62819")
+        self.assertEqual(rom[:8], b"PS-X EXE")
+        self.assertEqual(len(rom), 4096)
+        self.assertEqual(struct.unpack_from("<I", rom, 0x10)[0], 0x80010000)
+        self.assertEqual(struct.unpack_from("<II", rom, 0x18), (0x80010000, 2048))
+
+    def test_seed_card_format_and_hash(self):
+        card = pcsx_rearmed_rom.blank_card()
+        self.assertEqual(len(card), 131072)
+        self.assertEqual(hashlib.sha256(card).hexdigest(),
+                         "a5bc201b357015908a2869abb0f13e3655afc9ca150705bfcbd65cecd6a56cbd")
+        self.assertEqual(card[:2], b"MC")
+        for sector in range(36):
+            frame = card[sector * 128:(sector + 1) * 128]
+            checksum = 0
+            for value in frame:
+                checksum ^= value
+            self.assertEqual(checksum, 0)
+        for sector in range(1, 16):
+            self.assertEqual(card[sector * 128], 0xA0)
+        self.assertEqual(card[8192:8200], pcsx_rearmed_rom.MARKER)
+
+    def test_boot_transaction_changes_only_counter(self):
+        first = pcsx_rearmed_rom.expected_card(1)
+        third = pcsx_rearmed_rom.expected_card(3)
+        self.assertEqual(first[:8200], third[:8200])
+        self.assertEqual(first[8204:], third[8204:])
+        self.assertEqual(int.from_bytes(third[8200:8204], "little"), 3)
+        self.assertEqual(pcsx_rearmed_rom.expected_card(0), pcsx_rearmed_rom.blank_card())
+        for value in (-1, 2**32):
+            with self.assertRaises(ValueError):
+                pcsx_rearmed_rom.expected_card(value)
+
+    def make_runner(self):
+        root = tempfile.mkdtemp(prefix="ps1-gate-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        runner = player_e2e.Runner(root, root, "/player", "/core", 90,
+                                   pcsx_rearmed_candidate_core="/ps1-core", only_ps1=True)
+        os.makedirs(runner.state_root)
+        runner.scenarios.append({"name": "unit", "passed": True})
+        return runner
+
+    def test_fixture_tree_is_under_workdir(self):
+        runner = self.make_runner()
+        self.assertEqual(os.path.commonpath((runner.base, runner.workdir)), runner.workdir)
+
+    def test_revision_is_allowed_without_weakening_others(self):
+        runner = self.make_runner()
+        allowed = runner.env_for()["ROMM_PLAYER_ALLOWED_CORES"]
+        self.assertIn("pcsx_rearmed=da2cb8ecd17fd0932ab6d94774c0522beebce6e3", allowed)
+        self.assertIn("test_core=1", allowed)
+
+    def test_missing_prior_candidate_fails_without_launch(self):
+        runner = self.make_runner()
+        with mock.patch.object(runner, "launch") as launch:
+            runner._pcsx_rearmed_run("unit", "session", 2, "absent")
+        launch.assert_not_called()
+        self.assertFalse(runner.scenarios[-1]["passed"])
+
+    def test_adoption_copies_complete_previous_card(self):
+        runner = self.make_runner()
+        previous = os.path.join(runner.state_root, "prior.candidate.srm")
+        image = pcsx_rearmed_rom.expected_card(3)
+        with open(previous, "wb") as f:
+            f.write(image)
+        save = runner._pcsx_rearmed_seed("session", "prior")
+        with open(save, "rb") as f:
+            self.assertEqual(f.read(), image)
+        self.assertTrue(os.path.isfile(previous))
+
+    def test_exact_card_gate_rejects_unrestored_counter(self):
+        runner = self.make_runner()
+        candidate = os.path.join(runner.state_root, "session.candidate.srm")
+        image = pcsx_rearmed_rom.expected_card(1)
+        with open(candidate, "wb") as f:
+            f.write(image)
+        result = dict(protocolVersion=2, sessionId="session", exitKind="completed",
+                      checkpointWritten=True, candidateSavePath=candidate,
+                      saveHash=hashlib.sha256(image).hexdigest(), saveSize=len(image),
+                      frames=180, audioUnderrunFrames=0, audioOverrunFrames=0,
+                      errorCode=None, errorMessage=None)
+        with mock.patch.object(runner, "launch", return_value=(0, result)):
+            runner._pcsx_rearmed_run("unit", "session", 2)
+        self.assertFalse(runner.scenarios[-1]["passed"])
 
 
 class ForceKillSaveCleanupTest(unittest.TestCase):

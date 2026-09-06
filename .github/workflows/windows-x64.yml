@@ -113,6 +113,7 @@ jobs:
         run: |
           python packaging/validate-linux-targets.py
           python -m unittest discover -s packaging -p "test_*.py"
+          python -m unittest discover -s native/player/tests/e2e -p test_player_e2e.py
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -1438,7 +1439,8 @@ jobs:
             --pce-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/beetle_pce_fast_core.dll") `
             --genesis-plus-gx-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/genesis_plus_gx_core.dll") `
             --mgba-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/mgba_core.dll") `
-            --snes9x-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/snes9x_core.dll")
+            --snes9x-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/snes9x_core.dll") `
+            --pcsx-rearmed-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/pcsx_rearmed_core.dll")
           if ($LASTEXITCODE -ne 0) { throw "player E2E harness failed (exit $LASTEXITCODE)" }
 
       - name: Exercise Lynx and Neo Geo Pocket player persistence
