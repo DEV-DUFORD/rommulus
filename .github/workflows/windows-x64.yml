@@ -588,7 +588,11 @@ jobs:
             || { echo "::error::candidate stella_core.dll missing from $BUILD_DIR/bin"; exit 1; }
           [ ! -e "$BUILD_DIR/bin/libstella_core.dll" ] \
             || { echo "::error::non-canonical libstella_core.dll produced"; exit 1; }
-          echo "✓ player, test core, and nine candidate cores built with canonical names"
+          [ -f "$BUILD_DIR/bin/pcsx_rearmed_core.dll" ] \
+            || { echo "::error::candidate pcsx_rearmed_core.dll missing from $BUILD_DIR/bin"; exit 1; }
+          [ ! -e "$BUILD_DIR/bin/libpcsx_rearmed_core.dll" ] \
+            || { echo "::error::non-canonical libpcsx_rearmed_core.dll produced"; exit 1; }
+          echo "✓ player, test core, and ten candidate cores built with canonical names"
 
       - name: Stage unsigned artifact (SDL3.dll + libwinpthread closure beside the player)
         shell: msys2 {0}
@@ -617,6 +621,7 @@ jobs:
           cp "$BUILD_DIR/bin/mgba_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/snes9x_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/stella_core.dll" "$STAGE/cores-candidate/"
+          cp "$BUILD_DIR/bin/pcsx_rearmed_core.dll" "$STAGE/cores-candidate/"
           # libwinpthread-1.dll: the toolchain contract only guarantees static
           # libgcc/libstdc++ (-static-libgcc/-static-libstdc++); the mingw-w64
           # threading runtime is linked DYNAMICALLY by default, so threaded
@@ -646,6 +651,7 @@ jobs:
             closure_imports "$STAGE/cores-candidate/mgba_core.dll"
             closure_imports "$STAGE/cores-candidate/snes9x_core.dll"
             closure_imports "$STAGE/cores-candidate/stella_core.dll"
+            closure_imports "$STAGE/cores-candidate/pcsx_rearmed_core.dll"
           )"
           if grep -qi '^libwinpthread-1\.dll$' <<< "$imports"; then
             [ -f "$UCRT64_BIN/libwinpthread-1.dll" ] \
@@ -746,7 +752,7 @@ jobs:
           # cores-candidate/): they enter the same recursive PE32+ /
           # import-closure audit as every shipped image, plus the exact
           # export-allowlist checks below.
-          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll mgba_core.dll snes9x_core.dll stella_core.dll"
+          queue="rommulus-player.exe test_core.dll SDL3.dll gambatte_core.dll fceumm_core.dll prosystem_core.dll mednafen_wswan_core.dll beetle_pce_fast_core.dll genesis_plus_gx_core.dll mgba_core.dll snes9x_core.dll stella_core.dll pcsx_rearmed_core.dll"
           seen=" "
           while [ -n "$queue" ]; do
             name="${queue%% *}"
@@ -836,6 +842,7 @@ jobs:
           expected_exports="$(printf '%s\n' retro_api_version retro_deinit retro_get_memory_data retro_get_memory_size retro_get_region retro_get_system_av_info retro_get_system_info retro_init retro_load_game retro_reset retro_run retro_serialize retro_serialize_size retro_set_audio_sample retro_set_audio_sample_batch retro_set_controller_port_device retro_set_environment retro_set_input_poll retro_set_input_state retro_set_video_refresh retro_unload_game retro_unserialize | LC_ALL=C sort)"
           audit_candidate_exports "$STAGE/cores-candidate/snes9x_core.dll" snes9x
           audit_candidate_exports "$STAGE/cores-candidate/stella_core.dll" stella
+          audit_candidate_exports "$STAGE/cores-candidate/pcsx_rearmed_core.dll" pcsx_rearmed
           # Candidate provenance/hashes recorded in the AUDIT ARTIFACT ONLY —
           # deliberately NOT in CoreManifest.kt supportedAbis (the validator
           # packaging/validate-linux-targets.py keeps windows-x86_64 out of
@@ -910,6 +917,15 @@ jobs:
              echo "exports: native/cmake/cores/stella-windows.def (exact 22 retro_* exports)"
              echo "save gate: SYSTEM_RAM only; E2E asserts no checkpoint or .srm artifacts"
              echo "sha256(cores-candidate/stella_core.dll): $(sha256sum "$STAGE/cores-candidate/stella_core.dll" | cut -d' ' -f1)"
+             echo "=== pcsx_rearmed candidate provenance (CANDIDATE — NOT advertised) ==="
+             echo "status: windows-x86_64 in NO supportedAbis; staged under cores-candidate/ only"
+             echo "upstream: libretro/pcsx_rearmed @ da2cb8ecd17fd0932ab6d94774c0522beebce6e3"
+             echo "fragment: native/cmake/cores/pcsx_rearmed-windows.cmake"
+             echo "execution: built-in interpreter (DRC_DISABLE, P_HAVE_MMAP=0); no Lightrec/GNU Lightning or executable code arena"
+             echo "content: file images only; physical CD-ROM access excluded"
+             echo "exports: native/cmake/cores/pcsx_rearmed-windows.def (exact 22 retro_* exports)"
+             echo "saves: standard 131072-byte slot-1 memory card via RETRO_MEMORY_SAVE_RAM"
+             echo "sha256(cores-candidate/pcsx_rearmed_core.dll): $(sha256sum "$STAGE/cores-candidate/pcsx_rearmed_core.dll" | cut -d' ' -f1)"
           } >> "$AUDIT"
 
           # Artifact layout + SHA256 of every staged file (the audit log
@@ -982,7 +998,8 @@ jobs:
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/mgba_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/snes9x_core.dll" 50
           "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/stella_core.dll" 50
-          echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + nine candidates, no ROM content)"
+          "$SMOKE_DIR/core_load_smoke.exe" "$STAGE/cores-candidate/pcsx_rearmed_core.dll" 50
+          echo "✓ repeated native load/retro_api_version/retro_init/retro_deinit smoke passed (test_core control + ten candidates, no ROM content)"
 
       - name: Upload unsigned player artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

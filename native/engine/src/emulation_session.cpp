@@ -194,6 +194,11 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         environment_.setCoreOptionOverride("pcsx2_use_external_gameindex", "enabled");
     }
 #ifdef ROMM_PLAYER_QUALIFICATION
+    if (isPcsxRearmed) {
+        // Hosted qualification uses only the core's HLE BIOS. Production
+        // builds retain the existing user-supplied firmware requirement.
+        environment_.setCoreOptionOverride("pcsx_rearmed_bios", "HLE");
+    }
     if (isMednafenWswan) {
         // Qualification-only pin (ROMM_PLAYER_QUALIFICATION=1, the Windows
         // software-only candidate CI build): the core's default

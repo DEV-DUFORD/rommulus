@@ -154,6 +154,8 @@ list(REMOVE_ITEM PCSX_REARMED_SOURCES
 )
 endif()
 
+if(NOT ROMM_PCSX_REARMED_SOURCES_ONLY)
+
 add_library(pcsx_rearmed_core SHARED ${PCSX_REARMED_SOURCES})
 
 target_include_directories(pcsx_rearmed_core SYSTEM PRIVATE
@@ -306,4 +308,6 @@ target_link_libraries(pcsx_rearmed_core
     "-framework CoreFoundation"
     "-framework IOKit"
 )
+endif()
+
 endif()
