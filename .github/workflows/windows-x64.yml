@@ -1463,6 +1463,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+          $env:PYTHONUTF8 = "1"
           $failedCores = @()
           foreach ($coreId in @("handy", "mednafen_ngp")) {
             python native/player/tests/e2e/handheld_player_e2e.py `

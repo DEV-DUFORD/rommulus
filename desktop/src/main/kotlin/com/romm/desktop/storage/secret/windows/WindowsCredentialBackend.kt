@@ -39,7 +39,9 @@ class WindowsCredentialBackend(
     private val api: WindowsCredentialApi,
 ) : SecretBackend {
 
-    private val logger = DesktopLogger.get()
+    // Adapter composition happens before Main installs the platform-specific logger.
+    // Resolve it only when a credential operation actually needs to report a warning.
+    private val logger by lazy { DesktopLogger.get() }
 
     override fun state(): KeyringState = runCatching {
         when (val result = api.enumerateTargets(WindowsCredentialTargets.APP_PREFIX + "*")) {
