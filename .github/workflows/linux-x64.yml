@@ -547,7 +547,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
-            -DDOLPHIN_BUILD_PARALLEL_JOBS=8
+            -DDOLPHIN_BUILD_PARALLEL_JOBS=16
 
       - name: Build player
         run: |

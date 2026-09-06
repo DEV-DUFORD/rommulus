@@ -229,7 +229,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install" \
-            -DDOLPHIN_BUILD_PARALLEL_JOBS=8
+            -DDOLPHIN_BUILD_PARALLEL_JOBS=16
           cmake --build build/player -j"$(( $(nproc) / 2 ))"
 
       - name: Apply desktop release version
