@@ -38,7 +38,7 @@ public:
    bool ContextLoad(LSS_FILE *fp);
    void Reset(void);
 
-   bool Available(void){ return ((type != 0) && !string_is_empty(filename)); };
+   bool Available(void){ return (type & 7) >= 1 && (type & 7) <= 5; };
    void ProcessEepromIO(UBYTE iodir,UBYTE iodat);
    void ProcessEepromCounter(UWORD cnt);
    void ProcessEepromBusy(void);
@@ -48,6 +48,8 @@ public:
    };
    void SetEEPROMType(UBYTE b);
    int Size(void);
+   int SaveSize(void){ return Available() ? Size() : 0; };
+   void *SaveData(void){ return SaveSize() ? romdata : NULL; };
    void InitFrom(char *data,int count){ memcpy(romdata,data,__min(count,Size()));};
 
    void Poke(ULONG addr,UBYTE data) { };

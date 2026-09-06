@@ -18,6 +18,7 @@ bool system_io_flash_read(uint8_t *s, uint32_t len)
 {
    char path_str[1024];
    RFILE *flash_fp = NULL;
+   int64_t count;
 
    MDFN_MakeFName(MDFNMKF_SAV, path_str, sizeof(path_str), 0, "flash");
    flash_fp = filestream_open(path_str,
@@ -26,10 +27,10 @@ bool system_io_flash_read(uint8_t *s, uint32_t len)
    if (!flash_fp)
       return 0;
 
-   filestream_read(flash_fp, s, len);
+   count = filestream_read(flash_fp, s, len);
    filestream_close(flash_fp);
 
-   return 1;
+   return count == len;
 }
 
 bool system_io_flash_write(uint8_t *s, uint32_t len)
@@ -78,13 +79,21 @@ int FLASH_StateAction(void *data, int load, int data_only)
 
    if(!FlashLength) // No flash data to save, OR no flash data to load.
    {
+      if (load)
+         flash_reset();
       if(flashdata)
          free(flashdata);
       return 1;
    }
 
    if(load)
+   {
+      if (FlashLength < 8 || FlashLength > 8 + 256 * (8 + 65535))
+         return 0;
       flashdata = (uint8_t *)malloc(FlashLength);
+      if (!flashdata)
+         return 0;
+   }
 
    (*FLSH_StateRegs).v = flashdata;
    (*FLSH_StateRegs).size = FlashLength;
@@ -97,8 +106,11 @@ int FLASH_StateAction(void *data, int load, int data_only)
 
    if(load)
    {
-      memcpy(ngpc_rom.data, ngpc_rom.orig_data, ngpc_rom.length);
-      do_flash_read(flashdata);
+      if (!romm_restore_save_memory(flashdata, FlashLength))
+      {
+         free(flashdata);
+         return 0;
+      }
    }
 
    free(flashdata);

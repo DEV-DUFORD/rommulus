@@ -6,9 +6,11 @@
 # Mixed C/C++ target: 32 .c + 5 .cpp compiled; 5 additional opcode-table
 # .c files are #included into z80_ops.c's translation unit, not standalone.
 # ---------------------------------------------------------------------------
-set(MEDNAFEN_NGP_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/mednafen_ngp)
+if(NOT DEFINED MEDNAFEN_NGP_DIR)
+    set(MEDNAFEN_NGP_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/mednafen_ngp)
+endif()
 
-add_library(mednafen_ngp_core SHARED
+set(ROMM_MEDNAFEN_NGP_SOURCES
     # libretro/ — main entry point
     ${MEDNAFEN_NGP_DIR}/libretro.c
     # mednafen/ — core utilities (2 .c + 1 .cpp)
@@ -56,6 +58,12 @@ add_library(mednafen_ngp_core SHARED
     ${MEDNAFEN_NGP_DIR}/libretro-common/vfs/vfs_implementation.c
 )
 
+if(ROMM_MEDNAFEN_NGP_SOURCES_ONLY)
+    return()
+endif()
+
+add_library(mednafen_ngp_core SHARED ${ROMM_MEDNAFEN_NGP_SOURCES})
+
 # Upstream's own jni/Application.mk sets LOCAL_CPP_FEATURES := exceptions;
 # match that exactly. Vendored third-party source: not held to this project's
 # own -Wall -Wextra (matches all prior core targets).
@@ -82,8 +90,8 @@ target_compile_definitions(mednafen_ngp_core PRIVATE
     GIT_VERSION=\"a50d5ac\"
 )
 
-# Linked with upstream's own version script so only the standard retro_*
-# Libretro ABI is exported — never Beetle NeoPop's internal symbols.
+# Export the Libretro ABI and the three save-memory extensions, never
+# Beetle NeoPop's internal symbols.
 target_link_options(mednafen_ngp_core PRIVATE
     "-Wl,--version-script=${MEDNAFEN_NGP_DIR}/link.T"
     "-Wl,--no-undefined"

@@ -411,7 +411,9 @@ if(WIN32 AND NOT ROMM_WIN32_SOFTWARE_ONLY)
     add_executable(angle_gles3_smoke
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/angle_gles3_smoke.cpp
     )
-    target_include_directories(angle_gles3_smoke PRIVATE ${ROMM_ANGLE_INCLUDE_DIR})
+    target_include_directories(angle_gles3_smoke PRIVATE
+        ${ROMM_PLAYER_INCLUDE} ${ROMM_ANGLE_INCLUDE_DIR}
+    )
     target_link_libraries(angle_gles3_smoke PRIVATE
         SDL3::SDL3
         ${ROMM_ANGLE_EGL_LIBRARY}
@@ -448,18 +450,10 @@ endif()
 romm_apply_warning_flags(test_core)
 
 # ---------------------------------------------------------------------------
-# Candidate production cores (WIN32 only — NOT advertised): Windows x86_64
-# builds of vendored Libretro cores, built alongside test_core as candidates
-# for the per-core gate (plans/WINDOWS_IMPL.md section 6.4). "Candidate" is
-# load-bearing: windows-x86_64 appears in NO shared manifest (CoreManifest.kt
-# supportedAbis, packaging/share/rommulus/core-manifest.json,
-# docs/linux-support-manifest.md — the validator
-# packaging/validate-linux-targets.py asserts the no-Windows invariant) and
-# no player launch path references these DLLs. CI stages them separately
-# under cores-candidate/ and audits them (PE32+ machine, recursive import
-# closure, exact export allowlist, repeated load/init/deinit smoke) without
-# promoting them. Each core gets its own <core>-windows.cmake fragment; the
-# *-linux.cmake fragments below stay POSIX and are never included on WIN32.
+# Windows game cores. The software-only qualification harness keeps its
+# separate staging layout; the complete application packages these DLLs
+# under native/cores and uses the ordinary Windows core catalog.
+# N64 requires the full ANGLE player. Dolphin and LRPS2 remain Linux-only.
 # ---------------------------------------------------------------------------
 if(WIN32)
     # Gambatte (Game Boy / GBC): first candidate production core for Win32.
@@ -505,6 +499,8 @@ if(WIN32)
     # interpreter and software SSSE3 GPU, with no JIT executable memory or
     # physical CD-ROM access.
     include(${ROMM_NATIVE_ROOT}/cmake/cores/pcsx_rearmed-windows.cmake)
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/handy-windows.cmake)
+    include(${ROMM_NATIVE_ROOT}/cmake/cores/mednafen_ngp-windows.cmake)
     set(ROMM_WIN32_CANDIDATE_CORE_TARGETS
         gambatte_core
         fceumm_core
@@ -516,7 +512,13 @@ if(WIN32)
         snes9x_core
         stella_core
         pcsx_rearmed_core
+        handy_core
+        mednafen_ngp_core
     )
+    if(NOT ROMM_WIN32_SOFTWARE_ONLY)
+        include(${ROMM_NATIVE_ROOT}/cmake/cores/mupen64plus_next-windows.cmake)
+        list(APPEND ROMM_WIN32_CANDIDATE_CORE_TARGETS mupen64plus_next_core)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------

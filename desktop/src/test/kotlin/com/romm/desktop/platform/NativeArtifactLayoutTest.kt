@@ -1,5 +1,6 @@
 package com.romm.desktop.platform
 
+import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.emulation.model.NativeBuildIdentities
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
@@ -61,7 +62,7 @@ class NativeArtifactLayoutTest {
             .isEqualTo("gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;test_core=1")
     }
 
-    // ------------------------------------------------------------- Windows layout (Phase 0 naming)
+    // ------------------------------------------------------------- Windows layout
 
     @Test
     fun `windows layout names the player executable and the canonical core dll`() {
@@ -120,16 +121,36 @@ class NativeArtifactLayoutTest {
     }
 
     @Test
-    fun `no production core is launchable on windows yet (phase 0 guardrail)`(@TempDir dir: Path) {
-        // Until a core passes its Windows gate (plans/WINDOWS_IMPL.md §6.4), nothing is approved
-        // for windows-x86_64, so the derived allowlist must stay empty even with cores installed.
+    fun `windows allowlist includes enabled games but rejects excluded and unknown dlls`(@TempDir dir: Path) {
         Files.write(dir.resolve("gambatte_core.dll"), byteArrayOf(0))
+        Files.write(dir.resolve("snes9x_core.dll"), byteArrayOf(0))
+        Files.write(dir.resolve("sameboy_core.dll"), byteArrayOf(0))
+        Files.write(dir.resolve("picodrive_core.dll"), byteArrayOf(0))
+        Files.write(dir.resolve("unknown_core.dll"), byteArrayOf(0))
         Files.write(dir.resolve("test_core.dll"), byteArrayOf(0))
         Files.write(dir.resolve("dolphin_core.dll"), byteArrayOf(0))
         Files.write(dir.resolve("lrps2_core.dll"), byteArrayOf(0))
 
         val installed = WindowsNativeArtifactLayout.scanInstalledCoreIds(dir)
-        assertThat(installed).containsExactly("dolphin", "gambatte", "lrps2", "test")
-        assertThat(WindowsNativeArtifactLayout.deriveAllowedCores(installed)).isEmpty()
+        assertThat(installed).containsExactly(
+            "dolphin", "gambatte", "lrps2", "picodrive", "sameboy", "snes9x", "test", "unknown",
+        )
+        assertThat(WindowsNativeArtifactLayout.deriveAllowedCores(installed))
+            .isEqualTo("gambatte=96174369b3c30d9fc57c926fa3379c273dc6a9a5;snes9x=1.63")
+    }
+
+    @Test
+    fun `windows installed inventory emits all thirteen pinned game revisions`(@TempDir dir: Path) {
+        val cores = CoreManifest.approvedEntries()
+            .filter { NativeBuildIdentities.WINDOWS_X86_64 in it.supportedAbis }
+        assertThat(cores).hasSize(13)
+        cores.forEach { Files.write(dir.resolve("${it.coreId}_core.dll"), byteArrayOf(0)) }
+
+        val installed = WindowsNativeArtifactLayout.scanInstalledCoreIds(dir)
+        assertThat(WindowsNativeArtifactLayout.deriveAllowedCores(installed))
+            .isEqualTo(
+                cores.sortedBy { it.coreId }
+                    .joinToString(";") { "${it.coreId}=${it.releaseTag.ifBlank { it.commitSha }}" },
+            )
     }
 }

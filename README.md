@@ -44,10 +44,13 @@ build only) · PlayStation 2 (lrps2, x86_64 Linux desktop build only).
 - **Android**: `./gradlew assembleRelease` (NDK r27.2.12479018, CMake 3.22.1; the libretro cores
   build as pinned shared libraries for `armeabi-v7a` and `arm64-v8a`).
 - **Tests**: `./gradlew test` (JVM unit tests) and `./gradlew connectedAndroidTest` (instrumented).
-- **Windows x86_64 (in progress, CI-only)**: no local Windows build guide and no Windows release
-  artifacts exist yet. The in-progress Windows work is built only by
+- **Windows x86_64 (experimental branch)**: 13 game cores are enabled directly for Windows;
+  physical Windows 10/11 hardware qualification remains pending. The branch must be completed
+  before merging; enablement is not a claim of a published, qualified release. CI builds use
   `.github/workflows/windows-x64.yml` on a pinned `windows-2022` runner (MinGW-w64 UCRT64 + Ninja
-  under MSYS2, pinned SDL3 3.4.16 source); current, non-advertised status is recorded in
+  under MSYS2, pinned SDL3 3.4.16 source). Package instructions are in
+  [`packaging/docs/windows-support.md`](packaging/docs/windows-support.md); the exact inventory,
+  existing hosted evidence, exclusions, and remaining qualification work are recorded in
   [`docs/windows-support-manifest.md`](docs/windows-support-manifest.md).
 
 A RomM server URL is read from `local.properties` (`romm.origin`) for local debug only; release

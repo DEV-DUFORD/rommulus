@@ -6,6 +6,34 @@ pin time; upstream publishes no release tags.
 
 ## What was vendored, and why
 
+### RomMulus persistence and Windows adapter (2026-09)
+
+Android, Linux, and the separate MinGW
+`native/cmake/cores/mednafen_ngp-windows.cmake` target share their source
+inventory. `mednafen_ngp_core.dll` exports exactly the player's 22 Libretro
+entry points plus `romm_get_save_memory_size`, `romm_get_save_memory_data`,
+and `romm_restore_save_memory`; the ELF version script exports these too.
+
+The save adapter preserves NeoPop's little-endian `.flash` block format:
+an eight-byte header (ID `0x53`, block count, total size), followed by
+eight-byte address/length/padding headers and their cartridge bytes.
+A valid empty eight-byte image is available before the first flash write.
+Save sizes may grow or shrink; querying the size does not invalidate data.
+Import validates all sizes, counts, and both ROM banks before changing any
+memory, restores the original cartridge plus compatibility fixes, then
+applies the blocks. Legacy file imports now require complete reads.
+
+Related fixes prevent contained block merges from losing trailing bytes,
+16-bit merged-length overflow, unaligned header reads, nondeterministic
+padding, and overflow of the 256-entry block table. Exhausted tables fall
+back to a complete cartridge image in bounded-size blocks. Loading an empty
+save state clears flash metadata/data; nonempty states reuse checked restore.
+The upstream file-based persistence route remains available.
+
+Original generated-content tests live in
+`native/player/tests/e2e/test_handheld_saves.py` and
+`handheld_player_e2e.py`; configure `native/player/tests/handheld` for CTest.
+
 Only the files upstream's own Android libretro build (`jni/Android.mk` +
 `Makefile.common`) actually compiles were vendored — a curated subset preserving
 upstream relative paths. The vendored set is **101 files (5 `.cpp` + 37 `.c` +

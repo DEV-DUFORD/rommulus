@@ -931,11 +931,17 @@ class LaunchJournalSupervisor(
         fun forPaths(
             paths: AppPaths,
             bindingSidecarIngestor: ((Path) -> Unit)? = null,
+            layout: com.romm.desktop.platform.NativeArtifactLayout =
+                com.romm.desktop.platform.LinuxNativeArtifactLayout,
+            playerBinaryPath: Path = Path.of(layout.playerExecutableName),
+            coresDirectory: Path = paths.dataDir.resolve("cores"),
         ): LaunchJournalSupervisor {
             val journalsRoot = paths.stateDir.resolve("journals")
             return LaunchJournalSupervisor(
                 journalsRoot = journalsRoot,
-                launcher = ProcessBuilderPlayerLauncher.defaultFor(journalsRoot, paths),
+                launcher = ProcessBuilderPlayerLauncher.defaultFor(
+                    journalsRoot, paths, layout, playerBinaryPath, coresDirectory,
+                ),
                 bindingSidecarIngestor = bindingSidecarIngestor,
             )
         }

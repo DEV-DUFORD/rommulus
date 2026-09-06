@@ -7,37 +7,10 @@
 # STATIC_LINKING-gated C sources ARE required.
 # ---------------------------------------------------------------------------
 
-add_library(handy_core SHARED
-    # libretro/ — Libretro driver + options
-    ${HANDY_DIR}/libretro/libretro.cpp
-    # lynx/ — core emulation (SOURCES_CXX from Makefile.common)
-    ${HANDY_DIR}/lynx/lynxdec.cpp
-    ${HANDY_DIR}/lynx/cart.cpp
-    ${HANDY_DIR}/lynx/memmap.cpp
-    ${HANDY_DIR}/lynx/mikie.cpp
-    ${HANDY_DIR}/lynx/ram.cpp
-    ${HANDY_DIR}/lynx/rom.cpp
-    ${HANDY_DIR}/lynx/susie.cpp
-    ${HANDY_DIR}/lynx/system.cpp
-    ${HANDY_DIR}/lynx/eeprom.cpp
-    # blip/ — audio resampling (SOURCES_CXX from Makefile.common)
-    ${HANDY_DIR}/blip/Blip_Buffer.cpp
-    ${HANDY_DIR}/blip/Stereo_Buffer.cpp
-    # libretro-common/ — C helper utilities (SOURCES_C from Makefile.common)
-    ${HANDY_DIR}/libretro-common/compat/compat_posix_string.c
-    ${HANDY_DIR}/libretro-common/compat/compat_snprintf.c
-    ${HANDY_DIR}/libretro-common/compat/compat_strcasestr.c
-    ${HANDY_DIR}/libretro-common/compat/compat_strl.c
-    ${HANDY_DIR}/libretro-common/compat/fopen_utf8.c
-    ${HANDY_DIR}/libretro-common/encodings/encoding_utf.c
-    ${HANDY_DIR}/libretro-common/file/file_path.c
-    ${HANDY_DIR}/libretro-common/file/file_path_io.c
-    ${HANDY_DIR}/libretro-common/streams/file_stream.c
-    ${HANDY_DIR}/libretro-common/streams/file_stream_transforms.c
-    ${HANDY_DIR}/libretro-common/string/stdstring.c
-    ${HANDY_DIR}/libretro-common/time/rtime.c
-    ${HANDY_DIR}/libretro-common/vfs/vfs_implementation.c
-)
+set(ROMM_HANDY_SOURCES_ONLY ON)
+include(${CMAKE_CURRENT_LIST_DIR}/handy.cmake)
+unset(ROMM_HANDY_SOURCES_ONLY)
+add_library(handy_core SHARED ${ROMM_HANDY_SOURCES})
 
 # Upstream's own Makefile.common builds with -std=gnu++11; match it exactly.
 set_target_properties(handy_core PROPERTIES
@@ -68,7 +41,7 @@ target_compile_definitions(handy_core PRIVATE
 
 # Vendored third-party source: not held to this project's own -Wall -Wextra
 # (matches all prior core targets). Linked with upstream's own version script
-# so only the standard retro_* Libretro ABI is exported.
+# so only the Libretro ABI and the three save-memory extensions are exported.
 # GNU-only linker flags (Linux per-core gate); Apple ld does not support them.
 if(NOT APPLE)
 target_link_options(handy_core PRIVATE

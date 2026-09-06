@@ -43,7 +43,7 @@ class CoreManifestTest {
         // Must stay in sync with DesktopBiosConfigurationProvider's canonical segacd staging names.
         assertThat(gpgx.requiredFirmware).containsExactly("bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin")
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(gpgx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(gpgx.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(gpgx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(gpgx.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -63,7 +63,7 @@ class CoreManifestTest {
         assertThat(snes9x.ownerRiskAcceptedBy).isNotBlank()
         assertThat(snes9x.ownerRiskAcceptedOn).isNotBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(snes9x.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(snes9x.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(snes9x.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(snes9x.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -83,7 +83,7 @@ class CoreManifestTest {
         assertThat(fceumm.ownerRiskAcceptedBy).isBlank()
         assertThat(fceumm.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(fceumm.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(fceumm.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(fceumm.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(fceumm.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -103,7 +103,7 @@ class CoreManifestTest {
         assertThat(mgba.ownerRiskAcceptedBy).isBlank()
         assertThat(mgba.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(mgba.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(mgba.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(mgba.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(mgba.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -124,7 +124,7 @@ class CoreManifestTest {
         assertThat(stella.ownerRiskAcceptedBy).isBlank()
         assertThat(stella.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(stella.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(stella.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(stella.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(stella.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -146,7 +146,7 @@ class CoreManifestTest {
         assertThat(gambatte.ownerRiskAcceptedBy).isBlank()
         assertThat(gambatte.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(gambatte.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(gambatte.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(gambatte.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(gambatte.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -167,7 +167,7 @@ class CoreManifestTest {
         assertThat(beetle.ownerRiskAcceptedBy).isBlank()
         assertThat(beetle.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(beetle.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(beetle.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(beetle.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(beetle.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -190,7 +190,7 @@ class CoreManifestTest {
         assertThat(ngp.ownerRiskAcceptedBy).isBlank()
         assertThat(ngp.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(ngp.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(ngp.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(ngp.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(ngp.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -213,7 +213,7 @@ class CoreManifestTest {
         assertThat(wswan.ownerRiskAcceptedBy).isBlank()
         assertThat(wswan.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(wswan.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(wswan.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(wswan.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(wswan.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -236,7 +236,7 @@ class CoreManifestTest {
         assertThat(handy.ownerRiskAcceptedBy).isBlank()
         assertThat(handy.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(handy.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(handy.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(handy.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(handy.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -259,7 +259,7 @@ class CoreManifestTest {
         assertThat(prosystem.ownerRiskAcceptedBy).isBlank()
         assertThat(prosystem.ownerRiskAcceptedOn).isBlank()
         // linux-x86_64 added for the standalone desktop player build (docs/linux-support-manifest.md).
-        assertThat(prosystem.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+        assertThat(prosystem.supportedAbis).containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(prosystem.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(prosystem.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest
@@ -283,7 +283,7 @@ class CoreManifestTest {
             "psxonpsp660.bin", "scph101.bin", "scph7001.bin", "scph1001.bin",
         )
         assertThat(pcsx.supportedAbis)
-            .containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+            .containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(pcsx.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(pcsx.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64)
@@ -301,7 +301,7 @@ class CoreManifestTest {
         assertThat(mupen64.supportedExtensions).contains(".n64", ".bin")
         assertThat(mupen64.requiredFirmware).isEmpty()
         assertThat(mupen64.supportedAbis)
-            .containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64")
+            .containsExactlyInAnyOrder("armeabi-v7a", "arm64-v8a", "linux-x86_64", "windows-x86_64")
         assertThat(mupen64.binaryChecksums).containsOnlyKeys("armeabi-v7a", "arm64-v8a")
         assertThat(mupen64.binaryChecksums.values).allSatisfy { checksum ->
             assertThat(checksum).hasSize(64) // SHA-256 hex digest

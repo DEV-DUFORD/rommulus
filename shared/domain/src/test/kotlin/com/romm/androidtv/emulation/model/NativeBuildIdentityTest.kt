@@ -18,14 +18,17 @@ class NativeBuildIdentityTest {
     }
 
     @Test
-    fun `no production core advertises windows-x86_64 support`() {
-        // Phase 0 guardrail (plans/WINDOWS_IMPL.md §3.1/§6.2): windows-x86_64 is a first-class
-        // build identity, but no core may claim it until its Windows gate passes. Enabling a
-        // core for Windows is a deliberate, gated decision — never a manifest side effect.
-        val offenders = CoreManifest.approvedEntries()
+    fun `exactly thirteen approved game cores advertise windows-x86_64 support`() {
+        val windowsCores = CoreManifest.entries
             .filter { NativeBuildIdentities.WINDOWS_X86_64 in it.supportedAbis }
-            .map { it.coreId }
-        assertThat(offenders).isEmpty()
+        assertThat(windowsCores).allMatch { it.approved }
+        assertThat(windowsCores.map { it.coreId }).containsExactlyInAnyOrder(
+            "gambatte", "fceumm", "prosystem", "mednafen_wswan", "stella",
+            "beetle_pce_fast", "genesis_plus_gx", "mgba", "snes9x", "pcsx_rearmed",
+            "handy", "mednafen_ngp", "mupen64plus_next",
+        )
+        assertThat(windowsCores.map { it.coreId })
+            .doesNotContain("sameboy", "picodrive", "test_core", "dolphin", "lrps2")
     }
 
     @Test

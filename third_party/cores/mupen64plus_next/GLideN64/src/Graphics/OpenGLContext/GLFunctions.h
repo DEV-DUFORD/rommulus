@@ -42,6 +42,11 @@ typedef double GLdouble;
 
 #define GL_LUMINANCE 0x1909
 #include <GL/glext.h>
+#if defined(OS_WINDOWS) && defined(HAVE_OPENGLES)
+// ANGLE's GLES extension header defines GL_EXT_direct_state_access with only
+// its GLES subset, suppressing this desktop typedef in GL/glext.h.
+typedef void (APIENTRYP PFNGLTEXTURESTORAGE2DMULTISAMPLEEXTPROC) (GLuint texture, GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations);
+#endif
 #include <stdexcept>
 #include <sstream>
 #include "Log.h"

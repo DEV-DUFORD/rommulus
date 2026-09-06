@@ -4,6 +4,7 @@ import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.firmwareDir
 import com.romm.desktop.PosixTestSupport
 import com.romm.desktop.platform.LinuxNativeArtifactLayout
+import com.romm.desktop.platform.WindowsNativeArtifactLayout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -111,6 +112,35 @@ class PlayerProcessLauncherTest {
     }
 
     // ---------------------------------------------------------------- launch integration
+
+    @Test
+    fun `Windows launch uses packaged core root rather than user cores`(@TempDir dir: Path) {
+        val paths = TestAppPaths(dir.resolve("profile"))
+        val cores = Files.createDirectories(dir.resolve("installation/native/cores"))
+        Files.write(cores.resolve("gambatte_core.dll"), byteArrayOf(0))
+        val journals = Files.createDirectories(paths.stateDir.resolve("journals"))
+        Files.createDirectories(journals.resolve("session-1"))
+        Files.writeString(journals.resolve("session-1/request.json"), "{}")
+        var environment: Map<String, String> = emptyMap()
+        var command: List<String> = emptyList()
+        val executable = dir.resolve("installation/native/rommulus-player.exe")
+        val launcher = ProcessBuilderPlayerLauncher(
+            playerBinaryPath = executable,
+            journalsRoot = journals,
+            appPaths = paths,
+            layout = WindowsNativeArtifactLayout,
+            coresDirectory = cores,
+            starter = { args, env ->
+                command = args
+                environment = env
+                FakeProcess(42)
+            },
+        )
+        assertThat(launcher.launch(requestFor(paths, cores))).isEqualTo(LaunchOutcome.Started(42))
+        assertThat(command.first()).isEqualTo(executable.toString())
+        assertThat(environment["ROMM_PLAYER_CORE_ROOT"]).isEqualTo(cores.toString())
+        assertThat(environment["ROMM_PLAYER_DATA_ROOT"]).isEqualTo(paths.dataDir.toString())
+    }
 
     /** Minimal [Process] stand-in for the [ProcessBuilderPlayerLauncher] starter seam. */
     private class FakeProcess(private val pidValue: Long) : Process() {

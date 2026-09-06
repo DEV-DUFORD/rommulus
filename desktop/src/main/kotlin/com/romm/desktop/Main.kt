@@ -1,6 +1,7 @@
 package com.romm.desktop
 
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.dp
@@ -13,9 +14,13 @@ import com.romm.desktop.platform.DesktopPlatformDetector
 import com.romm.desktop.platform.DesktopStartupPlan
 import com.romm.desktop.platform.desktopHostAdapters
 import com.romm.desktop.platform.desktopStartupPlan
+import com.romm.desktop.platform.WindowsNativeBundle
 import com.romm.desktop.storage.FileLockAppInstanceLock
 import com.romm.desktop.ui.image.loadBundledImage
 import java.util.logging.Level
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlinx.coroutines.delay
 import kotlin.system.exitProcess
 
 /**
@@ -34,7 +39,7 @@ import kotlin.system.exitProcess
  * is built here and injected into the coordinator; if the advisory file lock cannot be acquired,
  * another instance is already running — print an explanatory message and exit.
  */
-fun main() {
+fun main(args: Array<String>) {
     val detection = DesktopPlatformDetector.detectHost()
 
     // Startup gate (plans/WINDOWS_IMPL.md §3.1): unsupported hosts fail before any adapter is
@@ -53,6 +58,10 @@ fun main() {
     // Logger first: install from the selected AppPaths before ordinary logging begins, so every
     // record lands under this host's real state dir (plans/WINDOWS_IMPL.md §4.4).
     DesktopLogger.install(adapters.appPaths)
+    val nativeBundle = WindowsNativeBundle.fromLauncher(adapters.layout)
+    nativeBundle?.verify()
+    val smokeReport = if (args.size == 2 && args[0] == "--smoke-report") Path.of(args[1]) else null
+    require(args.isEmpty() || smokeReport != null) { "Usage: RomMulus [--smoke-report <file>]" }
     startupPlan.note?.let { note ->
         // The "%s" format specifier binds log(Level, String, Object); without it the notice is
         // silently dropped (see the PlayerJournal logging below).
@@ -84,6 +93,7 @@ fun main() {
             virtualKeyboardLauncher = adapters.virtualKeyboardLauncher,
             appInstanceLock = appInstanceLock,
             desktopEnvironment = desktopEnvironment,
+            nativeBundle = nativeBundle,
         )
         // Phase 8 Wave 2: crash-recovery scan over incomplete player launch journals
         // (plans/LINUX_X64.md §12.5). Runs before the first composition; diagnostics are logged now
@@ -121,6 +131,13 @@ fun main() {
             icon = windowIcon,
             undecorated = displayPolicy.undecorated,
         ) {
+            if (smokeReport != null) {
+                LaunchedEffect(Unit) {
+                    delay(1500)
+                    Files.writeString(smokeReport, "ROMMULUS_DESKTOP_SMOKE_PASS\n")
+                    exitApplication()
+                }
+            }
             RommulusDesktopApp(
                 coordinator = coordinator,
                 onCloseRequest = ::exitApplication,

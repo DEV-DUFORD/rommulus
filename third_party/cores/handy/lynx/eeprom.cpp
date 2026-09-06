@@ -46,7 +46,7 @@ void CEEPROM::Load(void)
 {
    RFILE *fe = NULL;
 
-   if(!Available())
+   if(!Available() || string_is_empty(filename))
       return;
 
    fe = filestream_open(filename, RETRO_VFS_FILE_ACCESS_READ,
@@ -56,7 +56,7 @@ void CEEPROM::Load(void)
    {
       handy_log(RETRO_LOG_INFO, "EEPROM LOAD %s\n", filename);
       memset(romdata, 0xff, sizeof(romdata));
-      filestream_read(fe, romdata, 1024);
+      filestream_read(fe, romdata, Size());
       filestream_close(fe);
    }
 }
@@ -65,7 +65,7 @@ void CEEPROM::Save(void)
 {
    RFILE *fe = NULL;
 
-   if(!Available())
+   if(!Available() || string_is_empty(filename))
       return;
 
    fe = filestream_open(filename, RETRO_VFS_FILE_ACCESS_WRITE,

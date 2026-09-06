@@ -93,9 +93,9 @@ object LinuxNativeArtifactLayout : NativeArtifactLayout {
  * Windows x86_64 artifact layout (plans/WINDOWS_IMPL.md §2.2/§3.3): `rommulus-player.exe`
  * executable and `<core-id>_core.dll` core libraries under the package's `native/cores/` root.
  *
- * Naming is defined now, in Phase 0, without enabling any production core: no manifest entry
- * advertises [NativeBuildIdentities.WINDOWS_X86_64], so [deriveAllowedCores] yields an empty
- * allowlist until a core passes its Windows gate (plans/WINDOWS_IMPL.md §6.4).
+ * The experimental branch enables thirteen game cores for [NativeBuildIdentities.WINDOWS_X86_64].
+ * [deriveAllowedCores] intersects installed DLLs with that inventory; synthetic and Linux-only
+ * cores never become launchable merely because a DLL is present.
  */
 object WindowsNativeArtifactLayout : NativeArtifactLayout {
     override val buildIdentity: String = NativeBuildIdentities.WINDOWS_X86_64

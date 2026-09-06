@@ -38,6 +38,28 @@ GPL-incompatible components are in the compiled subset.
 
 ## Scope and firmware
 
+### RomMulus persistence and Windows adapter (2026-09)
+
+The Android source inventory is shared with Linux and the separate MinGW
+`native/cmake/cores/handy-windows.cmake` target (`handy_core.dll`).
+Its `.def` exports exactly the player's 22 Libretro entry points and
+`romm_get_save_memory_size`, `romm_get_save_memory_data`,
+`romm_restore_save_memory`; the ELF version script exports the same extensions.
+
+The extensions expose the cartridge-declared EEPROM bytes, compatible with
+Handy's `.eeprom` files, rather than serializing CPU or EEPROM command state.
+Restore validates the exact EEPROM capacity before modifying memory.
+Cartridges without EEPROM still report no save memory. EEPROM hardware
+availability no longer depends on a file path, and legacy file loading reads
+the actual capacity instead of truncating 2 KiB EEPROMs at 1 KiB.
+Existing file persistence and Libretro state serialization remain available.
+
+Original generated-content tests are in
+`native/player/tests/e2e/test_handheld_saves.py` and
+`handheld_player_e2e.py`; the standalone CTest build is
+`native/player/tests/handheld`. The fixture's `howard.o` is an original
+generated program, not firmware or the historical Howard loader.
+
 - Atari Lynx **cartridge only**. Extensions: `lnx | lyx | o` (from
   `info->valid_extensions` in `libretro.cpp`).
 - **BIOS-free**: optional HLE. `ROM_FILE` = `lynxboot.img` is only consulted

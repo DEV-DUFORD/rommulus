@@ -7,6 +7,7 @@
 #include "romm_test.h"
 
 #include "native/player/hardware_core.h"
+#include "native/player/graphics_diagnostics.h"
 
 int main() {
     // Hardware-rendering cores (GL via SdlHardwareContext).
@@ -33,6 +34,18 @@ int main() {
     // Unknown/empty ids are software (the player's normal launch path).
     CHECK(!romm::player::isHardwareRenderingCore(""));
     CHECK(!romm::player::isHardwareRenderingCore("not_a_core"));
+
+    // A hardware-rendering API can still be implemented by a CPU adapter.
+    CHECK(romm::player::isKnownSoftwareGlRenderer(
+        "ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0)"));
+    CHECK(romm::player::isKnownSoftwareGlRenderer("ANGLE (SwiftShader Device)"));
+    CHECK(romm::player::isKnownSoftwareGlRenderer("llvmpipe (LLVM 19.1.0, 256 bits)"));
+    CHECK(romm::player::isKnownSoftwareGlRenderer("softpipe"));
+    CHECK(romm::player::isKnownSoftwareGlRenderer("Software Adapter"));
+    CHECK(!romm::player::isKnownSoftwareGlRenderer("ANGLE (Intel, Intel UHD Graphics Direct3D11)"));
+    CHECK(!romm::player::isKnownSoftwareGlRenderer("ANGLE (NVIDIA, NVIDIA GeForce RTX Direct3D11)"));
+    CHECK(!romm::player::isKnownSoftwareGlRenderer("ANGLE (AMD, AMD Radeon Direct3D11)"));
+    CHECK(!romm::player::isKnownSoftwareGlRenderer(""));
 
     return rommtest::finish("test_hardware_core_classification");
 }

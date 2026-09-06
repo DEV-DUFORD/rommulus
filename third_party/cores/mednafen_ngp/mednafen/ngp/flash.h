@@ -16,12 +16,16 @@
 #define __FLASH__
 
 #include <stdint.h>
+#include <stddef.h>
+#include <boolean.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 void flash_read(void);
+void flash_reset(void);
+bool romm_restore_save_memory(const void *data, size_t size);
 
 uint8_t *make_flash_commit(int32_t *length);
 

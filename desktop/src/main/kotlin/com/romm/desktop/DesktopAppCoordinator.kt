@@ -90,6 +90,7 @@ import com.romm.desktop.platform.DesktopPlatformDetector
 import com.romm.desktop.platform.HostOs
 import com.romm.desktop.platform.LinuxNativeArtifactLayout
 import com.romm.desktop.platform.NativeArtifactLayout
+import com.romm.desktop.platform.WindowsNativeBundle
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopClientTokenStorage
 import com.romm.desktop.storage.DesktopSessionStorage
@@ -394,8 +395,10 @@ class DesktopAppCoordinator(
     chosenSaveContentVerifierOverride: RommSaveContentVerifier? = null,
     gameLaunchRecorderOverride: GameLaunchRecorder? = null,
     desktopEnvironment: Map<String, String> = emptyMap(),
+    private val nativeBundle: WindowsNativeBundle? = null,
 ) {
     private val displayPolicy = desktopDisplayPolicy(desktopEnvironment)
+    private val coresDirectory = nativeBundle?.coresDirectory ?: paths.dataDir.resolve("cores")
 
     // ------------------------------------------------------------------ storage
 
@@ -715,7 +718,13 @@ class DesktopAppCoordinator(
      * [controllerBindingStore] BEFORE reconciliation deletes the session artifacts (§11.9).
      */
     val playerSupervisor: LaunchJournalSupervisor by lazy {
-        playerSupervisorOverride ?: LaunchJournalSupervisor.forPaths(paths, ::ingestControllerBindingSidecar)
+        playerSupervisorOverride ?: LaunchJournalSupervisor.forPaths(
+            paths,
+            ::ingestControllerBindingSidecar,
+            layout = layout,
+            playerBinaryPath = nativeBundle?.playerExecutable ?: Path.of(layout.playerExecutableName),
+            coresDirectory = coresDirectory,
+        )
     }
 
     /** ROM detail without a network fetch (test seam); production reads the presenter's current UI state. */
@@ -1418,7 +1427,7 @@ class DesktopAppCoordinator(
             // has no exact byte-size field to compare against an older replica before launch.
             null
         }
-        val coresDir = paths.dataDir.resolve("cores")
+        val coresDir = coresDirectory
         val params = PlayerLaunchParams(
             coreId = core.coreId,
             // The player validates request.coreBuildRevision against the derived
@@ -2034,7 +2043,7 @@ class DesktopAppCoordinator(
      * desktop data root's `cores/` directory. Unsupported and uninstalled platforms return null.
      */
     private fun resolveLaunchCore(platformSlug: String): CoreLicenseFinding? {
-        val coresDir = paths.dataDir.resolve("cores")
+        val coresDir = coresDirectory
         val installed: (CoreLicenseFinding) -> Boolean = { core ->
             layout.coreLibraryFileNames(core.coreId).any { Files.exists(coresDir.resolve(it)) }
         }

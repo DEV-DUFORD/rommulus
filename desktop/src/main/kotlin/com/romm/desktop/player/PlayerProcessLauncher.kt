@@ -58,6 +58,7 @@ class ProcessBuilderPlayerLauncher(
      * Linux layout, preserving the historical desktop behavior.
      */
     private val layout: NativeArtifactLayout = LinuxNativeArtifactLayout,
+    private val coresDirectory: Path = appPaths.dataDir.resolve("cores"),
     /** Test seam: replaces `ProcessBuilder.start()` with full env-var capture. */
     private val starter: (List<String>, Map<String, String>) -> Process = { command, env ->
         ProcessBuilder(command).apply {
@@ -110,7 +111,7 @@ class ProcessBuilderPlayerLauncher(
     }
 
     private fun buildEnvVars(request: PlayerRequest): Map<String, String> = buildMap {
-        val coresDir = appPaths.dataDir.resolve("cores")
+        val coresDir = coresDirectory
         put("ROMM_PLAYER_CORE_ROOT", coresDir.toString())
         put("ROMM_PLAYER_CACHE_ROOT", appPaths.cacheDir.toString())
         put("ROMM_PLAYER_DATA_ROOT", appPaths.dataDir.toString())
@@ -131,6 +132,7 @@ class ProcessBuilderPlayerLauncher(
             appPaths: AppPaths,
             layout: NativeArtifactLayout = LinuxNativeArtifactLayout,
             playerBinaryPath: Path = Path.of(layout.playerExecutableName),
+            coresDirectory: Path = appPaths.dataDir.resolve("cores"),
         ): ProcessBuilderPlayerLauncher {
             val resolvedPlayer = if (playerBinaryPath == Path.of(layout.playerExecutableName)) {
                 findExecutableOnPath(playerBinaryPath.fileName.toString())
@@ -139,7 +141,9 @@ class ProcessBuilderPlayerLauncher(
             } else {
                 playerBinaryPath
             }
-            return ProcessBuilderPlayerLauncher(resolvedPlayer, journalsRoot, appPaths, layout)
+            return ProcessBuilderPlayerLauncher(
+                resolvedPlayer, journalsRoot, appPaths, layout, coresDirectory,
+            )
         }
 
         private fun findDevelopmentPlayer(layout: NativeArtifactLayout): Path? {

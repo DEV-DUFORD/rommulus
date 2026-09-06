@@ -1,6 +1,7 @@
 #include "native/player/sdl_hardware_context.h"
 
 #include "native/player/overlay_pixels.h"
+#include "native/player/graphics_diagnostics.h"
 
 #include <SDL3/SDL.h>
 #include <GLES3/gl3.h>
@@ -82,7 +83,25 @@ SdlHardwareContext::SdlHardwareContext(
     if (context_ == nullptr) {
         logSdlError("SDL_GL_CreateContext");
     } else {
-        SDL_GL_MakeCurrent(window_, nullptr);
+        const auto* vendor = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
+        const auto* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        const auto* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        romm::log::sink().log(
+                romm::log::Severity::Info, kTag,
+                std::string("GL context: vendor=") + (vendor ? vendor : "(unknown)") +
+                    " renderer=" + (renderer ? renderer : "(unknown)") +
+                    " version=" + (version ? version : "(unknown)"));
+#ifdef _WIN32
+        if (renderer != nullptr && isKnownSoftwareGlRenderer(renderer)) {
+            romm::log::sink().log(
+                    romm::log::Severity::Warn, kTag,
+                    "ANGLE selected a software adapter; hardware-rendering core API "
+                    "does not imply GPU acceleration on this machine");
+        }
+#endif
+        if (!SDL_GL_MakeCurrent(window_, nullptr)) {
+            logSdlError("SDL_GL_MakeCurrent(release)");
+        }
     }
 }
 

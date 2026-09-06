@@ -65,9 +65,10 @@
 #   path. The separate artifact records ANGLE identity, renderer, hashes, and
 #   recursive PE closure. This qualifies the frontend contract only; it does
 #   not build or advertise a Tier 2/3 core.
-#   This workflow still does NOT:
-#     • package an MSI/EXE/ZIP, sign, or run jpackage
-#     • launch a Compose window
+#   The complete native runtime is also packaged with the Compose application
+#   and a bundled JVM into a portable ZIP and per-user EXE installer. The
+#   relocated package launches a Compose window without developer tools.
+#   Artifacts remain unsigned; physical-machine qualification is separate.
 # -------------------------------------------------------------------
 
 name: Windows x64 CI
@@ -109,7 +110,9 @@ jobs:
         # Source-only, toolchain-independent guard: fast feedback before the
         # JVM build. `python` is the Windows launcher on windows-2022.
         shell: bash
-        run: python packaging/validate-linux-targets.py
+        run: |
+          python packaging/validate-linux-targets.py
+          python -m unittest discover -s packaging -p "test_*.py"
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -194,7 +197,7 @@ jobs:
         with:
           msystem: UCRT64
           update: false
-          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf
+          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf nasm
 
       - name: Verify UCRT64 binutils provenance (unprefixed as/ld/objdump/windres)
         shell: msys2 {0}
@@ -529,6 +532,16 @@ jobs:
           set -euo pipefail
           cmake --build --preset windows-x86_64-software-only -j"$(nproc)"
 
+      - name: Exercise handheld native save contracts
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S native/player/tests/handheld -B build/handheld-windows -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$(cygpath -u "$GITHUB_WORKSPACE")/native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake"
+          cmake --build build/handheld-windows -j"$(nproc)"
+          ctest --test-dir build/handheld-windows --output-on-failure
+
       - name: Verify build outputs (canonical names)
         shell: msys2 {0}
         run: |
@@ -622,6 +635,8 @@ jobs:
           cp "$BUILD_DIR/bin/snes9x_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/stella_core.dll" "$STAGE/cores-candidate/"
           cp "$BUILD_DIR/bin/pcsx_rearmed_core.dll" "$STAGE/cores-candidate/"
+          cp "$BUILD_DIR/bin/handy_core.dll" "$STAGE/cores-candidate/"
+          cp "$BUILD_DIR/bin/mednafen_ngp_core.dll" "$STAGE/cores-candidate/"
           # libwinpthread-1.dll: the toolchain contract only guarantees static
           # libgcc/libstdc++ (-static-libgcc/-static-libstdc++); the mingw-w64
           # threading runtime is linked DYNAMICALLY by default, so threaded
@@ -1047,8 +1062,78 @@ jobs:
             -DROMM_ANGLE_GLESV2_LIBRARY="$ANGLE_ROOT/lib-mingw/libGLESv2.dll.a" \
             -DROMM_ANGLE_INCLUDE_DIR="$ANGLE_ROOT/include"
           cmake --build --preset windows-x86_64 \
-            --target rommulus_player angle_gles3_smoke \
             -j"$(nproc)"
+
+      - name: Stage complete Windows native runtime
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          python packaging/stage-windows-native.py \
+            --build build/player-windows-x86_64 \
+            --sdl "$SDL_PREFIX" \
+            --angle deps/angle \
+            --runtime-bin /ucrt64/bin \
+            --output dist/windows-native
+
+      - name: Upload complete Windows native runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-windows-native
+          path: dist/windows-native
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Build N64 hardware and dynarec probe
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          ANGLE_ROOT="$(cygpath -u "$GITHUB_WORKSPACE")/deps/angle"
+          cmake -S native/player/tests/n64 -B build/n64-smoke -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$(cygpath -u "$GITHUB_WORKSPACE")/native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake" \
+            -DROMM_ANGLE_INCLUDE_DIR="$ANGLE_ROOT/include" \
+            -DROMM_ANGLE_EGL_LIBRARY="$ANGLE_ROOT/lib-mingw/libEGL.dll.a" \
+            -DROMM_ANGLE_GLESV2_LIBRARY="$ANGLE_ROOT/lib-mingw/libGLESv2.dll.a"
+          cmake --build build/n64-smoke --target n64_smoke -j"$(nproc)"
+          python -m unittest discover -s native/player/tests/n64 -p "test_*.py"
+          python native/player/tests/n64/n64_rom.py build/n64-smoke/probe.z64
+
+      - name: Exercise N64 graphics audio SRAM and input
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:GITHUB_WORKSPACE "dist/n64-runtime"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item dist/windows-native/bin/* $stage
+          Copy-Item build/n64-smoke/n64_smoke.exe $stage
+          $save = Join-Path $stage "saves"
+          New-Item -ItemType Directory -Path $save | Out-Null
+          $core = (Resolve-Path dist/windows-native/cores/mupen64plus_next_core.dll).Path
+          $rom = (Resolve-Path build/n64-smoke/probe.z64).Path
+          $env:PATH = "$stage;$env:SystemRoot\System32"
+          $process = Start-Process (Join-Path $stage "n64_smoke.exe") `
+            -ArgumentList "`"$core`" `"$rom`" `"$save`"" -PassThru `
+            -RedirectStandardOutput (Join-Path $stage "stdout.log") `
+            -RedirectStandardError (Join-Path $stage "stderr.log")
+          $null = $process.Handle
+          if (-not $process.WaitForExit(120000)) {
+            Stop-Process -Id $process.Id -Force
+            Get-Content (Join-Path $stage "*.log")
+            throw "N64 probe exceeded 120 seconds."
+          }
+          Get-Content (Join-Path $stage "*.log")
+          if ($process.ExitCode -ne 0) { throw "N64 probe failed ($($process.ExitCode))" }
+          if (-not (Select-String -Path (Join-Path $stage "stdout.log") -Pattern "N64_WINDOWS_SMOKE_PASS" -Quiet)) {
+            throw "N64 probe did not report success."
+          }
+
+      - name: Upload N64 runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-n64-windows-diagnostics
+          path: dist/n64-runtime/*.log
+          if-no-files-found: ignore
 
       - name: Stage and audit ANGLE graphics-spike closure
         shell: msys2 {0}
@@ -1356,10 +1441,118 @@ jobs:
             --snes9x-core (Join-Path $env:GITHUB_WORKSPACE "dist/player-win64-software-only/cores-candidate/snes9x_core.dll")
           if ($LASTEXITCODE -ne 0) { throw "player E2E harness failed (exit $LASTEXITCODE)" }
 
+      - name: Exercise Lynx and Neo Geo Pocket player persistence
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($coreId in @("handy", "mednafen_ngp")) {
+            python native/player/tests/e2e/handheld_player_e2e.py `
+              --player dist/player-win64-software-only/bin/rommulus-player.exe `
+              --core "dist/player-win64-software-only/cores-candidate/${coreId}_core.dll" `
+              --core-id $coreId --work-dir e2e-out --video-driver offscreen
+            if ($LASTEXITCODE -ne 0) { throw "$coreId player persistence failed" }
+          }
+
       - name: Upload E2E results and logs (always)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: rommulus-player-win64-e2e-results
           path: e2e-out
+          if-no-files-found: ignore
+
+  package-windows:
+    name: Windows ZIP and EXE
+    needs: [shared-jvm-tests, desktop-build-tests, native-win64-tests, native-player-win64, player-win64-e2e]
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Download audited native runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rommulus-windows-native
+          path: dist/windows-native
+
+      - name: Build desktop application and runtime classpath
+        shell: powershell
+        run: |
+          .\gradlew.bat --configure-on-demand :desktop:jar :desktop:copyRuntimeClasspath
+          if ($LASTEXITCODE -ne 0) { throw "Desktop packaging inputs failed" }
+
+      - name: Locate WiX installer tools
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not $env:WIX) { throw "The pinned windows-2022 runner must provide WiX 3." }
+          $wixBin = Join-Path $env:WIX "bin"
+          if (-not (Test-Path (Join-Path $wixBin "candle.exe"))) { throw "WiX candle.exe is missing" }
+          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Assemble complete ZIP and per-user EXE installer
+        shell: powershell
+        run: |
+          & packaging/build-windows.ps1 -NativeDir dist/windows-native
+
+      - name: Exercise relocated portable package without developer tools
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Join-Path $env:RUNNER_TEMP "RomMulus package test"
+          Expand-Archive dist/windows/rommulus-0.3.0-windows-x86_64.zip -DestinationPath $root
+          $app = Join-Path $root "RomMulus"
+          $env:PATH = "$env:SystemRoot\System32"
+          $env:JAVA_HOME = ""
+          $native = Start-Process -FilePath (Join-Path $app "native/rommulus-player.exe") `
+            -PassThru -Wait -RedirectStandardError dist/windows/player-launch.txt
+          if ($native.ExitCode -ne 2) { throw "Packaged player failed to start: $($native.ExitCode)" }
+          $report = Join-Path $env:RUNNER_TEMP "rommulus-desktop-smoke.txt"
+          $process = Start-Process -FilePath (Join-Path $app "RomMulus.exe") `
+            -WorkingDirectory $env:RUNNER_TEMP -ArgumentList "--smoke-report `"$report`"" `
+            -PassThru -RedirectStandardError dist/windows/desktop-stderr.txt `
+            -RedirectStandardOutput dist/windows/desktop-stdout.txt
+          $null = $process.Handle
+          if (-not $process.WaitForExit(90000)) {
+            Stop-Process -Id $process.Id -Force
+            throw "Packaged Compose window did not finish within 90 seconds."
+          }
+          if ($process.ExitCode -ne 0 -or -not (Test-Path $report)) {
+            throw "Packaged desktop failed: exit $($process.ExitCode)"
+          }
+          if ((Get-Content -Raw $report).Trim() -ne "ROMMULUS_DESKTOP_SMOKE_PASS") {
+            throw "Packaged desktop did not report successful window startup."
+          }
+          Copy-Item $report dist/windows/desktop-smoke.txt
+
+      - name: Upload Windows application
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-windows-x86_64
+          path: |
+            dist/windows/*.zip
+            dist/windows/*.exe
+            dist/windows/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload package diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-windows-package-diagnostics
+          path: |
+            dist/windows/*-smoke.txt
+            dist/windows/*-stderr.txt
+            dist/windows/*-stdout.txt
+            dist/windows/player-launch.txt
+            ~/AppData/Local/RomMulus/state/logs
           if-no-files-found: ignore

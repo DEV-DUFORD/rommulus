@@ -59,6 +59,9 @@
 #include "native/player/sdl_video_sink.h"
 #include "native/player/steam_deck.h"
 #include "native/player/validation.h"
+#if defined(_WIN32) && !defined(ROMM_WIN32_SOFTWARE_ONLY) && !defined(ROMM_PLAYER_DISABLE_HARDWARE_CONTEXT)
+#include "native/player/windows_angle.h"
+#endif
 
 namespace {
 
@@ -518,15 +521,24 @@ int main(int argc, char* argv[]) {
     SDL_WindowFlags windowFlags = SDL_WINDOW_RESIZABLE;
     if (useHardwareRendering) {
 #if defined(_WIN32)
-        // ANGLE exposes OpenGL ES, never desktop OpenGL. Request its highest
-        // Libretro-relevant profile so Dolphin can use its GLES3 fallback and
-        // a future GLideN64 Windows candidate can use its explicit GLES build.
+        // ANGLE exposes OpenGL ES, never desktop OpenGL. GLES3 is the
+        // GLideN64 contract; the selected backend must support it even when
+        // a machine without a usable GPU needs the WARP fallback.
         // lrps2 cannot use this path at its current pin (see the graphics
         // spike evidence); accepting its nominal ES3 request here does not
         // advertise or build that core.
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#if !defined(ROMM_WIN32_SOFTWARE_ONLY) && !defined(ROMM_PLAYER_DISABLE_HARDWARE_CONTEXT)
+        if (!romm::player::configureWindowsAngle()) {
+            const std::string error = std::string("ANGLE initialization failed: ") + SDL_GetError();
+            std::fprintf(stderr, "error: %s\n", error.c_str());
+            writeResult(request, romm::player::ExitKind::LaunchFailed, false, 0, 0, 0, &error);
+            SDL_Quit();
+            return 1;
+        }
+#endif
 #else
         // N64 (GLideN64) and lrps2 use desktop OpenGL 3.3 on Linux. GLideN64's
         // GLES path targets mobile GPUs and produces incorrect depth ordering

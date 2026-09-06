@@ -1,4 +1,4 @@
-// sdl_video_sink.cpp — SDL3 software video output for the Linux player.
+// sdl_video_sink.cpp — SDL3 presentation of software-emulated core frames.
 //
 // SDL3 API notes (verified against the installed SDL3 headers):
 //   - SDL_CreateRenderer(window, name) — SDL3 dropped the SDL2 flags
@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace romm::player {
 
@@ -105,7 +106,30 @@ void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
         return;
     }
 
+#ifdef _WIN32
+    const char* requestedDriver = SDL_GetHint(SDL_HINT_RENDER_DRIVER);
+    if (requestedDriver != nullptr && requestedDriver[0] != '\0') {
+        romm::log::sink().log(
+                romm::log::Severity::Info, kTag,
+                std::string("Explicit SDL presentation driver: ") + requestedDriver);
+        renderer_ = SDL_CreateRenderer(window_, nullptr);
+    } else {
+        // Preserve SDL's GPU-first preference order and final software
+        // fallback, but expose individual failures rather than hiding them.
+        for (int i = 0; i < SDL_GetNumRenderDrivers() && renderer_ == nullptr; ++i) {
+            const char* driver = SDL_GetRenderDriver(i);
+            renderer_ = SDL_CreateRenderer(window_, driver);
+            if (renderer_ == nullptr) {
+                romm::log::sink().log(
+                        romm::log::Severity::Warn, kTag,
+                        std::string("SDL presentation driver ") + driver +
+                            " failed: " + SDL_GetError());
+            }
+        }
+    }
+#else
     renderer_ = SDL_CreateRenderer(window_, nullptr);
+#endif
     if (renderer_ == nullptr) {
         romm::log::sink().log(romm::log::Severity::Warn, kTag,
                               std::string("SDL_CreateRenderer failed: ") +
@@ -113,6 +137,23 @@ void SdlVideoSink::attachWindow(romm::video::NativeWindowHandle window) {
         window_ = nullptr;
         return;
     }
+
+    const char* rendererName = SDL_GetRendererName(renderer_);
+    const bool softwarePresentation =
+        rendererName != nullptr && std::strcmp(rendererName, "software") == 0;
+    romm::log::sink().log(
+            softwarePresentation ? romm::log::Severity::Warn : romm::log::Severity::Info,
+            kTag, std::string("SDL presentation renderer=") +
+                (rendererName ? rendererName : "(unknown)") +
+                (softwarePresentation ? " (CPU presentation)" : " (adapter-dependent acceleration)") +
+                "; core emulation remains software");
+#ifdef _WIN32
+    if (SDL_GetHintBoolean(SDL_HINT_RENDER_DIRECT3D11_WARP, false)) {
+        romm::log::sink().log(
+                romm::log::Severity::Warn, kTag,
+                "SDL_RENDER_DIRECT3D11_WARP explicitly requests software D3D11 presentation");
+    }
+#endif
 
     if (!SDL_SetRenderVSync(renderer_, 1)) {
         romm::log::sink().log(romm::log::Severity::Warn, kTag,

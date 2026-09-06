@@ -1,6 +1,9 @@
 #include <SDL3/SDL.h>
 #include <GLES3/gl32.h>
 
+#include "native/player/windows_angle.h"
+#include "native/player/graphics_diagnostics.h"
+
 #include <cstdio>
 #include <cstring>
 
@@ -45,6 +48,13 @@ int main() {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    if (!romm::player::configureWindowsAngle()) {
+        fail("configureWindowsAngle");
+        SDL_Quit();
+        return 1;
+    }
 
     SDL_Window* window = SDL_CreateWindow(
         "RomMulus ANGLE GLES3 smoke", 64, 64,
@@ -80,7 +90,11 @@ int main() {
     const bool isGles3 =
         profile == SDL_GL_CONTEXT_PROFILE_ES &&
         major >= 3;
-    if (!isAngle || !isGles3) {
+    const bool softwareAdapter = renderer != nullptr &&
+        romm::player::isKnownSoftwareGlRenderer(renderer);
+    const char* requireGpu = SDL_getenv("ROMM_ANGLE_REQUIRE_GPU");
+    const bool gpuRequired = requireGpu != nullptr && std::strcmp(requireGpu, "1") == 0;
+    if (!isAngle || !isGles3 || (gpuRequired && (softwareAdapter || renderer == nullptr))) {
         std::fprintf(
             stderr,
             "ANGLE_GLES3_SMOKE_FAIL operation=context_identity profile=%d "
@@ -92,6 +106,8 @@ int main() {
         SDL_Quit();
         return 1;
     }
+    std::printf("ANGLE_GLES3_ADAPTER software=%s gpu_required=%s\n",
+                softwareAdapter ? "yes" : "no", gpuRequired ? "yes" : "no");
     std::printf(
         "ANGLE_GLES3_CONTEXT profile=ES version=%d.%d vendor=\"%s\" "
         "renderer=\"%s\" gl_version=\"%s\" glsl=\"%s\"\n",
@@ -127,6 +143,11 @@ int main() {
         GLint linked = GL_FALSE;
         glGetProgramiv(program, GL_LINK_STATUS, &linked);
         ok = linked == GL_TRUE;
+        if (!ok) {
+            GLchar log[1024] = {};
+            glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+            std::fprintf(stderr, "ANGLE_GLES3_SMOKE_FAIL operation=link_program log=%s\n", log);
+        }
     }
     if (ok) {
         glGenTextures(1, &texture);
@@ -138,7 +159,12 @@ int main() {
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
         glFramebufferTexture2D(
             GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-        ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        ok = status == GL_FRAMEBUFFER_COMPLETE;
+        if (!ok) {
+            std::fprintf(stderr, "ANGLE_GLES3_SMOKE_FAIL operation=framebuffer status=0x%x\n",
+                         status);
+        }
     }
     if (ok) {
         glGenVertexArrays(1, &vertexArray);
@@ -148,15 +174,24 @@ int main() {
         glDrawArrays(GL_TRIANGLES, 0, 3);
         unsigned char pixel[4] = {};
         glReadPixels(2, 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-        ok = glGetError() == GL_NO_ERROR &&
+        const GLenum error = glGetError();
+        ok = error == GL_NO_ERROR &&
              pixel[0] >= 62 && pixel[0] <= 66 &&
              pixel[1] >= 126 && pixel[1] <= 130 &&
              pixel[2] >= 190 && pixel[2] <= 194 &&
              pixel[3] == 255;
+        if (!ok) {
+            std::fprintf(stderr,
+                         "ANGLE_GLES3_SMOKE_FAIL operation=readback gl_error=0x%x pixel=%u,%u,%u,%u\n",
+                         error, pixel[0], pixel[1], pixel[2], pixel[3]);
+        }
         glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         glBlitFramebuffer(0, 0, 4, 4, 0, 0, 64, 64, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        SDL_GL_SwapWindow(window);
+        if (!SDL_GL_SwapWindow(window)) {
+            fail("SDL_GL_SwapWindow");
+            ok = false;
+        }
         ok = ok && glGetError() == GL_NO_ERROR;
     }
 

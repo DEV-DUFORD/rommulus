@@ -1100,6 +1100,28 @@ void retro_run(void)
    gAudioBufferPointer = 0;
 }
 
+/* Raw EEPROM bytes match Handy's .eeprom files, not the volatile EEPROM
+ * command state in ContextSave. C linkage also makes these discoverable
+ * by frontends loading the optional RomMulus save ABI. */
+extern "C" size_t romm_get_save_memory_size(void)
+{
+   return initialized && lynx ? lynx->mEEPROM->SaveSize() : 0;
+}
+
+extern "C" void *romm_get_save_memory_data(void)
+{
+   return initialized && lynx ? lynx->mEEPROM->SaveData() : NULL;
+}
+
+extern "C" bool romm_restore_save_memory(const void *data, size_t size)
+{
+   const size_t expected = romm_get_save_memory_size();
+   if (!data || !expected || size != expected)
+      return false;
+   memcpy(romm_get_save_memory_data(), data, size);
+   return true;
+}
+
 size_t retro_serialize_size(void)
 {
    if(!lynx)

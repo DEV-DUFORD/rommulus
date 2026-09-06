@@ -6,9 +6,11 @@
 # plus 13 libretro-common/ C units) — the project builds dynamic, so the
 # STATIC_LINKING-gated C sources ARE required.
 # ---------------------------------------------------------------------------
-set(HANDY_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/handy)
+if(NOT DEFINED HANDY_DIR)
+    set(HANDY_DIR ${ROMM_APP_CPP_DIR}/../../../../third_party/cores/handy)
+endif()
 
-add_library(handy_core SHARED
+set(ROMM_HANDY_SOURCES
     # libretro/ — Libretro driver + options
     ${HANDY_DIR}/libretro/libretro.cpp
     # lynx/ — core emulation (SOURCES_CXX from Makefile.common)
@@ -40,6 +42,12 @@ add_library(handy_core SHARED
     ${HANDY_DIR}/libretro-common/vfs/vfs_implementation.c
 )
 
+if(ROMM_HANDY_SOURCES_ONLY)
+    return()
+endif()
+
+add_library(handy_core SHARED ${ROMM_HANDY_SOURCES})
+
 # Upstream's own Makefile.common builds with -std=gnu++11; match it exactly.
 set_target_properties(handy_core PROPERTIES
     CXX_STANDARD 11
@@ -69,7 +77,7 @@ target_compile_definitions(handy_core PRIVATE
 
 # Vendored third-party source: not held to this project's own -Wall -Wextra
 # (matches all prior core targets). Linked with upstream's own version script
-# so only the standard retro_* Libretro ABI is exported.
+# so only the Libretro ABI and the three save-memory extensions are exported.
 target_link_options(handy_core PRIVATE
     "-Wl,--version-script=${HANDY_DIR}/libretro/link.T"
     "-Wl,--no-undefined"

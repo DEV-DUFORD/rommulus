@@ -1,47 +1,65 @@
 # Windows x86_64 Core Support Manifest
 
-Factual record of the current Windows x86_64 work (`plans/WINDOWS_IMPL.md`). Unlike
-`docs/linux-support-manifest.md`, this manifest is **not an enablement record**: `windows-x86_64`
-appears in **no** `CoreManifest.kt` `supportedAbis` and in **no**
-`packaging/share/rommulus/core-manifest.json` entry — the validator
-`packaging/validate-linux-targets.py` fails the build if any approved/production core advertises
-`windows-x86_64` — and no player launch path can select a Windows core. Windows is **not a
-supported platform** and no Windows release artifacts exist. A core becomes launchable on Windows
-only after its full per-core gate (`plans/WINDOWS_IMPL.md` §6.4, 15 criteria, including physical
-Windows 10/11 qualification) passes and its enablement is recorded here.
+This experimental branch directly enables **13 Windows x86_64 game cores** in
+`CoreManifest.kt` and `packaging/share/rommulus/windows-core-manifest.json`. There is no separate
+preview catalog or runtime promotion gate: installed Windows DLLs for these cores are launchable.
+The branch is not ready to merge until the implementation and qualification work is complete.
+
+**Physical Windows 10/11 qualification is pending.** Enablement is an implementation decision,
+not a claim of completed hardware testing or a published release. Hosted build/load/lifecycle
+evidence below must not be substituted for physical controller, interactive audio/video,
+sleep/resume, GPU/driver, and soak validation.
+
+The Linux package manifest (`packaging/share/rommulus/core-manifest.json`) remains unchanged.
+`packaging/validate-linux-targets.py` preserves the Linux Kotlin/package/documentation inventory
+checks and separately requires agreement between the 13 Windows Kotlin entries, Windows package
+entries, enabled rows below, and Windows adapter/export files. SameBoy, PicoDrive, `test_core`,
+Dolphin, and lrps2 remain excluded from the Windows game inventory.
+
+The Windows manifest uses schema version 1 with `platform: "windows-x86_64"` and a `cores` array.
+Every entry has `enabled: true`, `supportedAbis: ["windows-x86_64"]`, the canonical
+`coreLibraryFile: "<coreId>_core.dll"`, `adapterFile`, the existing upstream/revision pins,
+systems/extensions/firmware, and reviewed licensing fields. Revision allowlists use `releaseTag`
+when nonblank, otherwise `commitSha`. `binaryChecksums.windows-x86_64: null` is not a verified
+hash; packaging records hashes of the actual build. Canonical game DLLs live under `native/cores`.
 
 ## Core status
 
 Tiers per `plans/WINDOWS_IMPL.md` §6.2. All 16 cores of the Linux manifest appear exactly once;
-every Windows build target is a separate `<core>-windows.cmake` fragment — none of the Linux
-`*-linux.cmake` fragments is ever included on WIN32.
+every Windows game target has a separate `<core>-windows.cmake` adapter. Shared source inventories
+may be reused, but Windows must not instantiate Linux targets or inherit ELF linker settings.
 
 | Core | Tier | Windows build target | Gate status | Enabled |
 | --- | --- | --- | --- | --- |
 | `test_core` | 0 | `native/player/CMakeLists.txt` (WIN32 block, `add_library(test_core SHARED …)`, `PREFIX ""` → `test_core.dll`) | IMPLEMENTED — Win32 player foundation, PE/import audit, load smoke, and hosted synthetic lifecycle E2E passed | no |
-| `gambatte` | 1 | `native/cmake/cores/gambatte-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and SRAM lifecycle gates passed; physical Win10/11 qualification pending | no |
-| `fceumm` | 1 | `native/cmake/cores/fceumm-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and SRAM lifecycle gates passed; physical Win10/11 qualification pending | no |
-| `prosystem` | 1 | `native/cmake/cores/prosystem-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and no-save lifecycle gates passed; physical Win10/11 qualification pending | no |
-| `handy` | 1 | — (no `handy-windows.cmake`) | NOT STARTED | no |
-| `mednafen_ngp` | 1 | — (no `mednafen_ngp-windows.cmake`) | NOT STARTED | no |
-| `mednafen_wswan` | 1 | `native/cmake/cores/mednafen_wswan-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and SRAM lifecycle gates passed; physical Win10/11 qualification pending | no |
-| `stella` | 1 | `native/cmake/cores/stella-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 22-export boundary, no-persistent-save lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
-| `beetle_pce_fast` | 1 | `native/cmake/cores/beetle_pce_fast-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and BRAM lifecycle gates passed; physical Win10/11 qualification pending | no |
-| `mgba` | 1 | `native/cmake/cores/mgba-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 25-export boundary, 32 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
-| `snes9x` | 1 | `native/cmake/cores/snes9x-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 22-export boundary, 2 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
-| `genesis_plus_gx` | 1 | `native/cmake/cores/genesis_plus_gx-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 26-export boundary, 64 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
-| `pcsx_rearmed` | 2 | — (no `pcsx_rearmed-windows.cmake`) | INVESTIGATED — interpreter-first candidate boundary selected; implementation pending independent review | no |
-| `mupen64plus_next` | 2 | — (no `mupen64plus_next-windows.cmake`) | NOT STARTED | no |
+| `gambatte` | 1 | `native/cmake/cores/gambatte-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `fceumm` | 1 | `native/cmake/cores/fceumm-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `prosystem` | 1 | `native/cmake/cores/prosystem-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `handy` | 1 | `native/cmake/cores/handy-windows.cmake` | ENABLED (experimental) — new adapter; hosted and physical qualification pending | yes |
+| `mednafen_ngp` | 1 | `native/cmake/cores/mednafen_ngp-windows.cmake` | ENABLED (experimental) — new adapter; hosted and physical qualification pending | yes |
+| `mednafen_wswan` | 1 | `native/cmake/cores/mednafen_wswan-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `stella` | 1 | `native/cmake/cores/stella-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `beetle_pce_fast` | 1 | `native/cmake/cores/beetle_pce_fast-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `mgba` | 1 | `native/cmake/cores/mgba-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `snes9x` | 1 | `native/cmake/cores/snes9x-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `genesis_plus_gx` | 1 | `native/cmake/cores/genesis_plus_gx-windows.cmake` | ENABLED (experimental) — prior hosted lifecycle evidence; physical qualification pending | yes |
+| `pcsx_rearmed` | 2 | `native/cmake/cores/pcsx_rearmed-windows.cmake` | ENABLED (experimental) — interpreter-only; hosted and physical qualification pending | yes |
+| `mupen64plus_next` | 2 | `native/cmake/cores/mupen64plus_next-windows.cmake` | ENABLED (experimental) — new adapter; hosted and physical qualification pending | yes |
 | `dolphin` | 3 | — (no `dolphin-windows.cmake`) | NOT STARTED | no |
 | `lrps2` | 3 | — (no `lrps2-windows.cmake`) | NOT STARTED | no |
 
 Counts: Tier 0 = 1, Tier 1 = 11, Tier 2 = 2, Tier 3 = 2 (16 total, matching the 16 rows of
 `docs/linux-support-manifest.md`).
 
+## Historical qualification evidence
+
+The following records retain earlier hosted run IDs, hashes, and engineering findings.
+They describe those builds, not newly validated binaries from this branch. Earlier candidate-only
+staging has been superseded by direct experimental enablement above.
+
 ## snes9x — Windows x86_64 candidate build identity
 
-Candidate posture: the canonical `snes9x_core.dll` is staged only under
-`cores-candidate/`; it is not advertised by any production `CoreManifest`.
+Current posture: `snes9x_core.dll` is enabled directly in the experimental Windows inventory.
 
 - Upstream: `snes9xgit/snes9x` 1.63
   (`921f9f7b83660eb44ad263022a57a4a029057c37`).
@@ -58,14 +76,12 @@ Candidate posture: the canonical `snes9x_core.dll` is staged only under
   Hosted `snes9x_core.dll` SHA-256:
   `54aeef176ac87c61d452af95be1f144bbe9c287556cc571895361fa8fbb497ac`.
 
-Snes9x remains candidate-only. Physical Windows 10/11, controller,
-interactive audio/video, sleep/resume, and soak qualification remain required
-before any `CoreManifest.supportedAbis` enablement.
+Physical Windows 10/11, controller, interactive audio/video, sleep/resume, and soak
+qualification remain pending despite experimental enablement.
 
 ## stella — Windows x86_64 candidate build identity
 
-Candidate posture: the canonical `stella_core.dll` is staged only under
-`cores-candidate/`; it is not advertised by any production `CoreManifest`.
+Current posture: `stella_core.dll` is enabled directly in the experimental Windows inventory.
 
 - Upstream: `stella-emu/stella` 7.0
   (`d55b1aec0d067a4c901a6dcdf81cb8f579685659`).
@@ -83,9 +99,8 @@ Candidate posture: the canonical `stella_core.dll` is staged only under
   Hosted `stella_core.dll` SHA-256:
   `300c89d2ca6a74c5d1cfa061b345300663c4c9483b199dc28935d84ebdd628a2`.
 
-Stella remains candidate-only. Physical Windows 10/11, controller,
-interactive audio/video, sleep/resume, and soak qualification remain required
-before any `CoreManifest.supportedAbis` enablement.
+Physical Windows 10/11, controller, interactive audio/video, sleep/resume, and soak
+qualification remain pending despite experimental enablement.
 
 ## Platform foundation and desktop shell (Phase 1)
 
@@ -114,8 +129,8 @@ source/link split in `native/player/CMakeLists.txt`; the toolchain contract
 `native/cmake/toolchains/windows-mingw-ucrt-x86_64.cmake`; and the CMake presets
 `windows-x86_64` and `windows-x86_64-software-only` in `native/player/CMakePresets.json`.
 
-`test_core` (Tier 0, synthetic, project-owned) is the only core the Windows player build enables;
-it exists for host/player protocol and lifecycle validation only, never for game content. Local
+`test_core` (Tier 0, synthetic, project-owned) exists for host/player protocol and lifecycle
+validation only, never for game content or the enabled Windows package inventory. Historical local
 evidence: MinGW-w64 UCRT64 cross-build of `rommulus-player.exe` + `test_core.dll` as PE32+
 x86_64, and a full local macOS synthetic-core E2E via the host-portable harness
 `native/player/tests/e2e/player_e2e.py`. Workflow
@@ -144,11 +159,9 @@ pin in `CoreManifest.kt`):
 | Renderer | software, RGB565 (runs under the temporary software-only boundary; no ANGLE required) |
 | Saves | SRAM via `RETRO_MEMORY_SAVE_RAM` (8192-byte battery SRAM for the generated E2E ROM) |
 
-Candidate posture: CI stages `gambatte_core.dll` separately under `cores-candidate/` (never an
-enabled-core path) and audits it (PE32+ machine, recursive import closure, exact 22-symbol export
-allowlist, repeated load/`retro_api_version`/`retro_init`/`retro_deinit` smoke) **without
-promoting it**. `windows-x86_64` is in no `supportedAbis`, no package manifest entry, and no
-launch path.
+Current posture: `gambatte_core.dll` is enabled directly. Earlier CI audited its separate
+candidate build (PE32+ machine, recursive import closure, exact 22-symbol export allowlist,
+repeated load/`retro_api_version`/`retro_init`/`retro_deinit` smoke).
 
 ### Qualification evidence and generated test ROM
 
@@ -196,11 +209,9 @@ pin in `CoreManifest.kt`):
 | Renderer | software, RGBX888 with RGB565 fallback (runs under the temporary software-only boundary; no ANGLE required) |
 | Saves | SRAM via `RETRO_MEMORY_SAVE_RAM` (8192-byte battery WRAM for the generated E2E ROM) |
 
-Candidate posture: CI stages `fceumm_core.dll` separately under `cores-candidate/` (never an
-enabled-core path) and audits it (PE32+ machine, recursive import closure, exact 22-symbol export
-allowlist, repeated load/`retro_api_version`/`retro_init`/`retro_deinit` smoke) **without
-promoting it**. `windows-x86_64` is in no `supportedAbis`, no package manifest entry, and no
-launch path.
+Current posture: `fceumm_core.dll` is enabled directly. Earlier CI audited its separate
+candidate build (PE32+ machine, recursive import closure, exact 22-symbol export allowlist,
+repeated load/`retro_api_version`/`retro_init`/`retro_deinit` smoke).
 
 ### Qualification evidence and generated test ROM
 
@@ -253,11 +264,9 @@ master HEAD of `libretro/prosystem-libretro`):
 | Renderer | software (Maria/TIA emulation; no HW-render request — runs under the temporary software-only boundary) |
 | Saves | **none** — this pin exposes no `RETRO_MEMORY_SAVE_RAM` region (`retro_get_memory_size(RETRO_MEMORY_SAVE_RAM)` returns 0; only SYSTEM_RAM). The E2E asserts a rigorous no-persistent-save gate instead of SRAM invariants |
 
-Candidate posture: CI stages `prosystem_core.dll` separately under `cores-candidate/` (never an
-enabled-core path) and audits it (PE32+ machine, recursive import closure, exact 22-symbol export
-allowlist, repeated load/`retro_api_version`/`retro_init`/`retro_deinit` smoke) **without
-promoting it**. `windows-x86_64` is in no `supportedAbis`, no package manifest entry, and no
-launch path.
+Current posture: `prosystem_core.dll` is enabled directly. Earlier CI audited its separate
+candidate build (PE32+ machine, recursive import closure, exact 22-symbol export allowlist,
+repeated load/`retro_api_version`/`retro_init`/`retro_deinit` smoke).
 
 ### Qualification evidence and generated test ROM
 
@@ -314,11 +323,9 @@ of `libretro/beetle-wswan-libretro`):
 | Renderer | software (no HW-render request — runs under the temporary software-only boundary) |
 | Saves | 8192-byte battery SRAM (`RETRO_MEMORY_SAVE_RAM`; cart header code `0x01`). The E2E drives a deterministic SRAM counter oracle against the player-reported per-run frame counts |
 
-Candidate posture: CI stages `mednafen_wswan_core.dll` separately under `cores-candidate/`
-(never an enabled-core path) and audits it (PE32+ machine, recursive import closure, exact
-22-symbol export allowlist, repeated load/`retro_api_version`/`retro_init`/`retro_deinit`
-smoke) **without promoting it**. `windows-x86_64` is in no `supportedAbis`, no package manifest
-entry, and no launch path.
+Current posture: `mednafen_wswan_core.dll` is enabled directly. Earlier CI audited its separate
+candidate build (PE32+ machine, recursive import closure, exact 22-symbol export allowlist,
+repeated load/`retro_api_version`/`retro_init`/`retro_deinit` smoke).
 
 ### Qualification evidence and generated test ROM
 
@@ -373,9 +380,9 @@ gate).
 | Renderer | software, RGB565 |
 | Saves | 2048-byte BRAM via `RETRO_MEMORY_SAVE_RAM` |
 
-Candidate posture: the DLL is staged only under `cores-candidate/`. It is included in recursive
-PE32+/import-closure auditing, exact export auditing, provenance hashing, 50-cycle native load
-smoke, and the player E2E gate, but remains absent from every `windows-x86_64` supported ABI.
+Current posture: `beetle_pce_fast_core.dll` is enabled directly. The earlier candidate build
+passed recursive PE32+/import-closure auditing, exact export auditing, provenance hashing,
+50-cycle native load smoke, and the player E2E gate.
 
 **Windows-hosted qualification — passed.** Run
 [33972683164](https://github.com/DEV-DUFORD/rommulus/actions/runs/33972683164) passed all five
@@ -446,8 +453,8 @@ That evidence establishes compile support, not a production-safe JIT:
 - no upstream runtime gate demonstrates exception behavior, repeated
   unload/reload, or shutdown reliability for this DLL at this pin.
 
-The first candidate will therefore compile the built-in PCSX interpreter with
-`DRC_DISABLE` and omit Lightrec and GNU Lightning. It will define
+The experimental Windows adapter compiles the built-in PCSX interpreter with
+`DRC_DISABLE` and omits Lightrec and GNU Lightning. It defines
 `P_HAVE_MMAP=0` rather than adding the currently unvendored `deps/mman`
 source: the interpreter does not require fixed virtual addresses, and
 `libpcsxcore/psxmem.c` then uses its existing zeroed-allocation fallback.
@@ -469,18 +476,18 @@ Lightrec/Lightning emitters are linked and initialized. Upstream defaults
 `LIGHTREC_THREADED_COMPILER=0`, so this follow-up does not additionally inherit
 a background compiler thread.
 
-The interpreter target will reuse the already-vendored common Linux source
+The interpreter target reuses the already-vendored common Linux source
 inventory while excluding the exact Lightrec/Lightning sources already
-removed by the existing Apple verification fallback. It will use the portable
+removed by the existing Apple verification fallback. It uses the portable
 SSSE3 software GPU, CHD/miniz and Libretro VFS support, retain asynchronous CD
 and GPU workers through libretro-common's Win32 thread backend, and disable
 the asynchronous SPU path as upstream does on Windows because that path uses
-POSIX semaphores. Physical CD-ROM access will be excluded: the candidate
+POSIX semaphores. Physical CD-ROM access is excluded: the Windows adapter
 accepts content files only and does not need host-device access in the player.
 It remains compatible with the software-only Windows player; ANGLE is not
 involved.
 
-`native/cmake/cores/pcsx_rearmed-windows.def` will constrain the DLL to exactly
+`native/cmake/cores/pcsx_rearmed-windows.def` constrains the DLL to exactly
 the 22 required Libretro entry points resolved by `CoreLibrary`. The optional
 `retro_cheat_reset`, `retro_cheat_set`, and `retro_load_game_special` symbols
 remain private, and no `romm_*` save extension is needed because the standard
@@ -526,21 +533,22 @@ image, adoption/restore, repeated load, and force-kill recovery.
 
 Interpreter performance is not inferred from hosted correctness. Sustained
 frame pacing, audio stability, and soak behavior on representative legal
-content and physical Windows hardware are required before
-`windows-x86_64` can be added to production support metadata; if that gate
-fails, the separately hardened Lightrec follow-up is a release prerequisite.
+content and physical Windows hardware remain required for release qualification,
+despite direct experimental enablement. If that qualification fails, the separately
+hardened Lightrec follow-up may be a release prerequisite.
 
-No `pcsx_rearmed-windows.cmake` exists yet, no candidate DLL has been built,
-and `windows-x86_64` remains absent from all production manifests. Independent
-read-only review accepted the interpreter-first direction and identified the
-RAM-mapping, export, and fresh-card details resolved above.
+`pcsx_rearmed-windows.cmake` and its export definition now exist, and the game core is enabled
+in both Kotlin and the Windows package manifest. This records implementation, not a new hosted
+or physical qualification result. The earlier independent review accepted the interpreter-first
+direction and identified the RAM-mapping, export, and fresh-card requirements above.
 
 ## Windows ANGLE/GLES3 graphics frontend spike
 
-The production candidate bundle continues to use the
-`windows-x86_64-software-only` preset
+Earlier candidate bundles used the
+`windows-x86_64-software-only` diagnostic preset
 (`ROMM_WIN32_SOFTWARE_ONLY=ON`; the option defaults OFF globally and is meaningful only for
-WIN32). This is a **temporary, fail-closed boundary**: the GLES3/ANGLE hardware-context source,
+WIN32). This is a **software-only diagnostic boundary**, not the full 13-core package:
+the GLES3/ANGLE hardware-context source,
 import libraries, and include directory are excluded, a no-op `SdlHardwareContext` is compiled
 instead (no unresolved GL API can exist), and the player **fails closed with `launch_failed`**
 for every known hardware-rendering core and every Libretro `SET_HW_RENDER` /
@@ -597,8 +605,8 @@ The hosted runner covers only Microsoft's Basic **Render** Driver through
 ANGLE's D3D11 backend. Intel, AMD, NVIDIA, hybrid-GPU, physical Microsoft
 Basic Display Driver, Remote Desktop, physical Windows 10/11, interactive
 graphics/audio, sleep/resume, and soak evidence remain pending. No Tier 2/3
-core was built or advertised, and no production manifest may add
-`windows-x86_64` from this frontend-only result.
+core was qualified by that historical frontend-only result. The experimental branch's
+direct enablement of PCSX-ReARMed and Mupen64Plus-Next does not change that evidence.
 
 ## Build inputs (pinned)
 
