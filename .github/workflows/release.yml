@@ -178,8 +178,8 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           set -euo pipefail
-          sudo apt-get -o DPkg::Lock::Timeout=300 update
-          sudo apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends \
+          flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get update
+          flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get install -y --no-install-recommends \
             clang-18 g++ cmake ninja-build nasm pkg-config wget zstd xvfb \
             libsqlite3-dev \
             libasound2-dev libaudio-dev libdbus-1-dev libdecor-0-dev \
