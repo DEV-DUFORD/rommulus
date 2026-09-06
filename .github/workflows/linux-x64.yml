@@ -332,7 +332,7 @@ jobs:
       - name: Build engine tests
         run: |
           set -euo pipefail
-          cmake --build build -j"$(nproc)"
+          cmake --build build -j"$(( $(nproc) / 4 ))"
 
       - name: Run engine tests (CTest, ASan/UBSan)
         run: |
@@ -393,7 +393,7 @@ jobs:
       - name: Build engine tests
         run: |
           set -euo pipefail
-          cmake --build build -j"$(nproc)"
+          cmake --build build -j"$(( $(nproc) / 4 ))"
 
       - name: Run engine tests (CTest)
         run: |
@@ -493,7 +493,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr/local \
             -DSDL_SHARED=OFF \
             -DSDL_STATIC=ON
-          cmake --build build/sdl -j"$(nproc)"
+          cmake --build build/sdl -j"$(( $(nproc) / 4 ))"
           sudo cmake --install build/sdl
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
@@ -515,7 +515,7 @@ jobs:
           set -euo pipefail
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
-          cmake --build build/player -j"$(nproc)"
+          cmake --build build/player -j"$(( $(nproc) / 4 ))"
 
       - name: Verify rommulus_player binary exists
         run: |
@@ -705,7 +705,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr/local \
             -DSDL_SHARED=OFF \
             -DSDL_STATIC=ON
-          cmake --build build/sdl -j"$(nproc)"
+          cmake --build build/sdl -j"$(( $(nproc) / 4 ))"
           sudo cmake --install build/sdl
           pkg-config --modversion SDL3 2>/dev/null && echo "✓ SDL3 pkg-config OK" || echo "⚠ SDL3 pkg-config not found"
 
@@ -718,7 +718,7 @@ jobs:
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/player -j"$(nproc)"
+          cmake --build build/player -j"$(( $(nproc) / 4 ))"
 
       - name: Verify player binary and core libraries
         run: |

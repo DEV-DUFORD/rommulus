@@ -93,7 +93,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/sdl-install" \
             -DSDL_SHARED=OFF \
             -DSDL_STATIC=ON
-          cmake --build build/sdl -j"$(nproc)"
+          cmake --build build/sdl -j"$(( $(nproc) / 4 ))"
           cmake --install build/sdl
 
       - name: Build player and cores
@@ -104,7 +104,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install"
-          cmake --build build/player -j"$(nproc)"
+          cmake --build build/player -j"$(( $(nproc) / 4 ))"
 
       - name: Build desktop application
         run: |
