@@ -198,7 +198,7 @@ jobs:
         with:
           msystem: UCRT64
           update: false
-          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf nasm
+          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf
 
       - name: Verify UCRT64 binutils provenance (unprefixed as/ld/objdump/windres)
         shell: msys2 {0}
@@ -343,7 +343,7 @@ jobs:
         with:
           msystem: UCRT64
           update: false
-          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf
+          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf nasm
 
       - name: Verify UCRT64 binutils provenance (unprefixed as/ld/objdump/windres)
         shell: msys2 {0}
