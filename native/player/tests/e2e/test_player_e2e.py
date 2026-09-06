@@ -10,6 +10,7 @@
 import json
 import hashlib
 import os
+from pathlib import Path
 import shutil
 import sys
 import tempfile
@@ -785,7 +786,7 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreId"], GAMBATTE_CORE_ID)
         self.assertEqual(req["coreBuildRevision"], GAMBATTE_REVISION)
         self.assertEqual(req["contentPath"],
-                         "/cache état/rommulus-e2e-gambatte.gb")
+                         Path("/cache état/rommulus-e2e-gambatte.gb").absolute().as_posix())
         self.assertNotIn("\\", req["contentPath"])
 
     def test_fceumm_candidate_request(self):
@@ -799,7 +800,7 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreId"], FCEUMM_CORE_ID)
         self.assertEqual(req["coreBuildRevision"], FCEUMM_REVISION)
         self.assertEqual(req["contentPath"],
-                         "/cache état/rommulus-e2e-fceumm.nes")
+                         Path("/cache état/rommulus-e2e-fceumm.nes").absolute().as_posix())
         self.assertNotIn("\\", req["contentPath"])
 
     def test_prosystem_candidate_request(self):
@@ -815,7 +816,7 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreId"], PROSYSTEM_CORE_ID)
         self.assertEqual(req["coreBuildRevision"], PROSYSTEM_REVISION)
         self.assertEqual(req["contentPath"],
-                         "/cache état/rommulus-e2e-prosystem.a78")
+                         Path("/cache état/rommulus-e2e-prosystem.a78").absolute().as_posix())
         self.assertIsNone(req["expectedSaveSize"])
         self.assertNotIn("\\", req["contentPath"])
 
@@ -828,7 +829,7 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreId"], STELLA_CORE_ID)
         self.assertEqual(req["coreBuildRevision"], STELLA_REVISION)
         self.assertEqual(req["contentPath"],
-                         "/cache état/rommulus-e2e-stella.bin")
+                         Path("/cache état/rommulus-e2e-stella.bin").absolute().as_posix())
         self.assertIsNone(req["expectedSaveSize"])
         self.assertNotIn("\\", req["contentPath"])
 
@@ -844,7 +845,7 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreId"], WSWAN_CORE_ID)
         self.assertEqual(req["coreBuildRevision"], WSWAN_REVISION)
         self.assertEqual(req["contentPath"],
-                         "/cache état/rommulus-e2e-wswan.ws")
+                         Path("/cache état/rommulus-e2e-wswan.ws").absolute().as_posix())
         self.assertIsNone(req["expectedSaveSize"])
         self.assertNotIn("\\", req["contentPath"])
 
@@ -858,7 +859,7 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreBuildRevision"], PCE_REVISION)
         self.assertEqual(
             req["contentPath"],
-            "/cache état/rommulus-e2e-beetle-pce-fast.pce")
+            Path("/cache état/rommulus-e2e-beetle-pce-fast.pce").absolute().as_posix())
         self.assertNotIn("\\", req["contentPath"])
 
     def test_genesis_plus_gx_candidate_request(self):
@@ -871,7 +872,7 @@ class BuildRequestTest(unittest.TestCase):
         self.assertEqual(req["coreId"], GENESIS_PLUS_GX_CORE_ID)
         self.assertEqual(req["coreBuildRevision"], GENESIS_PLUS_GX_REVISION)
         self.assertEqual(req["contentPath"],
-                         "/cache état/rommulus-e2e-genesis-plus-gx.bin")
+                         Path("/cache état/rommulus-e2e-genesis-plus-gx.bin").absolute().as_posix())
 
     def test_paths_are_forward_slash(self):
         req = build_request("s-1", r"C:\cores\test_core.dll", r"D:\data\system",
@@ -992,7 +993,7 @@ class AsPosixTest(unittest.TestCase):
     def test_forward_slashes(self):
         out = player_e2e.as_posix(os.path.join("a", "b c", "тест"))
         self.assertNotIn("\\", out)
-        self.assertTrue(out.startswith(("/", os.sep[0])))
+        self.assertTrue(os.path.isabs(out))
 
 
 class PcsxRearmedFixtureTest(unittest.TestCase):
