@@ -511,3 +511,49 @@ This session ended after the FCEUmm candidate's local qualification passed. Cont
   10/11, interactive graphics/audio, sleep/resume, and soak qualification
   remain pending. No Tier 2/3 candidate was started and every production
   `CoreManifest.supportedAbis` entry remains free of `windows-x86_64`.
+
+## Tier 2 PCSX-ReARMed investigation (candidate not started)
+
+- Audited exact PCSX-ReARMed pin
+  `da2cb8ecd17fd0932ab6d94774c0522beebce6e3`, its Android ari64 inventory,
+  Linux x86_64 Lightrec/GNU Lightning inventory, frontend options, memory-card
+  implementation, and upstream Win64 build path.
+- Upstream run `30723537402` successfully cross-compiled the exact pin's
+  x86_64 MinGW DLL with Lightrec using Ubuntu's MSVCRT-default cross
+  toolchain. It did not run the DLL, so UCRT64, exception-unwind, repeated
+  unload/reload, and shutdown reliability are undemonstrated. DEP is satisfied
+  by construction and CFG is not expected to block the uninstrumented DLL;
+  the RWX arena is a hardening gap rather than a predicted launch failure.
+- PCSX's Lightrec glue allocates an 8 MiB `PAGE_EXECUTE_READWRITE` code buffer
+  that remains RWX because GNU Lightning treats it as caller-owned. Lightrec
+  also retains an explicit Windows register-allocation FIXME/workaround.
+  `LIGHTREC_INTERPRETER` still maps and initializes executable code, so only
+  `DRC_DISABLE` plus source exclusion creates a no-JIT boundary.
+- Selected an interpreter-first boundary: define `DRC_DISABLE`; omit
+  Lightrec and GNU Lightning; define `P_HAVE_MMAP=0` so the existing
+  interpreter-safe allocation fallback is used instead of adding the
+  currently unvendored general Win32 mmap shim; keep the software SSSE3 GPU,
+  CHD/miniz, Libretro VFS, async CD/GPU, and upstream's Windows choice to
+  disable async SPU; and exclude physical CD-ROM access. Android and Linux
+  build behavior must remain unchanged.
+- The exact PE boundary will expose only the 22 required Libretro symbols via
+  `pcsx_rearmed-windows.def`; the three optional upstream extras stay private.
+- Production BIOS policy remains the existing user-supplied, hash-verified
+  firmware gate. Qualification alone will force the core's HLE BIOS so hosted
+  CI uses no copyrighted BIOS bytes.
+- Confirmed slot 1 is exactly 131072-byte `RETRO_MEMORY_SAVE_RAM` when
+  `pcsx_rearmed_memcard1=libretro`; the frontend already forces that mode and
+  disables slot 2.
+- Proposed legal fixture: a generated/hash-pinned PS-X EXE with only original
+  MIPS code/data plus a generated/hash-pinned standard blank 128 KiB card.
+  Libretro card mode starts zero-filled and has no path for HLE `format`, and
+  the player restore races the already-running software core. The fixture
+  therefore polls sector zero until the restored `MC` signature appears,
+  calls `InitCARD(1)`, `StartCARD`, and `_bu_init`, then uses HLE file APIs to
+  update a marker/counter and emits a completion signal before the harness
+  samples the card. It will exercise the full save lifecycle without game,
+  BIOS, SDK, or licensed CD-sector content.
+- Detailed evidence and the pre-implementation boundary are recorded in
+  `docs/windows-support-manifest.md`. Independent read-only review accepted
+  the direction after the RAM-mapping, export, and fresh-card boundaries were
+  made explicit; no Windows target or production support flag has been added.

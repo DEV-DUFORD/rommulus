@@ -30,7 +30,7 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 | `mgba` | 1 | `native/cmake/cores/mgba-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 25-export boundary, 32 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `snes9x` | 1 | `native/cmake/cores/snes9x-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 22-export boundary, 2 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `genesis_plus_gx` | 1 | `native/cmake/cores/genesis_plus_gx-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 26-export boundary, 64 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
-| `pcsx_rearmed` | 2 | — (no `pcsx_rearmed-windows.cmake`) | NOT STARTED | no |
+| `pcsx_rearmed` | 2 | — (no `pcsx_rearmed-windows.cmake`) | INVESTIGATED — interpreter-first candidate boundary selected; implementation pending independent review | no |
 | `mupen64plus_next` | 2 | — (no `mupen64plus_next-windows.cmake`) | NOT STARTED | no |
 | `dolphin` | 3 | — (no `dolphin-windows.cmake`) | NOT STARTED | no |
 | `lrps2` | 3 | — (no `lrps2-windows.cmake`) | NOT STARTED | no |
@@ -393,6 +393,147 @@ required `HUBM\x00\x88\x10\x80` BRAM prefix, generates software video and PSG au
 VBlank events into BRAM offsets 8–10. The lifecycle gate covers checkpoint creation, adoption and
 restore into fresh processes, repeated load, and force-kill lock recovery.
 **SHA-256: `db6dce97515cb1730e927358dcbffb55acbadaecc9e320efdc07499d262b342f`.**
+
+## PCSX-ReARMed — Win64 investigation and candidate boundary
+
+The exact vendored PCSX-ReARMed pin is
+`da2cb8ecd17fd0932ab6d94774c0522beebce6e3` (2026-08-02). Android uses the
+upstream ARM/ARM64 ari64 dynarec closure in
+`native/cmake/cores/pcsx_rearmed.cmake`; Linux x86_64 uses the separate
+Lightrec/GNU Lightning closure in
+`native/cmake/cores/pcsx_rearmed-linux.cmake`. The Windows candidate must not
+alter either target.
+
+### Win64 JIT finding
+
+The pinned upstream tree has a real MinGW Win64 compile path:
+
+- upstream workflow
+  [30723537402](https://github.com/libretro/pcsx_rearmed/actions/runs/30723537402)
+  compiled `pcsx_rearmed_libretro.dll` with x86_64 MinGW and
+  `DYNAREC=lightrec`;
+- GNU Lightning has explicit Microsoft x64 calling-convention register
+  assignments;
+- upstream's `deps/mman` is a general POSIX
+  `mmap`/`munmap`/`mprotect` shim over
+  `CreateFileMapping`/`MapViewOfFileEx`/`VirtualProtect`. It is enabled by
+  `MMAP_WIN32=1` independently of `DYNAREC` because `libpcsxcore/psxmem.c`
+  maps PSX RAM through it; only its `mprotect` is aliased for GNU Lightning.
+
+That evidence establishes compile support, not a production-safe JIT:
+
+- the upstream workflow does not load the DLL, boot content, execute generated
+  code, or unload/reload it, and it builds with Ubuntu's
+  `gcc-mingw-w64` cross toolchain (MSVCRT-default) rather than the MSYS2
+  UCRT64 toolchain this project ships;
+- PCSX-ReARMed allocates Lightrec's shared 8 MiB code buffer with
+  `PROT_EXEC | PROT_READ | PROT_WRITE`; the Win32 shim translates that to
+  `PAGE_EXECUTE_READWRITE`, and GNU Lightning treats it as caller-owned code,
+  so its normal protect/unprotect path deliberately does nothing. The current
+  path therefore remains permanently RWX rather than enforcing W^X;
+- the pinned Lightrec source still carries an explicit `_WIN32` FIXME stating
+  that GNU Lightning uses mapped registers as temporaries and works around it
+  by marking all mapped registers live;
+- the pinned sources register no unwind metadata for generated code:
+  `RtlAddFunctionTable`, `RtlInstallFunctionTableCallback`, and
+  `__register_frame` are absent, so Windows exception propagation and stack
+  walking through generated nonleaf frames are not established;
+- DEP is satisfied by the executable arena, and CFG is not expected to reject
+  the MinGW-built DLL's indirect calls because executable allocations are
+  valid call targets by default and the DLL is not CFG-instrumented. The
+  finding is a hardening gap—the permanently RWX 8 MiB arena remains an
+  eligible exploitation target—not a predicted launch failure;
+- no upstream runtime gate demonstrates exception behavior, repeated
+  unload/reload, or shutdown reliability for this DLL at this pin.
+
+The first candidate will therefore compile the built-in PCSX interpreter with
+`DRC_DISABLE` and omit Lightrec and GNU Lightning. It will define
+`P_HAVE_MMAP=0` rather than adding the currently unvendored `deps/mman`
+source: the interpreter does not require fixed virtual addresses, and
+`libpcsxcore/psxmem.c` then uses its existing zeroed-allocation fallback.
+Hosted runtime gates must confirm the expected fixed-address warning is
+benign and the fallback allocation is released across repeated unloads. This
+is an explicit interpreter-only divergence from upstream's Windows build, not
+an assumption that the mmap shim is JIT-only.
+
+This removes the RWX arena and generated-code unwind gap from the first
+boundary: the candidate DLL contains no runtime-generated code. JIT enablement
+remains a separate measured follow-up that must implement W^X and pass
+dedicated DEP/CFG, exception/crash, repeated unload/reload, and long-run
+game-compatibility gates on UCRT64. W^X is not a configuration toggle:
+GNU Lightning skips protect/unprotect for caller-owned buffers, while PCSX's
+Lightrec glue owns the arena, so enabling it requires a local or upstream
+source change. `LIGHTREC_INTERPRETER` is also not a no-JIT substitute: that
+runtime option is read only after the executable arena is mapped and the
+Lightrec/Lightning emitters are linked and initialized. Upstream defaults
+`LIGHTREC_THREADED_COMPILER=0`, so this follow-up does not additionally inherit
+a background compiler thread.
+
+The interpreter target will reuse the already-vendored common Linux source
+inventory while excluding the exact Lightrec/Lightning sources already
+removed by the existing Apple verification fallback. It will use the portable
+SSSE3 software GPU, CHD/miniz and Libretro VFS support, retain asynchronous CD
+and GPU workers through libretro-common's Win32 thread backend, and disable
+the asynchronous SPU path as upstream does on Windows because that path uses
+POSIX semaphores. Physical CD-ROM access will be excluded: the candidate
+accepts content files only and does not need host-device access in the player.
+It remains compatible with the software-only Windows player; ANGLE is not
+involved.
+
+`native/cmake/cores/pcsx_rearmed-windows.def` will constrain the DLL to exactly
+the 22 required Libretro entry points resolved by `CoreLibrary`. The optional
+`retro_cheat_reset`, `retro_cheat_set`, and `retro_load_game_special` symbols
+remain private, and no `romm_*` save extension is needed because the standard
+save-memory region exposes the complete card.
+
+### Firmware, saves, and legal qualification content
+
+Production policy remains unchanged: PlayStation launches require a
+user-supplied, hash-verified BIOS staged by the existing desktop firmware
+flow. No BIOS may be bundled. Although upstream's `auto` option falls back to
+its HLE BIOS when no external image is present, HLE will be forced only in the
+qualification build so deterministic CI never consumes proprietary firmware
+and does not weaken the current production compatibility policy.
+
+The frontend already forces `pcsx_rearmed_memcard1=libretro` and
+`pcsx_rearmed_memcard2=none`. At this pin, slot 1 returns `Mcd1Data` as
+`RETRO_MEMORY_SAVE_RAM` with `MCD_SIZE == 1024 * 8 * 16` (131072 bytes).
+That exact 128 KiB image fits the existing checkpoint, adoption, restore, and
+server-sync contract; disabling slot 2 prevents an unsynchronized shared card.
+
+Qualification content will be a generated, hash-pinned PS-X EXE containing
+only project-authored MIPS instructions and data. The pinned core directly
+loads `.exe` payloads after the 0x800-byte PS-X EXE header, so no licensed CD
+sectors, boot logo, game data, SDK runtime, or BIOS bytes are needed. The E2E
+harness will also generate a hash-pinned standard blank 131072-byte card image
+and restore it during launch. This is required because Libretro card mode
+intentionally starts with a zero-filled `Mcd1Data` buffer and gives
+`Config.Mcd1` no file path, so HLE `format("bu00:")` is a no-op and file
+creation cannot find the `0xa0` free-directory frames on an all-zero card.
+
+The player currently starts the software-core run loop before applying the
+save restore, so the fixture must tolerate that ordering. It will poll sector
+zero through HLE `B0:4F _card_read_sector` until the restored `MC` signature
+appears and perform no card mutation while the buffer is zero-filled. It will
+then call `B0:4A InitCARD(1)`, `B0:4B StartCARD`, and `A0:70 _bu_init` before
+using the `B0:32`-`B0:36` open/lseek/read/write/close calls to create, read,
+and update a marker and counter in slot 1. The E2E oracle will wait for a
+fixture completion signal before sampling the image. Video and audio
+assertions will use Windows-specific goldens because the Windows candidate
+disables async SPU while other targets do not. The oracle must validate the
+exact card image and mutation across fresh launch from the generated blank
+image, adoption/restore, repeated load, and force-kill recovery.
+
+Interpreter performance is not inferred from hosted correctness. Sustained
+frame pacing, audio stability, and soak behavior on representative legal
+content and physical Windows hardware are required before
+`windows-x86_64` can be added to production support metadata; if that gate
+fails, the separately hardened Lightrec follow-up is a release prerequisite.
+
+No `pcsx_rearmed-windows.cmake` exists yet, no candidate DLL has been built,
+and `windows-x86_64` remains absent from all production manifests. Independent
+read-only review accepted the interpreter-first direction and identified the
+RAM-mapping, export, and fresh-card details resolved above.
 
 ## Windows ANGLE/GLES3 graphics frontend spike
 
