@@ -341,8 +341,9 @@ int LoadPlugins() {
 
 void ReleasePlugins() {
 	cdra_shutdown();
-	if (hGPUDriver != NULL) GPU_shutdown();
-	if (hSPUDriver != NULL) SPU_shutdown();
+	/* A required symbol lookup can fail before shutdown is resolved. */
+	if (hGPUDriver != NULL && GPU_shutdown != NULL) GPU_shutdown();
+	if (hSPUDriver != NULL && SPU_shutdown != NULL) SPU_shutdown();
 
 	if (hGPUDriver != NULL) { SysCloseLibrary(hGPUDriver); hGPUDriver = NULL; }
 	if (hSPUDriver != NULL) { SysCloseLibrary(hSPUDriver); hSPUDriver = NULL; }

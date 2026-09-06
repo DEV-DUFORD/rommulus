@@ -37,6 +37,9 @@ target_compile_definitions(pcsx_rearmed_core PRIVATE
     USE_LIBRETRO_VFS
     HAVE_LIBRETRO
     NO_FRONTEND
+    # Builtin plugins have no dynamic-loader error state. Without this,
+    # SysLibError reports "not supported" after every successful lookup.
+    NO_DYLIB
     BUILTIN_GPU=neon
     GIT_VERSION=" da2cb8e"
     RETRO_API=

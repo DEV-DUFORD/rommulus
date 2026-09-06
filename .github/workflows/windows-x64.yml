@@ -1406,6 +1406,7 @@ jobs:
           path: dist/player-win64-software-only
 
       - name: Verify artifact SHA256 manifest (import-audit.txt)
+        id: verify-native-artifact
         # Pre-flight integrity gate: every staged file must match the hash
         # recorded by job 4's recursive PE/import audit, so a corrupted or
         # partial download can never reach the E2E scenarios.
@@ -1458,16 +1459,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "player E2E harness failed (exit $LASTEXITCODE)" }
 
       - name: Exercise Lynx and Neo Geo Pocket player persistence
+        if: ${{ !cancelled() && steps.verify-native-artifact.outcome == 'success' }}
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+          $failedCores = @()
           foreach ($coreId in @("handy", "mednafen_ngp")) {
             python native/player/tests/e2e/handheld_player_e2e.py `
               --player dist/player-win64-software-only/bin/rommulus-player.exe `
               --core "dist/player-win64-software-only/cores-candidate/${coreId}_core.dll" `
               --core-id $coreId --work-dir e2e-out --video-driver offscreen
-            if ($LASTEXITCODE -ne 0) { throw "$coreId player persistence failed" }
+            if ($LASTEXITCODE -ne 0) { $failedCores += $coreId }
           }
+          if ($failedCores.Count -ne 0) { throw "Player persistence failed: $($failedCores -join ', ')" }
 
       - name: Upload E2E results and logs (always)
         if: always()
@@ -1479,7 +1483,7 @@ jobs:
 
   package-windows:
     name: Windows ZIP and EXE
-    needs: [shared-jvm-tests, desktop-build-tests, native-win64-tests, native-player-win64, player-win64-e2e]
+    needs: [shared-jvm-tests, desktop-build-tests, native-win64-tests, native-player-win64]
     runs-on: windows-2022
     timeout-minutes: 35
     steps:
@@ -1529,7 +1533,12 @@ jobs:
           $env:PATH = "$env:SystemRoot\System32"
           $env:JAVA_HOME = ""
           $native = Start-Process -FilePath (Join-Path $app "native/rommulus-player.exe") `
-            -PassThru -Wait -RedirectStandardError dist/windows/player-launch.txt
+            -PassThru -RedirectStandardError dist/windows/player-launch.txt
+          $null = $native.Handle
+          if (-not $native.WaitForExit(15000)) {
+            Stop-Process -Id $native.Id -Force
+            throw "Packaged player did not exit within 15 seconds."
+          }
           if ($native.ExitCode -ne 2) { throw "Packaged player failed to start: $($native.ExitCode)" }
           $report = Join-Path $env:RUNNER_TEMP "rommulus-desktop-smoke.txt"
           $process = Start-Process -FilePath (Join-Path $app "RomMulus.exe") `
@@ -1549,10 +1558,10 @@ jobs:
           }
           Copy-Item $report dist/windows/desktop-smoke.txt
 
-      - name: Upload Windows application
+      - name: Stage Windows application pending core qualification
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: rommulus-windows-x86_64
+          name: rommulus-windows-package-build
           path: |
             dist/windows/*.zip
             dist/windows/*.exe
@@ -1572,3 +1581,23 @@ jobs:
             dist/windows/player-launch.txt
             ~/AppData/Local/RomMulus/state/logs
           if-no-files-found: ignore
+
+  publish-windows:
+    name: Publish qualified Windows application
+    needs: [package-windows, player-win64-e2e]
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Download completed application package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rommulus-windows-package-build
+          path: dist/windows
+
+      - name: Upload Windows application
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rommulus-windows-x86_64
+          path: dist/windows
+          if-no-files-found: error
+          compression-level: 0
