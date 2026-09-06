@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get update
           flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get install -y --no-install-recommends \
-            clang-18 g++ cmake ninja-build nasm pkg-config wget zstd \
+            clang-18 g++ cmake ninja-build nasm pkg-config wget zstd ccache \
             libasound2-dev libaudio-dev libdbus-1-dev libdecor-0-dev \
             libdrm-dev libegl1-mesa-dev libfribidi-dev libgbm-dev \
             libgl1-mesa-dev libgles2-mesa-dev libibus-1.0-dev \
@@ -103,7 +103,8 @@ jobs:
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install"
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install" \
+            -DDOLPHIN_BUILD_PARALLEL_JOBS=4
           cmake --build build/player -j"$(( $(nproc) / 2 ))"
 
       - name: Build desktop application
@@ -118,6 +119,8 @@ jobs:
             --no-man-pages
 
       - name: Build Android debug APK
+        env:
+          ROMMULUS_NDK_CCACHE: "1"
         run: |
           set -euo pipefail
           ./gradlew --configure-on-demand :app:assembleDebug

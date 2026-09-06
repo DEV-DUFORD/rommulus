@@ -84,6 +84,17 @@ android {
                 // Keeping -g preserves native debuggability/symbols for the debug variant; only
                 // the missing optimization was the problem.
                 arguments += listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=RelWithDebInfo")
+                // Opt-in (env-gated, not on by default) ccache wiring for the NDK/CMake native
+                // build. Speeds up repeated CI native rebuilds — the self-hosted runner's
+                // checkout step wipes .cxx/ every run, but ccache's own cache dir lives outside
+                // the workspace and survives. Off by default so local dev machines without
+                // ccache installed aren't affected.
+                if (System.getenv("ROMMULUS_NDK_CCACHE") == "1") {
+                    arguments += listOf(
+                        "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+                        "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+                    )
+                }
             }
         }
     }

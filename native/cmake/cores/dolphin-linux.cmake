@@ -15,6 +15,12 @@ if(NOT EXISTS "${DOLPHIN_DIR}/Externals/fmt/fmt/CMakeLists.txt")
         "Dolphin dependencies are missing. Run: git submodule update --init --recursive")
 endif()
 
+set(DOLPHIN_BUILD_PARALLEL_JOBS "2" CACHE STRING
+    "Parallel job count for the Dolphin libretro core build. Kept low by \
+default (see BUILD_COMMAND below for why); override with \
+-DDOLPHIN_BUILD_PARALLEL_JOBS=<N> on machines with more cores/RAM \
+(e.g. CI runners) to speed up this step.")
+
 set(DOLPHIN_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/dolphin-build)
 set(DOLPHIN_CORE_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libdolphin_core.so)
 set(DOLPHIN_ASSET_OUTPUT
@@ -48,7 +54,7 @@ ExternalProject_Add(dolphin_core
     # templates), and unbounded --parallel on a standard 4-core/16GB CI
     # runner reliably OOM-kills cc1plus once several of them compile at once.
     BUILD_COMMAND
-        ${CMAKE_COMMAND} --build <BINARY_DIR> --target dolphin_libretro --parallel 2
+        ${CMAKE_COMMAND} --build <BINARY_DIR> --target dolphin_libretro --parallel ${DOLPHIN_BUILD_PARALLEL_JOBS}
     INSTALL_COMMAND
         ${CMAKE_COMMAND} -E copy_if_different
         <BINARY_DIR>/dolphin_libretro.so

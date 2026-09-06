@@ -131,14 +131,29 @@ jobs:
             "ndk;27.2.12479018" \
             "cmake;3.22.1"
 
+      - name: Install ccache
+        run: |
+          set -euo pipefail
+          flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get update
+          flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get install -y ccache
+
       - name: Run Android unit tests
+        env:
+          ROMMULUS_NDK_CCACHE: "1"
         run: ./gradlew :app:testDebugUnitTest
 
       - name: Assemble Android debug APK
+        env:
+          ROMMULUS_NDK_CCACHE: "1"
         run: ./gradlew :app:assembleDebug
 
       - name: Assemble Android release (unsigned)
+        env:
+          ROMMULUS_NDK_CCACHE: "1"
         run: ./gradlew :app:assembleRelease
+
+      - name: Show ccache stats
+        run: ccache --show-stats || true
 
   # =================================================================
   # 3. desktop-tests  — Phase 0+ (functional when :desktop exists)
@@ -531,7 +546,8 @@ jobs:
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDOLPHIN_BUILD_PARALLEL_JOBS=4
 
       - name: Build player
         run: |

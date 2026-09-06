@@ -101,6 +101,12 @@ jobs:
       - name: Install Android build tools
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
+      - name: Install ccache
+        run: |
+          set -euo pipefail
+          flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get update
+          flock -w 300 /tmp/rommulus-ci-apt.lock sudo apt-get install -y ccache
+
       - name: Apply release version
         run: |
           set -euo pipefail
@@ -129,6 +135,7 @@ jobs:
           RELEASE_STORE_PASSWORD: ${{ secrets.ROMMULUS_RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.ROMMULUS_RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.ROMMULUS_RELEASE_KEY_PASSWORD }}
+          ROMMULUS_NDK_CCACHE: "1"
         run: ./gradlew --no-daemon :app:bundleRelease :app:assembleRelease
 
       - name: Prepare Android artifacts
@@ -221,7 +228,8 @@ jobs:
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install"
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install" \
+            -DDOLPHIN_BUILD_PARALLEL_JOBS=4
           cmake --build build/player -j"$(( $(nproc) / 2 ))"
 
       - name: Apply desktop release version
