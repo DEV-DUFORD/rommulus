@@ -343,7 +343,21 @@ jobs:
         with:
           msystem: UCRT64
           update: false
-          install: mingw-w64-ucrt-x86_64-toolchain cmake ninja pkgconf nasm
+          install: mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja pkgconf nasm
+
+      - name: Verify native Windows CMake and Ninja
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          # Native generators honor Windows command-length limits and use
+          # response files with Windows paths for large links such as N64.
+          for tool in cmake ninja; do
+            case "$(command -v "$tool")" in
+              /ucrt64/bin/"$tool"|/ucrt64/bin/"$tool".exe) ;;
+              *) echo "::error::$tool must come from the native UCRT64 package"; exit 1 ;;
+            esac
+            "$tool" --version
+          done
 
       - name: Verify UCRT64 binutils provenance (unprefixed as/ld/objdump/windres)
         shell: msys2 {0}
