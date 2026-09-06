@@ -7,10 +7,12 @@ All generated files stay inside the build tree, including non-ASCII paths.
 """
 
 import ctypes as C
+import faulthandler
 import os
 from pathlib import Path
 import shutil
 import struct
+import sys
 import unittest
 import uuid
 
@@ -21,6 +23,39 @@ class GameInfo(C.Structure):
     _fields_ = [("path", C.c_char_p), ("data", C.c_void_p),
                 ("size", C.c_size_t), ("meta", C.c_char_p)]
 
+LogFunction = C.CFUNCTYPE(None, C.c_int, C.c_char_p)
+
+
+class LogCallback(C.Structure):
+    _fields_ = [("log", LogFunction)]
+
+
+class Environment:
+    def __init__(self, root):
+        self.directory = str(root).encode("utf-8")
+        self.messages = []
+        # The C logger is variadic. Consume only its fixed prefix, never
+        # attempt Python %-formatting with arguments absent from this ABI.
+        self.log_function = LogFunction(
+            lambda level, message: self.messages.append((level, message)))
+
+    def __call__(self, command, data):
+        if command in (9, 31):
+            C.cast(data, C.POINTER(C.c_char_p))[0] = self.directory
+            return True
+        if command == 10:
+            return True
+        if command == 3:
+            C.cast(data, C.POINTER(C.c_bool))[0] = True
+            return True
+        if command == 27:  # RETRO_ENVIRONMENT_GET_LOG_INTERFACE.
+            # Handy reads log.log even if the frontend returns false. Supply
+            # the same supported interface as the real player, with a callback
+            # kept alive for the entire core lifetime.
+            C.cast(data, C.POINTER(LogCallback))[0].log = self.log_function
+            return True
+        return False
+
 
 class Core:
     def __init__(self, library, root):
@@ -30,21 +65,10 @@ class Core:
                 os.environ["ROMM_HANDHELD_DLL_DIR"]))
         self.dll = C.CDLL(str(Path(library).resolve()))
         self.root = root
-        self.directory = str(root).encode("utf-8")
+        self.environment = Environment(root)
         self.frames = 0
         self.audio_frames = 0
         self.callbacks = []
-
-        def environment(command, data):
-            if command in (9, 31):  # System and save directories.
-                C.cast(data, C.POINTER(C.c_char_p))[0] = self.directory
-                return True
-            if command == 10:  # Pixel format.
-                return True
-            if command == 3:  # Can dupe.
-                C.cast(data, C.POINTER(C.c_bool))[0] = True
-                return True
-            return False
 
         def video(data, width, height, pitch):
             if data and width and height and pitch:
@@ -55,7 +79,7 @@ class Core:
             return frames
 
         signatures = (
-            ("retro_set_environment", C.CFUNCTYPE(C.c_bool, C.c_uint, C.c_void_p), environment),
+            ("retro_set_environment", C.CFUNCTYPE(C.c_bool, C.c_uint, C.c_void_p), self.environment),
             ("retro_set_video_refresh", C.CFUNCTYPE(None, C.c_void_p, C.c_uint, C.c_uint, C.c_size_t), video),
             ("retro_set_audio_sample", C.CFUNCTYPE(None, C.c_int16, C.c_int16), lambda *_: None),
             ("retro_set_audio_sample_batch", C.CFUNCTYPE(C.c_size_t, C.c_void_p, C.c_size_t), audio),
@@ -66,9 +90,16 @@ class Core:
             wrapped = kind(callback)
             self.callbacks.append(wrapped)
             getattr(self.dll, name).argtypes = [kind]
+            getattr(self.dll, name).restype = None
             getattr(self.dll, name)(wrapped)
+        for name in ("retro_init", "retro_deinit", "retro_reset", "retro_run",
+                     "retro_unload_game"):
+            getattr(self.dll, name).argtypes = []
+            getattr(self.dll, name).restype = None
         for name in ("romm_get_save_memory_size", "retro_serialize_size"):
+            getattr(self.dll, name).argtypes = []
             getattr(self.dll, name).restype = C.c_size_t
+        self.dll.romm_get_save_memory_data.argtypes = []
         self.dll.romm_get_save_memory_data.restype = C.c_void_p
         self.dll.retro_get_memory_data.argtypes = [C.c_uint]
         self.dll.retro_get_memory_data.restype = C.c_void_p
@@ -118,6 +149,14 @@ class Core:
 
 
 class FixtureTests(unittest.TestCase):
+    def test_log_interface_initializes_poisoned_output(self):
+        environment = Environment(Path("build"))
+        output = LogCallback()
+        C.memset(C.byref(output), 0xA5, C.sizeof(output))
+        self.assertTrue(environment(27, C.byref(output)))
+        output.log(1, b"original log format %s")
+        self.assertEqual(environment.messages, [(1, b"original log format %s")])
+
     def test_original_headers(self):
         self.assertEqual(handy_rom()[:4], b"LYNX")
         self.assertEqual(handy_rom()[60], 4)
@@ -303,4 +342,13 @@ class BinaryTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    faulthandler.enable()
+    print("Handheld test interpreter: executable=%s version=%s os=%s platform=%s "
+          "pointer_bits=%d DLL_directory=%s" %
+          (sys.executable, sys.version.split()[0], os.name, sys.platform,
+           C.sizeof(C.c_void_p) * 8, os.environ.get("ROMM_HANDHELD_DLL_DIR", "")),
+          flush=True)
+    if os.environ.get("ROMM_HANDHELD_EXPECT_WINDOWS") == "1":
+        if os.name != "nt" or C.sizeof(C.c_void_p) != 8:
+            raise RuntimeError("Windows DLL tests require native 64-bit Windows Python")
     unittest.main()
