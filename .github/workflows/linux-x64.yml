@@ -434,6 +434,7 @@ jobs:
             cmake \
             ninja-build \
             nasm \
+            ccache \
             libsqlite3-dev \
             pkg-config \
             wget \
@@ -476,9 +477,27 @@ jobs:
           clang-18 --version | head -1
           cmake --version | head -1
           ninja --version
+          ccache --version | head -1
           echo "=========================="
 
+      - name: Check for cached SDL3 install
+        id: sdl3-check
+        run: |
+          set -euo pipefail
+          SDL_VERSION="3.4.14"
+          MARKER="/usr/local/share/.rommulus-sdl3-version"
+          # /usr/local persists across runs on this self-hosted runner, so a
+          # matching prior install can be reused instead of rebuilt from source.
+          if [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "${SDL_VERSION}-clang18" ] && [ -f /usr/local/lib/libSDL3.a ]; then
+            echo "✓ SDL3 ${SDL_VERSION} already installed at /usr/local — skipping rebuild."
+            echo "cached=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "SDL3 ${SDL_VERSION} not found (or version mismatch) at /usr/local — will build from source."
+            echo "cached=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and install SDL3 from source (release-3.4.14)
+        if: steps.sdl3-check.outputs.cached != 'true'
         run: |
           set -euo pipefail
           SDL_VERSION="3.4.14"
@@ -492,9 +511,11 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr/local \
             -DSDL_SHARED=OFF \
-            -DSDL_STATIC=ON
+            -DSDL_STATIC=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
           cmake --build build/sdl -j"$(( $(nproc) / 2 ))"
           sudo cmake --install build/sdl
+          echo "${SDL_VERSION}-clang18" | sudo tee /usr/local/share/.rommulus-sdl3-version >/dev/null
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
           echo "SDL3 installed to /usr/local."
@@ -508,6 +529,8 @@ jobs:
           cmake -S native/player -B build/player \
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build player
@@ -516,6 +539,7 @@ jobs:
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
           cmake --build build/player -j"$(( $(nproc) / 2 ))"
+          ccache --show-stats || true
 
       - name: Verify rommulus_player binary exists
         run: |
