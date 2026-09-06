@@ -21,7 +21,7 @@ class LinuxControllerEnvironmentPolicy(
     environmentOverride: ControllerEnvironment? = null,
 ) : ControllerEnvironmentPolicy {
 
-    private val logger: Logger = DesktopLogger.get()
+    private val logger: Logger by lazy { DesktopLogger.get() }
 
     /**
      * The `LinuxEnvironmentPlugin` is the live environment. [JInputControllerSource.ensureJinputNatives]

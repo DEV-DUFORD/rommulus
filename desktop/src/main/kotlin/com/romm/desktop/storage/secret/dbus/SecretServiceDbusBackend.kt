@@ -57,7 +57,7 @@ class SecretServiceDbusBackend(
     }
 
     // JUL via DesktopLogger (token-redacting formatter). Never log secret/token contents here.
-    private val logger: Logger = DesktopLogger.get()
+    private val logger: Logger by lazy { DesktopLogger.get() }
 
     /** Lazily connect to the session bus (reads $DBUS_SESSION_BUS_ADDRESS); null if it fails. */
     private val connection: DBusConnection? by lazy {

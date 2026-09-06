@@ -22,7 +22,7 @@ class DefaultControllerEnvironmentPolicy(
     environmentOverride: ControllerEnvironment? = null,
 ) : ControllerEnvironmentPolicy {
 
-    private val logger: Logger = DesktopLogger.get()
+    private val logger: Logger by lazy { DesktopLogger.get() }
 
     /**
      * The injected [environmentOverride] (a test fake) is used as-is so no JInput native is loaded;
