@@ -18,15 +18,15 @@ every Windows build target is a separate `<core>-windows.cmake` fragment — non
 
 | Core | Tier | Windows build target | Gate status | Enabled |
 | --- | --- | --- | --- | --- |
-| `test_core` | 0 | `native/player/CMakeLists.txt` (WIN32 block, `add_library(test_core SHARED …)`, `PREFIX ""` → `test_core.dll`) | IMPLEMENTED — Win32 player foundation + `test_core.dll` complete; local MinGW-w64 UCRT64 PE32+ cross-build and local macOS synthetic-core E2E passed; **awaiting first live `windows-2022` run** (CI jobs 3–5) | no |
-| `gambatte` | 1 | `native/cmake/cores/gambatte-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
-| `fceumm` | 1 | `native/cmake/cores/fceumm-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
-| `prosystem` | 1 | `native/cmake/cores/prosystem-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
+| `test_core` | 0 | `native/player/CMakeLists.txt` (WIN32 block, `add_library(test_core SHARED …)`, `PREFIX ""` → `test_core.dll`) | IMPLEMENTED — Win32 player foundation, PE/import audit, load smoke, and hosted synthetic lifecycle E2E passed | no |
+| `gambatte` | 1 | `native/cmake/cores/gambatte-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and SRAM lifecycle gates passed; physical Win10/11 qualification pending | no |
+| `fceumm` | 1 | `native/cmake/cores/fceumm-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and SRAM lifecycle gates passed; physical Win10/11 qualification pending | no |
+| `prosystem` | 1 | `native/cmake/cores/prosystem-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and no-save lifecycle gates passed; physical Win10/11 qualification pending | no |
 | `handy` | 1 | — (no `handy-windows.cmake`) | NOT STARTED | no |
 | `mednafen_ngp` | 1 | — (no `mednafen_ngp-windows.cmake`) | NOT STARTED | no |
-| `mednafen_wswan` | 1 | `native/cmake/cores/mednafen_wswan-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows build, exact 22-export allowlist, and recursive PE32+/import-closure audit wired into CI (job 4); local MinGW UCRT64 cross-build and local macOS real-core E2E passed; **Windows-hosted run and physical Win10/11 qualification pending** | no |
+| `mednafen_wswan` | 1 | `native/cmake/cores/mednafen_wswan-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and SRAM lifecycle gates passed; physical Win10/11 qualification pending | no |
 | `stella` | 1 | `native/cmake/cores/stella-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 22-export boundary, no-persistent-save lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
-| `beetle_pce_fast` | 1 | `native/cmake/cores/beetle_pce_fast-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — Windows PE32+ cross-build, exact 22-export allowlist, deterministic original HuCard, and local BRAM lifecycle E2E passed; hosted `windows-2022` and physical Win10/11 qualification pending | no |
+| `beetle_pce_fast` | 1 | `native/cmake/cores/beetle_pce_fast-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted PE/import/export/load and BRAM lifecycle gates passed; physical Win10/11 qualification pending | no |
 | `mgba` | 1 | `native/cmake/cores/mgba-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 25-export boundary, 32 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `snes9x` | 1 | `native/cmake/cores/snes9x-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 22-export boundary, 2 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
 | `genesis_plus_gx` | 1 | `native/cmake/cores/genesis_plus_gx-windows.cmake` (included by `native/player/CMakeLists.txt`, WIN32 block only) | CANDIDATE — hosted build, PE/import closure, exact 26-export boundary, 64 KiB SRAM lifecycle E2E, and load smoke passed; physical Win10/11 qualification remains required | no |
@@ -89,9 +89,9 @@ before any `CoreManifest.supportedAbis` enablement.
 
 ## Platform foundation and desktop shell (Phase 1)
 
-Implemented in this working tree; local macOS validation passed (desktop test suite green, with
-host-gated Windows integration tests skipped off-Windows). The **first live `windows-2022` run is
-pending** — CI jobs 1–2 of `.github/workflows/windows-x64.yml` are the gate:
+Implemented and exercised on pinned `windows-2022`; final workflow
+[33999863049](https://github.com/DEV-DUFORD/rommulus/actions/runs/33999863049)
+passed the shared and desktop jobs, including host-gated Windows integration tests:
 
 - Windows Known Folder paths (`desktop/src/main/kotlin/com/romm/desktop/storage/paths/WindowsAppPaths.kt`,
   JNA `SHGetKnownFolderPath` seam in `JnaWindowsKnownFolderResolver.kt`);
@@ -118,9 +118,10 @@ source/link split in `native/player/CMakeLists.txt`; the toolchain contract
 it exists for host/player protocol and lifecycle validation only, never for game content. Local
 evidence: MinGW-w64 UCRT64 cross-build of `rommulus-player.exe` + `test_core.dll` as PE32+
 x86_64, and a full local macOS synthetic-core E2E via the host-portable harness
-`native/player/tests/e2e/player_e2e.py`. **Awaiting first live `windows-2022` run** (CI jobs 3–5:
-engine CTest suite, SDL3 software-only player build + recursive PE/import audit, staged-artifact
-E2E).
+`native/player/tests/e2e/player_e2e.py`. Workflow
+[33999863049](https://github.com/DEV-DUFORD/rommulus/actions/runs/33999863049)
+passed the engine CTest suite, SDL3 software-only player/candidate build,
+recursive PE/import audits, load smoke, and staged-artifact E2E.
 
 ## gambatte — Windows x86_64 candidate build identity
 
@@ -136,7 +137,7 @@ pin in `CoreManifest.kt`):
 | Windows fragment | `native/cmake/cores/gambatte-windows.cmake` (WIN32 block of `native/player/CMakeLists.txt` only) |
 | Export control | `native/cmake/cores/gambatte-windows.def` — exactly the 22 `retro_*` exports the player's `CoreLibrary` resolves; no `romm_*` save extensions (this core defines none at this pin) |
 | Compiler / build | MinGW-w64 UCRT64 (MSYS2) + CMake + Ninja, `-O2 -DNDEBUG`, `-Wl,--no-undefined`; canonical output name `gambatte_core.dll` (`PREFIX ""` — never `libgambatte_core.dll`) |
-| Binary hash | **NOT RECORDED** — the SHA-256 of `gambatte_core.dll` is written only into the CI artifact's `import-audit.txt` by the pinned `windows-2022` run (job 4); no binary hash is committed here until that run produces it |
+| Binary hash | `f9810c07fbc1862ce3c12dc813dd095ead49f0042dd0b2d8f7c71f88276f9a87` (hosted run `33999863049`) |
 | Supported systems | `gb`, `gbc` |
 | Supported extensions | `.gb`, `.gbc` |
 | Required firmware | none |
@@ -157,9 +158,10 @@ launch path.
   `native/player/tests/e2e/player_e2e.py` (offscreen video, software render, dummy audio):
   bounded-frame runs, result schema, SRAM save/restore/adoption across relaunch, repeated load,
   force-kill lock recovery.
-- **Windows-hosted — pending:** the first live run of `.github/workflows/windows-x64.yml`
-  (jobs 4–5) on the pinned `windows-2022` runner has not happened yet; that run is the
-  target-runtime gate and will record the candidate DLL's SHA-256 in `import-audit.txt`.
+- **Windows-hosted — passed:** final workflow
+  [33999863049](https://github.com/DEV-DUFORD/rommulus/actions/runs/33999863049)
+  passed PE/import/export audits, 50-cycle load smoke, and all Gambatte
+  lifecycle scenarios.
 - **Physical Windows 10/11 — pending:** per-core gate `plans/WINDOWS_IMPL.md` §6.4 (15 criteria,
   including item 15, physical qualification) is not complete. Hosted CI must not be treated as
   physical qualification.
@@ -187,7 +189,7 @@ pin in `CoreManifest.kt`):
 | Windows fragment | `native/cmake/cores/fceumm-windows.cmake` (WIN32 block of `native/player/CMakeLists.txt` only) |
 | Export control | `native/cmake/cores/fceumm-windows.def` — exactly the 22 `retro_*` exports the player's `CoreLibrary` resolves; no `romm_*` save extensions (this core defines none at this pin); the three upstream extras (`retro_cheat_reset`, `retro_cheat_set`, `retro_load_game_special`) stay local to the DLL |
 | Compiler / build | MinGW-w64 UCRT64 (MSYS2) + CMake + Ninja, `-O2 -DNDEBUG`, `-Wl,--no-undefined`; canonical output name `fceumm_core.dll` (`PREFIX ""` — never `libfceumm_core.dll`) |
-| Binary hash | **NOT RECORDED** — the SHA-256 of `fceumm_core.dll` is written only into the CI artifact's `import-audit.txt` by the pinned `windows-2022` run (job 4); no binary hash is committed here until that run produces it |
+| Binary hash | `1853cf6ac3a42a5be591634df4c5f5d63b9fb55d5270268fc7bea1533008d63b` (hosted run `33999863049`) |
 | Supported systems | `nes`, `famicom` |
 | Supported extensions | `.nes`, `.unf` |
 | Required firmware | none (cartridge-only scope; FDS is excluded from the vendored build) |
@@ -211,9 +213,10 @@ launch path.
   save/restore/adoption across relaunch, repeated load, force-kill lock recovery — all four FCEUmm
   qualification scenarios green (report `build/reports/fceumm-e2e-local/e2e-report.json`,
   `passed: true` on macOS arm64).
-- **Windows-hosted — pending:** the first live run of `.github/workflows/windows-x64.yml`
-  (jobs 4–5) on the pinned `windows-2022` runner has not happened yet; that run is the
-  target-runtime gate and will record the candidate DLL's SHA-256 in `import-audit.txt`.
+- **Windows-hosted — passed:** final workflow
+  [33999863049](https://github.com/DEV-DUFORD/rommulus/actions/runs/33999863049)
+  passed PE/import/export audits, 50-cycle load smoke, and all FCEUmm
+  lifecycle scenarios.
 - **Physical Windows 10/11 — pending:** per-core gate `plans/WINDOWS_IMPL.md` §6.4 (15 criteria,
   including item 15, physical qualification) is not complete. Hosted CI must not be treated as
   physical qualification.
@@ -243,7 +246,7 @@ master HEAD of `libretro/prosystem-libretro`):
 | Windows fragment | `native/cmake/cores/prosystem-windows.cmake` (WIN32 block of `native/player/CMakeLists.txt` only) |
 | Export control | `native/cmake/cores/prosystem-windows.def` — exactly the 22 `retro_*` exports the player's `CoreLibrary` resolves; no `romm_*` save extensions (this core defines none at this pin); the three upstream extras (`retro_cheat_reset`, `retro_cheat_set`, `retro_load_game_special`) stay local to the DLL |
 | Compiler / build | MinGW-w64 UCRT64 (MSYS2) + CMake + Ninja, `-O2 -DNDEBUG`, `-Wl,--no-undefined`; canonical output name `prosystem_core.dll` (`PREFIX ""` — never `libprosystem_core.dll`) |
-| Binary hash | **NOT RECORDED** — the SHA-256 of `prosystem_core.dll` is written only into the CI artifact's `import-audit.txt` by the pinned `windows-2022` run (job 4); no binary hash is committed here until that run produces it |
+| Binary hash | `185af5850b4e3ce4f4241b7389ead796ffa62113aec4ad22cff654e988a180cc` (hosted run `33999863049`) |
 | Supported systems | `atari7800` |
 | Supported extensions | `.a78` |
 | Required firmware | none (the optional BIOS is only consulted when present in the system directory; the E2E ROM is BIOS-free) |
@@ -268,9 +271,10 @@ launch path.
   launch, repeated load, and force-kill lock recovery — all three ProSystem qualification
   scenarios green alongside every test_core/Gambatte/FCEUmm scenario (report
   `build/reports/prosystem-e2e-local/e2e-report.json`, `passed: true` on macOS arm64).
-- **Windows-hosted — pending:** the first live run of `.github/workflows/windows-x64.yml`
-  (jobs 4–5) on the pinned `windows-2022` runner has not happened yet; that run is the
-  target-runtime gate and will record the candidate DLL's SHA-256 in `import-audit.txt`.
+- **Windows-hosted — passed:** final workflow
+  [33999863049](https://github.com/DEV-DUFORD/rommulus/actions/runs/33999863049)
+  passed PE/import/export audits, 50-cycle load smoke, and all ProSystem
+  no-save lifecycle scenarios.
 - **Physical Windows 10/11 — pending:** per-core gate `plans/WINDOWS_IMPL.md` §6.4 (15 criteria,
   including item 15, physical qualification) is not complete. Hosted CI must not be treated as
   physical qualification.
@@ -303,7 +307,7 @@ of `libretro/beetle-wswan-libretro`):
 | Windows fragment | `native/cmake/cores/mednafen_wswan-windows.cmake` (WIN32 block of `native/player/CMakeLists.txt` only) |
 | Export control | `native/cmake/cores/mednafen_wswan-windows.def` — exactly the 22 `retro_*` exports the player's `CoreLibrary` resolves; no `romm_*` save extensions (this core defines none at this pin) |
 | Compiler / build | MinGW-w64 UCRT64 (MSYS2) + CMake + Ninja, `-O2 -DNDEBUG`, `-Wl,--no-undefined`; canonical output name `mednafen_wswan_core.dll` (`PREFIX ""` — never `libmednafen_wswan_core.dll`) |
-| Binary hash | **NOT RECORDED** — the SHA-256 of `mednafen_wswan_core.dll` is written only into the CI artifact's `import-audit.txt` by the pinned `windows-2022` run (job 4); no binary hash is committed here until that run produces it |
+| Binary hash | `19712e75c3290368adf75324f011413e72ad17fda683c4a9323c1aa219a8c7b5` (hosted run `33999863049`) |
 | Supported systems | `wonderSwan`, `wonderSwanColor` |
 | Supported extensions | `.ws`, `.wsc` |
 | Required firmware | none (the E2E ROM is BIOS-free — the NEC V30's reset fetch at physical `0xFFFF0` lands in cart ROM) |
@@ -325,9 +329,10 @@ entry, and no launch path.
   generated ROM: fresh loads of 1/2/10/60 frames and restore chains of 1+2, 2+10, and 10+60
   frames all match the exact counter oracle — proving both the deterministic per-frame iteration
   count and SRAM persistence across power-ons (the restored counter keeps counting).
-- **Windows-hosted — pending:** the first live run of `.github/workflows/windows-x64.yml`
-  (jobs 4–5) on the pinned `windows-2022` runner has not happened yet; that run is the
-  target-runtime gate and will record the candidate DLL's SHA-256 in `import-audit.txt`.
+- **Windows-hosted — passed:** final workflow
+  [33999863049](https://github.com/DEV-DUFORD/rommulus/actions/runs/33999863049)
+  passed PE/import/export audits, 50-cycle load smoke, and all WonderSwan
+  lifecycle scenarios.
 - **Physical Windows 10/11 — pending:** per-core gate `plans/WINDOWS_IMPL.md` §6.4 (15 criteria,
   including item 15, physical qualification) is not complete. Hosted CI must not be treated as
   physical qualification.
@@ -389,9 +394,10 @@ VBlank events into BRAM offsets 8–10. The lifecycle gate covers checkpoint cre
 restore into fresh processes, repeated load, and force-kill lock recovery.
 **SHA-256: `db6dce97515cb1730e927358dcbffb55acbadaecc9e320efdc07499d262b342f`.**
 
-## Temporary software-only boundary (pre-ANGLE) — not yet qualified
+## Windows ANGLE/GLES3 graphics frontend spike
 
-The Windows player currently builds under the `windows-x86_64-software-only` preset
+The production candidate bundle continues to use the
+`windows-x86_64-software-only` preset
 (`ROMM_WIN32_SOFTWARE_ONLY=ON`; the option defaults OFF globally and is meaningful only for
 WIN32). This is a **temporary, fail-closed boundary**: the GLES3/ANGLE hardware-context source,
 import libraries, and include directory are excluded, a no-op `SdlHardwareContext` is compiled
@@ -401,12 +407,57 @@ for every known hardware-rendering core and every Libretro `SET_HW_RENDER` /
 remains required; software cores such as `test_core`, `gambatte`, `fceumm`, `prosystem`,
 `mednafen_wswan`, and `beetle_pce_fast` keep full functionality.
 
-The pinned ANGLE distribution is **not yet built, staged, or qualified** in Windows CI — the
-workflow explicitly does not yet build the player with the pinned ANGLE distribution — so the
-Windows hardware-rendering path is unqualified, and the full `windows-x86_64` preset (which
-requires the pinned ANGLE EGL/GLES libraries at configure time) is not exercised by CI yet. No
-hardware-rendering core may be advertised or enabled on Windows until ANGLE (or a deliberate
-successor) passes the per-core gate.
+The frontend-only ANGLE spike passed hosted Windows CI in workflow
+[33999863049](https://github.com/DEV-DUFORD/rommulus/actions/runs/33999863049).
+That run built the full `windows-x86_64` player, staged SDL3 plus ANGLE under a
+sanitized loader `PATH`, passed recursive PE32+/import-closure and SHA-256
+audits, and ran a hidden-window probe through SDL's EGL path. The probe
+created an OpenGL ES 3.0 context, compiled GLSL ES 3.00 shaders, validated an
+FBO, drew and read back a deterministic pixel, and blitted to the default
+framebuffer.
+
+Hosted runtime identity:
+
+- ANGLE `2.1.1`, git revision
+  `a96fca8d5ee2ca61e8de419e38cd577579281c9e`;
+- `OpenGL ES 3.0` / `OpenGL ES GLSL ES 3.00`;
+- vendor `Google Inc. (Microsoft)`;
+- renderer `ANGLE (Microsoft, Microsoft Basic Render Driver (0x0000008C)
+  Direct3D11 vs_5_0 ps_5_0, D3D11-10.0.20348.5386)`.
+
+Hosted artifact SHA-256 values:
+
+| File | SHA-256 |
+| --- | --- |
+| `SDL3.dll` | `9ee5ad00e3e80a4bb2b701540888bf2d3a531223544b04a8a67eca389d84b8c8` |
+| `libEGL.dll` | `93bad311fa0747c910f832c0a93960d8735d9b8c7f90cc437d584a46f2d35017` |
+| `libGLESv2.dll` | `0b172ed570ebf6d82a57807b44619dc4102ce0373449bbab1645cc8ffad873f0` |
+| `libwinpthread-1.dll` | `92e996ab2cb61f5106b8b67a4dc23dd2959958cdb3afe6d2f9c6fc3afef85258` |
+| `rommulus-player.exe` | `411fcfe39f2ced221b5a35bd2c769717664029a9663181b792471179b00acbb4` |
+| `angle_gles3_smoke.exe` | `9fb92a1c2e5ab29cfa12c9023b7d629ce494fcee00b344d228502dc73d9ef3cb` |
+
+The spike resolves the frontend direction, not any hardware core's support
+gate:
+
+- Dolphin's pinned Libretro renderer has GLES 3.0/3.1/3.2 paths, so the
+  Windows player retains the GLES3 contract for a later Dolphin candidate
+  qualification.
+- Mupen64Plus-Next's current GLideN64 integration needs an explicit GLES
+  build. Its existing desktop-OpenGL/WGL build cannot be relabeled as GLES;
+  use a separately configured GLideN64 GLES candidate or a deliberate
+  desktop-OpenGL player variant.
+- The pinned lrps2 integration negotiates GLES3 but leaves its context
+  version unset, selects the desktop GLAD loader, and requires desktop
+  `GL_ARB_shading_language_420pack`. It therefore cannot use this frontend
+  reliably without core-side profile/loader work; a separate desktop
+  OpenGL path or deliberate D3D/Vulkan frontend extension remains necessary.
+
+The hosted runner covers only Microsoft's Basic **Render** Driver through
+ANGLE's D3D11 backend. Intel, AMD, NVIDIA, hybrid-GPU, physical Microsoft
+Basic Display Driver, Remote Desktop, physical Windows 10/11, interactive
+graphics/audio, sleep/resume, and soak evidence remain pending. No Tier 2/3
+core was built or advertised, and no production manifest may add
+`windows-x86_64` from this frontend-only result.
 
 ## Build inputs (pinned)
 
@@ -417,6 +468,11 @@ successor) passes the per-core gate.
 - SDL3: pinned `release-3.4.16` source archive, SHA-256
   `7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68` (verified before
   extraction; built shared-only into a job-local prefix).
+- ANGLE: `XCSoar/angle-libs` release `a96fca8`, built from ANGLE revision
+  `a96fca8d5ee2ca61e8de419e38cd577579281c9e`; Windows x64 archive SHA-256
+  `82723e19795d683e6af2afadf39fb00d248d6a5a2cb2af9faeebc017a7f4f5d8`.
+  CI derives MinGW import libraries from the verified DLL export tables;
+  the package's `.lib` files are MSVC-format and are not used by UCRT64.
 - JDK: Temurin 17 (JVM jobs only).
 - Artifacts are **unsigned by design** at this stage; signing lands with the packaging lane
   (`plans/WINDOWS_IMPL.md` §7.3).

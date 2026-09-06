@@ -468,3 +468,46 @@ This session ended after the FCEUmm candidate's local qualification passed. Cont
   `CoreManifest.supportedAbis`; physical Windows 10/11, controller,
   interactive audio/video, sleep/resume, and soak qualification remain
   required before enablement.
+
+## Windows ANGLE/GLES3 graphics spike (hosted baseline complete)
+
+- Added a full Win32 hardware-context build using SDL3's EGL path and pinned
+  `XCSoar/angle-libs` release `a96fca8` (ANGLE revision
+  `a96fca8d5ee2ca61e8de419e38cd577579281c9e`, archive SHA-256
+  `82723e19795d683e6af2afadf39fb00d248d6a5a2cb2af9faeebc017a7f4f5d8`).
+  The UCRT64 job derives MinGW import libraries from the verified PE export
+  tables rather than consuming the distribution's MSVC-format `.lib` files.
+- The dedicated hidden-window probe forces SDL through EGL/ANGLE, verifies
+  the ES profile and ANGLE identity, compiles GLSL ES 3.00 shaders, validates
+  an FBO, checks a deterministic rendered pixel, and blits to the default
+  framebuffer. It runs from the staged closure under a sanitized `PATH`.
+- Final workflow run `33999863049` passed all jobs:
+  https://github.com/DEV-DUFORD/rommulus/actions/runs/33999863049
+  The runtime reported OpenGL ES 3.0 / GLSL ES 3.00 on ANGLE 2.1.1 using
+  `Microsoft Basic Render Driver` through D3D11.
+- Final hosted SHA-256 values:
+  `libEGL.dll` `93bad311fa0747c910f832c0a93960d8735d9b8c7f90cc437d584a46f2d35017`;
+  `libGLESv2.dll` `0b172ed570ebf6d82a57807b44619dc4102ce0373449bbab1645cc8ffad873f0`;
+  `SDL3.dll` `9ee5ad00e3e80a4bb2b701540888bf2d3a531223544b04a8a67eca389d84b8c8`;
+  `libwinpthread-1.dll` `92e996ab2cb61f5106b8b67a4dc23dd2959958cdb3afe6d2f9c6fc3afef85258`;
+  `rommulus-player.exe` `411fcfe39f2ced221b5a35bd2c769717664029a9663181b792471179b00acbb4`;
+  `angle_gles3_smoke.exe` `9fb92a1c2e5ab29cfa12c9023b7d629ce494fcee00b344d228502dc73d9ef3cb`.
+- Renderer decision: retain the GLES3 Windows frontend for later Dolphin
+  qualification; require an explicit GLideN64 GLES build (or a separate
+  desktop-OpenGL player variant) for Mupen64Plus-Next; do not attempt lrps2
+  on this frontend until its desktop loader/profile assumptions are changed,
+  otherwise use a deliberate desktop OpenGL or D3D/Vulkan extension.
+- The ANGLE-enabled SDL build exposed a pre-existing E2E race: an SDL
+  focus-loss event could checkpoint a force-kill victim's `savePath`, causing
+  a supposedly fresh relaunch to restore victim state. The harness now
+  removes only that known per-session checkpoint after confirming the exact
+  victim process has terminated, preserving the lock-release gate and fresh
+  save oracle. It also requires Genesis Plus GX and mGBA relaunch result JSON
+  instead of permitting false-positive success.
+- Independent read-only audit found the missing-result false-positive and it
+  was corrected before final run `33999863049`.
+- This is frontend-only hosted evidence. Intel, AMD, NVIDIA, hybrid GPU,
+  physical Microsoft Basic Display Driver, Remote Desktop, physical Windows
+  10/11, interactive graphics/audio, sleep/resume, and soak qualification
+  remain pending. No Tier 2/3 candidate was started and every production
+  `CoreManifest.supportedAbis` entry remains free of `windows-x86_64`.
