@@ -7,6 +7,100 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+function New-WindowsIcon {
+    param(
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    Add-Type -AssemblyName System.Drawing
+    $sizes = @(16, 24, 32, 48, 64, 128, 256)
+    $images = [System.Collections.Generic.List[byte[]]]::new()
+    foreach ($size in $sizes) {
+        $bitmap = [System.Drawing.Bitmap]::new(
+            $size,
+            $size,
+            [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+        )
+        try {
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            try {
+                $graphics.CompositingQuality =
+                    [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+                $graphics.InterpolationMode =
+                    [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $graphics.PixelOffsetMode =
+                    [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                $graphics.SmoothingMode =
+                    [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+                $graphics.ScaleTransform($size / 108.0, $size / 108.0)
+                $background = [System.Drawing.SolidBrush]::new(
+                    [System.Drawing.ColorTranslator]::FromHtml("#1a1a2e")
+                )
+                $accent = [System.Drawing.SolidBrush]::new(
+                    [System.Drawing.ColorTranslator]::FromHtml("#e94560")
+                )
+                $foreground = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
+                try {
+                    # Keep this geometry aligned with desktop/src/main/resources/icons/rommulus_icon.svg.
+                    $graphics.FillRectangle($background, 0, 0, 108, 108)
+                    $graphics.FillRectangle($accent, 30, 30, 48, 48)
+                    $graphics.FillPolygon(
+                        $foreground,
+                        [System.Drawing.PointF[]]@(
+                            [System.Drawing.PointF]::new(42, 48),
+                            [System.Drawing.PointF]::new(60, 38),
+                            [System.Drawing.PointF]::new(78, 48),
+                            [System.Drawing.PointF]::new(60, 58)
+                        )
+                    )
+                } finally {
+                    $background.Dispose()
+                    $accent.Dispose()
+                    $foreground.Dispose()
+                }
+            } finally {
+                $graphics.Dispose()
+            }
+            $stream = [System.IO.MemoryStream]::new()
+            try {
+                $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+                $images.Add($stream.ToArray())
+            } finally {
+                $stream.Dispose()
+            }
+        } finally {
+            $bitmap.Dispose()
+        }
+    }
+
+    $file = [System.IO.File]::Create($Destination)
+    $writer = [System.IO.BinaryWriter]::new($file)
+    try {
+        $writer.Write([uint16]0)
+        $writer.Write([uint16]1)
+        $writer.Write([uint16]$images.Count)
+        $offset = 6 + (16 * $images.Count)
+        for ($index = 0; $index -lt $images.Count; $index++) {
+            $size = $sizes[$index]
+            $writer.Write([byte]$(if ($size -eq 256) { 0 } else { $size }))
+            $writer.Write([byte]$(if ($size -eq 256) { 0 } else { $size }))
+            $writer.Write([byte]0)
+            $writer.Write([byte]0)
+            $writer.Write([uint16]1)
+            $writer.Write([uint16]32)
+            $writer.Write([uint32]$images[$index].Length)
+            $writer.Write([uint32]$offset)
+            $offset += $images[$index].Length
+        }
+        foreach ($image in $images) {
+            $writer.Write($image)
+        }
+    } finally {
+        $writer.Dispose()
+    }
+}
+
 $repo = Split-Path $PSScriptRoot -Parent
 $native = (Resolve-Path $NativeDir).Path
 $nativeAudit = Get-Content -Raw (Join-Path $native "native-audit.json") | ConvertFrom-Json
@@ -22,6 +116,9 @@ foreach ($entry in $nativeAudit.PSObject.Properties) {
 $output = [System.IO.Path]::GetFullPath($OutputDir)
 $jpackage = Join-Path $env:JAVA_HOME "bin/jpackage.exe"
 if (-not (Test-Path $jpackage)) { throw "JDK 17 jpackage.exe is required." }
+$icon = Join-Path $repo "desktop/build/packaging/rommulus.ico"
+New-Item -ItemType Directory -Force -Path (Split-Path $icon -Parent) | Out-Null
+New-WindowsIcon -Destination $icon
 $appJar = Join-Path $repo "desktop/build/libs/desktop.jar"
 $libs = Join-Path $repo "desktop/build/runtime-libs"
 if (-not (Test-Path $appJar)) { throw "Run :desktop:jar :desktop:copyRuntimeClasspath first." }
@@ -37,7 +134,7 @@ try {
     & $jpackage --type app-image --name RomMulus --app-version $Version `
         --vendor DEV-DUFORD --description "RomMulus game library and emulator" `
         --input $inputDir --main-jar desktop.jar --main-class com.romm.desktop.MainKt `
-        --add-modules ALL-MODULE-PATH --dest $output
+        --add-modules ALL-MODULE-PATH --icon $icon --dest $output
     if ($LASTEXITCODE -ne 0) { throw "jpackage app-image failed ($LASTEXITCODE)" }
 } finally {
     Remove-Item -LiteralPath $inputDir -Recurse -Force
@@ -87,16 +184,23 @@ SDL/ANGLE identities and licenses are included in licenses/.
 This development build is unsigned; no ROMs or BIOS firmware are bundled.
 "@ | Set-Content -Encoding UTF8 (Join-Path $licenses "SOURCE.txt")
 
-$checksums = Get-ChildItem $image -File -Recurse | Sort-Object FullName | ForEach-Object {
-    $relative = $_.FullName.Substring($image.Length + 1).Replace("\", "/")
-    "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())  $relative"
-}
+# jpackage consumes this app-image marker and does not install it with an EXE package.
+$checksums = Get-ChildItem $image -File -Recurse |
+    Where-Object { $_.FullName -ne (Join-Path $image "app/.jpackage.xml") } |
+    Sort-Object FullName |
+    ForEach-Object {
+        $relative = $_.FullName.Substring($image.Length + 1).Replace("\", "/")
+        "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())  $relative"
+    }
 $checksums | Set-Content -Encoding ASCII (Join-Path $image "PACKAGE.sha256")
+if (Select-String -LiteralPath (Join-Path $image "PACKAGE.sha256") -SimpleMatch "app/.jpackage.xml") {
+    throw "PACKAGE.sha256 must not include jpackage installer metadata."
+}
 $zip = Join-Path $output "rommulus-$Version-windows-x86_64.zip"
 Compress-Archive -Path $image -DestinationPath $zip -CompressionLevel Optimal
 if (-not $SkipInstaller) {
     & $jpackage --type exe --name RomMulus --app-version $Version --vendor DEV-DUFORD `
-        --app-image $image --dest $output --win-per-user-install --win-dir-chooser `
+        --app-image $image --icon $icon --dest $output --win-per-user-install --win-dir-chooser `
         --win-shortcut --win-menu --win-upgrade-uuid "a89fbccd-8263-4716-bbbc-fb64e49ed30c"
     if ($LASTEXITCODE -ne 0) { throw "jpackage EXE installer failed ($LASTEXITCODE)" }
 }
