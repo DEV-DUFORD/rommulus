@@ -2011,6 +2011,7 @@ class DesktopAppCoordinator(
             originProvider = { settingsAdapter.currentProfile().origin },
             firmwareDir = paths.firmwareDir(),
             platformSlug = platformSlug,
+            securityPolicy = securityPolicy,
         )
 
     /** Whether [platformSlug] is a BIOS-required console (SEGA CD / PlayStation / PlayStation 2). */

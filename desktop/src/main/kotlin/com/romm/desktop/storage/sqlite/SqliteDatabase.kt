@@ -182,7 +182,7 @@ class SqliteDatabase private constructor(
                 if (Files.exists(dbPath)) {
                     securityPolicy.hardenFile(dbPath, PathPermissionProfile.USER_ONLY_FILE, FileSensitivity.SENSITIVE)
                 }
-                val appliedVersion = SqliteMigrationRunner(dbPath).apply(connection, migrations)
+                val appliedVersion = SqliteMigrationRunner(dbPath, securityPolicy).apply(connection, migrations)
                 SqliteDatabase(dbPath, connection, securityPolicy).also {
                     it._schemaVersion = appliedVersion
                     databaseOpenedHook?.invoke(it)
