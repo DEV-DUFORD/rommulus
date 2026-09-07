@@ -145,6 +145,15 @@ class SqliteDatabase private constructor(
         fun open(path: Path): Result<SqliteDatabase> = open(path, discoverClasspathMigrations())
 
         /**
+         * Opens [path] with the classpath migrations and an explicit [securityPolicy] (startup
+         * seam): production callers pass the SAME host-selected policy the rest of their adapter
+         * bundle was built from, so the database directory/file are hardened through the real
+         * ACL applier instead of silently falling back to [FileSecurityPolicies.default].
+         */
+        fun open(path: Path, securityPolicy: FileSecurityPolicy): Result<SqliteDatabase> =
+            open(path, discoverClasspathMigrations(), securityPolicy)
+
+        /**
          * Opens [path] with an explicit migration list (test seam; production uses the classpath).
          * On failure the prior DB file is restored from the pre-migration backup and the
          * connection is closed; callers must treat a failed result as "refuse writable startup".

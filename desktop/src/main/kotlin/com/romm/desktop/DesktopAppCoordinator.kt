@@ -91,6 +91,8 @@ import com.romm.desktop.platform.HostOs
 import com.romm.desktop.platform.LinuxNativeArtifactLayout
 import com.romm.desktop.platform.NativeArtifactLayout
 import com.romm.desktop.platform.WindowsNativeBundle
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
 import com.romm.desktop.settings.DesktopSettingsAdapter
 import com.romm.desktop.storage.DesktopClientTokenStorage
 import com.romm.desktop.storage.DesktopSessionStorage
@@ -377,6 +379,16 @@ class DesktopAppCoordinator(
     val virtualKeyboardLauncher: VirtualKeyboardLauncher =
         VirtualKeyboardLauncher.forHostOs(hostOs),
     /**
+     * The host-selected [FileSecurityPolicy] used to harden sensitive on-disk state (currently
+     * the sqlite database directory/file). Defaults to [FileSecurityPolicies.default] so
+     * existing tests (which install a fake through [FileSecurityPolicies.testPolicyOverride])
+     * are unaffected; production startup MUST pass the SAME policy instance it built the rest of
+     * this bundle's [paths] from (`adapters.securityPolicy` in `Main.kt`) so Windows sensitive
+     * paths are hardened through the real Win32-backed [com.romm.desktop.platform.security.JnaWindowsAclApplier]
+     * instead of falling back to the fail-closed [com.romm.desktop.platform.security.UnconfiguredWindowsAclApplier].
+     */
+    val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
+    /**
      * Single-instance lock (plans/LINUX_X64.md §10.4). Production startup builds exactly ONE
      * [FileLockAppInstanceLock] and injects it here; when absent (tests) the coordinator builds
      * its own over [paths].stateDir, preserving the historical behavior.
@@ -414,7 +426,7 @@ class DesktopAppCoordinator(
         JsonContentIndexStore(paths.cacheDir.resolve(JsonContentIndexStore.FILE_NAME))
     }
 
-    val database: SqliteDatabase = SqliteDatabase.open(paths.databaseDir().resolve(DB_FILE_NAME))
+    val database: SqliteDatabase = SqliteDatabase.open(paths.databaseDir().resolve(DB_FILE_NAME), securityPolicy)
         .getOrElse { throw IllegalStateException("Failed to open desktop database at ${paths.databaseDir()}", it) }
 
     private val sessionRecordStore = SqliteSessionRecordStore(database)

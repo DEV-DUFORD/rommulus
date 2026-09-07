@@ -91,6 +91,10 @@ fun main(args: Array<String>) {
             hostOs = adapters.hostOs,
             controllerEnvironmentPolicy = adapters.controllerEnvironmentPolicy,
             virtualKeyboardLauncher = adapters.virtualKeyboardLauncher,
+            // Same policy instance the rest of `adapters` (paths, layout) was built from, so the
+            // sqlite database is hardened through Windows' real Win32-backed ACL applier instead
+            // of the fail-closed default (plans/WINDOWS_IMPL.md §4.2).
+            securityPolicy = adapters.securityPolicy,
             appInstanceLock = appInstanceLock,
             desktopEnvironment = desktopEnvironment,
             nativeBundle = nativeBundle,
