@@ -1533,6 +1533,11 @@ jobs:
           $app = Join-Path $root "RomMulus"
           $env:PATH = "$env:SystemRoot\System32"
           $env:JAVA_HOME = ""
+          # Hosted windows-2022 runners have no real GPU (only the Microsoft Basic Display
+          # Adapter), so Skiko's default hardware-accelerated DIRECT3D/OPENGL context creation
+          # can hang indefinitely instead of failing fast. Force Skia's software rasterizer for
+          # this smoke test, matching how Skiko's own CI exercises headless Windows agents.
+          $env:SKIKO_RENDER_API = "SOFTWARE_COMPAT"
           $native = Start-Process -FilePath (Join-Path $app "native/rommulus-player.exe") `
             -PassThru -RedirectStandardError dist/windows/player-launch.txt
           $null = $native.Handle
@@ -1570,6 +1575,22 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+      - name: Collect packaged app logs
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          # upload-artifact requires every uploaded path to live under a single common ancestor
+          # directory; the packaged app's Known Folder log dir is outside $env:GITHUB_WORKSPACE,
+          # so copy it in here rather than referencing it directly (which fails the upload step
+          # with "rootDirectory is not a parent directory of the file").
+          $logs = Join-Path $env:LOCALAPPDATA "RomMulus\state\logs"
+          if (Test-Path $logs) {
+            $dest = "dist/windows/app-logs"
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            Copy-Item (Join-Path $logs "*") $dest -Recurse -Force
+          }
+
       - name: Upload package diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -1580,7 +1601,7 @@ jobs:
             dist/windows/*-stderr.txt
             dist/windows/*-stdout.txt
             dist/windows/player-launch.txt
-            ~/AppData/Local/RomMulus/state/logs
+            dist/windows/app-logs
           if-no-files-found: ignore
 
   publish-windows:
