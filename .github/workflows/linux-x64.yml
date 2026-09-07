@@ -52,6 +52,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: linux-x64-${{ github.ref }}
@@ -68,11 +69,49 @@ env:
 
 jobs:
   # =================================================================
-  # 1. shared-jvm-tests  — Phase 0+ (functional when shared modules exist)
+  # 1. select-shared-jvm-runner
+  # =================================================================
+  select-shared-jvm-runner:
+    name: Select shared JVM test runner
+    runs-on: ubuntu-24.04
+    outputs:
+      runner: ${{ steps.select.outputs.runner }}
+
+    steps:
+      - name: Prefer available macOS runner
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runners="$(curl --fail --silent \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runners?per_page=100")"
+
+          if jq -e '
+            .runners[]
+            | select(
+                .name == "nerd-mac-mini"
+                and .status == "online"
+                and .busy == false
+              )
+          ' <<<"$runners" >/dev/null; then
+            echo 'runner=["self-hosted","macOS","ARM64","rommulus"]' >> "$GITHUB_OUTPUT"
+            echo "Selected available nerd-mac-mini runner."
+          else
+            echo 'runner=["ubuntu-24.04"]' >> "$GITHUB_OUTPUT"
+            echo "nerd-mac-mini is unavailable or busy; selected ubuntu-24.04."
+          fi
+
+  # =================================================================
+  # 2. shared-jvm-tests  — Phase 0+ (functional when shared modules exist)
   # =================================================================
   shared-jvm-tests:
     name: Shared JVM tests
-    runs-on: ubuntu-24.04
+    needs: select-shared-jvm-runner
+    runs-on: ${{ fromJSON(needs.select-shared-jvm-runner.outputs.runner) }}
     timeout-minutes: 30
 
     steps:
