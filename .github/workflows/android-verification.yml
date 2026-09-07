@@ -13,14 +13,19 @@ concurrency:
 jobs:
   build:
     name: Build signed release APK
-    runs-on: [self-hosted, Linux, X64]
+    if: github.ref == 'refs/heads/main'
+    environment: release-signing
+    runs-on: [self-hosted, Linux, X64, rommulus-trusted-linux]
     timeout-minutes: 90
     env:
       RELEASE_STORE_FILE: ${{ github.workspace }}/rommulus-release.jks
 
     steps:
-      - name: Check out requested revision
+      - name: Check out main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          persist-credentials: false
 
       - name: Set up Java
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -50,6 +55,7 @@ jobs:
             echo "::error::The release keystore secret is not configured."
             exit 1
           fi
+          umask 077
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RELEASE_STORE_FILE"
 
       - name: Build signed release APK
@@ -59,6 +65,10 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.ROMMULUS_RELEASE_KEY_PASSWORD }}
           ROMMULUS_NDK_CCACHE: "1"
         run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Remove release keystore
+        if: always()
+        run: rm -f "$RELEASE_STORE_FILE"
 
       - name: Upload verification APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

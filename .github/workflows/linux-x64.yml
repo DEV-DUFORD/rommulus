@@ -65,6 +65,8 @@ env:
   # GRADLE_OPTS overrides gradle.properties and would drop the AGP-required
   # --add-opens flags (JDK 17 strong encapsulation / Gson reflection).
   GRADLE_OPTS: -Dorg.gradle.daemon=false
+  SDL_VERSION: 3.4.14
+  SDL_SHA256: 30d4aa2b3037718142b32dffd4e72f917ebb6cc5227150e7bb9c45efb2153aeb
 
 jobs:
   # =================================================================
@@ -78,6 +80,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -106,12 +110,14 @@ jobs:
   # =================================================================
   android-regression:
     name: Android regression
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ${{ fromJSON(github.event_name != 'pull_request' && '["self-hosted","Linux","X64","rommulus-trusted-linux"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 45
 
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -166,6 +172,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -240,6 +248,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -299,12 +309,14 @@ jobs:
   # and UndefinedBehaviorSanitizer, then runs the CTest suite.
   native-debug-asan-ubsan:
     name: Native debug (ASan/UBSan)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ${{ fromJSON(github.event_name != 'pull_request' && '["self-hosted","Linux","X64","rommulus-trusted-linux"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -362,12 +374,14 @@ jobs:
   # CTest suite.
   native-release-build:
     name: Native release build
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ${{ fromJSON(github.event_name != 'pull_request' && '["self-hosted","Linux","X64","rommulus-trusted-linux"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -423,7 +437,7 @@ jobs:
   # the downloadable player from requiring a separately installed SDL3.
   player-build:
     name: Player build (SDL3)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ${{ fromJSON(github.event_name != 'pull_request' && '["self-hosted","Linux","X64","rommulus-trusted-linux"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 90
 
     steps:
@@ -431,6 +445,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -495,65 +510,49 @@ jobs:
           ccache --version | head -1
           echo "=========================="
 
-      - name: Check for cached SDL3 install
-        id: sdl3-check
-        run: |
-          set -euo pipefail
-          SDL_VERSION="3.4.14"
-          MARKER="/usr/local/share/.rommulus-sdl3-version"
-          # /usr/local persists across runs on this self-hosted runner, so a
-          # matching prior install can be reused instead of rebuilt from source.
-          if [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "${SDL_VERSION}-clang18" ] && [ -f /usr/local/lib/libSDL3.a ]; then
-            echo "✓ SDL3 ${SDL_VERSION} already installed at /usr/local — skipping rebuild."
-            echo "cached=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "SDL3 ${SDL_VERSION} not found (or version mismatch) at /usr/local — will build from source."
-            echo "cached=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Restore SDL3
+        id: sdl3-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/sdl-install
+          key: ${{ github.event_name != 'pull_request' && 'trusted' || 'untrusted' }}-sdl3-${{ env.SDL_VERSION }}-${{ runner.os }}-${{ runner.arch }}-clang18-static-v2
 
       - name: Build and install SDL3 from source (release-3.4.14)
-        if: steps.sdl3-check.outputs.cached != 'true'
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          SDL_VERSION="3.4.14"
           SDL_TAG="release-${SDL_VERSION}"
+          archive="$RUNNER_TEMP/SDL3-${SDL_VERSION}.tar.gz"
           mkdir -p deps/sdl3
           echo "Downloading SDL3 ${SDL_TAG}..."
-          wget -qO- "https://github.com/libsdl-org/SDL/releases/download/${SDL_TAG}/SDL3-${SDL_VERSION}.tar.gz" \
-            | tar -xz -C deps/sdl3 --strip-components=1
-          echo "Configuring SDL3 Release build (prefix=/usr/local)..."
+          wget -q "https://github.com/libsdl-org/SDL/releases/download/${SDL_TAG}/SDL3-${SDL_VERSION}.tar.gz" \
+            -O "$archive"
+          echo "${SDL_SHA256}  ${archive}" | sha256sum --check
+          tar -xzf "$archive" -C deps/sdl3 --strip-components=1
           cmake -S deps/sdl3 -B build/sdl \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/sdl-install" \
             -DSDL_SHARED=OFF \
             -DSDL_STATIC=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache
           cmake --build build/sdl -j"$(( $(nproc) / 2 ))"
-          sudo cmake --install build/sdl
-          echo "${SDL_VERSION}-clang18" | sudo tee /usr/local/share/.rommulus-sdl3-version >/dev/null
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
-          export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
-          echo "SDL3 installed to /usr/local."
-          pkg-config --modversion SDL3 2>/dev/null && echo "✓ SDL3 pkg-config OK" || echo "⚠ SDL3 pkg-config not found"
+          cmake --install build/sdl
 
       - name: Configure player (Release)
         run: |
           set -euo pipefail
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
-          export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
           cmake -S native/player -B build/player \
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/sdl-install" \
             -DDOLPHIN_BUILD_PARALLEL_JOBS=16
 
       - name: Build player
         run: |
           set -euo pipefail
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
-          export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
           cmake --build build/player -j"$(( $(nproc) / 2 ))"
           ccache --show-stats || true
 
@@ -602,6 +601,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -660,7 +661,7 @@ jobs:
   #     start is covered by desktop-tests.
   package-tarball:
     name: Package tarball
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ${{ fromJSON(github.event_name != 'pull_request' && '["self-hosted","Linux","X64","rommulus-trusted-linux"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 120
     needs: player-build
     env:
@@ -671,6 +672,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -935,6 +937,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # No JDK / native toolchain needed here: the assertions run against the
       # source tree and the tarball artifact produced by package-tarball.
