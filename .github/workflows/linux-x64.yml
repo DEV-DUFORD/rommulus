@@ -68,57 +68,11 @@ env:
 
 jobs:
   # =================================================================
-  # 1. select-shared-jvm-runner
-  # =================================================================
-  select-shared-jvm-runner:
-    name: Select shared JVM test runner
-    runs-on: ubuntu-24.04
-    outputs:
-      runner: ${{ steps.select.outputs.runner }}
-
-    steps:
-      - name: Prefer available macOS runner
-        id: select
-        env:
-          RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
-        run: |
-          set -euo pipefail
-          selected_runner='["ubuntu-24.04"]'
-          selection_reason="RUNNER_STATUS_TOKEN is not configured"
-
-          if [ -n "$RUNNER_STATUS_TOKEN" ] \
-            && runners="$(curl --fail --silent \
-              --header "Authorization: Bearer $RUNNER_STATUS_TOKEN" \
-              --header "Accept: application/vnd.github+json" \
-              --header "X-GitHub-Api-Version: 2022-11-28" \
-              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runners?per_page=100")" \
-            && jq -e '
-              .runners[]
-              | select(
-                  .name == "nerd-mac-mini"
-                  and .status == "online"
-                  and .busy == false
-                )
-            ' <<<"$runners" >/dev/null; then
-            selected_runner='["self-hosted","macOS","ARM64","rommulus"]'
-            selection_reason="nerd-mac-mini is online and idle"
-          fi
-
-          if [ "$selected_runner" = '["self-hosted","macOS","ARM64","rommulus"]' ]; then
-            echo 'runner=["self-hosted","macOS","ARM64","rommulus"]' >> "$GITHUB_OUTPUT"
-            echo "Selected available nerd-mac-mini runner ($selection_reason)."
-          else
-            echo 'runner=["ubuntu-24.04"]' >> "$GITHUB_OUTPUT"
-            echo "Selected ubuntu-24.04 ($selection_reason)."
-          fi
-
-  # =================================================================
-  # 2. shared-jvm-tests  — Phase 0+ (functional when shared modules exist)
+  # 1. shared-jvm-tests  — Phase 0+ (functional when shared modules exist)
   # =================================================================
   shared-jvm-tests:
     name: Shared JVM tests
-    needs: select-shared-jvm-runner
-    runs-on: ${{ fromJSON(needs.select-shared-jvm-runner.outputs.runner) }}
+    runs-on: [self-hosted, macOS, ARM64, rommulus]
     timeout-minutes: 30
 
     steps:
