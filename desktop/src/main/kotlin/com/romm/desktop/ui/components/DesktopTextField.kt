@@ -7,7 +7,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -36,11 +41,14 @@ fun DesktopTextField(
     singleLine: Boolean = true,
     placeholder: String? = null,
 ) {
+    var isFocused by remember { mutableStateOf(false) }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(text = label) },
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .onFocusChanged { isFocused = it.isFocused },
         visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(
             keyboardType = if (isPassword) KeyboardType.Password else KeyboardType.Text,
@@ -49,7 +57,9 @@ fun DesktopTextField(
         keyboardActions = KeyboardActions(
             onDone = { onDone?.invoke() },
         ),
-        placeholder = placeholder?.let { { Text(text = it) } },
+        placeholder = placeholder
+            ?.takeUnless { isFocused }
+            ?.let { { Text(text = it) } },
         maxLines = if (singleLine) 1 else Int.MAX_VALUE,
     )
 }

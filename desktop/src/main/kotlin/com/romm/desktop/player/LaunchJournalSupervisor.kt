@@ -2,6 +2,8 @@ package com.romm.desktop.player
 
 import com.romm.androidtv.library.RommTheme
 import com.romm.androidtv.storage.AppPaths
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
 import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets
@@ -286,6 +288,7 @@ class LaunchJournalSupervisor(
     /** Liveness probe for a session's player (a real probe lands with the player in Wave 3+). */
     private val playerLiveness: (String) -> PlayerLiveness = { PlayerLiveness.DEAD },
     private val clock: () -> Long = System::currentTimeMillis,
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
     /**
      * Ingests the player's controller-binding sidecar (`<sessionDir>/controller-bindings.json`,
      * §11.9) BEFORE reconciliation can delete the session artifacts. Invoked from [onPlayerExit]
@@ -297,7 +300,7 @@ class LaunchJournalSupervisor(
     private val bindingSidecarIngestor: ((Path) -> Unit)? = null,
 ) {
 
-    internal val store = LaunchJournalStore(journalsRoot)
+    internal val store = LaunchJournalStore(journalsRoot, securityPolicy)
 
     /** Runs the sidecar ingestor fail-soft (see [bindingSidecarIngestor] for the contract). */
     private fun ingestBindingSidecar(sessionId: String) {
@@ -935,13 +938,15 @@ class LaunchJournalSupervisor(
                 com.romm.desktop.platform.LinuxNativeArtifactLayout,
             playerBinaryPath: Path = Path.of(layout.playerExecutableName),
             coresDirectory: Path = paths.dataDir.resolve("cores"),
+            securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
         ): LaunchJournalSupervisor {
             val journalsRoot = paths.stateDir.resolve("journals")
             return LaunchJournalSupervisor(
                 journalsRoot = journalsRoot,
                 launcher = ProcessBuilderPlayerLauncher.defaultFor(
-                    journalsRoot, paths, layout, playerBinaryPath, coresDirectory,
+                    journalsRoot, paths, layout, playerBinaryPath, coresDirectory, securityPolicy,
                 ),
+                securityPolicy = securityPolicy,
                 bindingSidecarIngestor = bindingSidecarIngestor,
             )
         }

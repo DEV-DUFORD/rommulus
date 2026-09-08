@@ -3,6 +3,8 @@ package com.romm.desktop.player
 import com.romm.androidtv.storage.AppPaths
 import com.romm.desktop.platform.LinuxNativeArtifactLayout
 import com.romm.desktop.platform.NativeArtifactLayout
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -59,6 +61,7 @@ class ProcessBuilderPlayerLauncher(
      */
     private val layout: NativeArtifactLayout = LinuxNativeArtifactLayout,
     private val coresDirectory: Path = appPaths.dataDir.resolve("cores"),
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
     /** Test seam: replaces `ProcessBuilder.start()` with full env-var capture. */
     private val starter: (List<String>, Map<String, String>) -> Process = { command, env ->
         ProcessBuilder(command).apply {
@@ -79,7 +82,10 @@ class ProcessBuilderPlayerLauncher(
         // capture degrades to a no-op (no orphan directory is created).
         val playerLog = runCatching {
             SecureFiles.requireSessionId(request.sessionId).getOrThrow()
-            PlayerLogCapture(journalsRoot.resolve(request.sessionId).resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME))
+            PlayerLogCapture(
+                journalsRoot.resolve(request.sessionId).resolve(LaunchJournalStore.PLAYER_LOG_FILE_NAME),
+                securityPolicy = securityPolicy,
+            )
         }.getOrElse { e ->
             return LaunchOutcome.Error("failed to spawn player: ${e.message ?: e::class.java.simpleName}")
         }
@@ -133,6 +139,7 @@ class ProcessBuilderPlayerLauncher(
             layout: NativeArtifactLayout = LinuxNativeArtifactLayout,
             playerBinaryPath: Path = Path.of(layout.playerExecutableName),
             coresDirectory: Path = appPaths.dataDir.resolve("cores"),
+            securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
         ): ProcessBuilderPlayerLauncher {
             val resolvedPlayer = if (playerBinaryPath == Path.of(layout.playerExecutableName)) {
                 findExecutableOnPath(playerBinaryPath.fileName.toString())
@@ -142,7 +149,7 @@ class ProcessBuilderPlayerLauncher(
                 playerBinaryPath
             }
             return ProcessBuilderPlayerLauncher(
-                resolvedPlayer, journalsRoot, appPaths, layout, coresDirectory,
+                resolvedPlayer, journalsRoot, appPaths, layout, coresDirectory, securityPolicy,
             )
         }
 

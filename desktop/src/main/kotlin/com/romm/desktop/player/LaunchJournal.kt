@@ -157,7 +157,10 @@ internal const val JOURNAL_SCHEMA_VERSION: Int = 1
  * [LaunchJournalSupervisor.RETAINED_PLAYER_LOG_SESSIONS] sessions; every other artifact is
  * deleted with the journal.
  */
-class LaunchJournalStore(private val journalsRoot: Path) {
+class LaunchJournalStore(
+    private val journalsRoot: Path,
+    private val securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
+) {
 
     private val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val journalAdapter = moshi.adapter(LaunchJournalFile::class.java)
@@ -170,7 +173,7 @@ class LaunchJournalStore(private val journalsRoot: Path) {
     /** Creates the session directory (0700) when absent. */
     fun ensureSessionDir(sessionId: String): Path {
         val dir = sessionDir(sessionId)
-        AtomicFileIo.ensureUserOnlyDirectory(dir)
+        AtomicFileIo.ensureUserOnlyDirectory(dir, securityPolicy)
         return dir
     }
 
@@ -193,10 +196,10 @@ class LaunchJournalStore(private val journalsRoot: Path) {
     fun write(journal: LaunchJournal) {
         SecureFiles.requireSessionId(journal.sessionId).getOrThrow()
         val target = journalPath(journal.sessionId)
-        AtomicFileIo.ensureUserOnlyDirectory(checkNotNull(target.parent))
+        AtomicFileIo.ensureUserOnlyDirectory(checkNotNull(target.parent), securityPolicy)
         val json = journalAdapter.toJson(LaunchJournalFile.from(journal))
         // Defaults: USER_ONLY_FILE (0600 on Linux) + SENSITIVE.
-        AtomicFileIo.writeAtomically(target, json.toByteArray(StandardCharsets.UTF_8))
+        AtomicFileIo.writeAtomically(target, json.toByteArray(StandardCharsets.UTF_8), policy = securityPolicy)
     }
 
     /**
@@ -221,9 +224,9 @@ class LaunchJournalStore(private val journalsRoot: Path) {
     /** Atomically writes the v1 request JSON for [sessionId] (0600); creates the session directory when absent. */
     fun writeRequest(sessionId: String, json: String) {
         val target = requestPath(sessionId)
-        AtomicFileIo.ensureUserOnlyDirectory(checkNotNull(target.parent))
+        AtomicFileIo.ensureUserOnlyDirectory(checkNotNull(target.parent), securityPolicy)
         // Defaults: USER_ONLY_FILE (0600 on Linux) + SENSITIVE.
-        AtomicFileIo.writeAtomically(target, json.toByteArray(StandardCharsets.UTF_8))
+        AtomicFileIo.writeAtomically(target, json.toByteArray(StandardCharsets.UTF_8), policy = securityPolicy)
     }
 
     /** Session IDs on disk (directory names that pass [SecureFiles.requireSessionId]). */

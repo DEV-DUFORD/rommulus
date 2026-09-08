@@ -10,68 +10,50 @@ Set-StrictMode -Version Latest
 
 function New-WindowsIcon {
     param(
+        [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][string]$Destination
     )
 
     Add-Type -AssemblyName System.Drawing
     $sizes = @(16, 24, 32, 48, 64, 128, 256)
     $images = [System.Collections.Generic.List[byte[]]]::new()
-    foreach ($size in $sizes) {
-        $bitmap = [System.Drawing.Bitmap]::new(
-            $size,
-            $size,
-            [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
-        )
-        try {
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $sourceImage = [System.Drawing.Image]::FromFile($Source)
+    try {
+        foreach ($size in $sizes) {
+            $bitmap = [System.Drawing.Bitmap]::new(
+                $size,
+                $size,
+                [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+            )
             try {
-                $graphics.CompositingQuality =
-                    [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
-                $graphics.InterpolationMode =
-                    [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-                $graphics.PixelOffsetMode =
-                    [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-                $graphics.SmoothingMode =
-                    [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-                $graphics.ScaleTransform($size / 108.0, $size / 108.0)
-                $background = [System.Drawing.SolidBrush]::new(
-                    [System.Drawing.ColorTranslator]::FromHtml("#1a1a2e")
-                )
-                $accent = [System.Drawing.SolidBrush]::new(
-                    [System.Drawing.ColorTranslator]::FromHtml("#e94560")
-                )
-                $foreground = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
+                $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
                 try {
-                    # Keep this geometry aligned with desktop/src/main/resources/icons/rommulus_icon.svg.
-                    $graphics.FillRectangle($background, 0, 0, 108, 108)
-                    $graphics.FillRectangle($accent, 30, 30, 48, 48)
-                    $graphics.FillPolygon(
-                        $foreground,
-                        [System.Drawing.PointF[]]@(
-                            [System.Drawing.PointF]::new(42, 48),
-                            [System.Drawing.PointF]::new(60, 38),
-                            [System.Drawing.PointF]::new(78, 48),
-                            [System.Drawing.PointF]::new(60, 58)
-                        )
-                    )
+                    $graphics.CompositingQuality =
+                        [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+                    $graphics.InterpolationMode =
+                        [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                    $graphics.PixelOffsetMode =
+                        [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                    $graphics.SmoothingMode =
+                        [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+                    $graphics.Clear([System.Drawing.Color]::Transparent)
+                    $graphics.DrawImage($sourceImage, 0, 0, $size, $size)
                 } finally {
-                    $background.Dispose()
-                    $accent.Dispose()
-                    $foreground.Dispose()
+                    $graphics.Dispose()
+                }
+                $stream = [System.IO.MemoryStream]::new()
+                try {
+                    $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+                    $images.Add($stream.ToArray())
+                } finally {
+                    $stream.Dispose()
                 }
             } finally {
-                $graphics.Dispose()
+                $bitmap.Dispose()
             }
-            $stream = [System.IO.MemoryStream]::new()
-            try {
-                $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
-                $images.Add($stream.ToArray())
-            } finally {
-                $stream.Dispose()
-            }
-        } finally {
-            $bitmap.Dispose()
         }
+    } finally {
+        $sourceImage.Dispose()
     }
 
     $file = [System.IO.File]::Create($Destination)
@@ -118,7 +100,9 @@ $jpackage = Join-Path $env:JAVA_HOME "bin/jpackage.exe"
 if (-not (Test-Path $jpackage)) { throw "JDK 17 jpackage.exe is required." }
 $icon = Join-Path $repo "desktop/build/packaging/rommulus.ico"
 New-Item -ItemType Directory -Force -Path (Split-Path $icon -Parent) | Out-Null
-New-WindowsIcon -Destination $icon
+New-WindowsIcon `
+    -Source (Join-Path $repo "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png") `
+    -Destination $icon
 $appJar = Join-Path $repo "desktop/build/libs/desktop.jar"
 $libs = Join-Path $repo "desktop/build/runtime-libs"
 if (-not (Test-Path $appJar)) { throw "Run :desktop:jar :desktop:copyRuntimeClasspath first." }

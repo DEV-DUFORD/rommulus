@@ -1,6 +1,9 @@
 package com.romm.desktop.player
 
 import com.romm.androidtv.storage.TestAppPaths
+import com.romm.desktop.platform.security.FileSecurityPolicies
+import com.romm.desktop.platform.security.FileSecurityPolicy
+import com.romm.desktop.platform.security.RecordingFileSecurityPolicy
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.description.TextDescription
 import org.junit.jupiter.api.Test
@@ -34,6 +37,7 @@ class LaunchJournalSupervisorTest {
         launchOutcome: (PlayerRequest) -> LaunchOutcome = { LaunchOutcome.Started(pid = 4242L) },
         adoptionPolicy: SaveAdoptionPolicy = DefaultSaveAdoptionPolicy(),
         fakeLauncher: FakePlayerProcessLauncher? = null,
+        securityPolicy: FileSecurityPolicy = FileSecurityPolicies.default(),
     ): Fixture {
         val paths = TestAppPaths(tempDir)
         val journalsRoot = paths.stateDir.resolve("journals")
@@ -43,6 +47,7 @@ class LaunchJournalSupervisorTest {
             launcher = launcher,
             adoptionPolicy = adoptionPolicy,
             playerLiveness = liveness,
+            securityPolicy = securityPolicy,
         )
         // A real ROM file with a pinned hash so the default adoption policy can verify identity.
         val content = paths.cacheDir.resolve("roms").resolve("game.gba")
@@ -80,6 +85,25 @@ class LaunchJournalSupervisorTest {
     }
 
     // ------------------------------------------------------------------ lifecycle
+
+    @Test
+    fun `prepare uses the supervisor security policy for journal artifacts`() {
+        val securityPolicy = RecordingFileSecurityPolicy()
+        val f = fixture(securityPolicy = securityPolicy)
+
+        readySession(f)
+
+        assertThat(securityPolicy.calls)
+            .anySatisfy { call ->
+                assertThat(call.op).isEqualTo("createDirectoryIfAbsent")
+                assertThat(call.path.parent).isEqualTo(f.journalsRoot)
+            }
+            .anySatisfy { call ->
+                assertThat(call.op).isEqualTo("hardenFile")
+                assertThat(call.path.startsWith(f.journalsRoot)).isTrue()
+                assertThat(call.path.fileName.toString()).startsWith(".tmp-")
+            }
+    }
 
     @Test
     fun `prepare writes request and journal atomically, exit reconciles, journal deleted`() {

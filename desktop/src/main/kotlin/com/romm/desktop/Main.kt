@@ -112,11 +112,9 @@ fun main(args: Array<String>) {
         // flashes Home (mirrors MainActivity).
         coordinator.appMode = coordinator.computeStartupAppMode()
 
-        // Window icon: the bundled RomMulus mark (desktop port of Android's ic_launcher.xml),
-        // rasterized once from the classpath SVG. `null` keeps Compose's default icon if the
-        // asset is ever missing.
+        // `null` keeps Compose's default icon if the bundled product logo is ever missing.
         val windowIcon: Painter? = remember {
-            loadBundledImage("/icons/rommulus_icon.svg", size = 256)?.let(::BitmapPainter)
+            loadBundledImage("/icons/romm_logo.svg", size = 256)?.let(::BitmapPainter)
         }
         val windowState = rememberWindowState(
             placement = if (displayPolicy.fullscreen) {

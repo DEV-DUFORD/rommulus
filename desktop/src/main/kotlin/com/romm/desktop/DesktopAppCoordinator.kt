@@ -736,6 +736,7 @@ class DesktopAppCoordinator(
             layout = layout,
             playerBinaryPath = nativeBundle?.playerExecutable ?: Path.of(layout.playerExecutableName),
             coresDirectory = coresDirectory,
+            securityPolicy = securityPolicy,
         )
     }
 
