@@ -237,6 +237,14 @@ void ColorBufferToRDRAM::copyToRDRAM(u32 _address, bool _sync)
 {
 	if (!isMemoryWritable(RDRAM + _address, gDP.colorImage.width << gDP.colorImage.size >> 1))
 		return;
+	if (gDP.m_subscreen) {
+		FrameBuffer * pBuffer = frameBufferList().findBuffer(_address);
+		if (pBuffer != nullptr && !pBuffer->m_isOBScreen) {
+			copyWhiteToRDRAM(pBuffer);
+			gDP.m_subscreen = false;
+			return;
+		}
+	}
 	if (!_prepareCopy(_address))
 		return;
 	if (config.frameBufferEmulation.copyToRDRAM == Config::CopyToRDRAM::ctDisable && config.frameBufferEmulation.fbInfoDisabled != 0)

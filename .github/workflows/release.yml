@@ -7,6 +7,16 @@ on:
         description: Release version (for example, 0.3.0)
         required: true
         type: string
+      tag_suffix:
+        description: Optional tag suffix (for example, -preview-1)
+        required: false
+        default: ""
+        type: string
+      prerelease:
+        description: Publish as a GitHub prerelease
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -38,10 +48,15 @@ jobs:
         id: version
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          TAG_SUFFIX: ${{ inputs.tag_suffix }}
         run: |
           set -euo pipefail
           if [[ ! "$INPUT_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "::error::Version must use X.Y.Z format without a leading v."
+            exit 1
+          fi
+          if [[ ! "$TAG_SUFFIX" =~ ^$|^-[0-9A-Za-z][0-9A-Za-z.-]*$ ]]; then
+            echo "::error::Tag suffix must be empty or start with '-' and contain only letters, numbers, dots, and hyphens."
             exit 1
           fi
 
@@ -63,7 +78,7 @@ jobs:
             exit 1
           fi
 
-          tag="v$INPUT_VERSION"
+          tag="v$INPUT_VERSION$TAG_SUFFIX"
           if git rev-parse --verify --quiet "refs/tags/$tag"; then
             echo "::error::Tag $tag already exists."
             exit 1
@@ -355,6 +370,7 @@ jobs:
       TAG: ${{ needs.prepare.outputs.tag }}
       VERSION: ${{ needs.prepare.outputs.version }}
       VERSION_CODE: ${{ needs.prepare.outputs.version_code }}
+      PRERELEASE: ${{ inputs.prerelease }}
 
     steps:
       - name: Check out release revision
@@ -406,6 +422,10 @@ jobs:
           appimage="release-artifacts/rommulus-$VERSION-linux-x86_64.AppImage"
           checksum="$appimage.sha256"
           [ -f "$apk" ] && [ -f "$aab" ] && [ -f "$appimage" ] && [ -f "$checksum" ]
+          release_args=()
+          if [[ "$PRERELEASE" == "true" ]]; then
+            release_args+=(--prerelease)
+          fi
           gh release create "$TAG" \
             "$apk" \
             "$aab" \
@@ -413,4 +433,5 @@ jobs:
             "$checksum" \
             --title "RomMulus $TAG" \
             --generate-notes \
-            --verify-tag
+            --verify-tag \
+            "${release_args[@]}"
