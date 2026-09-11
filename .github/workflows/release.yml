@@ -55,14 +55,16 @@ jobs:
             echo "::error::Version must use X.Y.Z format without a leading v."
             exit 1
           fi
+
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+
           if [[ ! "$TAG_SUFFIX" =~ ^$|^-[0-9A-Za-z][0-9A-Za-z.-]*$ ]]; then
             echo "::error::Tag suffix must be empty or start with '-' and contain only letters, numbers, dots, and hyphens."
             exit 1
           fi
 
-          major="${BASH_REMATCH[1]}"
-          minor="${BASH_REMATCH[2]}"
-          patch="${BASH_REMATCH[3]}"
           if (( ${#major} > 4 || ${#minor} > 3 || ${#patch} > 3 )); then
             echo "::error::Version components are too large."
             exit 1
