@@ -27,8 +27,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -58,6 +60,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -216,6 +220,9 @@ private fun GameDetailContent(
     // PlayerSessionEvent.Ended from an earlier session that is still exiting must not clear a
     // newer launch's status, so we only react to Ended for the session we actually launched.
     var launchedSessionId by remember { mutableStateOf<String?>(null) }
+    var isDownloaded by remember(romId) { mutableStateOf(coordinator.isRomDownloaded(romId)) }
+    var showRemoveConfirmation by remember { mutableStateOf(false) }
+    var removeDownloadError by remember { mutableStateOf<String?>(null) }
     // launchPlayer does file I/O + a process spawn — run it off the compose UI thread and
     // publish the result back as state (snapshot state is safe to write from any thread).
     val launchScope = rememberCoroutineScope()
@@ -245,6 +252,7 @@ private fun GameDetailContent(
                 // qualifies — the refresh is an idempotent local read keyed by [romId]. If this
                 // read wins the race against the enqueue, the next refresh corrects it.
                 launch(Dispatchers.Default) { saveStatusPresenter.refresh(romId) }
+                isDownloaded = coordinator.isRomDownloaded(romId)
                 if (event.sessionId == launchedSessionId) {
                     playStatus = when (val report = event.report) {
                         is PlayerExitReport.Reconciled -> if (
@@ -310,7 +318,6 @@ private fun GameDetailContent(
     var serverSaveAvailability by remember(romId) {
         mutableStateOf(ServerSaveAvailability.Checking)
     }
-
     LaunchedEffect(romId) {
         serverSaveAvailability = when (
             val result = withContext(Dispatchers.Default) { coordinator.listSavesForRom(romId) }
@@ -342,6 +349,9 @@ private fun GameDetailContent(
         }
     }
 
+    val density = LocalDensity.current
+    var actionRailHeight by remember { mutableStateOf(56.dp) }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ── Main scrollable content ──────────────────────────────────────
         when (val section = uiState.detail) {
@@ -368,7 +378,7 @@ private fun GameDetailContent(
                 rom = section.data,
                 playEnabled = coordinator.isPlatformPlayable(section.data.platformSlug),
                 isOffline = !coordinator.serverReachable,
-                isAvailableOffline = coordinator.isRomDownloaded(romId),
+                isAvailableOffline = isDownloaded,
                 onPlayClick = {
                     launchScope.launch {
                         // Android `nativeLibraryOnPlay` parity: publish the staging state (with
@@ -378,6 +388,7 @@ private fun GameDetailContent(
                         val result = withContext(Dispatchers.Default) { coordinator.launchPlayer(romId) }
                         playStatus = result
                         launchedSessionId = (result as? PlayerLaunchResult.Started)?.sessionId
+                        isDownloaded = coordinator.isRomDownloaded(romId)
                         coordinator.finishGameLaunch(romId, result)
                     }
                 },
@@ -417,6 +428,7 @@ private fun GameDetailContent(
                 playUpFocusRequester = headerFocusRequester,
                 firstScreenshotFocusRequester = firstScreenshotFocusRequester,
                 screenshotUpFocusRequester = playFocusRequester,
+                actionRailHeight = actionRailHeight,
             )
         }
 
@@ -427,15 +439,20 @@ private fun GameDetailContent(
                 playEnabled = coordinator.isPlatformPlayable(loadedDetail.platformSlug),
                 biosReady = biosState is RequiredBiosState.Ready,
                 isOffline = !coordinator.serverReachable,
-                isAvailableOffline = coordinator.isRomDownloaded(romId),
+                isAvailableOffline = isDownloaded,
             )
             GameDetailActionRail(
                 favoriteState = uiState.favorite,
                 onFavoriteClick = presenter::onFavoriteSelected,
                 onAddClick = presenter::onCollectionPickerRequested,
                 onBackClick = { coordinator.onBack() },
+                showRemoveDownload = isDownloaded,
+                onRemoveDownloadClick = { showRemoveConfirmation = true },
                 modifier = Modifier
                     .align(Alignment.TopEnd)
+                    .onSizeChanged { size ->
+                        actionRailHeight = with(density) { size.height.toDp() }
+                    }
                     .padding(end = 32.dp, top = 24.dp),
                 downFocusRequester = playFocusRequester.takeIf { linkRailToPlay },
                 favoriteFocusRequester = headerFocusRequester,
@@ -527,6 +544,45 @@ private fun GameDetailContent(
                 )
             }
         }
+
+        if (showRemoveConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showRemoveConfirmation = false },
+                title = { Text("Remove downloaded game?") },
+                text = {
+                    Text(
+                        removeDownloadError
+                            ?: "The local game download will be removed. Save data will be kept.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            launchScope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    coordinator.removeDownloadedGame(romId)
+                                }
+                                result.fold(
+                                    onSuccess = {
+                                        isDownloaded = false
+                                        showRemoveConfirmation = false
+                                        removeDownloadError = null
+                                    },
+                                    onFailure = { removeDownloadError = it.message ?: "Removal failed." },
+                                )
+                            }
+                        },
+                    ) {
+                        Text("Remove")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRemoveConfirmation = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -566,6 +622,7 @@ private fun GameDetailBody(
     playUpFocusRequester: FocusRequester,
     firstScreenshotFocusRequester: FocusRequester,
     screenshotUpFocusRequester: FocusRequester,
+    actionRailHeight: androidx.compose.ui.unit.Dp,
 ) {
     val colors = LocalRommulusColors.current
     val chooseSaveFocusRequester = remember { FocusRequester() }
@@ -574,7 +631,12 @@ private fun GameDetailBody(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 24.dp),
+            .padding(
+                start = 32.dp,
+                end = 32.dp,
+                top = 36.dp + actionRailHeight,
+                bottom = 24.dp,
+            ),
     ) {
         item {
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -599,16 +661,14 @@ private fun GameDetailBody(
                 }
                 Spacer(modifier = Modifier.width(24.dp))
                 Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        // The fixed top-right action row shares this header's vertical band.
-                        // Keep title/platform text clear of it rather than drawing beneath it.
-                        .padding(end = 420.dp),
+                    modifier = Modifier.weight(1f),
                 ) {
                     Text(
                         text = rom.title,
                         style = MaterialTheme.typography.headlineMedium,
                         color = colors.textPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = rom.platformDisplayName,
@@ -1331,6 +1391,8 @@ private fun GameDetailActionRail(
     onFavoriteClick: () -> Unit,
     onAddClick: () -> Unit,
     onBackClick: () -> Unit,
+    showRemoveDownload: Boolean,
+    onRemoveDownloadClick: () -> Unit,
     modifier: Modifier = Modifier,
     downFocusRequester: FocusRequester?,
     favoriteFocusRequester: FocusRequester,
@@ -1368,6 +1430,20 @@ private fun GameDetailActionRail(
             Icon(imageVector = Icons.Filled.Add, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text("Add to Collection")
+        }
+        if (showRemoveDownload) {
+            TvOutlinedButton(
+                onClick = onRemoveDownloadClick,
+                modifier = Modifier
+                    .focusProperties {
+                        if (downFocusRequester != null) down = downFocusRequester
+                    }
+                    .focusableItem("detail:remove-download", navigator, onRemoveDownloadClick),
+            ) {
+                Icon(imageVector = Icons.Filled.Delete, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Remove Download")
+            }
         }
         TvOutlinedButton(
             onClick = onBackClick,

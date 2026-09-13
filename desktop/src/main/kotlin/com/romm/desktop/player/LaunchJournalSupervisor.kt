@@ -1,5 +1,7 @@
 package com.romm.desktop.player
 
+import com.romm.androidtv.emulation.model.isCompatibleSaveSize
+import com.romm.androidtv.emulation.model.normalizeExpectedSaveSize
 import com.romm.androidtv.library.RommTheme
 import com.romm.androidtv.storage.AppPaths
 import java.io.IOException
@@ -220,10 +222,14 @@ class DefaultSaveAdoptionPolicy : SaveAdoptionPolicy {
 
         val size = Files.size(context.candidatePath)
         request.expectedSaveSize?.let { expected ->
-            if (size != expected) return AdoptionDecision.Reject("candidate size $size != expectedSaveSize $expected")
+            if (!isCompatibleSaveSize(request.coreId, expected, size)) {
+                return AdoptionDecision.Reject("candidate size $size != expectedSaveSize $expected")
+            }
         }
         result.saveSize?.let { expected ->
-            if (size != expected) return AdoptionDecision.Reject("candidate size $size != result saveSize $expected")
+            if (!isCompatibleSaveSize(request.coreId, expected, size)) {
+                return AdoptionDecision.Reject("candidate size $size != result saveSize $expected")
+            }
         }
 
         val contentHash = request.contentHash
@@ -354,7 +360,7 @@ class LaunchJournalSupervisor(
             savePath = params.savePath.toAbsolutePath().normalize().toString(),
             candidateSavePath = candidateSavePath.toString(),
             resultPath = resultPath.toString(),
-            expectedSaveSize = params.expectedSaveSize,
+            expectedSaveSize = normalizeExpectedSaveSize(params.coreId, params.expectedSaveSize),
             video = params.video,
             theme = params.theme,
             controllerBindings = params.controllerBindings,
@@ -728,12 +734,12 @@ class LaunchJournalSupervisor(
             }
         }
         result.saveSize?.let { expected ->
-            if (Files.size(canonical) != expected) {
+            if (!isCompatibleSaveSize(request.coreId, expected, Files.size(canonical))) {
                 return "confirmed save size does not match the result's saveSize"
             }
         }
         request.expectedSaveSize?.let { expected ->
-            if (Files.size(canonical) != expected) {
+            if (!isCompatibleSaveSize(request.coreId, expected, Files.size(canonical))) {
                 return "confirmed save size does not match the request's expectedSaveSize"
             }
         }

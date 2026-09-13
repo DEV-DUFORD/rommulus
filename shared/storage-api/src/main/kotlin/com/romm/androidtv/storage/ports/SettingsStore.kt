@@ -11,6 +11,7 @@ object SettingsKeys {
     const val SHARP_FILTER_ENABLED = "video_sharp_filter_enabled"
     const val AUTOCLEAN_SAVES_ON_UPLOAD = "autoclean_saves_on_upload"
     const val ONSCREEN_GAME_CONTROLS = "on_screen_game_controls"
+    const val ROM_CACHE_DIRECTORY = "rom_cache_directory"
     const val SEGACD_BIOS_ID = "segacd_bios_id"
     const val SEGACD_BIOS_FILE_NAME = "segacd_bios_file_name"
     const val PSX_BIOS_ID = "psx_bios_id"

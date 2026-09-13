@@ -71,10 +71,13 @@ class DesktopSaveLaunchSynchronizerTest {
         return Harness(store, content, sync, synchronizer) { queued }
     }
 
-    private fun request(expectedSize: Long? = SERVER_BYTES.size.toLong()) = SaveSyncRequest(
+    private fun request(
+        expectedSize: Long? = SERVER_BYTES.size.toLong(),
+        coreId: String = CORE_ID,
+    ) = SaveSyncRequest(
         romId = ROM_ID,
         romHash = ROM_HASH,
-        coreId = CORE_ID,
+        coreId = coreId,
         coreBuildRevision = CORE_REVISION,
         expectedSramSizeBytes = expectedSize,
         fileName = "zelda.gb",
@@ -174,6 +177,24 @@ class DesktopSaveLaunchSynchronizerTest {
             .containsExactly(*LOCAL_BYTES)
         assertThat(h.sync.confirmCalls).isEmpty()
         assertThat(h.store.findByScope(scope())?.syncStatus).isEqualTo(SaveSyncStatus.QUARANTINED)
+    }
+
+    @Test
+    fun `mGBA legacy download size is accepted and expected size is normalized`() {
+        val h = harness()
+        val serverBytes = ByteArray(64 * 1024) { 0x42 }
+        h.sync.negotiate(operation(SyncAction.DOWNLOAD, emulator = "mgba"))
+        h.sync.downloadResult = SaveDownloadResult.Success(serverBytes)
+
+        val outcome = h.synchronizer.syncBeforeLaunch(
+            request(expectedSize = 32L * 1024L, coreId = "mgba"),
+        )
+
+        assertThat(outcome).isInstanceOf(SaveSyncOutcome.Downloaded::class.java)
+        assertThat(h.content.readLocal(SERVER_KEY, USERNAME, ROM_ID, ROM_HASH, SLOT))
+            .containsExactly(*serverBytes)
+        assertThat(h.store.findByScope(scope())!!.expectedSramSizeBytes)
+            .isEqualTo(128L * 1024L)
     }
 
     @Test

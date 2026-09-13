@@ -715,6 +715,13 @@ int main(int argc, char* argv[]) {
     const std::string saveDir =
             request.savePath.empty() ? request.systemDir : parentDirectory(request.savePath);
     std::string systemDir = request.systemDir;
+    std::fprintf(
+        stderr,
+        "info: launch core=%s revision=%s content=%s system=%s\n",
+        request.coreId.c_str(),
+        request.coreBuildRevision.c_str(),
+        request.contentPath.c_str(),
+        request.systemDir.c_str());
     if (request.coreId == "dolphin") {
         const auto dolphinSystem = dolphinSystemDirectory();
         if (!dolphinSystem.has_value()) {
@@ -726,6 +733,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         systemDir = *dolphinSystem;
+        std::fprintf(stderr, "info: Dolphin system data=%s\n", systemDir.c_str());
     }
     if (request.coreId == "lrps2") {
         // lrps2 resolves every data path relative to <system>/pcsx2 inside
@@ -766,6 +774,10 @@ int main(int argc, char* argv[]) {
                 SDL_Quit();
                 return 1;
             }
+            std::fprintf(
+                stderr,
+                "info: staged PS2 BIOS path=%s\n",
+                stagedBios.string().c_str());
         } else {
             std::fprintf(stderr,
                          "info: no staged PS2 BIOS at %s; the core will fail to boot without one\n",
@@ -781,6 +793,11 @@ int main(int argc, char* argv[]) {
                 std::fprintf(stderr,
                              "info: failed to stage lrps2 GameIndex.yaml (%s); the core will use its built-in database\n",
                              copyError.message().c_str());
+            } else {
+                std::fprintf(
+                    stderr,
+                    "info: staged lrps2 GameIndex.yaml from %s\n",
+                    gameIndex->c_str());
             }
         } else {
             std::fprintf(stderr,

@@ -11,11 +11,16 @@ import androidx.compose.ui.window.rememberWindowState
 import com.romm.desktop.log.DesktopLogger
 import com.romm.desktop.storage.FileLockAppInstanceLock
 import com.romm.desktop.storage.paths.XdgAppPaths
+import com.romm.desktop.storage.settings.JsonSettingsStore
+import com.romm.androidtv.storage.ports.SettingsKeys
+import com.romm.androidtv.storage.settingsFile
 import com.romm.desktop.storage.secret.FileSecretBackend
 import com.romm.desktop.storage.secret.UnavailableSecretServiceFallback
 import com.romm.desktop.storage.secret.dbus.SecretServiceDbusBackend
 import com.romm.desktop.ui.image.loadBundledImage
 import java.util.logging.Level
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * Desktop entry point: builds the real XDG [XdgAppPaths], the freedesktop Secret Service
@@ -29,7 +34,28 @@ fun main() {
     val displayPolicy = desktopDisplayPolicy(desktopEnvironment)
 
     application {
-        val paths = XdgAppPaths()
+        val defaultPaths = XdgAppPaths()
+        val configuredCacheDir = runCatching {
+            JsonSettingsStore(defaultPaths.settingsFile())
+                .snapshot()
+                .get(SettingsKeys.ROM_CACHE_DIRECTORY)
+                ?.takeIf(String::isNotBlank)
+                ?.let(Path::of)
+                ?.toAbsolutePath()
+                ?.normalize()
+                ?.also {
+                    Files.createDirectories(it)
+                    require(Files.isDirectory(it) && Files.isWritable(it))
+                }
+        }.getOrElse {
+            DesktopLogger.get().log(
+                Level.WARNING,
+                "Configured ROM cache directory is unavailable; using the default cache.",
+                it,
+            )
+            null
+        }
+        val paths = XdgAppPaths(cacheDirOverride = configuredCacheDir)
         val lock = FileLockAppInstanceLock(null, paths.stateDir)
         if (!lock.acquire()) {
             println("RomMulus is already running. Only one instance may run at a time; exiting.")
@@ -87,6 +113,10 @@ fun main() {
             RommulusDesktopApp(
                 coordinator = coordinator,
                 onCloseRequest = ::exitApplication,
+                onRequestForeground = {
+                    window.toFront()
+                    window.requestFocus()
+                },
             )
         }
     }

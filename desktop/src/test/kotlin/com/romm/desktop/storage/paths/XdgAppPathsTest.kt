@@ -179,4 +179,21 @@ class XdgAppPathsTest {
         assertThat(firstAccess).isEqualTo(secondAccess)
         assertThat(Files.exists(firstAccess)).isTrue()
     }
+
+    @Test
+    fun `explicit cache directory overrides only the cache root`() {
+        val home = setupHome()
+        val customCache = tempDir.resolve("sd-card").resolve("rommulus")
+        val paths = XdgAppPaths(
+            xdgEnv = emptyMap(),
+            homeDir = home,
+            cacheDirOverride = customCache,
+        )
+
+        assertThat(paths.cacheDir).isEqualTo(customCache.toAbsolutePath().normalize())
+        assertThat(Files.isDirectory(paths.cacheDir)).isTrue()
+        assertThat(paths.configDir).isEqualTo(home.resolve(".config/rommulus"))
+        assertThat(paths.dataDir).isEqualTo(home.resolve(".local/share/rommulus"))
+        assertThat(paths.stateDir).isEqualTo(home.resolve(".local/state/rommulus"))
+    }
 }

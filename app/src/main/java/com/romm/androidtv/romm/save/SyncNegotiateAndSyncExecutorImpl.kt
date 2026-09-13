@@ -1,5 +1,6 @@
 package com.romm.androidtv.romm.save
 
+import com.romm.androidtv.emulation.model.isCompatibleSaveSize
 import com.romm.androidtv.romm.ClientSaveState
 import com.romm.androidtv.romm.DeviceIdentity
 import com.romm.androidtv.romm.RommApiError
@@ -308,9 +309,11 @@ class SyncNegotiateAndSyncExecutorImpl(
             return 0 to 1
         }
 
-        // Known trusted size: exact-size gate.
+        // Known trusted size: strict compatibility gate (exact except documented migrations).
         val expectedSize = replica.expectedSramSizeBytes
-        if (expectedSize != null && bytes.size.toLong() != expectedSize) {
+        if (expectedSize != null &&
+            !isCompatibleSaveSize(replica.coreId, expectedSize, bytes.size.toLong())
+        ) {
             saveContentStore.quarantine(
                 op.serverKey, op.userKey, op.romId, op.romHash, op.slot, bytes, "size-mismatch", now,
             )

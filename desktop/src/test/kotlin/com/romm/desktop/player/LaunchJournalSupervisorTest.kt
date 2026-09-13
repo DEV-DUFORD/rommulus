@@ -113,6 +113,46 @@ class LaunchJournalSupervisorTest {
     }
 
     @Test
+    fun `mGBA launch normalizes expected size and accepts legacy result size`() {
+        val f = fixture()
+        val params = f.params.copy(coreId = "mgba", expectedSaveSize = 32L * 1024L)
+        val session = when (val result = f.supervisor.prepareLaunch(params)) {
+            is PrepareLaunchResult.Ready -> result.session
+            is PrepareLaunchResult.Failed -> error("expected Ready, got Failed: ${result.reason}")
+        }
+        assertThat(f.launcher.launches.single().expectedSaveSize).isEqualTo(128L * 1024L)
+
+        // Simulate replay of a request journal written before the stable
+        // contract, when mGBA had reported a detected 32 KiB save.
+        Files.writeString(
+            session.requestPath,
+            PlayerProtocol.serializeRequest(
+                f.launcher.launches.single().copy(expectedSaveSize = 32L * 1024L),
+            ),
+        )
+        val stableBytes = ByteArray(128 * 1024) { 0x5A }
+        Files.write(session.candidateSavePath, stableBytes)
+        Files.writeString(
+            session.resultPath,
+            PlayerProtocol.serializeResult(
+                PlayerResult(
+                    sessionId = session.sessionId,
+                    exitKind = PlayerExitKind.COMPLETED,
+                    checkpointWritten = true,
+                    candidateSavePath = session.candidateSavePath.toString(),
+                    saveHash = SecureFiles.sha256Hex(session.candidateSavePath),
+                    // A pre-stable-contract result may still carry the detected size.
+                    saveSize = 64L * 1024L,
+                ),
+            ),
+        )
+
+        assertThat(f.supervisor.onPlayerExit(session, exitCode = 0))
+            .isInstanceOf(PlayerExitReport.Reconciled::class.java)
+        assertThat(Files.size(params.savePath)).isEqualTo(128L * 1024L)
+    }
+
+    @Test
     fun `prepareLaunch serializes a null contentPath as an empty string`() {
         val f = fixture()
         val noContent = f.params.copy(contentPath = null, contentHash = "")

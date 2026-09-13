@@ -28,13 +28,17 @@ import java.nio.file.attribute.PosixFilePermissions
  */
 class XdgAppPaths(
     private val xdgEnv: Map<String, String?> = System.getenv() as Map<String, String?>,
-    private val homeDir: Path = Path.of(System.getProperty("user.home"))
+    private val homeDir: Path = Path.of(System.getProperty("user.home")),
+    private val cacheDirOverride: Path? = null,
 ) : AppPaths {
 
     private val configBase: Path by lazy { resolveXdgOrFallback("XDG_CONFIG_HOME", homeDir.resolve(".config"), "rommulus") }
     private val dataBase: Path by lazy { resolveXdgOrFallback("XDG_DATA_HOME", homeDir.resolve(".local").resolve("share"), "rommulus") }
     private val stateBase: Path by lazy { resolveXdgOrFallback("XDG_STATE_HOME", homeDir.resolve(".local").resolve("state"), "rommulus") }
-    private val cacheBase: Path by lazy { resolveXdgOrFallback("XDG_CACHE_HOME", homeDir.resolve(".cache"), "rommulus") }
+    private val cacheBase: Path by lazy {
+        cacheDirOverride?.toAbsolutePath()?.normalize()
+            ?: resolveXdgOrFallback("XDG_CACHE_HOME", homeDir.resolve(".cache"), "rommulus")
+    }
 
     override val configDir: Path get() = ensureDirectory(configBase, CONFIG_PERMISSIONS)
     override val dataDir: Path get() = ensureDirectory(dataBase, DATA_PERMISSIONS)

@@ -48,9 +48,10 @@ class SaveConflictResolverTest {
         rommSaveId: Long? = 900L,
         serverHash: String? = sha256Hex(SERVER_BYTES),
         expectedSize: Long? = null,
+        coreId: String = "snes9x",
     ) = SaveReplicaRecord(
         serverKey = SRV, userKey = USER, romId = ROM_ID, romHash = HASH, slot = SLOT,
-        coreId = "snes9x", coreBuildRevision = "rev-42",
+        coreId = coreId, coreBuildRevision = "rev-42",
         expectedSramSizeBytes = expectedSize,
         localHash = sha256Hex(LOCAL_BYTES), localSizeBytes = LOCAL_BYTES.size.toLong(),
         localWrittenAtEpochMs = GEN,
@@ -205,6 +206,26 @@ class SaveConflictResolverTest {
         assertThat(rep.rommSaveId).isEqualTo(900L)
         // The download was confirmed (idempotent bookkeeping).
         assertThat(h.sync.confirmCalls).containsExactly(Triple(ORIGIN, 900L, DEVICE_ID))
+    }
+
+    @Test
+    fun `keep server accepts legacy mGBA size and normalizes replica expectation`() {
+        val serverBytes = ByteArray(64 * 1024) { 0x33 }
+        val h = Harness()
+        val replica = conflictReplica(
+            serverHash = sha256Hex(serverBytes),
+            expectedSize = 32L * 1024L,
+            coreId = "mgba",
+        )
+        h.seedConflict(replica)
+        h.sync.listSavesResult = SaveListResult.Success(listOf(listedSave(emulator = "mgba")))
+        h.sync.downloadResult = SaveDownloadResult.Success(serverBytes)
+        h.sync.confirmResult = SaveConfirmResult.Success
+
+        assertThat(h.resolver.resolve(replica, SaveConflictChoice.KEEP_SERVER))
+            .isInstanceOf(SaveConflictResolutionResult.Success::class.java)
+        assertThat(h.content.readLocal(SRV, USER, ROM_ID, HASH, SLOT)).containsExactly(*serverBytes)
+        assertThat(h.store.findByScope(scope)!!.expectedSramSizeBytes).isEqualTo(128L * 1024L)
     }
 
     @Test

@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -50,11 +51,25 @@ fun RomGridScreen(
 ) {
     val presenter = remember(query) { coordinator.romGridPresenter(query) }
     val uiState by presenter.uiState.collectAsState()
-    val gridState = rememberLazyGridState()
+    val scrollKey = remember(query) { "grid:$query" }
+    val initialScroll = remember(scrollKey) { coordinator.libraryScrollPosition(scrollKey) }
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialScroll.index,
+        initialFirstVisibleItemScrollOffset = initialScroll.offset,
+    )
     val colors = LocalRommulusColors.current
     val parent = gridParentScreen(query)
     // Shell-provided shared navigator (controller D-pad / left-stick navigation).
     val navigator = LocalFocusNavigator.current
+    DisposableEffect(scrollKey, gridState) {
+        onDispose {
+            coordinator.rememberLibraryScrollPosition(
+                scrollKey,
+                gridState.firstVisibleItemIndex,
+                gridState.firstVisibleItemScrollOffset,
+            )
+        }
+    }
 
     Column(
         modifier = modifier

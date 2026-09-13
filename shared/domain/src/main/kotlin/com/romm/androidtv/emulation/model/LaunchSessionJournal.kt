@@ -84,6 +84,9 @@ class LaunchSessionJournal(private val journalDir: File) {
             canonicalFileName = patch.canonicalFileName ?: current.canonicalFileName,
             expectedSramSizeBytes = patch.expectedSramSizeBytes ?: current.expectedSramSizeBytes,
             serverContentHash = patch.serverContentHash ?: current.serverContentHash,
+            recoveryStatePath = patch.recoveryStatePath ?: current.recoveryStatePath,
+            recoveryStateVersion = patch.recoveryStateVersion ?: current.recoveryStateVersion,
+            recoveryPauseOverlay = patch.recoveryPauseOverlay ?: current.recoveryPauseOverlay,
         )
         write(file, updated)
         return updated
@@ -121,6 +124,9 @@ class LaunchSessionJournal(private val journalDir: File) {
             canonicalFileName = patch.canonicalFileName ?: current.canonicalFileName,
             expectedSramSizeBytes = patch.expectedSramSizeBytes ?: current.expectedSramSizeBytes,
             serverContentHash = patch.serverContentHash ?: current.serverContentHash,
+            recoveryStatePath = patch.recoveryStatePath ?: current.recoveryStatePath,
+            recoveryStateVersion = patch.recoveryStateVersion ?: current.recoveryStateVersion,
+            recoveryPauseOverlay = patch.recoveryPauseOverlay ?: current.recoveryPauseOverlay,
         )
         write(file, updated)
         return updated
@@ -131,6 +137,20 @@ class LaunchSessionJournal(private val journalDir: File) {
      * Used by recovery logic to replay results after process death.
      */
     fun read(sessionId: String): SessionDescriptor? = read(descriptorFile(sessionId))
+
+    /** Clears a consumed recovery snapshot without changing the session state. */
+    fun clearRecoveryState(sessionId: String): SessionDescriptor {
+        val file = descriptorFile(sessionId)
+        val current = read(file)
+            ?: throw IllegalStateException("No descriptor for session $sessionId")
+        val updated = current.copy(
+            recoveryStatePath = null,
+            recoveryStateVersion = null,
+            recoveryPauseOverlay = null,
+        )
+        write(file, updated)
+        return updated
+    }
 
     /**
      * Deletes the descriptor file. Terminal cleanup after the result has been
@@ -274,6 +294,12 @@ data class SessionDescriptor(
     val expectedSramSizeBytes: Long? = null,
     /** Server-reported content hash from the original candidate download. Persisted for ADOPTED recovery finalization. Null if not reported. */
     val serverContentHash: String? = null,
+    /** App-private versioned Libretro state envelope written while backgrounding. */
+    val recoveryStatePath: String? = null,
+    /** Envelope version understood by the native host. */
+    val recoveryStateVersion: Int? = null,
+    /** Pause overlay to restore after activity/process recreation. */
+    val recoveryPauseOverlay: String? = null,
 )
 
 /**
@@ -294,4 +320,7 @@ data class SessionDescriptorPatch(
     val canonicalFileName: String? = null,
     val expectedSramSizeBytes: Long? = null,
     val serverContentHash: String? = null,
+    val recoveryStatePath: String? = null,
+    val recoveryStateVersion: Int? = null,
+    val recoveryPauseOverlay: String? = null,
 )

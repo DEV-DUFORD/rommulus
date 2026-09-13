@@ -1,5 +1,7 @@
 package com.romm.desktop.sync
 
+import com.romm.androidtv.emulation.model.isCompatibleSaveSize
+import com.romm.androidtv.emulation.model.normalizeExpectedSaveSize
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.romm.SaveConfirmResult
 import com.romm.androidtv.romm.SaveDownloadResult
@@ -250,7 +252,7 @@ class SaveConflictResolver(
             )
         }
 
-        // Validate hash (when the conflict recorded one) + exact known SRAM size — no fabrication.
+        // Validate hash plus known SRAM size (exact except documented migrations).
         val actualServerHash = sha256Hex(serverBytes)
         if (replica.serverHash != null && replica.serverHash != actualServerHash) {
             return SaveConflictResolutionResult.Failure(
@@ -258,7 +260,9 @@ class SaveConflictResolver(
             )
         }
         val expectedSize = replica.expectedSramSizeBytes
-        if (expectedSize != null && serverBytes.size.toLong() != expectedSize) {
+        if (expectedSize != null &&
+            !isCompatibleSaveSize(replica.coreId, expectedSize, serverBytes.size.toLong())
+        ) {
             return SaveConflictResolutionResult.Failure(
                 "sram-size-mismatch: expected $expectedSize bytes, got ${serverBytes.size}",
             )
@@ -277,6 +281,7 @@ class SaveConflictResolver(
         content.writeLocalAtomically(replica.serverKey, replica.userKey, replica.romId, replica.romHash, replica.slot, serverBytes)
         val now = clock()
         upsert(replica.copy(
+            expectedSramSizeBytes = normalizeExpectedSaveSize(replica.coreId, expectedSize),
             localHash = actualServerHash,
             localSizeBytes = serverBytes.size.toLong(),
             localWrittenAtEpochMs = now,

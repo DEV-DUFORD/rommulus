@@ -4,12 +4,16 @@ import com.romm.androidtv.auth.SessionStorage
 import com.romm.androidtv.library.RomDetail
 import com.romm.androidtv.onboarding.OnboardingRoutingDecision.AppMode
 import com.romm.androidtv.emulation.model.sha256Hex
+import com.romm.androidtv.emulation.model.SavePathPolicy
 import com.romm.androidtv.romm.FirmwareStagingOutcome
 import com.romm.androidtv.storage.AppPaths
 import com.romm.androidtv.storage.TestAppPaths
 import com.romm.androidtv.storage.firmwareDir
 import com.romm.androidtv.storage.fakes.InMemorySessionRecordStore
 import com.romm.androidtv.storage.ports.SettingsKeys
+import com.romm.androidtv.storage.records.ContentIndexKind
+import com.romm.androidtv.storage.records.ContentIndexRecord
+import com.romm.androidtv.storage.romCacheDir
 import com.romm.desktop.library.StubServer
 import com.romm.desktop.player.ControllerBindingIdentity
 import com.romm.desktop.player.FakePlayerProcessLauncher
@@ -54,6 +58,124 @@ class DesktopAppCoordinatorTest {
         verifiedAtEpochMillis = 123L,
         kioskMode = kioskMode,
     )
+
+    @Test
+    fun `download lookup is isolated by active server and user`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        val c = coordinator(paths)
+        val activeServer = SavePathPolicy.sanitizeSegment("https://demo.romm.app")
+        val activePath = paths.romCacheDir().resolve("active/7/game.gb")
+        val foreignPath = paths.romCacheDir().resolve("foreign/7/other.gb")
+        Files.createDirectories(activePath.parent)
+        Files.createDirectories(foreignPath.parent)
+        Files.write(activePath, byteArrayOf(1, 2, 3))
+        Files.write(foreignPath, byteArrayOf(4, 5, 6))
+        c.contentIndexStore.upsert(
+            cachedRomRecord("active", activeServer, "anonymous", activePath),
+        ).getOrThrow()
+        c.contentIndexStore.upsert(
+            cachedRomRecord("foreign", "another-server", "anonymous", foreignPath),
+        ).getOrThrow()
+
+        assertThat(c.isRomDownloaded(7L)).isTrue()
+        assertThat(c.downloadedGames().map { it.title }).containsExactly("active")
+    }
+
+    @Test
+    fun `remove downloaded game deletes only active cache and preserves saves`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        val c = coordinator(paths)
+        val serverKey = SavePathPolicy.sanitizeSegment("https://demo.romm.app")
+        val contentPath = paths.romCacheDir().resolve("active/7/game.gb")
+        val savePath = paths.dataDir.resolve("saves/keep.srm")
+        Files.createDirectories(contentPath.parent)
+        Files.createDirectories(savePath.parent)
+        Files.write(contentPath, byteArrayOf(1, 2, 3))
+        Files.write(savePath, byteArrayOf(9))
+        c.contentIndexStore.upsert(
+            cachedRomRecord("active", serverKey, "anonymous", contentPath),
+        ).getOrThrow()
+
+        assertThat(c.removeDownloadedGame(7L).exceptionOrNull()).isNull()
+        assertThat(Files.exists(contentPath)).isFalse()
+        assertThat(Files.readAllBytes(savePath)).containsExactly(9)
+        assertThat(c.isRomDownloaded(7L)).isFalse()
+    }
+
+    @Test
+    fun `remove downloaded game preserves content referenced by another user`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        val c = coordinator(paths)
+        val serverKey = SavePathPolicy.sanitizeSegment("https://demo.romm.app")
+        val contentPath = paths.romCacheDir().resolve("shared/7/game.gb")
+        Files.createDirectories(contentPath.parent)
+        Files.write(contentPath, byteArrayOf(1, 2, 3))
+        c.contentIndexStore.upsert(
+            cachedRomRecord("active", serverKey, "anonymous", contentPath),
+        ).getOrThrow()
+        c.contentIndexStore.upsert(
+            cachedRomRecord("other", serverKey, "other-user", contentPath),
+        ).getOrThrow()
+
+        assertThat(c.removeDownloadedGame(7L).exceptionOrNull()).isNull()
+        assertThat(Files.readAllBytes(contentPath)).containsExactly(1, 2, 3)
+        assertThat(c.contentIndexStore.allRecords().map { it.userKey }).containsExactly("other-user")
+    }
+
+    @Test
+    fun `download lookup and removal reject a symlinked cache escape`(@TempDir dir: Path) {
+        val paths = dir.testRoot()
+        val c = coordinator(paths)
+        val serverKey = SavePathPolicy.sanitizeSegment("https://demo.romm.app")
+        val outside = dir.resolve("outside")
+        Files.createDirectories(outside.resolve("7"))
+        val outsideFile = outside.resolve("7/game.gb")
+        Files.write(outsideFile, byteArrayOf(1, 2, 3))
+        val linkedOrigin = paths.romCacheDir().resolve("linked")
+        Files.createDirectories(linkedOrigin.parent)
+        Files.createSymbolicLink(linkedOrigin, outside)
+        val indexedPath = linkedOrigin.resolve("7/game.gb")
+        c.contentIndexStore.upsert(
+            cachedRomRecord("escaped", serverKey, "anonymous", indexedPath),
+        ).getOrThrow()
+
+        assertThat(c.isRomDownloaded(7L)).isFalse()
+        assertThat(c.removeDownloadedGame(7L).isFailure).isTrue()
+        assertThat(Files.exists(outsideFile)).isTrue()
+    }
+
+    private fun cachedRomRecord(
+        title: String,
+        serverKey: String,
+        userKey: String,
+        path: Path,
+    ) = ContentIndexRecord(
+        key = "ROM:$serverKey:$userKey:7:",
+        kind = ContentIndexKind.ROM,
+        serverKey = serverKey,
+        userKey = userKey,
+        remoteId = 7,
+        fileIdsKey = "",
+        contentHash = sha256Hex(Files.readAllBytes(path)),
+        absolutePath = path.toString(),
+        sizeBytes = Files.size(path),
+        lastAccessedEpochMs = 1,
+        title = title,
+        platformDisplayName = "Game Boy",
+        platformSlug = "gb",
+        fileName = path.fileName.toString(),
+        lastModifiedEpochMs = Files.getLastModifiedTime(path).toMillis(),
+    )
+
+    @Test
+    fun `launchPlayer rejects a second game while a player is active`(@TempDir dir: Path) {
+        val c = coordinator(dir.testRoot())
+        c.activePlayerSessionId.value = "existing-session"
+
+        assertThat(c.launchPlayer(8L)).isEqualTo(
+            PlayerLaunchResult.Failed("Close the currently running game before launching another."),
+        )
+    }
 
     // ---------------------------------------------------------------- decideAppMode
 

@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
@@ -89,6 +90,7 @@ import java.util.logging.Level
 fun RommulusDesktopApp(
     coordinator: DesktopAppCoordinator,
     onCloseRequest: () -> Unit,
+    onRequestForeground: () -> Unit = {},
 ) {
     // Exit-on-request: when the coordinator flags a root exit, close the window.
     LaunchedEffect(coordinator.exitRequested) {
@@ -141,8 +143,21 @@ fun RommulusDesktopApp(
     // composition, so the guarantee holds across navigation.
     val shellFocusRequester = remember { FocusRequester() }
     var keyboardCaptureActive by remember { mutableStateOf(false) }
+    var previousPlayerSessionId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         runCatching { shellFocusRequester.requestFocus() }
+    }
+    LaunchedEffect(activePlayerSessionId) {
+        if (previousPlayerSessionId != null && activePlayerSessionId == null) {
+            val previousFocusKey = focusNavigator.currentFocusKey()
+            onRequestForeground()
+            withFrameNanos { }
+            runCatching { shellFocusRequester.requestFocus() }
+            if (previousFocusKey != null) {
+                focusNavigator.focusItem(previousFocusKey)
+            }
+        }
+        previousPlayerSessionId = activePlayerSessionId
     }
 
     RommulusTheme(theme = theme) {

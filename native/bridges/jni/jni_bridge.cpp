@@ -243,6 +243,22 @@ Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeRestoreSav
 }
 
 extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeCheckpointState(
+        JNIEnv* env, jobject /*thiz*/, jstring statePath) {
+    if (g_session == nullptr) return JNI_FALSE;
+    return g_session->checkpointState(jstringToStd(env, statePath)) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeRestoreState(
+        JNIEnv* env, jobject /*thiz*/, jstring statePath) {
+    if (g_session == nullptr) return JNI_FALSE;
+    return g_session->restoreState(jstringToStd(env, statePath)) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
 JNIEXPORT jlong JNICALL
 Java_com_romm_androidtv_emulation_nativehost_NativeLibretroHost_nativeGetSramSizeBytes(
         JNIEnv* /*env*/, jobject /*thiz*/) {

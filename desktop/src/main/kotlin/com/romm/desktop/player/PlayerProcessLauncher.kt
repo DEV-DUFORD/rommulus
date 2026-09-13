@@ -92,8 +92,15 @@ interface PlayerProcessLauncher {
 
 /** Outcome of a spawn attempt. */
 sealed interface LaunchOutcome {
-    /** The player process started; [pid] identifies it (liveness tracking lands in a later wave). */
-    data class Started(val pid: Long) : LaunchOutcome
+    /** The player process started; [pid] identifies it for diagnostics and journal recovery. */
+    class Started(
+        val pid: Long,
+        internal val process: Process? = null,
+    ) : LaunchOutcome {
+        override fun equals(other: Any?): Boolean = other is Started && pid == other.pid
+        override fun hashCode(): Int = pid.hashCode()
+        override fun toString(): String = "Started(pid=$pid)"
+    }
 
     /** Spawn failed (binary missing, request file invalid, OS error). No player is running. */
     data class Error(val message: String) : LaunchOutcome
@@ -168,7 +175,7 @@ class ProcessBuilderPlayerLauncher(
             }
             process
         }.fold(
-            onSuccess = { process -> LaunchOutcome.Started(process.pid()) },
+            onSuccess = { process -> LaunchOutcome.Started(process.pid(), process) },
             onFailure = { e ->
                 playerLog.appendLine("[pre-launch] failed to spawn player: ${e.message ?: e::class.java.simpleName}")
                 playerLog.close()

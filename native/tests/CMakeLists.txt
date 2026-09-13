@@ -87,6 +87,8 @@ romm_add_engine_test(test_atomic_file_store)
 romm_add_engine_test(test_pixel_format)
 romm_add_engine_test(test_core_library)
 romm_add_engine_test(test_n64_rom)
+romm_add_engine_test(test_save_ram_persistence)
+romm_add_engine_test(test_serialized_state)
 
 function(romm_add_player_test name)
     add_executable(${name} ${name}.cpp)

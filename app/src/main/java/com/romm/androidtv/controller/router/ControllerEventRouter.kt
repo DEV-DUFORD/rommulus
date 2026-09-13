@@ -36,7 +36,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * 6. Produces a [StateFlow] of slot states for Compose UI consumption.
  * 7. Enumerates already-connected controllers on startup and lifecycle resume.
  *
- * Does NOT persist beyond current process (Phase 0 scope).
+ * Persistence is supplied by the activity through stable reconnect keys; live
+ * Android device IDs remain scoped to this router instance.
  */
 class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceListener {
     /** Current four-slot browser contract, exposed as StateFlow. */
@@ -74,8 +75,8 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     /** Device signatures observed this session. */
     private val deviceIdToSignature = mutableMapOf<Int, DeviceSignature>()
 
-    /** User-selected controller layout, retained across this router's STOP/START cycle. */
-    private var manualSlotAssignments: List<DeviceSignature?>? = null
+    /** Preferred reconnect key per player port, retained across STOP/START cycles. */
+    private var preferredSlotReconnectKeys: List<String?> = List(ControllerSlot.SLOT_COUNT) { null }
 
     private val virtualRemoteDeviceId = Int.MIN_VALUE
 
@@ -143,7 +144,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
 
         deviceIdToSlotIndex.clear()
         deviceIdToSlotIndex.putAll(result.deviceSlots)
-        manualSlotAssignments = result.slots.indices.map { assignedSlot ->
+        preferredSlotReconnectKeys = result.slots.indices.map { assignedSlot ->
             result.deviceSlots.entries
                 .firstOrNull { (assignedDeviceId, slot) ->
                     slot == assignedSlot &&
@@ -152,6 +153,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
                 }
                 ?.key
                 ?.let(deviceIdToSignature::get)
+                ?.reconnectKey
         }
         pauseCombinationPressedPerDevice.keys.forEach { pauseCombinationPressedPerDevice[it] = false }
 
@@ -167,6 +169,26 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         }
         emitIfChanged(updatedSlots)
         return true
+    }
+
+    /** Seeds durable player-port preferences before connected devices are enumerated. */
+    fun restorePreferredSlotAssignments(reconnectKeys: List<String?>) {
+        preferredSlotReconnectKeys = List(ControllerSlot.SLOT_COUNT) { slotIndex ->
+            reconnectKeys.getOrNull(slotIndex)
+        }
+        restoreManualSlotAssignments()
+    }
+
+    /** Stable player-port preferences suitable for durable storage. */
+    fun preferredSlotReconnectKeys(): List<String?> {
+        val currentAssignments = durablePreferredReconnectKeys(
+            storedReconnectKeys = preferredSlotReconnectKeys,
+            deviceSlots = deviceIdToSlotIndex,
+            deviceSignatures = deviceIdToSignature,
+            virtualRemoteDeviceId = virtualRemoteDeviceId,
+        )
+        preferredSlotReconnectKeys = currentAssignments
+        return currentAssignments
     }
 
     /** Notify settings UI which assigned physical controller produced an input event. */
@@ -552,31 +574,14 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
     }
 
     private fun restoreManualSlotAssignments() {
-        val desired = manualSlotAssignments ?: return
-        val availableDeviceIds = deviceIdToSignature.keys
-            .filter { deviceId ->
-                deviceId != virtualRemoteDeviceId &&
-                    !deviceIdToSignature[deviceId].isAndroidTvVirtualController()
-            }
-            .toMutableSet()
-        val restoredSlots = _slotsFlow.value.map(::emptyControllerSlot).toMutableList()
-        val restoredDeviceSlots = mutableMapOf<Int, Int>()
-
-        desired.forEachIndexed { slotIndex, desiredSignature ->
-            if (desiredSignature == null || slotIndex !in restoredSlots.indices) return@forEachIndexed
-            val deviceId = availableDeviceIds
-                .sorted()
-                .firstOrNull { candidate ->
-                    deviceIdToSignature[candidate]?.matchesReconnect(desiredSignature) == true
-                }
-                ?: return@forEachIndexed
-            availableDeviceIds.remove(deviceId)
-            restoredDeviceSlots[deviceId] = slotIndex
-            restoredSlots[slotIndex] = restoredSlots[slotIndex].copy(
-                preferredSignature = deviceIdToSignature.getValue(deviceId),
-                connectionState = SlotConnectionState.CONNECTED,
-                currentSnapshot = GamepadSnapshot.EMPTY,
-            )
+        val result = reconcilePhysicalControllerAssignments(
+            slots = _slotsFlow.value,
+            deviceSignatures = deviceIdToSignature,
+            preferredReconnectKeys = preferredSlotReconnectKeys,
+            virtualRemoteDeviceId = virtualRemoteDeviceId,
+        )
+        val restoredSlots = result.slots.toMutableList()
+        for ((deviceId, slotIndex) in result.deviceSlots) {
             InputDevice.getDevice(deviceId)?.let { device ->
                 resolvedAxesPerDevice[deviceId] = resolveAxes(device, restoredSlots[slotIndex].mapping)
             }
@@ -586,7 +591,7 @@ class ControllerEventRouter : android.hardware.input.InputManager.InputDeviceLis
         }
 
         deviceIdToSlotIndex.clear()
-        deviceIdToSlotIndex.putAll(restoredDeviceSlots)
+        deviceIdToSlotIndex.putAll(result.deviceSlots)
         emitIfChanged(restoredSlots)
     }
 
@@ -947,10 +952,96 @@ internal fun physicalDeviceIds(
     .map { (deviceId, _) -> deviceId }
     .toList()
 
+internal fun durablePreferredReconnectKeys(
+    storedReconnectKeys: List<String?>,
+    deviceSlots: Map<Int, Int>,
+    deviceSignatures: Map<Int, DeviceSignature>,
+    virtualRemoteDeviceId: Int = Int.MIN_VALUE,
+): List<String?> = List(ControllerSlot.SLOT_COUNT) { slotIndex ->
+    storedReconnectKeys.getOrNull(slotIndex)
+        ?: deviceSlots.entries
+            .firstOrNull { (deviceId, assignedSlot) ->
+                assignedSlot == slotIndex &&
+                    deviceId != virtualRemoteDeviceId &&
+                    !deviceSignatures[deviceId].isAndroidTvVirtualController()
+            }
+            ?.key
+            ?.let(deviceSignatures::get)
+            ?.reconnectKey
+}
+
 internal data class ControllerPortAssignment(
     val slots: List<ControllerSlot>,
     val deviceSlots: Map<Int, Int>,
 )
+
+internal fun reconcilePhysicalControllerAssignments(
+    slots: List<ControllerSlot>,
+    deviceSignatures: Map<Int, DeviceSignature>,
+    preferredReconnectKeys: List<String?>,
+    virtualRemoteDeviceId: Int = Int.MIN_VALUE,
+): ControllerPortAssignment {
+    val existingRemoteSlot = slots.indexOfFirst {
+        it.preferredSignature == DeviceSignature.VIRTUAL_REMOTE
+    }
+    val existingRemoteSnapshot = existingRemoteSlot
+        .takeIf { it >= 0 }
+        ?.let { slots[it].currentSnapshot }
+    val availableDeviceIds = deviceSignatures.keys
+        .filter { deviceId ->
+            deviceId != virtualRemoteDeviceId &&
+                !deviceSignatures[deviceId].isAndroidTvVirtualController()
+        }
+        .sorted()
+        .toMutableSet()
+    val restoredSlots = slots.map(::emptyControllerSlot).toMutableList()
+    val restoredDeviceSlots = mutableMapOf<Int, Int>()
+
+    preferredReconnectKeys.forEachIndexed { slotIndex, reconnectKey ->
+        if (reconnectKey == null || slotIndex !in restoredSlots.indices) return@forEachIndexed
+        val deviceId = availableDeviceIds.firstOrNull { candidate ->
+            deviceSignatures[candidate]?.reconnectKey == reconnectKey
+        } ?: return@forEachIndexed
+        availableDeviceIds.remove(deviceId)
+        restoredDeviceSlots[deviceId] = slotIndex
+        restoredSlots[slotIndex] = restoredSlots[slotIndex].copy(
+            preferredSignature = deviceSignatures.getValue(deviceId),
+            connectionState = SlotConnectionState.CONNECTED,
+            currentSnapshot = GamepadSnapshot.EMPTY,
+        )
+    }
+
+    for (deviceId in availableDeviceIds) {
+        val slotIndex = restoredSlots.indexOfFirst {
+            it.connectionState == SlotConnectionState.UNASSIGNED
+        }
+        if (slotIndex < 0) break
+        restoredDeviceSlots[deviceId] = slotIndex
+        restoredSlots[slotIndex] = restoredSlots[slotIndex].copy(
+            preferredSignature = deviceSignatures.getValue(deviceId),
+            connectionState = SlotConnectionState.CONNECTED,
+            currentSnapshot = GamepadSnapshot.EMPTY,
+        )
+    }
+
+    if (existingRemoteSlot >= 0) {
+        val remoteSlot = existingRemoteSlot.takeIf { slotIndex ->
+            restoredSlots[slotIndex].connectionState == SlotConnectionState.UNASSIGNED
+        } ?: restoredSlots.indexOfFirst {
+            it.connectionState == SlotConnectionState.UNASSIGNED
+        }
+        if (remoteSlot >= 0) {
+            restoredDeviceSlots[virtualRemoteDeviceId] = remoteSlot
+            restoredSlots[remoteSlot] = restoredSlots[remoteSlot].copy(
+                preferredSignature = DeviceSignature.VIRTUAL_REMOTE,
+                connectionState = SlotConnectionState.CONNECTED,
+                currentSnapshot = existingRemoteSnapshot ?: GamepadSnapshot.EMPTY,
+            )
+        }
+    }
+
+    return ControllerPortAssignment(restoredSlots, restoredDeviceSlots)
+}
 
 internal fun applyControllerPortAssignment(
     slots: List<ControllerSlot>,

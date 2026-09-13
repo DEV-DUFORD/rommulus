@@ -56,9 +56,10 @@ class SaveSyncDrainExecutorTest {
         generation: Long? = GEN,
         syncStatus: SaveSyncStatus = SaveSyncStatus.UNSYNCED,
         expectedSize: Long? = null,
+        coreId: String = CORE_ID,
     ) = SaveReplicaRecord(
         serverKey = SRV, userKey = USER, romId = ROM_ID, romHash = HASH, slot = SLOT,
-        coreId = CORE_ID, coreBuildRevision = CORE_REV,
+        coreId = coreId, coreBuildRevision = CORE_REV,
         expectedSramSizeBytes = expectedSize,
         localHash = sha256Hex(BYTES), localSizeBytes = BYTES.size.toLong(), localWrittenAtEpochMs = generation,
         syncStatus = syncStatus,
@@ -81,12 +82,13 @@ class SaveSyncDrainExecutorTest {
     private fun negotiateOp(
         generation: Long = GEN,
         coreBuildRevision: String? = CORE_REV,
+        coreId: String = CORE_ID,
     ) = PendingOperationRecord(
         serverKey = SRV, userKey = USER, romId = ROM_ID, romHash = HASH, slot = SLOT,
         operationType = PendingOperationType.NEGOTIATE_AND_SYNC,
         localGenerationEpochMs = generation,
         origin = ORIGIN,
-        negotiateFileName = "neg.srm", negotiateCoreId = CORE_ID, negotiateCoreBuildRevision = coreBuildRevision,
+        negotiateFileName = "neg.srm", negotiateCoreId = coreId, negotiateCoreBuildRevision = coreBuildRevision,
         createdAtEpochMs = NOW - 1000, updatedAtEpochMs = NOW - 1000,
     )
 
@@ -536,6 +538,29 @@ class SaveSyncDrainExecutorTest {
         assertThat(h.sync.confirmCalls).isEmpty()
         assertThat(h.sync.completeSessionCalls)
             .containsExactly(Triple(ORIGIN, 91L, SyncCompleteRequest(operationsCompleted = 0, operationsFailed = 1)))
+    }
+
+    @Test
+    fun `negotiate accepts legacy mGBA size and normalizes replica expectation`() {
+        val serverBytes = ByteArray(64 * 1024) { 0x24 }
+        val h = Harness()
+        h.store.upsert(replica(expectedSize = 32L * 1024L, coreId = "mgba"))
+        val opId = h.store.enqueue(negotiateOp(coreId = "mgba")).getOrThrow()
+        h.seedLocal()
+        h.sync.negotiateResult = SyncNegotiateResult.Success(
+            SyncNegotiateInfo(
+                sessionId = 92L,
+                operations = listOf(
+                    syncOp(SyncAction.DOWNLOAD, saveId = 8823L, emulator = "mgba"),
+                ),
+            ),
+        )
+        h.sync.downloadResult = SaveDownloadResult.Success(serverBytes)
+
+        assertThat(h.executor.drainBatch()).isEqualTo(SaveSyncDrainExecutor.DrainResult.Complete)
+        assertThat(h.store.findById(opId)!!.status).isEqualTo(PendingOperationStatus.SUCCEEDED)
+        assertThat(h.content.readLocal(SRV, USER, ROM_ID, HASH, SLOT)).containsExactly(*serverBytes)
+        assertThat(h.store.findByScope(scope)!!.expectedSramSizeBytes).isEqualTo(128L * 1024L)
     }
 
     @Test

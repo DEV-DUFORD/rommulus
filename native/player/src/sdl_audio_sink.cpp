@@ -23,9 +23,8 @@
 //     the startup gap is real prebuffer time, not starvation, and is not
 //     counted.
 //   - overrun: pushSamples() finds the queued audio (device-format bytes)
-//     above a bound of two seconds of audio — the stream buffer is about
-//     to overflow and SDL will drop data. Those frames are counted as
-//     overrun frames.
+//     above the latency bound. Stale queued samples are cleared so a render
+//     stall cannot leave gameplay audio seconds behind video.
 #include "native/player/sdl_audio_sink.h"
 
 #include <SDL3/SDL.h>
@@ -54,11 +53,18 @@ constexpr double kDefaultPrebufferSeconds = 0.1;
 // single SDL_PutAudioStreamData call stays small.
 constexpr int kPrebufferChunkFrames = 4096;
 
-// Two seconds of device-format audio, in bytes.
+// Keep enough audio to absorb normal scheduling jitter without allowing a
+// stalled core's catch-up frames to produce perceptible, persistent latency.
+constexpr double kMaximumQueuedSeconds = 0.25;
+
 int overrunBoundFor(const SDL_AudioSpec& deviceSpec) {
     const int frameBytes =
         SDL_AUDIO_BYTESIZE(deviceSpec.format) * deviceSpec.channels;
-    return deviceSpec.freq > 0 ? deviceSpec.freq * frameBytes * 2 : 0;
+    return deviceSpec.freq > 0
+        ? static_cast<int>(
+              static_cast<double>(deviceSpec.freq * frameBytes) *
+              kMaximumQueuedSeconds)
+        : 0;
 }
 
 }  // namespace
@@ -204,10 +210,18 @@ void SdlAudioSink::pushSamples(const int16_t* interleaved, size_t frames) {
         // Gated on framesPushed_ so the first fill of an empty stream is
         // not misreported as an underrun.
         underrunFrames_ += frames;
-    } else if (queuedBytes > overrunBoundBytes_) {
-        // Buffer above the bound: the stream is about to drop data; count
-        // these frames as overrun (see file header).
-        overrunFrames_ += frames;
+    } else if (overrunBoundBytes_ > 0 && queuedBytes > overrunBoundBytes_) {
+        // Catch-up after a rendering stall can produce audio much faster than
+        // realtime. Keeping those samples makes audio remain behind video even
+        // after emulation recovers, so discard the stale queue before adding
+        // the current frame's audio.
+        if (SDL_ClearAudioStream(stream_)) {
+            overrunFrames_ += frames;
+        } else {
+            romm::log::sink().log(
+                romm::log::Severity::Warn, kTag,
+                std::string("SDL_ClearAudioStream failed: ") + SDL_GetError());
+        }
     }
 
     // S16 stereo = 4 bytes per frame. Never blocks the emulation thread;

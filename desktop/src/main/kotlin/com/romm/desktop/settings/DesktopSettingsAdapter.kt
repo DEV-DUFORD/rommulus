@@ -9,6 +9,8 @@ import com.romm.androidtv.network.RommServerAddress
 import com.romm.androidtv.network.ServerAddressResult
 import com.romm.androidtv.storage.ports.SettingsKeys
 import com.romm.androidtv.storage.ports.SettingsStore
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * Adapts the desktop [SettingsStore] (JSON) + [SessionStorage] (SQLite) pair into the
@@ -79,6 +81,26 @@ class DesktopSettingsAdapter(
 
     fun setOnScreenGameControlsEnabled(enabled: Boolean) {
         store.write(mapOf(SettingsKeys.ONSCREEN_GAME_CONTROLS to enabled.toString()))
+    }
+
+    fun romCacheDirectoryOverride(): String =
+        store.snapshot().get(SettingsKeys.ROM_CACHE_DIRECTORY).orEmpty()
+
+    fun setRomCacheDirectoryOverride(value: String): Result<Unit> = runCatching {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) {
+            store.clear(SettingsKeys.ROM_CACHE_DIRECTORY).getOrThrow()
+            return@runCatching
+        }
+        val path = Path.of(trimmed)
+        require(path.isAbsolute) { "Use an absolute folder path." }
+        Files.createDirectories(path)
+        require(Files.isDirectory(path) && Files.isWritable(path)) {
+            "The selected folder is not writable."
+        }
+        store.write(
+            mapOf(SettingsKeys.ROM_CACHE_DIRECTORY to path.normalize().toString()),
+        ).getOrThrow()
     }
 
     // Video Options toggles (mirrors Android's SettingsRepository keys): read at

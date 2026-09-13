@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.romm.desktop.DesktopAppCoordinator
@@ -21,6 +23,20 @@ import com.romm.desktop.ui.navigation.LocalFocusNavigator
 fun DownloadedGamesScreen(coordinator: DesktopAppCoordinator) {
     val colors = LocalRommulusColors.current
     val roms = coordinator.downloadedGames()
+    val initialScroll = remember { coordinator.libraryScrollPosition("downloads") }
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialScroll.index,
+        initialFirstVisibleItemScrollOffset = initialScroll.offset,
+    )
+    DisposableEffect(gridState) {
+        onDispose {
+            coordinator.rememberLibraryScrollPosition(
+                "downloads",
+                gridState.firstVisibleItemIndex,
+                gridState.firstVisibleItemScrollOffset,
+            )
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -47,7 +63,7 @@ fun DownloadedGamesScreen(coordinator: DesktopAppCoordinator) {
         } else {
             PositionalRomGrid(
                 navigator = LocalFocusNavigator.current,
-                gridState = rememberLazyGridState(),
+                gridState = gridState,
                 roms = roms,
                 cardKeyPrefix = "downloads:",
                 onOpen = { coordinator.openGameDetail(it, Screen.DOWNLOADED) },

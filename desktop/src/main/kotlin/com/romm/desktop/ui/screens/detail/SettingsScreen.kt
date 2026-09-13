@@ -110,6 +110,8 @@ fun SettingsScreen(
     var showThemeDialog by remember { mutableStateOf(false) }
     var restoreThemeFocus by remember { mutableStateOf(false) }
     var privacyOpenError by remember { mutableStateOf(false) }
+    var romCachePath by remember { mutableStateOf(coordinator.settingsAdapter.romCacheDirectoryOverride()) }
+    var romCachePathMessage by remember { mutableStateOf<String?>(null) }
 
     // Focus requesters — the D-pad/arrow navigation chain (mirrors the Android screen).
     val originFocus = remember { FocusRequester() }
@@ -121,6 +123,8 @@ fun SettingsScreen(
     val loginFocus = remember { FocusRequester() }
     val logoutFocus = remember { FocusRequester() }
     val hideUnsupportedFocus = remember { FocusRequester() }
+    val romCachePathFocus = remember { FocusRequester() }
+    val saveRomCachePathFocus = remember { FocusRequester() }
     val themeFocus = remember { FocusRequester() }
     val segaCdFocus = remember { FocusRequester() }
     val playStationFocus = remember { FocusRequester() }
@@ -393,12 +397,69 @@ fun SettingsScreen(
                 onCheckedChange = presenter::onHideUnsupportedSystemsChanged,
                 focusRequester = hideUnsupportedFocus,
                 upFocus = if (loggedIn) logoutFocus else loginFocus,
-                downFocus = themeFocus,
+                downFocus = romCachePathFocus,
                 colors = colors,
                 navigator = navigator,
                 focusKey = "settings:hide-unsupported",
                 onActivate = { presenter.onHideUnsupportedSystemsChanged(!uiState.hideUnsupportedSystems) },
             )
+            Spacer(modifier = Modifier.height(16.dp))
+            DesktopTextField(
+                value = romCachePath,
+                onValueChange = {
+                    romCachePath = it
+                    romCachePathMessage = null
+                },
+                label = "ROM download folder",
+                placeholder = coordinator.paths.cacheDir.toString(),
+                onDone = { saveRomCachePathFocus.requestFocus() },
+                modifier = Modifier
+                    .focusRequester(romCachePathFocus)
+                    .focusProperties {
+                        up = hideUnsupportedFocus
+                        down = saveRomCachePathFocus
+                    },
+            )
+            TvOutlinedButton(
+                onClick = {
+                    coordinator.settingsAdapter.setRomCacheDirectoryOverride(romCachePath).fold(
+                        onSuccess = {
+                            romCachePathMessage = "Saved. Restart RomMulus to use this download folder."
+                        },
+                        onFailure = {
+                            romCachePathMessage = it.message ?: "Could not use that folder."
+                        },
+                    )
+                },
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .focusRequester(saveRomCachePathFocus)
+                    .focusProperties {
+                        up = romCachePathFocus
+                        down = themeFocus
+                    }
+                    .focusableItem("settings:rom-cache-path", navigator) {
+                        coordinator.settingsAdapter.setRomCacheDirectoryOverride(romCachePath).fold(
+                            onSuccess = {
+                                romCachePathMessage =
+                                    "Saved. Restart RomMulus to use this download folder."
+                            },
+                            onFailure = {
+                                romCachePathMessage = it.message ?: "Could not use that folder."
+                            },
+                        )
+                    },
+            ) {
+                Text("Save Download Folder")
+            }
+            romCachePathMessage?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -415,7 +476,7 @@ fun SettingsScreen(
                 modifier = Modifier
                     .focusRequester(themeFocus)
                     .focusProperties {
-                        up = hideUnsupportedFocus
+                        up = saveRomCachePathFocus
                         down = segaCdFocus
                     }
                     .focusableItem("settings:theme", navigator) { showThemeDialog = true },

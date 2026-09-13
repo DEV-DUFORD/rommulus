@@ -66,10 +66,15 @@ fun HomeScreen(
     val uiState by presenter.uiState.collectAsState()
     val colors = LocalRommulusColors.current
     val navigator = LocalFocusNavigator.current
-    val columnState = rememberLazyListState()
-    val continuePlayingState = rememberLazyListState()
-    val recentlyAddedState = rememberLazyListState()
-    val favoritesState = rememberLazyListState()
+    @Composable
+    fun rememberedListState(key: String): LazyListState {
+        val position = remember(key) { coordinator.libraryScrollPosition(key) }
+        return rememberLazyListState(position.index, position.offset)
+    }
+    val columnState = rememberedListState("home:column")
+    val continuePlayingState = rememberedListState("home:continue")
+    val recentlyAddedState = rememberedListState("home:recent")
+    val favoritesState = rememberedListState("home:favorites")
     val shelfStates = mapOf(
         HomeShelf.CONTINUE_PLAYING to continuePlayingState,
         HomeShelf.RECENTLY_ADDED to recentlyAddedState,
@@ -92,6 +97,22 @@ fun HomeScreen(
             rememberedCardIndices[HomeShelf.FAVORITES] ?: 0,
         ),
     )
+    DisposableEffect(columnState, continuePlayingState, recentlyAddedState, favoritesState) {
+        onDispose {
+            mapOf(
+                "home:column" to columnState,
+                "home:continue" to continuePlayingState,
+                "home:recent" to recentlyAddedState,
+                "home:favorites" to favoritesState,
+            ).forEach { (key, state) ->
+                coordinator.rememberLibraryScrollPosition(
+                    key,
+                    state.firstVisibleItemIndex,
+                    state.firstVisibleItemScrollOffset,
+                )
+            }
+        }
+    }
 
     DisposableEffect(navigator, navigationOwner, navigationShelves) {
         navigator.installGridNavigation(navigationOwner) { direction ->

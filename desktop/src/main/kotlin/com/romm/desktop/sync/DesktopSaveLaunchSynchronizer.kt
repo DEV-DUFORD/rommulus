@@ -1,6 +1,8 @@
 package com.romm.desktop.sync
 
 import com.romm.androidtv.emulation.model.SavePathPolicy
+import com.romm.androidtv.emulation.model.isCompatibleSaveSize
+import com.romm.androidtv.emulation.model.normalizeExpectedSaveSize
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.romm.ClientSaveState
 import com.romm.androidtv.romm.DeviceRegistrationResult
@@ -149,8 +151,10 @@ class DesktopSaveLaunchSynchronizer(
                     (existingReplica ?: newReplica(request, scope)).copy(
                         coreId = request.coreId,
                         coreBuildRevision = request.coreBuildRevision,
-                        expectedSramSizeBytes =
+                        expectedSramSizeBytes = normalizeExpectedSaveSize(
+                            request.coreId,
                             request.expectedSramSizeBytes ?: existingReplica?.expectedSramSizeBytes,
+                        ),
                         rommSaveId = operation.saveId ?: existingReplica?.rommSaveId,
                         serverHash = operation.serverContentHash ?: existingReplica?.serverHash,
                         serverUpdatedAtEpochMs =
@@ -239,7 +243,7 @@ class DesktopSaveLaunchSynchronizer(
                 emulator = operation.emulator,
             )
         }
-        if (bytes.size.toLong() != expectedSize) {
+        if (!isCompatibleSaveSize(request.coreId, expectedSize, bytes.size.toLong())) {
             return quarantineDownload(
                 request,
                 scope,
@@ -265,7 +269,7 @@ class DesktopSaveLaunchSynchronizer(
             (existingReplica ?: newReplica(request, scope)).copy(
                 coreId = request.coreId,
                 coreBuildRevision = request.coreBuildRevision,
-                expectedSramSizeBytes = expectedSize,
+                expectedSramSizeBytes = normalizeExpectedSaveSize(request.coreId, expectedSize),
                 localHash = sha256Hex(bytes),
                 localSizeBytes = bytes.size.toLong(),
                 localWrittenAtEpochMs = now,
@@ -307,8 +311,10 @@ class DesktopSaveLaunchSynchronizer(
             (existingReplica ?: newReplica(request, scope)).copy(
                 coreId = request.coreId,
                 coreBuildRevision = request.coreBuildRevision,
-                expectedSramSizeBytes =
+                expectedSramSizeBytes = normalizeExpectedSaveSize(
+                    request.coreId,
                     request.expectedSramSizeBytes ?: existingReplica?.expectedSramSizeBytes,
+                ),
                 rommSaveId = operation.saveId ?: existingReplica?.rommSaveId,
                 serverHash = operation.serverContentHash ?: existingReplica?.serverHash,
                 serverSizeBytes = bytes.size.toLong(),
@@ -381,8 +387,10 @@ class DesktopSaveLaunchSynchronizer(
             existingReplica.copy(
                 coreId = request.coreId,
                 coreBuildRevision = request.coreBuildRevision,
-                expectedSramSizeBytes =
+                expectedSramSizeBytes = normalizeExpectedSaveSize(
+                    request.coreId,
                     request.expectedSramSizeBytes ?: existingReplica.expectedSramSizeBytes,
+                ),
                 syncStatus = SaveSyncStatus.PENDING_UPLOAD,
                 lastError = null,
             ),
@@ -403,8 +411,10 @@ class DesktopSaveLaunchSynchronizer(
         return base.copy(
             coreId = request.coreId,
             coreBuildRevision = request.coreBuildRevision,
-            expectedSramSizeBytes =
+            expectedSramSizeBytes = normalizeExpectedSaveSize(
+                request.coreId,
                 request.expectedSramSizeBytes ?: existingReplica?.expectedSramSizeBytes,
+            ),
             localHash = existingReplica?.localHash ?: localBytes?.let(::sha256Hex),
             localSizeBytes = existingReplica?.localSizeBytes ?: localBytes?.size?.toLong(),
             rommSaveId = operation.saveId ?: base.rommSaveId,
@@ -424,7 +434,10 @@ class DesktopSaveLaunchSynchronizer(
         slot = scope.slot,
         coreId = request.coreId,
         coreBuildRevision = request.coreBuildRevision,
-        expectedSramSizeBytes = request.expectedSramSizeBytes,
+        expectedSramSizeBytes = normalizeExpectedSaveSize(
+            request.coreId,
+            request.expectedSramSizeBytes,
+        ),
     )
 
     private fun completeSession(origin: String, sessionId: Long, completed: Int, failed: Int) {

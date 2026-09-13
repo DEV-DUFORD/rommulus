@@ -1,5 +1,7 @@
 package com.romm.androidtv.emulation.process
 
+import com.romm.androidtv.emulation.model.DescriptorState
+import com.romm.androidtv.emulation.model.SessionDescriptor
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -29,6 +31,53 @@ class EmulationInputRoutingPolicyTest {
         assertThat(pauseOverlayOnBackground(PauseOverlay.TOUCH_CONTROLLER_SETTINGS))
             .isEqualTo(PauseOverlay.TOUCH_CONTROLLER_SETTINGS)
     }
+
+    @Test
+    fun `recreated activity restores a paused overlay and never resumes gameplay`() {
+        assertThat(restoredPauseOverlay("VIDEO_OPTIONS")).isEqualTo(PauseOverlay.VIDEO_OPTIONS)
+        assertThat(restoredPauseOverlay("CLOSED")).isEqualTo(PauseOverlay.MENU)
+        assertThat(restoredPauseOverlay("unknown")).isEqualTo(PauseOverlay.MENU)
+        assertThat(restoredPauseOverlay(null)).isEqualTo(PauseOverlay.MENU)
+    }
+
+    @Test
+    fun `activity recreation never re-adopts original candidate over recovered SRAM`() {
+        val adopted = sessionDescriptor(state = DescriptorState.ADOPTED)
+        val backgrounded = sessionDescriptor(
+            state = DescriptorState.CORE_LOADED,
+            recoveryStatePath = "/data/recovery/session.state",
+            recoveryPauseOverlay = "MENU",
+        )
+
+        assertThat(shouldAttemptCandidateAdoption(null)).isTrue()
+        assertThat(shouldAttemptCandidateAdoption(sessionDescriptor(DescriptorState.LAUNCHED))).isTrue()
+        assertThat(shouldAttemptCandidateAdoption(adopted)).isFalse()
+        assertThat(shouldAttemptCandidateAdoption(sessionDescriptor(DescriptorState.REJECTED))).isFalse()
+        assertThat(shouldAttemptCandidateAdoption(sessionDescriptor(DescriptorState.CRASHED))).isFalse()
+        assertThat(shouldAttemptCandidateAdoption(backgrounded)).isFalse()
+        assertThat(
+            shouldAttemptCandidateAdoption(
+                sessionDescriptor(DescriptorState.CORE_LOADED).copy(recoveryStateVersion = 1),
+            ),
+        ).isFalse()
+    }
+
+    private fun sessionDescriptor(
+        state: DescriptorState,
+        recoveryStatePath: String? = null,
+        recoveryPauseOverlay: String? = null,
+    ) = SessionDescriptor(
+        sessionId = "session",
+        state = state,
+        candidatePath = "/data/candidate.srm",
+        candidateDownloadedSizeBytes = 32768,
+        canonicalSavePath = "/data/autosave.srm",
+        checkpointedHash = "hash",
+        errorDetail = null,
+        recoveryStatePath = recoveryStatePath,
+        recoveryStateVersion = recoveryStatePath?.let { 1 },
+        recoveryPauseOverlay = recoveryPauseOverlay,
+    )
 
     @Test
     fun `quick back from video options or controller settings returns to menu never closes`() {

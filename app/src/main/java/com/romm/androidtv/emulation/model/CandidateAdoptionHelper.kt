@@ -10,7 +10,7 @@ import java.io.IOException
  *
  * Contract for [adoptCandidate]:
  * 1. Validate size/provenance/hash/path against the native SRAM size. Exact size is required
- *    except for legacy variable-length Genesis Plus GX cartridge saves.
+ *    except for documented mGBA and Genesis Plus GX migration contracts.
  * 2. Backup canonical local bytes durably — only if a canonical local copy exists.
  *    Never claim preservation without an actual durable backup. Idempotent: repeated
  *    calls for the same candidate do not overwrite prior backups.
@@ -146,10 +146,10 @@ class FilesystemCandidateAdoptionHelper : CandidateAdoptionHelper {
             if (nativeSramSizeBytes <= 0L) {
                 return AdoptionResult.NoSram(nativeSramSizeBytes)
             }
-            if (!isCompatibleCandidateSize(
+            if (!isCompatibleSaveSize(
                     coreId = candidateMetadata.coreId,
-                    nativeSramSizeBytes = nativeSramSizeBytes,
-                    downloadedSizeBytes = candidateMetadata.downloadedSizeBytes,
+                    expectedSizeBytes = nativeSramSizeBytes,
+                    actualSizeBytes = candidateMetadata.downloadedSizeBytes,
                 )
             ) {
                 return AdoptionResult.RejectedSizeMismatch(
@@ -295,17 +295,3 @@ class FilesystemCandidateAdoptionHelper : CandidateAdoptionHelper {
         val romHash: String,
     )
 }
-
-internal fun isCompatibleCandidateSize(
-    coreId: String,
-    nativeSramSizeBytes: Long,
-    downloadedSizeBytes: Long,
-): Boolean {
-    if (nativeSramSizeBytes == downloadedSizeBytes) return true
-
-    return coreId == "genesis_plus_gx" &&
-        nativeSramSizeBytes == GENESIS_PLUS_GX_SRAM_SIZE_BYTES &&
-        downloadedSizeBytes in 1..nativeSramSizeBytes
-}
-
-private const val GENESIS_PLUS_GX_SRAM_SIZE_BYTES = 64L * 1024L

@@ -1,6 +1,8 @@
 #include "emulation_session.h"
 #include "atomic_file_store.h"
 #include "n64_rom.h"
+#include "save_ram_persistence.h"
+#include "serialized_state.h"
 
 #include <native/engine/LogSink.h>
 
@@ -86,6 +88,10 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
     const CoreFunctions& fns = core_.functions();
     struct retro_system_info systemInfo {};
     fns.retro_get_system_info(&systemInfo);
+    coreIdentity_ = std::string(systemInfo.library_name ? systemInfo.library_name : "") + "\n" +
+                    (systemInfo.library_version ? systemInfo.library_version : "");
+    isMgba_ = systemInfo.library_name != nullptr &&
+              std::strcmp(systemInfo.library_name, "mGBA") == 0;
 
     std::vector<uint8_t> contentBuffer;
     if (!contentPath.empty() && !systemInfo.need_fullpath &&
@@ -124,6 +130,14 @@ bool EmulationSession::start(const std::string& corePath, const std::string& sys
         std::strcmp(systemInfo.library_name, "LRPS2") == 0;
     adaptiveFrameSkipEnabled_ = isMupen64PlusNext;
     catchUpAfterStall_ = isDolphin || isLrps2;
+#if !defined(__ANDROID__)
+    // Dolphin can emit more than one hardware video callback from a single
+    // retro_run(), including null duplicate-frame callbacks. Presenting each
+    // callback can make Gamescope throttle one emulation step multiple times.
+    coalesceHardwarePresentation_ = isDolphin;
+#else
+    coalesceHardwarePresentation_ = false;
+#endif
     if (isDolphin) {
         environment_.setPreferredHardwareContext(kHwContextOpenGlCore);
     }
@@ -436,9 +450,23 @@ void EmulationSession::runLoop() {
         presentVideoFrame_.store(videoEnabled, std::memory_order_relaxed);
         environment_.setVideoEnabled(videoEnabled);
         const auto frameWorkStarted = std::chrono::steady_clock::now();
+        hardwareCallbackSeenThisRun_ = false;
+        validHardwareFrameThisRun_ = false;
+        hardwareFrameWidthThisRun_ = 0;
+        hardwareFrameHeightThisRun_ = 0;
         {
             std::lock_guard<std::mutex> lock(coreExecutionMutex_);
             core_.functions().retro_run();
+        }
+        if (coalesceHardwarePresentation_ &&
+            presentVideoFrame_.load(std::memory_order_relaxed) &&
+            hardwareCallbackSeenThisRun_ &&
+            validHardwareFrameThisRun_) {
+            romm::gl::context().setContentGeometry(
+                hardwareFrameWidthThisRun_, hardwareFrameHeightThisRun_);
+            if (!romm::gl::context().swapBuffers()) {
+                LOGE("HW render: coalesced swapBuffers failed — context may be lost");
+            }
         }
         const auto frameWorkDuration = std::chrono::steady_clock::now() - frameWorkStarted;
         scheduler.reportFrameWorkDuration(frameWorkDuration);
@@ -547,6 +575,15 @@ size_t EmulationSession::memorySizeUnlocked(unsigned id) {
         const size_t extendedSize = fns.romm_get_save_memory_size();
         if (extendedSize > 0) return extendedSize;
     }
+    if (id == RETRO_MEMORY_SAVE_RAM && isMgba_) {
+        // mGBA allocates a 128 KiB frontend save buffer, but changes the
+        // reported logical size after runtime save-type detection. Persisting
+        // that changing size makes a save written late in one session fail
+        // the next session's initial 128 KiB restore contract. Keep the
+        // frontend-facing contract stable and migrate valid historical sizes
+        // during restore instead.
+        return kMgbaStableSaveRamSize;
+    }
     return fns.retro_get_memory_size(id);
 }
 
@@ -577,11 +614,12 @@ bool EmulationSession::checkpointSaveRam(const std::string& savePath) {
 }
 
 bool EmulationSession::restoreSaveRam(const std::string& savePath) {
+    std::vector<uint8_t> saveImage;
+    if (!readWholeFile(savePath, saveImage) || saveImage.empty()) return false;
+
     std::lock_guard<std::mutex> lock(coreExecutionMutex_);
     const CoreFunctions& fns = core_.functions();
     if (fns.romm_restore_save_memory != nullptr) {
-        std::vector<uint8_t> saveImage;
-        if (!readWholeFile(savePath, saveImage) || saveImage.empty()) return false;
         if (!fns.romm_restore_save_memory(saveImage.data(), saveImage.size())) {
             LOGE("restoreSaveRam: core rejected app save memory image");
             return false;
@@ -595,7 +633,13 @@ bool EmulationSession::restoreSaveRam(const std::string& savePath) {
         LOGE("restoreSaveRam: core exposes no RETRO_MEMORY_SAVE_RAM region");
         return false;
     }
-    if (!readFileExact(savePath, data, size)) return false;
+    std::vector<uint8_t> restoreImage;
+    if (!expandSaveRamImageForRestore(isMgba_, size, saveImage, restoreImage)) {
+        LOGE("restoreSaveRam: incompatible save size (expected %zu, got %zu)",
+             size, saveImage.size());
+        return false;
+    }
+    std::memcpy(data, restoreImage.data(), restoreImage.size());
 
     if (fns.romm_get_save_memory_size != nullptr &&
         fns.romm_get_save_memory_size() > 0) {
@@ -603,6 +647,48 @@ bool EmulationSession::restoreSaveRam(const std::string& savePath) {
             LOGE("restoreSaveRam: core rejected extended save memory image");
             return false;
         }
+    }
+    return true;
+}
+
+bool EmulationSession::checkpointState(const std::string& statePath) {
+    std::vector<uint8_t> payload;
+    {
+        std::lock_guard<std::mutex> lock(coreExecutionMutex_);
+        if (!core_.isLoaded()) return false;
+        const CoreFunctions& fns = core_.functions();
+        const size_t size = fns.retro_serialize_size();
+        if (size == 0) return false;
+        payload.resize(size);
+        if (!fns.retro_serialize(payload.data(), payload.size())) {
+            LOGE("checkpointState: core serialization failed");
+            return false;
+        }
+    }
+
+    std::vector<uint8_t> encoded;
+    if (!encodeSerializedState(coreIdentity_, payload, encoded)) return false;
+    return atomicWriteFile(statePath, encoded.data(), encoded.size());
+}
+
+bool EmulationSession::restoreState(const std::string& statePath) {
+    std::vector<uint8_t> encoded;
+    if (!readWholeFile(statePath, encoded)) return false;
+
+    std::lock_guard<std::mutex> lock(coreExecutionMutex_);
+    if (!core_.isLoaded()) return false;
+    const CoreFunctions& fns = core_.functions();
+    const size_t expectedSize = fns.retro_serialize_size();
+    if (expectedSize == 0) return false;
+
+    std::vector<uint8_t> payload;
+    if (!decodeSerializedState(encoded, coreIdentity_, expectedSize, payload)) {
+        LOGE("restoreState: incompatible or corrupt serialized state");
+        return false;
+    }
+    if (!fns.retro_unserialize(payload.data(), payload.size())) {
+        LOGE("restoreState: core unserialize failed");
+        return false;
     }
     return true;
 }
@@ -660,16 +746,19 @@ void EmulationSession::checkpointAutosaveIfChanged() {
 }
 
 bool EmulationSession::serialize(void* buffer, size_t size) {
+    std::lock_guard<std::mutex> lock(coreExecutionMutex_);
     if (!core_.isLoaded()) return false;
     return core_.functions().retro_serialize(buffer, size);
 }
 
 bool EmulationSession::unserialize(const void* buffer, size_t size) {
+    std::lock_guard<std::mutex> lock(coreExecutionMutex_);
     if (!core_.isLoaded()) return false;
     return core_.functions().retro_unserialize(buffer, size);
 }
 
 size_t EmulationSession::serializeSize() {
+    std::lock_guard<std::mutex> lock(coreExecutionMutex_);
     if (!core_.isLoaded()) return 0;
     return core_.functions().retro_serialize_size();
 }
@@ -756,9 +845,18 @@ void EmulationSession::videoRefreshTrampoline(const void* data, unsigned width, 
         // a compositing frontend can center content that doesn't fill the full
         // buffer (e.g. lrps2 reports a fixed 640x448 base geometry but renders
         // the game's native resolution). Then swap the buffers to present.
-        romm::gl::context().setContentGeometry(width, height);
-        if (!romm::gl::context().swapBuffers()) {
-            LOGE("HW render: swapBuffers failed — context may be lost");
+        if (self->coalesceHardwarePresentation_) {
+            self->hardwareCallbackSeenThisRun_ = true;
+            if (data == RETRO_HW_FRAME_BUFFER_VALID) {
+                self->validHardwareFrameThisRun_ = true;
+                self->hardwareFrameWidthThisRun_ = width;
+                self->hardwareFrameHeightThisRun_ = height;
+            }
+        } else {
+            romm::gl::context().setContentGeometry(width, height);
+            if (!romm::gl::context().swapBuffers()) {
+                LOGE("HW render: swapBuffers failed — context may be lost");
+            }
         }
     } else {
         // Software-rendering core: convert pixels and blit to the platform

@@ -49,8 +49,8 @@ private:
     // before the device starts consuming, so the buffer is normally already
     // full by the first push; this is a safety net).
     uint64_t framesPushed_ = 0;
-    // Device-format bytes of queued audio at/above which a push is counted
-    // as an overrun (the stream buffer is about to drop data).
+    // Device-format bytes of queued audio at/above which stale samples are
+    // discarded and the push is counted as an overrun.
     int overrunBoundBytes_ = 0;
 
     mutable std::mutex mutex_;

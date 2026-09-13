@@ -35,7 +35,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * preserved for replay on the next main-process resume.
  *
  * Recovery semantics:
- * - REJECTED/CRASHED: cleanup-only, deleted synchronously.
+ * - REJECTED/CRASHED: sync a durable gameplay checkpoint when present;
+ *   otherwise clean up the orphan descriptor.
  * - ADOPTED: recovered idempotently via finalizeAdoption + syncPostPlay. Journal
  *   preserved on failure, deleted only after both succeed.
  * - Non-terminal (LAUNCHED/CORE_LOADED): recovered with best-effort post-play sync.
@@ -52,11 +53,11 @@ class EmulationResultHandler(
 
     private val sessionLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
 
-    /** Once-per-process guard: prevents concurrent recovery invocations. */
+    /** Serializes recovery passes triggered by repeated MainActivity resumes. */
     private val recoveryMutex = Mutex()
 
-    /** Tracks whether a recovery pass has already been attempted in this process. */
-    private var recoveryAttempted = AtomicBoolean(false)
+    /** Coalesces overlapping resumes without suppressing later post-emulation recovery passes. */
+    private var recoveryInFlight = AtomicBoolean(false)
 
     /** Deferred that completes when the last recovery pass finishes (for test awaiting). */
     private var lastRecoveryDeferred: CompletableDeferred<Unit>? = null
@@ -199,13 +200,12 @@ class EmulationResultHandler(
 
     /**
      * Non-blocking recovery entry point for production use. Called from MainActivity.onResume().
-     * Launches async recovery on IO dispatcher, guarded by once-per-process + per-session mutex.
+     * Launches async recovery on IO dispatcher, coalescing only overlapping invocations.
      * Does NOT block the calling thread.
      */
     fun recoverPendingSessions() {
-        // Once-per-process guard: skip if already attempted.
-        if (!recoveryAttempted.compareAndSet(false, true)) {
-            Log.d(logTag, "recoverPendingSessions: recovery already attempted in this process, skipping")
+        if (!recoveryInFlight.compareAndSet(false, true)) {
+            Log.d(logTag, "recoverPendingSessions: recovery already in flight, coalescing")
             return
         }
 
@@ -217,6 +217,7 @@ class EmulationResultHandler(
                 try {
                     recoverPendingSessionsInternal()
                 } finally {
+                    recoveryInFlight.set(false)
                     deferred.complete(Unit)
                 }
             }
@@ -228,9 +229,7 @@ class EmulationResultHandler(
      * provides deterministic awaiting of async recovery work. NOT for production use.
      */
     suspend fun recoverPendingSessionsAwaited() {
-        if (!recoveryAttempted.compareAndSet(false, true)) {
-            Log.d(logTag, "recoverPendingSessionsAwaited: recovery already attempted in this process")
-            // If already attempted, wait for the existing deferred to complete.
+        if (!recoveryInFlight.compareAndSet(false, true)) {
             lastRecoveryDeferred?.await()
             return
         }
@@ -242,15 +241,16 @@ class EmulationResultHandler(
             try {
                 recoverPendingSessionsInternal()
             } finally {
+                recoveryInFlight.set(false)
                 deferred.complete(Unit)
             }
         }
     }
 
     /**
-     * Internal recovery logic. Scans ALL journal files, processes terminal/cleanup-only
-     * descriptors synchronously, and recovers ADOPTED + non-terminal descriptors with
-     * per-session mutex serialization. Journal preserved on failure for replay.
+     * Internal recovery logic. Scans ALL journal files and recovers every
+     * descriptor carrying a durable checkpoint, including terminal candidate
+     * states, with per-session mutex serialization. Journal preserved on failure.
      */
     private suspend fun recoverPendingSessionsInternal() {
         try {
@@ -268,12 +268,6 @@ class EmulationResultHandler(
                 emptyList()
             }
 
-            // Cleanup-only descriptors: REJECTED and CRASHED — delete synchronously.
-            for (descriptor in allDescriptors.filter { it.state.isCleanupOnly }) {
-                Log.i(logTag, "recoverPendingSessions: cleaning up cleanup-only session ${descriptor.sessionId} (${descriptor.state})")
-                journal.remove(descriptor.sessionId)
-            }
-
             // ADOPTED descriptors: recover idempotently (finalizeAdoption + syncPostPlay).
             val adopted = allDescriptors.filter { it.state == DescriptorState.ADOPTED }
             val recoveryJobs = mutableListOf<Job>()
@@ -288,8 +282,12 @@ class EmulationResultHandler(
                 )
             }
 
-            // Non-terminal descriptors (LAUNCHED/CORE_LOADED): recover with best-effort post-play.
-            val pending = allDescriptors.filter { !it.state.isTerminal }
+            // Every non-ADOPTED descriptor gets a chance to recover a durable
+            // checkpoint. This includes REJECTED/CRASHED: those states describe
+            // candidate/core launch handling, not whether later gameplay SRAM
+            // exists. Descriptors without a usable checkpoint are cleaned up by
+            // recoverNonAdoptedSession().
+            val pending = allDescriptors.filter { it.state != DescriptorState.ADOPTED }
             for (descriptor in pending) {
                 val lock = getSessionLock(descriptor.sessionId)
                 recoveryJobs.add(
@@ -325,19 +323,23 @@ class EmulationResultHandler(
         val romHash = descriptor.romHash
         val coreId = descriptor.coreId
         val coreBuildRevision = descriptor.coreBuildRevision
-        val checkpointedHash = descriptor.checkpointedHash
         val canonicalSavePath = descriptor.canonicalSavePath
         val rommSaveId = descriptor.rommSaveId
         val serverContentHash = descriptor.serverContentHash
 
         if (rommSessionId == null || romId == null || romHash == null || coreId == null ||
-            coreBuildRevision == null || checkpointedHash == null ||
-            canonicalSavePath == null || rommSaveId == null) {
+            coreBuildRevision == null || canonicalSavePath == null || rommSaveId == null) {
             Log.w(logTag, "recoverPendingSessions: journal descriptor missing authoritative fields — cannot recover ADOPTED session ${descriptor.sessionId}")
-            // Missing fields: cannot recover, remove journal to avoid infinite replay.
-            journal.remove(descriptor.sessionId)
+            // Preserve the descriptor: deleting it would discard the only durable
+            // evidence needed for a later authenticated recovery attempt.
             return
         }
+        val checkpointFile = File(canonicalSavePath)
+        if (!checkpointFile.isFile || checkpointFile.length() <= 0L) {
+            Log.w(logTag, "recoverPendingSessions: checkpoint missing for ADOPTED session ${descriptor.sessionId}")
+            return
+        }
+        val checkpointedHash = sha256Hex(checkpointFile.readBytes())
 
         val session = sessionStore.current() ?: run {
             Log.w(logTag, "recoverPendingSessions: no active session for ADOPTED recovery ${descriptor.sessionId}")
@@ -383,7 +385,7 @@ class EmulationResultHandler(
 
         // Only remove journal if no failure occurred.
         if (!hadFailure) {
-            journal.remove(descriptor.sessionId)
+            removeJournalAndRecoveryState(journal, descriptor)
             Log.i(logTag, "recoverPendingSessions: journal cleaned up for ADOPTED session ${descriptor.sessionId}")
         } else {
             Log.w(logTag, "recoverPendingSessions: journal PRESERVED for ADOPTED session ${descriptor.sessionId} (failure — will replay)")
@@ -397,27 +399,39 @@ class EmulationResultHandler(
         journal: LaunchSessionJournal,
         descriptor: SessionDescriptor,
     ) {
-        val cpHash = descriptor.checkpointedHash
         val cpPath = descriptor.canonicalSavePath
         val cpRomId = descriptor.romId
-        if (cpHash != null && cpPath != null && cpRomId != null) {
+        val checkpointFile = cpPath?.let(::File)
+        if (checkpointFile?.isFile == true && checkpointFile.length() > 0L && cpRomId != null) {
+            // The native periodic autosave may have completed immediately before
+            // abrupt process death, without a JVM callback to update the journal.
+            // The canonical atomic file is authoritative; hash it during recovery
+            // rather than trusting a possibly older descriptor hash.
+            val cpHash = sha256Hex(checkpointFile.readBytes())
             Log.i(logTag, "recoverPendingSessions: syncing checkpoint from non-ADOPTED descriptor ${descriptor.sessionId}")
             try {
+                journal.patchIdentity(
+                    descriptor.sessionId,
+                    SessionDescriptorPatch(
+                        checkpointedHash = cpHash,
+                        expectedSramSizeBytes = checkpointFile.length(),
+                    ),
+                )
                 syncPostPlayAwaited(
                     descriptor.sessionId,
-                    cpPath,
+                    checkpointFile.absolutePath,
                     cpHash,
                     cpRomId,
                 )
-                journal.remove(descriptor.sessionId)
+                removeJournalAndRecoveryState(journal, descriptor)
             } catch (e: Exception) {
                 Log.w(logTag, "recoverPendingSessions: syncPostPlay failed for non-ADOPTED session ${descriptor.sessionId}", e)
                 // Preserve journal for retry.
             }
         } else {
-            // No checkpoint data — clean up orphan descriptor.
+            // No checkpoint data — clean up the orphan descriptor.
             Log.i(logTag, "recoverPendingSessions: cleaning up non-ADOPTED descriptor without checkpoint data ${descriptor.sessionId}")
-            journal.remove(descriptor.sessionId)
+            removeJournalAndRecoveryState(journal, descriptor)
         }
     }
 
@@ -468,8 +482,32 @@ class EmulationResultHandler(
     private fun cleanupJournal(sessionId: String) {
         try {
             val journalDir = filesDir.resolve("launch_sessions")
-            LaunchSessionJournal(journalDir).remove(sessionId)
+            val journal = LaunchSessionJournal(journalDir)
+            val descriptor = journal.read(sessionId)
+            if (descriptor != null) {
+                removeJournalAndRecoveryState(journal, descriptor)
+            } else {
+                journal.remove(sessionId)
+            }
         } catch (_: Exception) {}
+    }
+
+    private fun removeJournalAndRecoveryState(
+        journal: LaunchSessionJournal,
+        descriptor: SessionDescriptor,
+    ) {
+        descriptor.recoveryStatePath?.let { path ->
+            try {
+                val root = filesDir.canonicalFile
+                val state = File(path).canonicalFile
+                if (state.path.startsWith(root.path + File.separator)) {
+                    state.delete()
+                }
+            } catch (_: Exception) {
+                // Journal cleanup remains safe even if an orphaned state cannot be removed.
+            }
+        }
+        journal.remove(descriptor.sessionId)
     }
 
     /**

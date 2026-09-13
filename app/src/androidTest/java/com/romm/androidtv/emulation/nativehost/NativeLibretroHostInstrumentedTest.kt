@@ -135,6 +135,36 @@ class NativeLibretroHostInstrumentedTest {
         host.nativeStopSession()
     }
 
+    @Test
+    fun versionedStateCheckpointRestoresCoreStateAndRejectsCorruption() {
+        assertTrue(NativeLibretroHost.ensureLoaded())
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val corePath = NativeLibretroHost.resolveBundledTestCorePath(context)
+        val systemDir = context.filesDir.resolve("system").apply { mkdirs() }.absolutePath
+        val saveDir = context.filesDir.resolve("state_roundtrip").apply { mkdirs() }.absolutePath
+        val statePath = context.filesDir.resolve("state_roundtrip/recovery.state").absolutePath
+        val beforePath = context.filesDir.resolve("state_roundtrip/before.srm").absolutePath
+        val afterPath = context.filesDir.resolve("state_roundtrip/after.srm").absolutePath
+
+        assertTrue(host.nativeLoadTestCore(corePath, systemDir, saveDir))
+        Thread.sleep(1200)
+        host.nativeSetPaused(true)
+        assertTrue(host.nativeCheckpointState(statePath))
+        assertTrue(host.nativeCheckpointSaveRam(beforePath))
+        val before = readFirstByte(beforePath)
+
+        host.nativeSetPaused(false)
+        Thread.sleep(1200)
+        host.nativeSetPaused(true)
+        assertTrue(host.nativeRestoreState(statePath))
+        assertTrue(host.nativeCheckpointSaveRam(afterPath))
+        assertEquals(before, readFirstByte(afterPath))
+
+        java.io.File(statePath).writeBytes(byteArrayOf(1, 2, 3))
+        assertTrue(!host.nativeRestoreState(statePath))
+    }
+
     private fun readFirstByte(path: String): Int {
         val bytes = java.io.File(path).readBytes()
         assertTrue("expected a non-empty SRAM file at $path", bytes.isNotEmpty())

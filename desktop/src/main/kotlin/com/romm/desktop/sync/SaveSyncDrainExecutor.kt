@@ -1,5 +1,7 @@
 package com.romm.desktop.sync
 
+import com.romm.androidtv.emulation.model.isCompatibleSaveSize
+import com.romm.androidtv.emulation.model.normalizeExpectedSaveSize
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.romm.ClientSaveState
 import com.romm.androidtv.romm.RommApiError
@@ -513,9 +515,11 @@ class SaveSyncDrainExecutor(
             return 0 to 1
         }
 
-        // Known trusted size: exact-size gate.
+        // Known trusted size: exact except documented core migration contracts.
         val expectedSize = replica.expectedSramSizeBytes
-        if (expectedSize != null && bytes.size.toLong() != expectedSize) {
+        if (expectedSize != null &&
+            !isCompatibleSaveSize(replica.coreId, expectedSize, bytes.size.toLong())
+        ) {
             content.quarantine(op.serverKey, op.userKey, op.romId, op.romHash, op.slot, bytes, "size-mismatch", now)
             upsertReplica(replica.copy(
                 syncStatus = SaveSyncStatus.QUARANTINED,
@@ -532,6 +536,7 @@ class SaveSyncDrainExecutor(
         content.writeLocalAtomically(op.serverKey, op.userKey, op.romId, op.romHash, op.slot, bytes)
         val localHash = sha256Hex(bytes)
         upsertReplica(replica.copy(
+            expectedSramSizeBytes = normalizeExpectedSaveSize(replica.coreId, expectedSize),
             localHash = localHash,
             localSizeBytes = bytes.size.toLong(),
             localWrittenAtEpochMs = now,

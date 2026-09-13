@@ -1,5 +1,6 @@
 package com.romm.androidtv.romm.save
 
+import com.romm.androidtv.emulation.model.isCompatibleSaveSize
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.romm.RommApiError
 import com.romm.androidtv.romm.RommSyncApi
@@ -303,8 +304,14 @@ class ConflictResolverImpl(
             )
         }
 
-        // Exact known SRAM size validation (if the local entity knows its expected size).
-        if (localEntity.expectedSramSizeBytes != null && serverBytes.size.toLong() != localEntity.expectedSramSizeBytes) {
+        // Known SRAM size validation (exact except documented migration contracts).
+        if (localEntity.expectedSramSizeBytes != null &&
+            !isCompatibleSaveSize(
+                localEntity.coreId,
+                localEntity.expectedSramSizeBytes,
+                serverBytes.size.toLong(),
+            )
+        ) {
             return ConflictResolutionResult.Failure(
                 RommApiError.PARSE_ERROR,
                 reason = "sram-size-mismatch: expected ${localEntity.expectedSramSizeBytes}, got ${serverBytes.size}",

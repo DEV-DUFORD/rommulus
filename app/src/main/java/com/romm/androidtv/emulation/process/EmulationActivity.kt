@@ -96,6 +96,7 @@ import com.romm.androidtv.emulation.model.EmulationResult
 import com.romm.androidtv.emulation.model.FilesystemCandidateAdoptionHelper
 import com.romm.androidtv.emulation.model.LaunchSessionJournal
 import com.romm.androidtv.emulation.model.SaveBackupStore
+import com.romm.androidtv.emulation.model.SessionDescriptor
 import com.romm.androidtv.emulation.model.SessionDescriptorPatch
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.emulation.nativehost.NativeLibretroHost
@@ -118,6 +119,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
@@ -152,6 +154,7 @@ class EmulationActivity : ComponentActivity() {
     private var ownsSessionGuard = false
     private var sessionStarted = false
     private var savePath: String? = null
+    private var recoveryStatePath: String? = null
     private var sessionIdForJournal: String? = null
     private var candidateMetadata: CandidateSaveMetadata? = null
     private var stageRomId: Long = -1L
@@ -345,6 +348,8 @@ class EmulationActivity : ComponentActivity() {
         /** Authoritative app launch session ID (UUID string from LaunchSpec.sessionId). Required for journal/result correlation. */
         const val EXTRA_APP_SESSION_ID = "com.romm.androidtv.emulation.EXTRA_APP_SESSION_ID"
         private const val SRAM_CHECKPOINT_INTERVAL_SECONDS = 30L
+        private const val RECOVERY_STATE_VERSION = 1
+        private const val STATE_PAUSE_OVERLAY = "pause_overlay"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -411,8 +416,12 @@ class EmulationActivity : ComponentActivity() {
                 System.currentTimeMillis().toString()
             }
         this.sessionIdForJournal = appSessionId
+        this.recoveryStatePath = filesDir.resolve(
+            "recovery_states/${appSessionId.replace(Regex("""[^a-zA-Z0-9._-]"""), "_")}.state",
+        ).absolutePath
         val journalDir = filesDir.resolve("launch_sessions").apply { mkdirs() }
         val journal = LaunchSessionJournal(journalDir)
+        val existingSessionDescriptor = journal.read(appSessionId)
         try {
             // Persist authoritative ROM/core identity in the journal for post-death recovery.
             val candidateMeta = this.candidateMetadata
@@ -503,16 +512,19 @@ class EmulationActivity : ComponentActivity() {
 
             // Phase B: candidate validation — delegates to interface-driven CandidateAdoptionHelper
             // for backup-before-restore ordering (LIBRETRO_REFACTOR.md Phase B).
-            val adoptionResult = this.candidateMetadata?.let { meta ->
-                FilesystemCandidateAdoptionHelper().adoptCandidate(
-                    candidateMetadata = meta,
-                    canonicalSavePath = savePath,
-                    nativeSramSizeBytes = host.nativeGetSramSizeBytes(),
-                    backupStore = EmulationSaveBackupStore(filesDir),
-                    nativeRestore = { path -> host.nativeRestoreSaveRam(path) },
-                    nativeCheckpoint = { path -> host.nativeCheckpointSaveRam(path) },
-                )
-            }
+            val recoveringExistingSession = !shouldAttemptCandidateAdoption(existingSessionDescriptor)
+            val adoptionResult = this.candidateMetadata
+                ?.takeIf { !recoveringExistingSession }
+                ?.let { meta ->
+                    FilesystemCandidateAdoptionHelper().adoptCandidate(
+                        candidateMetadata = meta,
+                        canonicalSavePath = savePath,
+                        nativeSramSizeBytes = host.nativeGetSramSizeBytes(),
+                        backupStore = EmulationSaveBackupStore(filesDir),
+                        nativeRestore = { path -> host.nativeRestoreSaveRam(path) },
+                        nativeCheckpoint = { path -> host.nativeCheckpointSaveRam(path) },
+                    )
+                }
 
             val candidateAdopted = when (adoptionResult) {
                 is AdoptionResult.Adopted -> {
@@ -584,7 +596,10 @@ class EmulationActivity : ComponentActivity() {
                 null -> false
             }
 
-            if (candidateAdopted) {
+            if (recoveringExistingSession) {
+                val restored = host.nativeRestoreSaveRam(savePath)
+                Log.i(TAG, "process-death recovery: skipped candidate re-adoption; canonical restored=$restored")
+            } else if (candidateAdopted) {
                 Log.d(TAG, "candidate adopted, skipping normal restore-on-launch")
             } else if (this.candidateMetadata != null) {
                 Log.i(TAG, "candidate rejected, falling through to normal restore-on-launch")
@@ -594,6 +609,27 @@ class EmulationActivity : ComponentActivity() {
                 // Normal no-candidate launch: existing restore-on-launch behavior unchanged.
                 val restored = host.nativeRestoreSaveRam(savePath)
                 Log.d(TAG, "restore-on-launch: restored=$restored path=$savePath")
+            }
+
+            val recoveryDescriptor = journal.read(appSessionId)
+            val recoveryFile = recoveryStatePath?.let(::File)
+            if (recoveryDescriptor?.recoveryPauseOverlay != null) {
+                // Pause intent is durable independently of serialize support. Keep
+                // the recreated session paused even if no state exists or
+                // unserialize rejects it; SRAM has already been restored above and
+                // the user must explicitly choose Resume.
+                host.nativeSetPaused(true)
+                val restoredOverlay = savedInstanceState
+                    ?.getString(STATE_PAUSE_OVERLAY)
+                    ?: recoveryDescriptor.recoveryPauseOverlay
+                pauseOverlay.value = restoredPauseOverlay(restoredOverlay)
+                val restored = recoveryFile?.isFile == true &&
+                    recoveryDescriptor.recoveryStateVersion == RECOVERY_STATE_VERSION &&
+                    host.nativeRestoreState(recoveryFile.absolutePath)
+                Log.i(
+                    TAG,
+                    "process-death recovery: stateRestored=$restored path=${recoveryFile?.absolutePath}",
+                )
             }
             host.nativeConfigureAutosave(savePath, SRAM_CHECKPOINT_INTERVAL_SECONDS)
 
@@ -665,6 +701,14 @@ class EmulationActivity : ComponentActivity() {
                         controllerRouter.releaseAllInputs()
                         inputAdapter.pushCurrentState()
                         pauseOverlay.value = PauseOverlay.MENU
+                    }
+                }
+            }
+
+            lifecycleScope.launch {
+                pauseOverlay.drop(1).collect { overlay ->
+                    if (overlay == PauseOverlay.CLOSED) {
+                        clearConsumedRecoveryState()
                     }
                 }
             }
@@ -795,6 +839,7 @@ class EmulationActivity : ComponentActivity() {
             try {
                 val bytes = File(path).readBytes()
                 checkpointedHash = sha256Hex(bytes)
+                persistCheckpointMetadata(path, checkpointedHash!!, bytes.size.toLong())
             } catch (e: Exception) {
                 Log.w(TAG, "checkpointIfRunning: failed to compute hash", e)
                 checkpointedHash = null
@@ -804,6 +849,66 @@ class EmulationActivity : ComponentActivity() {
         }
 
         return classifyCheckpointOutcome(saveMemorySizeBytes, checkpointed)
+    }
+
+    private fun persistCheckpointMetadata(path: String, hash: String, sizeBytes: Long) {
+        val sid = sessionIdForJournal ?: return
+        try {
+            LaunchSessionJournal(filesDir.resolve("launch_sessions")).patchIdentity(
+                sid,
+                SessionDescriptorPatch(
+                    canonicalSavePath = path,
+                    checkpointedHash = hash,
+                    expectedSramSizeBytes = sizeBytes,
+                ),
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "persistCheckpointMetadata: journal update failed", e)
+        }
+    }
+
+    private fun checkpointRecoveryState() {
+        if (!sessionStarted) return
+        val sid = sessionIdForJournal ?: return
+        val path = recoveryStatePath ?: return
+        File(path).parentFile?.mkdirs()
+
+        val checkpointed = host.nativeCheckpointState(path)
+        try {
+            val journal = LaunchSessionJournal(filesDir.resolve("launch_sessions"))
+            if (checkpointed) {
+                journal.patchIdentity(
+                    sid,
+                    SessionDescriptorPatch(
+                        recoveryStatePath = path,
+                        recoveryStateVersion = RECOVERY_STATE_VERSION,
+                        recoveryPauseOverlay = pauseOverlay.value.name,
+                    ),
+                )
+            } else {
+                // Atomic checkpoint failure leaves the previous destination intact. Never
+                // republish that stale state as current; retain only the durable pause intent.
+                File(path).delete()
+                journal.clearRecoveryState(sid)
+                journal.patchIdentity(
+                    sid,
+                    SessionDescriptorPatch(recoveryPauseOverlay = pauseOverlay.value.name),
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "checkpointRecoveryState: journal update failed", e)
+        }
+        Log.d(TAG, "checkpointRecoveryState: success=$checkpointed path=$path")
+    }
+
+    private fun clearConsumedRecoveryState() {
+        recoveryStatePath?.let { File(it).delete() }
+        val sid = sessionIdForJournal ?: return
+        try {
+            LaunchSessionJournal(filesDir.resolve("launch_sessions")).clearRecoveryState(sid)
+        } catch (e: Exception) {
+            Log.w(TAG, "clearConsumedRecoveryState: journal update failed", e)
+        }
     }
 
     /**
@@ -839,12 +944,21 @@ class EmulationActivity : ComponentActivity() {
         // screen-off doesn't lose progress if the process is later killed outright
         // (onDestroy is not guaranteed to run in that case).
         checkpointIfRunning()
+        checkpointRecoveryState()
         // Phase 4: capture must not survive activity stop (spec rule 8).
         captureCoordinator.cancel()
-        // Phase 6B: release any held touch buttons when the activity loses foreground, so a
-        // stuck touch input can't leak into the core on resume.
+        // Key-up and neutral-axis events may be delivered to the launcher after Home takes
+        // focus. Push an explicit neutral snapshot so stale physical or touch input cannot
+        // remain latched in the core when this activity resumes.
+        controllerRouter.releaseAllInputs()
+        inputAdapter.pushCurrentState()
         touchCoordinator.resetTouch()
         super.onPause()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_PAUSE_OVERLAY, pauseOverlay.value.name)
+        super.onSaveInstanceState(outState)
     }
 
     /**
@@ -957,6 +1071,9 @@ class EmulationActivity : ComponentActivity() {
         if (sessionStarted) {
             host.nativeStopSession()
             sessionStarted = false
+        }
+        if (isFinishing) {
+            recoveryStatePath?.let { File(it).delete() }
         }
 
         releaseSessionGuard()
@@ -1170,6 +1287,18 @@ internal fun pauseOverlayOnBackground(current: PauseOverlay): PauseOverlay = whe
     PauseOverlay.CONTROLLER_SETTINGS,
     PauseOverlay.TOUCH_CONTROLLER_SETTINGS -> current
 }
+
+internal fun restoredPauseOverlay(savedName: String?): PauseOverlay =
+    savedName
+        ?.let { name -> PauseOverlay.entries.firstOrNull { it.name == name } }
+        ?.let(::pauseOverlayOnBackground)
+        ?: PauseOverlay.MENU
+
+internal fun shouldAttemptCandidateAdoption(descriptor: SessionDescriptor?): Boolean =
+    (descriptor == null || !descriptor.state.isTerminal) &&
+        descriptor?.recoveryStatePath == null &&
+        descriptor?.recoveryStateVersion == null &&
+        descriptor?.recoveryPauseOverlay == null
 
 internal enum class CheckpointOutcome {
     SAVED,

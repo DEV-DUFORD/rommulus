@@ -537,6 +537,26 @@ class EmulationResultHandlerAwaitedTest {
     }
 
     @Test
+    fun recoverPendingSessionsSyncsRejectedSessionWhenGameplayCheckpointExists() {
+        seedSession()
+        val sessionId = UUID.randomUUID().toString()
+        seedJournalCoreLoadedWithCheckpoint(sessionId)
+        val journal = LaunchSessionJournal(filesDir.resolve("launch_sessions"))
+        journal.advance(
+            sessionId,
+            DescriptorState.REJECTED,
+            SessionDescriptorPatch(errorDetail = "candidate size mismatch"),
+        )
+
+        runBlocking {
+            handler.recoverPendingSessionsAwaited()
+        }
+
+        assertTrue(fakeCoordinator.syncPostPlayCalled)
+        assertFalse(journal.read(sessionId) != null)
+    }
+
+    @Test
     fun recoverPendingSessionsProcessesCoreLoadedWithCheckpointData() {
         seedSession()
         val sessionId = UUID.randomUUID().toString()
@@ -549,7 +569,10 @@ class EmulationResultHandlerAwaitedTest {
         }
 
         assertTrue(fakeCoordinator.syncPostPlayCalled)
-        assertEquals("recovery-hash", fakeCoordinator.syncPostPlayRequest!!.checkpointedHash)
+        assertEquals(
+            sha256Hex("recovery-sram-data".toByteArray()),
+            fakeCoordinator.syncPostPlayRequest!!.checkpointedHash,
+        )
         // Journal should be cleaned up on success.
         val descriptor = LaunchSessionJournal(filesDir.resolve("launch_sessions")).read(sessionId)
         assertFalse(descriptor != null)
@@ -596,29 +619,30 @@ class EmulationResultHandlerAwaitedTest {
     }
 
     @Test
-    fun recoverPendingSessionsOncePerProcessSkipsSubsequentCalls() {
+    fun recoverPendingSessionsProcessesNewJournalOnLaterResume() {
         seedSession()
-        val sessionId = UUID.randomUUID().toString()
-        seedJournalCoreLoadedWithCheckpoint(sessionId = sessionId)
+        seedJournalCoreLoadedWithCheckpoint(sessionId = UUID.randomUUID().toString())
 
         fakeCoordinator.syncPostPlayResult = PostPlayCheckpointResult.Unchanged
 
-        // First call: awaited variant for deterministic completion.
         runBlocking {
             handler.recoverPendingSessionsAwaited()
         }
         assertTrue(fakeCoordinator.syncPostPlayCalled)
 
-        // Reset flag to verify second call is a no-op.
         fakeCoordinator.syncPostPlayCalled = false
+        val laterSessionId = UUID.randomUUID().toString()
+        seedJournalCoreLoadedWithCheckpoint(sessionId = laterSessionId)
 
-        // Second call should be a no-op (once-per-process guard).
         runBlocking {
             handler.recoverPendingSessionsAwaited()
         }
 
-        // Second call should NOT have triggered another recovery.
-        assertFalse(fakeCoordinator.syncPostPlayCalled)
+        assertTrue(fakeCoordinator.syncPostPlayCalled)
+        assertFalse(
+            LaunchSessionJournal(filesDir.resolve("launch_sessions"))
+                .read(laterSessionId) != null,
+        )
     }
 
     // ========== Helpers ==========

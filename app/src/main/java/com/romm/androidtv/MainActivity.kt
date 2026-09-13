@@ -66,6 +66,7 @@ import com.romm.androidtv.cache.CacheDatabase
 import com.romm.androidtv.cache.ContentCache
 import com.romm.androidtv.config.SettingsRepository
 import com.romm.androidtv.controller.capture.ControllerBindingCaptureCoordinator
+import com.romm.androidtv.controller.ControllerAssignmentStore
 import com.romm.androidtv.controller.config.ControllerConfigDatabase
 import com.romm.androidtv.controller.config.ControllerConfigRepository
 import com.romm.androidtv.controller.config.CoreControllerProfiles
@@ -376,6 +377,11 @@ class MainActivity : ComponentActivity() {
     private val controllerRouter: ControllerEventRouter by lazy {
         ControllerEventRouter()
     }
+    private val controllerAssignmentStore: ControllerAssignmentStore by lazy {
+        ControllerAssignmentStore(
+            getSharedPreferences(ControllerAssignmentStore.PREFS_NAME, MODE_PRIVATE),
+        )
+    }
 
     /**
      * Phase 4 capture coordinator. Intercepts raw input before normal routing
@@ -650,14 +656,19 @@ class MainActivity : ComponentActivity() {
         // when the assigned controller is physically removed.
         inputManager.registerInputDeviceListener(captureCoordinator, null)
         controllerRouter.attachLifecycle(this)
+        controllerRouter.restorePreferredSlotAssignments(
+            controllerAssignmentStore.loadPreferredReconnectKeys(),
+        )
         // Enumerate controllers already connected before listener registration.
         // Without this, controllers plugged in before app launch are never assigned.
         controllerRouter.enumerateExistingDevices(inputManager)
+        persistControllerAssignments()
         // On lifecycle START, re-enumerate controllers. deactivate() on STOP clears
         // all device-to-slot mappings; this restores them when the Activity resumes.
         lifecycle.addObserver(LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
                 controllerRouter.enumerateExistingDevices(inputManager)
+                persistControllerAssignments()
             }
         })
 
@@ -1228,7 +1239,9 @@ class MainActivity : ComponentActivity() {
                                                 onBack = { currentScreen = Screen.NATIVE_CONTROLLER_LIST },
                                                 onSelectTab = controllerViewModel::selectTab,
                                                 onAssignController = { playerIndex, deviceId ->
-                                                    controllerRouter.assignControllerToSlot(playerIndex, deviceId)
+                                                    if (controllerRouter.assignControllerToSlot(playerIndex, deviceId)) {
+                                                        persistControllerAssignments()
+                                                    }
                                                     controllerViewModel.refreshConnectedDevices()
                                                 },
                                                 onRowFocused = controllerViewModel::onRowFocused,
@@ -1516,6 +1529,7 @@ class MainActivity : ComponentActivity() {
             Log.w(TAG, "launchEmulationActivity: failed to patch journal with core metadata", e)
         }
 
+        persistControllerAssignments()
         emulationLauncher.launch(
             Intent(this, com.romm.androidtv.emulation.process.EmulationActivity::class.java).apply {
                 putExtra(com.romm.androidtv.emulation.process.EmulationActivity.EXTRA_APP_SESSION_ID, appSessionId)
@@ -1543,6 +1557,15 @@ class MainActivity : ComponentActivity() {
         )
         lifecycleScope.launch(Dispatchers.IO) {
             gameLaunchRecorder.recordLaunch(spec.romId)
+        }
+    }
+
+    private fun persistControllerAssignments() {
+        if (!controllerAssignmentStore.savePreferredReconnectKeys(
+                controllerRouter.preferredSlotReconnectKeys(),
+            )
+        ) {
+            Log.w(TAG, "Failed to persist controller port assignments")
         }
     }
 

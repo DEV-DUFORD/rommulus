@@ -150,18 +150,28 @@ class CandidateAdoptionHelperTest {
     @Test
     fun `legacy variable-length Genesis save is accepted for stable SRAM image`() {
         assertThat(
-            isCompatibleCandidateSize(
+            isCompatibleSaveSize(
                 coreId = "genesis_plus_gx",
-                nativeSramSizeBytes = 65536L,
-                downloadedSizeBytes = 8192L,
+                expectedSizeBytes = 65536L,
+                actualSizeBytes = 8192L,
             )
         ).isTrue()
     }
 
     @Test
     fun `variable-length save remains rejected for other cores and Sega CD images`() {
-        assertThat(isCompatibleCandidateSize("snes9x", 65536L, 8192L)).isFalse()
-        assertThat(isCompatibleCandidateSize("genesis_plus_gx", 8208L, 8192L)).isFalse()
+        assertThat(isCompatibleSaveSize("snes9x", 65536L, 8192L)).isFalse()
+        assertThat(isCompatibleSaveSize("genesis_plus_gx", 8208L, 8192L)).isFalse()
+    }
+
+    @Test
+    fun `legacy mGBA save sizes are accepted for stable persistence migration`() {
+        for (legacySize in listOf(512L, 8192L, 32768L, 65536L, 131072L)) {
+            assertThat(isCompatibleSaveSize("mgba", 131072L, legacySize)).isTrue()
+            assertThat(isCompatibleSaveSize("mgba", legacySize, 131072L)).isTrue()
+        }
+        assertThat(isCompatibleSaveSize("mgba", 131072L, 16384L)).isFalse()
+        assertThat(isCompatibleSaveSize("sameboy", 131072L, 65536L)).isFalse()
     }
 
     @Test

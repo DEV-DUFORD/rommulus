@@ -145,6 +145,45 @@ class LaunchSessionJournalTest {
     }
 
     @Test
+    fun `background recovery metadata survives process death and can update terminal state`() {
+        val sessionId = "background-recovery"
+        journal.createOrGet(sessionId)
+        journal.advance(
+            sessionId,
+            DescriptorState.CORE_LOADED,
+            SessionDescriptorPatch(canonicalSavePath = "/data/save.srm"),
+        )
+        journal.advance(
+            sessionId,
+            DescriptorState.ADOPTED,
+            SessionDescriptorPatch(checkpointedHash = "adoption-hash"),
+        )
+
+        journal.patchIdentity(
+            sessionId,
+            SessionDescriptorPatch(
+                checkpointedHash = "latest-gameplay-hash",
+                recoveryStatePath = "/data/recovery/session.state",
+                recoveryStateVersion = 1,
+                recoveryPauseOverlay = "MENU",
+            ),
+        )
+
+        val recovered = LaunchSessionJournal(tempDir).read(sessionId)!!
+        assertThat(recovered.state).isEqualTo(DescriptorState.ADOPTED)
+        assertThat(recovered.checkpointedHash).isEqualTo("latest-gameplay-hash")
+        assertThat(recovered.recoveryStatePath).isEqualTo("/data/recovery/session.state")
+        assertThat(recovered.recoveryStateVersion).isEqualTo(1)
+        assertThat(recovered.recoveryPauseOverlay).isEqualTo("MENU")
+
+        val cleared = journal.clearRecoveryState(sessionId)
+        assertThat(cleared.checkpointedHash).isEqualTo("latest-gameplay-hash")
+        assertThat(cleared.recoveryStatePath).isNull()
+        assertThat(cleared.recoveryStateVersion).isNull()
+        assertThat(cleared.recoveryPauseOverlay).isNull()
+    }
+
+    @Test
     fun `listPending returns only non-terminal descriptors`() {
         journal.createOrGet("pending-1")
         journal.createOrGet("pending-2")

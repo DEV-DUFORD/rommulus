@@ -124,15 +124,16 @@ public:
     // caller's own thread — this does not run from inside a core callback.
     bool checkpointSaveRam(const std::string& savePath);
 
-    // Restores RETRO_MEMORY_SAVE_RAM from savePath if it exists and is
-    // exactly the size the core currently reports. Returns false (and
-    // leaves the core's SRAM untouched) if the file is missing or an exact
-    // size match fails — this is a deliberate, honest "incompatible/unknown
-    // provenance" rejection rather than a partial or truncated restore
-    // (section 11.1: "Never apply an existing save solely because its ROM
-    // ID and slot match... verify the exact post-retro_load_game() SRAM
-    // size").
+    // Restores RETRO_MEMORY_SAVE_RAM from savePath. Other cores require an
+    // exact size match. mGBA also accepts its known historical GBA save
+    // sizes and expands them into its stable 128 KiB frontend buffer.
     bool restoreSaveRam(const std::string& savePath);
+
+    // Atomically persists/restores a versioned Libretro serialized state.
+    // The envelope records the exact core name/version and payload size, so
+    // stale or incompatible state is rejected without invoking the core.
+    bool checkpointState(const std::string& statePath);
+    bool restoreState(const std::string& statePath);
 
     // Enables changed-only, crash-safe SRAM checkpoints from the emulation
     // thread. The first check occurs after interval; subsequent writes only
@@ -218,12 +219,19 @@ private:
     EnvironmentHandler environment_;
     SessionDiagnostics diagnostics_;
     std::string lastError_;
+    std::string coreIdentity_;
+    bool isMgba_ = false;
 
     InputState inputState_;
     double avFps_ = 60.0;
     double avSampleRate_ = 44100.0;
     bool adaptiveFrameSkipEnabled_ = false;
     bool catchUpAfterStall_ = false;
+    bool coalesceHardwarePresentation_ = false;
+    bool hardwareCallbackSeenThisRun_ = false;
+    bool validHardwareFrameThisRun_ = false;
+    unsigned hardwareFrameWidthThisRun_ = 0;
+    unsigned hardwareFrameHeightThisRun_ = 0;
     std::atomic<bool> presentVideoFrame_{true};
 
     std::thread thread_;

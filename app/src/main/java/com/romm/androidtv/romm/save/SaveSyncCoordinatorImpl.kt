@@ -2,6 +2,7 @@ package com.romm.androidtv.romm.save
 
 import com.romm.androidtv.auth.SessionStore
 import com.romm.androidtv.emulation.model.sha256Hex
+import com.romm.androidtv.emulation.model.isCompatibleSaveSize
 import com.romm.androidtv.network.extractServerKey
 import com.romm.androidtv.romm.ClientSaveState
 import com.romm.androidtv.romm.DeviceRegistrationResult
@@ -225,10 +226,16 @@ class SaveSyncCoordinatorImpl(
         // compatible for the same platform (e.g. a sameboy save loads fine on gambatte),
         // so a mismatched `emulator` field alone is not a sign of an incompatible or
         // untrustworthy save when the user explicitly picked it from this ROM's own save list.
-        // The exact-size gate below still protects against a save that plainly can't fit
-        // the console's expected SRAM size.
-        if (request.expectedSramSizeBytes != null) {
-            if (bytes.size.toLong() != request.expectedSramSizeBytes) {
+        // The compatibility gate below remains exact for other cores while
+        // allowing mGBA's documented legacy GBA save sizes.
+        val expectedChosenSaveSize = request.expectedSramSizeBytes
+        if (expectedChosenSaveSize != null) {
+            if (!isCompatibleSaveSize(
+                    request.coreId,
+                    expectedChosenSaveSize,
+                    bytes.size.toLong(),
+                )
+            ) {
                 val quarantinedPath = saveContentStore.quarantine(
                     serverKey, userKey, request.romId, request.romHash, request.slot, bytes, "size-mismatch", clock(),
                 )
@@ -540,9 +547,15 @@ class SaveSyncCoordinatorImpl(
             return SaveSyncOutcome.Quarantined("unknown-provenance", quarantinedPath)
         }
 
-        // Known trusted size: exact-size gate before adoption.
-        if (request.expectedSramSizeBytes != null) {
-            if (bytes.size.toLong() != request.expectedSramSizeBytes) {
+        // Known trusted size: strict compatibility gate before adoption.
+        val expectedDownloadSize = request.expectedSramSizeBytes
+        if (expectedDownloadSize != null) {
+            if (!isCompatibleSaveSize(
+                    request.coreId,
+                    expectedDownloadSize,
+                    bytes.size.toLong(),
+                )
+            ) {
                 val quarantinedPath = saveContentStore.quarantine(
                     serverKey, userKey, request.romId, request.romHash, request.slot, bytes, "size-mismatch", clock(),
                 )

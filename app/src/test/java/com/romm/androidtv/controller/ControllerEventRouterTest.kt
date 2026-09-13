@@ -4,8 +4,10 @@ import android.view.KeyEvent
 import com.romm.androidtv.controller.model.*
 import com.romm.androidtv.controller.router.ControllerEventRouter
 import com.romm.androidtv.controller.router.applyControllerPortAssignment
+import com.romm.androidtv.controller.router.durablePreferredReconnectKeys
 import com.romm.androidtv.controller.router.physicalDeviceIdForEffectiveSlot
 import com.romm.androidtv.controller.router.physicalDeviceIds
+import com.romm.androidtv.controller.router.reconcilePhysicalControllerAssignments
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
@@ -138,6 +140,83 @@ class ControllerEventRouterTest {
         assertThat(result).isNotNull
         assertThat(result!!.deviceSlots).doesNotContainKey(10)
         assertThat(result.slots[0].connectionState).isEqualTo(SlotConnectionState.UNASSIGNED)
+    }
+
+    @Test
+    fun `remembered controllers reclaim ports before remaining controllers fill gaps`() {
+        val first = DeviceSignature("first", 1, 1, "First")
+        val remembered = DeviceSignature("remembered", 2, 2, "Remembered")
+        val third = DeviceSignature("third", 3, 3, "Third")
+
+        val result = reconcilePhysicalControllerAssignments(
+            slots = ControllerSlot.createAllSlots(),
+            deviceSignatures = linkedMapOf(
+                30 to third,
+                10 to first,
+                20 to remembered,
+            ),
+            preferredReconnectKeys = listOf(null, remembered.reconnectKey, null, null),
+        )
+
+        assertThat(result.deviceSlots).containsEntry(20, 1)
+        assertThat(result.deviceSlots).containsEntry(10, 0)
+        assertThat(result.deviceSlots).containsEntry(30, 2)
+    }
+
+    @Test
+    fun `connected controllers fill sequential ports when there are no preferences`() {
+        val first = DeviceSignature("first", 1, 1, "First")
+        val second = DeviceSignature("second", 2, 2, "Second")
+
+        val result = reconcilePhysicalControllerAssignments(
+            slots = ControllerSlot.createAllSlots(),
+            deviceSignatures = linkedMapOf(20 to second, 10 to first),
+            preferredReconnectKeys = List(ControllerSlot.SLOT_COUNT) { null },
+        )
+
+        assertThat(result.deviceSlots).containsEntry(10, 0)
+        assertThat(result.deviceSlots).containsEntry(20, 1)
+        assertThat(result.slots[2].connectionState).isEqualTo(SlotConnectionState.UNASSIGNED)
+    }
+
+    @Test
+    fun `automatic fallback does not replace an absent remembered controller`() {
+        val remembered = DeviceSignature("remembered", 1, 1, "Remembered")
+        val fallback = DeviceSignature("fallback", 2, 2, "Fallback")
+
+        val durable = durablePreferredReconnectKeys(
+            storedReconnectKeys = listOf(remembered.reconnectKey, null, null, null),
+            deviceSlots = mapOf(20 to 0),
+            deviceSignatures = mapOf(20 to fallback),
+        )
+
+        assertThat(durable[0]).isEqualTo(remembered.reconnectKey)
+    }
+
+    @Test
+    fun `physical reconciliation retains active remote in next available port`() {
+        val physical = DeviceSignature("physical", 1, 1, "Physical")
+        val remoteSnapshot = GamepadSnapshot.fromPhysicalInput(
+            setOf(NeutralKey.DPAD_UP),
+            emptyMap(),
+            ControllerMapping(),
+        )
+        val slots = ControllerSlot.createAllSlots().toMutableList().apply {
+            this[0] = this[0]
+                .assign(DeviceSignature.VIRTUAL_REMOTE)
+                .updateSnapshot(remoteSnapshot)
+        }
+
+        val result = reconcilePhysicalControllerAssignments(
+            slots = slots,
+            deviceSignatures = mapOf(10 to physical),
+            preferredReconnectKeys = List(ControllerSlot.SLOT_COUNT) { null },
+        )
+
+        assertThat(result.deviceSlots).containsEntry(10, 0)
+        assertThat(result.deviceSlots).containsEntry(Int.MIN_VALUE, 1)
+        assertThat(result.slots[1].preferredSignature).isEqualTo(DeviceSignature.VIRTUAL_REMOTE)
+        assertThat(result.slots[1].currentSnapshot.buttons[LogicalControl.DPAD_UP.index]).isEqualTo(1f)
     }
 
     @Nested

@@ -7,6 +7,7 @@ import com.romm.androidtv.controller.config.CoreControllerProfiles
 import com.romm.androidtv.emulation.model.CoreLicenseFinding
 import com.romm.androidtv.emulation.model.CoreManifest
 import com.romm.androidtv.emulation.model.SavePathPolicy
+import com.romm.androidtv.emulation.model.normalizeExpectedSaveSize
 import com.romm.androidtv.emulation.model.sha256Hex
 import com.romm.androidtv.library.BiosConfigurationCatalog
 import com.romm.androidtv.library.BiosConfigurationPresenter
@@ -136,7 +137,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.Collections
+import java.util.Comparator
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.logging.Level
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CoroutineScope
@@ -246,6 +249,11 @@ data class GameLaunchUiState(
     fun matchesScope(romId: Long): Boolean = this.romId == romId
 }
 
+data class LibraryScrollPosition(
+    val index: Int = 0,
+    val offset: Int = 0,
+)
+
 /**
  * Required-BIOS availability for a BIOS-required console (SEGA CD / PlayStation), desktop mirror
  * of Android's `RequiredBiosState`. Drives the game detail screen's inline BIOS-unavailable
@@ -335,11 +343,11 @@ internal fun romContentLaunchFailureReason(
     RomContentStagingFailure.SizeMismatch ->
         "Content verification failed: '$fileName' is incomplete or does not match its expected size. The download may be corrupt — try launching again, or re-upload this ROM in your RomM library."
     RomContentStagingFailure.CorruptContent ->
-        "Content verification failed: '$fileName' is corrupt or unreadable. Re-upload this ROM in your RomM library, or try a different file version."
+        "Content verification failed for '$fileName': ${e.message}. Re-upload this ROM in your RomM library, or try a different file version."
     RomContentStagingFailure.MultiFileContent ->
         "This game's ROM has multiple files (for example, multiple discs) and can't be played on desktop yet. Use a single-file version of this game in your RomM library."
     RomContentStagingFailure.UnsafeContent ->
-        "Content verification failed: '$fileName' contains unsafe content and was rejected. Re-upload this ROM in your RomM library."
+        "Content verification failed for '$fileName': ${e.message}. The archive was rejected by the safety checks."
     RomContentStagingFailure.DownloadFailed -> "Could not download the ROM content: ${e.message}."
     RomContentStagingFailure.WriteFailed -> "Could not save the ROM content to disk: ${e.message}."
     RomContentStagingFailure.Misconfigured -> "The ROM content for this game is not available: ${e.message}."
@@ -512,6 +520,7 @@ class DesktopAppCoordinator(
       */
     private val detailPresenters: MutableMap<Long, RomDetailPresenter> =
         Collections.synchronizedMap(mutableMapOf())
+    private val libraryScrollPositions = ConcurrentHashMap<String, LibraryScrollPosition>()
 
     /** Single-instance lock (plans/LINUX_X64.md §10.4). Constructed here; acquired by Main. */
     val appInstanceLock: FileLockAppInstanceLock = FileLockAppInstanceLock(null, paths.stateDir)
@@ -1015,6 +1024,7 @@ class DesktopAppCoordinator(
                 // must not strand the new generation in PERMANENT_FAILURE.
                 coreId = context.coreId,
                 coreBuildRevision = context.coreBuildRevision,
+                expectedSramSizeBytes = normalizeExpectedSaveSize(context.coreId, bytes.size.toLong()),
                 localHash = localHash,
                 localSizeBytes = bytes.size.toLong(),
                 localWrittenAtEpochMs = generation,
@@ -1028,6 +1038,10 @@ class DesktopAppCoordinator(
             checkNotNull(existing).copy(
                 coreId = context.coreId,
                 coreBuildRevision = context.coreBuildRevision,
+                expectedSramSizeBytes = normalizeExpectedSaveSize(
+                    context.coreId,
+                    existing.expectedSramSizeBytes ?: bytes.size.toLong(),
+                ),
             )
         }
         saveStateStore.upsert(updatedReplica).getOrThrow()
@@ -1191,7 +1205,11 @@ class DesktopAppCoordinator(
      * instead of escaping: an escape would skip the caller's `finishGameLaunch` (leaving the Play
      * button stuck on "Preparing…" with no message shown) and leave no trace in the log.
      */
+    @Synchronized
     fun launchPlayer(romId: Long): PlayerLaunchResult {
+        if (activePlayerSessionId.value != null) {
+            return PlayerLaunchResult.Failed("Close the currently running game before launching another.")
+        }
         // A new session supersedes any earlier exit event (the UI clears its status on Ended).
         playerSessionEvents.value = null
         val result = try {
@@ -1214,7 +1232,7 @@ class DesktopAppCoordinator(
             ?: return PlayerLaunchResult.Failed("console is not supported on desktop")
 
         val staged: StagedContent = try {
-            cachedStagedContent(romId)
+            cachedStagedContent(romId, detail.fileName)
                 ?: romContentStager.stage(
                     romId,
                     detail.fileName,
@@ -1463,31 +1481,29 @@ class DesktopAppCoordinator(
     }
 
     /**
-     * Post-spawn exit watcher (§12.3): a daemon thread blocks on `ProcessHandle.onExit()` for
-     * the spawned pid — which completes immediately if the process has already exited — then
-     * calls [onPlayerProcessExited] so the session is reconciled as soon as the player exits
-     * instead of waiting for the next startup scan. The exit code is always
-     * [UNKNOWN_PLAYER_EXIT_CODE]: `ProcessHandle` does not expose it (only `java.lang.Process`
-     * does) and the supervisor uses the code only in diagnostic strings. If no handle can be
-     * obtained for the pid, the process is already gone and reconciliation runs immediately.
-     * The thread dies with the player (or the JVM); a crash in between is still recoverable by
-     * [scanPlayerJournals] at startup. Known limitation: if the OS reuses the pid before we
-     * attach, we would wait on the wrong process — the startup scan remains the backstop.
+     * Post-spawn exit watcher (§12.3): production launches retain the exact [Process], avoiding
+     * PID-reuse races and preserving its real exit code. Injected/legacy launchers that only
+     * provide a pid fall back to [ProcessHandle]. A crash between spawn and reconciliation is
+     * still recoverable by [scanPlayerJournals] at startup.
      */
     private fun watchPlayerExit(launch: LaunchOutcome, sessionId: String) {
-        val pid = (launch as? LaunchOutcome.Started)?.pid ?: return
+        val started = launch as? LaunchOutcome.Started ?: return
         Thread {
-            try {
-                // Wait for the player to exit (completes immediately if it already has).
-                ProcessHandle.of(pid).orElse(null)?.onExit()?.join()
+            val exitCode = try {
+                val process = started.process
+                if (process != null) {
+                    process.waitFor()
+                } else {
+                    ProcessHandle.of(started.pid).orElse(null)?.onExit()?.join()
+                    UNKNOWN_PLAYER_EXIT_CODE
+                }
             } catch (e: InterruptedException) {
-                // Interrupted before exit — still reconcile; the startup scan is the backstop.
+                Thread.currentThread().interrupt()
+                UNKNOWN_PLAYER_EXIT_CODE
             } catch (e: Exception) {
-                // No such process / platform error: it is already gone.
+                UNKNOWN_PLAYER_EXIT_CODE
             }
-            // ProcessHandle does not expose the exit code (only java.lang.Process does); the
-            // supervisor uses the code only in diagnostic strings, so -1 ("unknown") is safe.
-            onPlayerProcessExited(sessionId, UNKNOWN_PLAYER_EXIT_CODE)
+            onPlayerProcessExited(sessionId, exitCode)
         }.apply {
             isDaemon = true
             name = "player-exit-watch-$sessionId"
@@ -1606,7 +1622,17 @@ class DesktopAppCoordinator(
     private fun invalidateSessionAndReOnboard() {
         onboardingInitialStep = OnboardingStep.SERVER
         onboardingPresenterInstance = null
+        clearAccountScopedUiState()
         appMode = AppMode.ONBOARDING
+    }
+
+    private fun clearAccountScopedUiState() {
+        homePresenterInstance = null
+        settingsPresenterInstance = null
+        detailPresenters.clear()
+        chosenSaves.clear()
+        libraryScrollPositions.clear()
+        selectedRomId = null
     }
 
     // ------------------------------------------------------------------ navigation
@@ -1696,23 +1722,25 @@ class DesktopAppCoordinator(
 
     // ------------------------------------------------------------------ presenters (lazy per screen)
 
-    fun settingsPresenter(): SettingsPresenter = settingsPresenterLazy
+    fun settingsPresenter(): SettingsPresenter = synchronized(this) {
+        settingsPresenterInstance ?: createSettingsPresenter().also {
+            settingsPresenterInstance = it
+        }
+    }
 
-    private val homePresenterLazy = lazy {
-        HomePresenter(
+    fun homePresenter(): HomePresenter = synchronized(this) {
+        homePresenterInstance ?: HomePresenter(
             scope = scope,
             repository = network.libraryRepository,
             hideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
             supportedCoreAbis = setOf(LINUX_X86_64_ABI),
-        )
+        ).also {
+            homePresenterInstance = it
+        }
     }
 
-    fun homePresenter(): HomePresenter = homePresenterLazy.value
-
     private fun refreshContinuePlayingIfInitialized() {
-        if (homePresenterLazy.isInitialized()) {
-            homePresenterLazy.value.retryContinuePlaying()
-        }
+        homePresenterInstance?.retryContinuePlaying()
     }
 
     fun searchPresenter(): SearchPresenter = SearchPresenter(
@@ -1730,6 +1758,13 @@ class DesktopAppCoordinator(
         supportedCoreAbis = setOf(LINUX_X86_64_ABI),
     )
 
+    fun libraryScrollPosition(key: String): LibraryScrollPosition =
+        libraryScrollPositions[key] ?: LibraryScrollPosition()
+
+    fun rememberLibraryScrollPosition(key: String, index: Int, offset: Int) {
+        libraryScrollPositions[key] = LibraryScrollPosition(index.coerceAtLeast(0), offset.coerceAtLeast(0))
+    }
+
     fun romDetailPresenter(romId: Long): RomDetailPresenter =
         // synchronized: getOrPut on a Collections.synchronizedMap is not atomic — two threads
         // could both miss the key and construct two presenters. Lock on the map so the
@@ -1745,26 +1780,37 @@ class DesktopAppCoordinator(
             }
         }
 
-    fun isRomDownloaded(romId: Long): Boolean =
-        contentIndexStore.allRecords().any {
+    fun isRomDownloaded(romId: Long): Boolean {
+        val (serverKey, userKey) = activeCacheScope()
+        return contentIndexStore.allRecords().any {
             it.kind == ContentIndexKind.ROM &&
+                it.serverKey == serverKey &&
+                it.userKey == userKey &&
                 it.remoteId == romId &&
                 it.platformSlug.isNotBlank() &&
                 it.fileName.isNotBlank() &&
                 runCatching {
-                    val path = Path.of(it.absolutePath)
-                    Files.isRegularFile(path) && Files.size(path) == it.sizeBytes
+                    val path = activeCachePath(it) ?: return@runCatching false
+                    Files.size(path) == it.sizeBytes
                 }.getOrDefault(false)
         }
+    }
 
-    private fun cachedStagedContent(romId: Long): StagedContent? =
-        contentIndexStore.allRecords()
-            .filter { it.kind == ContentIndexKind.ROM && it.remoteId == romId }
+    private fun cachedStagedContent(romId: Long, fileName: String): StagedContent? {
+        val (serverKey, userKey) = activeCacheScope()
+        return contentIndexStore.allRecords()
+            .filter {
+                it.kind == ContentIndexKind.ROM &&
+                    it.serverKey == serverKey &&
+                    it.userKey == userKey &&
+                    it.remoteId == romId &&
+                    it.fileName == fileName
+            }
             .sortedByDescending { it.lastAccessedEpochMs }
             .firstNotNullOfOrNull {
                 runCatching {
-                    val path = Path.of(it.absolutePath)
-                    if (!Files.isRegularFile(path) ||
+                    val path = activeCachePath(it)
+                    if (path == null ||
                         !cachedContentIdentityMatches(
                             it,
                             Files.size(path),
@@ -1776,15 +1822,19 @@ class DesktopAppCoordinator(
                     StagedContent(path, it.contentHash)
                 }.getOrNull()
             }
+    }
 
-    fun downloadedGames(): List<LibraryRom> =
-        contentIndexStore.allRecords()
+    fun downloadedGames(): List<LibraryRom> {
+        val (serverKey, userKey) = activeCacheScope()
+        return contentIndexStore.allRecords()
             .asSequence()
             .filter {
                 it.kind == ContentIndexKind.ROM &&
+                    it.serverKey == serverKey &&
+                    it.userKey == userKey &&
                     runCatching {
-                        val path = Path.of(it.absolutePath)
-                        Files.isRegularFile(path) && Files.size(path) == it.sizeBytes
+                        val path = activeCachePath(it) ?: return@runCatching false
+                        Files.size(path) == it.sizeBytes
                     }.getOrDefault(false)
             }
             .distinctBy { it.remoteId }
@@ -1801,10 +1851,56 @@ class DesktopAppCoordinator(
                 )
             }
             .toList()
+    }
+
+    fun removeDownloadedGame(romId: Long): Result<Unit> = runCatching {
+        check(activePlayerSessionId.value == null) {
+            "Close the running game before removing a download."
+        }
+        val (serverKey, userKey) = activeCacheScope()
+        val records = contentIndexStore.allRecords().filter {
+            it.kind == ContentIndexKind.ROM &&
+                it.serverKey == serverKey &&
+                it.userKey == userKey &&
+                it.remoteId == romId
+        }
+        check(records.isNotEmpty()) { "This game is not downloaded." }
+
+        val cacheRoot = paths.romCacheDir().toRealPath()
+        val contentDirectories = records.mapNotNull { record ->
+            val path = activeCachePath(record) ?: return@mapNotNull null
+            val directory = path.parent?.toRealPath()
+            check(directory != null && directory.startsWith(cacheRoot) && directory != cacheRoot) {
+                "Refusing to remove content outside the ROM cache."
+            }
+            directory
+        }.distinct()
+        check(contentDirectories.isNotEmpty()) { "This game's download is not in the active cache." }
+
+        contentDirectories.forEach { directory ->
+            val referencedByAnotherScope = contentIndexStore.allRecords().any { record ->
+                record !in records && runCatching {
+                    activeCachePath(record)?.parent?.toRealPath() == directory
+                }.getOrDefault(false)
+            }
+            if (!referencedByAnotherScope && Files.exists(directory)) {
+                Files.walk(directory).use { entries ->
+                    entries.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
+                }
+            }
+        }
+        records.forEach { contentIndexStore.remove(it.key).getOrThrow() }
+    }
 
     private fun cachedRomDetail(romId: Long): RomDetail? {
+        val (serverKey, userKey) = activeCacheScope()
         val cached = contentIndexStore.allRecords()
-            .filter { it.kind == ContentIndexKind.ROM && it.remoteId == romId }
+            .filter {
+                it.kind == ContentIndexKind.ROM &&
+                    it.serverKey == serverKey &&
+                    it.userKey == userKey &&
+                    it.remoteId == romId
+            }
             .maxByOrNull { it.lastAccessedEpochMs }
             ?: return null
         if (!isRomDownloaded(romId) || cached.platformSlug.isBlank()) return null
@@ -1830,6 +1926,22 @@ class DesktopAppCoordinator(
             fileName = cached.fileName,
         )
     }
+
+    private fun activeCacheScope(): Pair<String, String> {
+        val origin = settingsAdapter.currentProfile().origin
+        val username = sessionStorage.coherentRecord(origin)?.username.orEmpty()
+        return SavePathPolicy.sanitizeSegment(origin.ifBlank { NO_ORIGIN_KEY }) to
+            SavePathPolicy.sanitizeSegment(username.ifBlank { ANONYMOUS_USER_KEY })
+    }
+
+    private fun activeCachePath(record: ContentIndexRecord): Path? = runCatching {
+        val cacheRoot = paths.romCacheDir().toRealPath()
+        val indexedPath = Path.of(record.absolutePath).toAbsolutePath().normalize()
+        if (Files.isSymbolicLink(indexedPath) || !Files.isRegularFile(indexedPath)) {
+            return@runCatching null
+        }
+        indexedPath.toRealPath().takeIf { it.startsWith(cacheRoot) && it != cacheRoot }
+    }.getOrNull()
 
     suspend fun refreshServerReachability() {
         val origin = settingsAdapter.currentProfile().origin
@@ -2093,7 +2205,13 @@ class DesktopAppCoordinator(
         )
     }
 
-    private val settingsPresenterLazy by lazy {
+    @Volatile
+    private var homePresenterInstance: HomePresenter? = null
+
+    @Volatile
+    private var settingsPresenterInstance: SettingsPresenter? = null
+
+    private fun createSettingsPresenter(): SettingsPresenter =
         SettingsPresenter(
                 scope = scope,
                 getCurrentProfile = { settingsAdapter.currentProfile() },
@@ -2112,7 +2230,10 @@ class DesktopAppCoordinator(
                 loginFn = { origin, username, password ->
                     network.authRepository.login(origin, username, password)
                 },
-                onLoginSuccess = { currentScreen = Screen.HOME },
+                onLoginSuccess = {
+                    clearAccountScopedUiState()
+                    currentScreen = Screen.HOME
+                },
                 onSessionInvalidated = { invalidateSessionAndReOnboard() },
                 getHideUnsupportedSystems = { settingsAdapter.hideUnsupportedSystems() },
                 setHideUnsupportedSystemsFn = settingsAdapter::setHideUnsupportedSystems,
@@ -2128,7 +2249,6 @@ class DesktopAppCoordinator(
                 appVersion = appVersion,
                 buildDefaultOrigin = buildDefaultOrigin,
             )
-    }
 
     private companion object {
         const val DB_FILE_NAME = "rommulus.db"

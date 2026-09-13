@@ -128,12 +128,17 @@ class NativeLibretroHost {
 
     /**
      * Restores RETRO_MEMORY_SAVE_RAM from [savePath] if it exists and is
-     * exactly the size the core currently reports. Returns false (leaving
-     * SRAM untouched) if the file is missing or its size doesn't match —
-     * this is an intentional, honest rejection of any incompatible or
-     * unknown-provenance save rather than a partial restore.
+     * a compatible size. Other cores require an exact match; mGBA accepts
+     * known historical GBA save sizes and expands them into its stable
+     * persistence buffer. Incompatible input leaves SRAM untouched.
      */
     external fun nativeRestoreSaveRam(savePath: String): Boolean
+
+    /** Atomically writes a versioned, core-identified Libretro serialized state. */
+    external fun nativeCheckpointState(statePath: String): Boolean
+
+    /** Restores a state written by [nativeCheckpointState], rejecting incompatible envelopes. */
+    external fun nativeRestoreState(statePath: String): Boolean
 
     /**
      * Returns the exact byte-size of the currently loaded core's
