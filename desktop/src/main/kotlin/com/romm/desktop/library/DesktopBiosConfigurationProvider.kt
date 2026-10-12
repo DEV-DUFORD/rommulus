@@ -287,7 +287,7 @@ class DesktopBiosConfigurationProvider(
 
             client.newCall(request).execute().use { response ->
                 when {
-                    response.code == 401 || response.code == 403 -> {
+                    response.code == 401 -> {
                         return FirmwareStagingOutcome.AuthExpired
                     }
                     response.code == 404 -> {

@@ -55,7 +55,7 @@ class SaveLaunchOrchestrator(
         /** Quarantined download; caller may show quarantine overlay. */
         data class Quarantined(val reason: String, val quarantinedPath: String) : PreparationResult
 
-        /** Bearer-authenticated sync returned AUTH_EXPIRED (401/403). Caller should reconcile or prompt login. */
+        /** Bearer-authenticated sync returned AUTH_EXPIRED (401). Caller should reconcile or prompt login. */
         data object AuthExpired : PreparationResult
 
         /**

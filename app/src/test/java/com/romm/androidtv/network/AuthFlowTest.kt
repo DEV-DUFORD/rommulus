@@ -460,6 +460,30 @@ class AuthFlowTest {
         }
 
         @Test
+        @DisplayName("a 403 on users/me is a server error, not VERIFICATION_FAILED")
+        fun `forbidden is not an expired session`() {
+            server.enqueue(MockResponse().setResponseCode(403).setBody("<html><body>Forbidden</body></html>"))
+
+            val result = verifyBearerSession(client, baseUrl(), "paired-token")
+
+            val failure = result as AuthFlowResult.Failure
+            assertThat(failure.error).isEqualTo(com.romm.androidtv.network.AuthError.SERVER_ERROR)
+            assertThat(failure.httpCode).isEqualTo(403)
+        }
+
+        @Test
+        @DisplayName("a 5xx on users/me is a server error, not VERIFICATION_FAILED")
+        fun `server error is not an expired session`() {
+            server.enqueue(MockResponse().setResponseCode(502))
+
+            val result = verifyBearerSession(client, baseUrl(), "paired-token")
+
+            val failure = result as AuthFlowResult.Failure
+            assertThat(failure.error).isEqualTo(com.romm.androidtv.network.AuthError.SERVER_ERROR)
+            assertThat(failure.httpCode).isEqualTo(502)
+        }
+
+        @Test
         @DisplayName("blank origin returns ORIGIN_NOT_CONFIGURED")
         fun `blank origin`() {
             val result = verifyExistingSession(client, "")

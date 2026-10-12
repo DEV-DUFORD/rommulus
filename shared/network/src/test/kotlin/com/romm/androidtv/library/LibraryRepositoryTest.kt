@@ -305,7 +305,7 @@ class LibraryRepositoryTest {
 
             assertThat(result).isInstanceOf(LibraryResult.Failure::class.java)
             val failure = result as LibraryResult.Failure
-            assertThat(failure.error).isEqualTo(RommApiError.AUTH_EXPIRED)
+            assertThat(failure.error).isEqualTo(RommApiError.SERVER_ERROR)
             assertThat(failure.httpCode).isEqualTo(403)
         }
     }

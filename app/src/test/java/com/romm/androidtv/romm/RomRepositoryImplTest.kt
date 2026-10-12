@@ -623,6 +623,16 @@ class RomRepositoryImplTest {
         }
 
         @Test
+        fun `a 403 on the content download is a network error, not AuthExpired`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(singleFileRomJson()))
+            server.enqueue(MockResponse().setResponseCode(403))
+
+            val outcome = runBlocking { repo().stageForLaunch(42) }
+
+            assertThat(outcome).isEqualTo(StagingOutcome.NetworkError("HTTP 403"))
+        }
+
+        @Test
         fun `no session on record surfaces as AuthExpired before any network call`() {
             val freshSessionStore = SessionStore(FakeSharedPreferences())
 

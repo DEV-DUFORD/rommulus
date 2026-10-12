@@ -153,7 +153,7 @@ class FirmwareRepositoryImpl(
             is AtomicFileStore.DownloadOutcome.HashMismatch ->
                 FirmwareStagingOutcome.CorruptedDownload(firmware.fileName, "${outcome.algorithm} mismatch")
             is AtomicFileStore.DownloadOutcome.HttpError ->
-                if (outcome.code == 401 || outcome.code == 403) {
+                if (outcome.code == 401) {
                     FirmwareStagingOutcome.AuthExpired
                 } else {
                     FirmwareStagingOutcome.NetworkError("HTTP ${outcome.code}")

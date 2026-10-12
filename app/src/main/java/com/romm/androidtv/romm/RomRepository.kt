@@ -286,7 +286,7 @@ class RomRepositoryImpl(
             is AtomicFileStore.DownloadOutcome.HashMismatch ->
                 StagingOutcome.CorruptedDownload("${outcome.algorithm} mismatch: expected ${outcome.expectedHash}, got ${outcome.actualHash}")
             is AtomicFileStore.DownloadOutcome.HttpError ->
-                if (outcome.code == 401 || outcome.code == 403) StagingOutcome.AuthExpired
+                if (outcome.code == 401) StagingOutcome.AuthExpired
                 else if (outcome.code == 404) StagingOutcome.RomNotFound
                 else StagingOutcome.NetworkError("HTTP ${outcome.code}")
             is AtomicFileStore.DownloadOutcome.NetworkError -> StagingOutcome.NetworkError(outcome.message)

@@ -297,6 +297,14 @@ class DesktopBiosConfigurationProviderTest {
     }
 
     @Test
+    fun `HTTP 403 on content maps to NetworkError, not AuthExpired`() {
+        server.content(ByteArray(0), 403)
+
+        assertThat(runBlocking { provider().select(firmware()) })
+            .isEqualTo(FirmwareStagingOutcome.NetworkError("HTTP 403"))
+    }
+
+    @Test
     fun `missing origin maps to NetworkError without touching the server`() {
         val firmware = firmware()
         val outcome = runBlocking { provider(origin = null).select(firmware) }

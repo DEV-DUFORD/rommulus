@@ -195,12 +195,14 @@ class RommApiTest {
         }
 
         @Test
-        fun `403 classifies as AUTH_EXPIRED`() {
-            server.enqueue(MockResponse().setResponseCode(403))
+        fun `403 classifies as SERVER_ERROR, not AUTH_EXPIRED`() {
+            server.enqueue(MockResponse().setResponseCode(403).setBody("""{"detail":"Forbidden"}"""))
 
             val result = RommApi.fetchRomInfo(client, baseUrl(), 42)
 
-            assertThat((result as RomInfoResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+            val failure = result as RomInfoResult.Failure
+            assertThat(failure.error).isEqualTo(RommApiError.SERVER_ERROR)
+            assertThat(failure.httpCode).isEqualTo(403)
         }
 
         @Test
