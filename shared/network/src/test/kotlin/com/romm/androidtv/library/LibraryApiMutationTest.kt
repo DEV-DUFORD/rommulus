@@ -248,10 +248,10 @@ class LibraryApiMutationTest {
         }
 
         @Test
-        fun `403 maps to AUTH_EXPIRED with http code preserved`() {
+        fun `403 maps to SERVER_ERROR with http code preserved`() {
             enqueue(403)
             val result = LibraryApi.createCollection(client, baseUrl(), "X", false)
-            assertThat((result as CollectionMutationResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+            assertThat((result as CollectionMutationResult.Failure).error).isEqualTo(RommApiError.SERVER_ERROR)
             assertThat(result.httpCode).isEqualTo(403)
         }
 

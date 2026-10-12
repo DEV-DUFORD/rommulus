@@ -174,6 +174,16 @@ class FirmwareRepositoryImplTest {
         }
 
         @Test
+        fun `a 403 on the content download is a network error, not AuthExpired`() {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(firmwareListJson))
+            server.enqueue(MockResponse().setResponseCode(403))
+
+            val outcome = runBlocking { repo().ensureStaged(1, listOf("bios.bin")) }
+
+            assertThat(outcome).isEqualTo(FirmwareStagingOutcome.NetworkError("HTTP 403"))
+        }
+
+        @Test
         fun `a hash mismatch during download is reported as CorruptedDownload for that file`() {
             val badHashJson = """
                 [{"id": 5, "file_name": "bios.bin", "file_size_bytes": 4, "sha1_hash": "deadbeef0000", "md5_hash": "", "crc_hash": ""}]

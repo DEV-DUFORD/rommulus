@@ -18,7 +18,7 @@ enum class AuthError {
     /** Credentials were rejected by the server (401). */
     INVALID_CREDENTIALS,
 
-    /** Server returned a non-2xx, non-401 error during login. */
+    /** Server returned a non-2xx, non-401 error during login or session verification. */
     SERVER_ERROR,
 
     /** Network failure during login or verification. */
@@ -293,8 +293,11 @@ private fun verifySession(
                         is HeartbeatCallResult.Failure -> AuthFlowResult.Failure(AuthError.POST_LOGIN_HEARTBEAT_FAILED, hbResult.httpCode)
                     }
                 }
+                // Callers clear the session on VERIFICATION_FAILED, so it means only what a
+                // 401 means: the credentials were not accepted. A 403 (a proxy or WAF, or a
+                // missing scope) or a 5xx says nothing about them.
                 response.code == 401 -> AuthFlowResult.Failure(AuthError.VERIFICATION_FAILED, 401)
-                else -> AuthFlowResult.Failure(AuthError.VERIFICATION_FAILED, response.code)
+                else -> AuthFlowResult.Failure(AuthError.SERVER_ERROR, response.code)
             }
         }
     } catch (e: IOException) {

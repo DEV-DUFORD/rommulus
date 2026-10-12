@@ -1065,7 +1065,7 @@ object RommSyncApi {
     private fun classifyResponse(response: okhttp3.Response): RommApiError? {
         return when {
             response.isSuccessful -> null
-            response.code == 401 || response.code == 403 -> RommApiError.AUTH_EXPIRED
+            response.code == 401 -> RommApiError.AUTH_EXPIRED
             response.code == 404 -> RommApiError.NOT_FOUND
             else -> RommApiError.SERVER_ERROR
         }

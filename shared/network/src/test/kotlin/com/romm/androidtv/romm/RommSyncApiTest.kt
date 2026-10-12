@@ -490,6 +490,23 @@ class RommSyncApiTest {
         }
 
         @Test
+        fun `download 403 from a proxy is a server error, not an expired session`() {
+            // A WAF in front of RomM refusing the request with its own error page: the
+            // credential was never looked at, so nothing says the session is gone.
+            server.enqueue(
+                MockResponse().setResponseCode(403)
+                    .setHeader("Content-Type", "text/html")
+                    .setBody("<html><head><title>403 Forbidden</title></head><body><h1>Forbidden</h1></body></html>")
+            )
+
+            val result = RommSyncApi.downloadSaveContent(client, baseUrl(), 10, "device-1")
+
+            val failure = result as SaveDownloadResult.Failure
+            assertThat(failure.error).isEqualTo(RommApiError.SERVER_ERROR)
+            assertThat(failure.httpCode).isEqualTo(403)
+        }
+
+        @Test
         fun `downloadSaveContentBackup uses optimistic=false and omits session_id`() {
             server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(byteArrayOf(1, 2, 3))))
 
@@ -758,7 +775,8 @@ class RommSyncApiTest {
                     OkHttpClient.Builder().build()
             }
 
-            server.enqueue(MockResponse().setResponseCode(403).setBody("""{"detail":"AUTH_EXPIRED"}"""))
+            // What RomM answers a request that carries no credentials.
+            server.enqueue(MockResponse().setResponseCode(401).setBody("""{"detail":"Not authenticated"}"""))
             val deviceResult = RommSyncApi.registerDevice(
                 bearerClientNoToken, baseUrl(), DeviceRegisterRequest(clientDeviceIdentifier = "install-uuid-e2e-2"),
             )

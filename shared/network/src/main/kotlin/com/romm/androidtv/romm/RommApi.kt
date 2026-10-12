@@ -84,7 +84,12 @@ sealed interface PlatformIdResult {
 /** Error classification shared by every RommApi network call. */
 enum class RommApiError {
     NOT_FOUND,
-    /** 401/403 — the session is no longer valid; the caller must re-authenticate. */
+    /**
+     * 401 — the server did not accept the credentials; the caller must re-authenticate.
+     * A 403 is not this: RomM answers 403 to an accepted credential that lacks a scope or
+     * fails the CSRF check, and a proxy or WAF in front of RomM can answer 403 on its own,
+     * so a 403 is a [SERVER_ERROR] with its HTTP code.
+     */
     AUTH_EXPIRED,
     SERVER_ERROR,
     NETWORK_ERROR,
@@ -328,7 +333,7 @@ object RommApi {
     private fun classifyResponse(response: okhttp3.Response): RommApiError? {
         return when {
             response.isSuccessful -> null
-            response.code == 401 || response.code == 403 -> RommApiError.AUTH_EXPIRED
+            response.code == 401 -> RommApiError.AUTH_EXPIRED
             response.code == 404 -> RommApiError.NOT_FOUND
             else -> RommApiError.SERVER_ERROR
         }
