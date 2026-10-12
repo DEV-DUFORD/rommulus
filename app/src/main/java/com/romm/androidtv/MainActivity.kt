@@ -55,6 +55,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.romm.androidtv.auth.AuthRepository
 import com.romm.androidtv.auth.SessionStore
+import com.romm.androidtv.auth.TokenRecheckResult
 import com.romm.androidtv.onboarding.OnboardingEffect
 import com.romm.androidtv.onboarding.OnboardingRoutingPolicy
 import com.romm.androidtv.onboarding.OnboardingStep
@@ -2154,52 +2155,44 @@ class MainActivity : ComponentActivity() {
                         return@launch
                     }
 
-                    // Verify the cookie session ONCE to distinguish a definitively-invalid token
-                    // from a transient network/TLS failure (spec 5.2.4-5.2.6). Only a definitive
-                    // auth failure (VERIFICATION_FAILED) or a failed token re-acquisition against
-                    // a valid cookie session means the token is actually revoked/expired, and
-                    // only then do we erase the session/token and route to Credentials (5.2.7).
-                    val verifyResult = authRepository.verifySession(origin)
-                    when (verifyResult) {
-                        is AuthFlowResult.Success -> {
-                            // Cookie session is valid; the bearer token was stale/revoked.
-                            // Force-reconcile to acquire a fresh durable token.
-                            val reconciled = authRepository.forceReconcileClientToken(origin, username)
-                            Log.d(DIAG_TAG, "MainActivity.launchNative: reconciled=$reconciled")
-                            if (reconciled) {
-                                // Retry preparation once after successful reconciliation.
-                                val retryPreparation = saveLaunchOrchestrator.prepare(
+                    // Ask the server about the stored client token ONCE to distinguish a
+                    // definitively-invalid token from a transient network/TLS failure (spec
+                    // 5.2.4-5.2.6). The token is checked first, as startup does: a device paired
+                    // by code has no cookie session, so a cookie check alone always failed there
+                    // and dropped a token the server still accepted. Only a token the server
+                    // refuses, with no cookie session able to replace it, erases the session/token
+                    // and routes to Credentials (5.2.7).
+                    val recheck = authRepository.recheckClientToken(origin, username)
+                    Log.d(DIAG_TAG, "MainActivity.launchNative: recheck=$recheck")
+                    when (recheck) {
+                        TokenRecheckResult.StillValid,
+                        TokenRecheckResult.Replaced -> {
+                            // The token is accepted, or a fresh one replaced it: retry preparation once.
+                            val retryPreparation = saveLaunchOrchestrator.prepare(
+                                romId = spec.romId,
+                                romHash = spec.romHash,
+                                coreId = spec.coreId,
+                                coreBuildRevision = "",
+                                expectedSramSizeBytes = knownSramSize,
+                                fileName = spec.serverSaveFileName,
+                            )
+                            // Dispatch retry result (no recursive auth-expired recovery).
+                            dispatchPreparationResult(retryPreparation, spec, savePath)
+                        }
+                        TokenRecheckResult.Refused -> {
+                            // Definitive: the server refuses the token and nothing can replace it.
+                            Log.d(DIAG_TAG, "MainActivity.launchNative: token refused — routing to Credentials")
+                            authRepository.clearExpiredSession(origin, username)
+                            routeToCredentials(username)
+                        }
+                        is TokenRecheckResult.Unverified -> {
+                            // Transient network/TLS failure: preserve session + token, stay in Main.
+                            Log.d(DIAG_TAG, "MainActivity.launchNative: transient verify failure — preserving session/token")
+                            withContext(Dispatchers.Main) {
+                                preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
                                     romId = spec.romId,
                                     romHash = spec.romHash,
-                                    coreId = spec.coreId,
-                                    coreBuildRevision = "",
-                                    expectedSramSizeBytes = knownSramSize,
-                                    fileName = spec.serverSaveFileName,
-                                )
-                                // Dispatch retry result (no recursive auth-expired recovery).
-                                dispatchPreparationResult(retryPreparation, spec, savePath)
-                            } else {
-                                // Valid cookie session but token re-acquisition failed: definitive.
-                                Log.d(DIAG_TAG, "MainActivity.launchNative: token reconcile failed — routing to Credentials")
-                                authRepository.clearExpiredSession(origin, username)
-                                routeToCredentials(username)
-                            }
-                        }
-                        is AuthFlowResult.Failure -> {
-                            if (verifyResult.error == com.romm.androidtv.network.AuthError.VERIFICATION_FAILED) {
-                                // Definitive: token AND cookie session are both invalid.
-                                Log.d(DIAG_TAG, "MainActivity.launchNative: verify failed — routing to Credentials")
-                                authRepository.clearExpiredSession(origin, username)
-                                routeToCredentials(username)
-                            } else {
-                                // Transient network/TLS failure: preserve session + token, stay in Main.
-                                Log.d(DIAG_TAG, "MainActivity.launchNative: transient verify failure — preserving session/token")
-                                withContext(Dispatchers.Main) {
-                                    preLaunchState = com.romm.androidtv.library.ui.SavePreLaunchState(
-                                        romId = spec.romId,
-                                        romHash = spec.romHash,
-                                    ).apply { isAuthExpired = true }
-                                }
+                                ).apply { isAuthExpired = true }
                             }
                         }
                     }

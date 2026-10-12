@@ -62,6 +62,21 @@ interface ClientTokenStorage {
     fun clearToken(origin: String, username: String)
 }
 
+/** What [AuthRepository.recheckClientToken] found out about the stored client token. */
+sealed interface TokenRecheckResult {
+    /** The server accepts the stored token. Nothing is lost; the call can be tried again. */
+    data object StillValid : TokenRecheckResult
+
+    /** The server refused the token, and the browser session issued a replacement. */
+    data object Replaced : TokenRecheckResult
+
+    /** The server refused the token and nothing can replace it: sign in or pair again. */
+    data object Refused : TokenRecheckResult
+
+    /** No verdict (network, TLS or server error). Nothing should be cleared. */
+    data class Unverified(val error: AuthError, val httpCode: Int?) : TokenRecheckResult
+}
+
 class AuthRepository(
     private val client: OkHttpClient,
     private val cookieSync: SessionCookieSync,
@@ -104,6 +119,48 @@ class AuthRepository(
         val token = clientTokenStorage?.getToken(record.origin, record.username.orEmpty())
             ?: return@withContext AuthFlowResult.Failure(AuthError.VERIFICATION_FAILED, 401)
         verifyBearerSession(client, origin, token.raw)
+    }
+
+    /**
+     * Decides what a sync call's AUTH_EXPIRED means for the stored client token, before
+     * anything is cleared. A device paired by code holds a client token and no browser
+     * session, so the token itself is what gets asked about, as startup does with
+     * [verifyDurableSession]:
+     *
+     * - The server accepts it: [TokenRecheckResult.StillValid]. Something other than the
+     *   token refused the call, and dropping the token would only leave it behind on the
+     *   server, still valid.
+     * - The server refuses it, or there is none: a browser session from a password sign-in,
+     *   if there is one, issues a replacement ([TokenRecheckResult.Replaced]). Without one,
+     *   or if the replacement fails, it is [TokenRecheckResult.Refused].
+     * - Either check gets no verdict: [TokenRecheckResult.Unverified].
+     *
+     * Only [TokenRecheckResult.Refused] calls for [clearExpiredSession], and the token that
+     * clears is one the server already refuses, so there is nothing left to revoke.
+     *
+     * The browser session is checked with [verifyExistingSession] directly, not [verifySession]:
+     * that would acquire a token whenever none is stored, and [forceReconcileClientToken]
+     * would then replace it with a second one, leaving the first behind.
+     */
+    suspend fun recheckClientToken(origin: String, username: String): TokenRecheckResult {
+        val durable = verifyDurableSession(origin)
+        if (durable is AuthFlowResult.Success) return TokenRecheckResult.StillValid
+        durable as AuthFlowResult.Failure
+        if (durable.error != AuthError.VERIFICATION_FAILED) {
+            return TokenRecheckResult.Unverified(durable.error, durable.httpCode)
+        }
+
+        val browser = withContext(Dispatchers.IO) { verifyExistingSession(client, origin) }
+        val result = when (browser) {
+            is AuthFlowResult.Success ->
+                if (forceReconcileClientToken(origin, username)) TokenRecheckResult.Replaced
+                else TokenRecheckResult.Refused
+            is AuthFlowResult.Failure ->
+                if (browser.error == AuthError.VERIFICATION_FAILED) TokenRecheckResult.Refused
+                else TokenRecheckResult.Unverified(browser.error, browser.httpCode)
+        }
+        RommLog.debug(TAG, "recheckClientToken: durableHttpCode=${durable.httpCode} result=$result")
+        return result
     }
 
     /** Runs a heartbeat check against the configured origin. */
