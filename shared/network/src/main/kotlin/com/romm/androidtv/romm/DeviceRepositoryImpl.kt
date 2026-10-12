@@ -12,12 +12,16 @@ private const val TAG = "RommAuthDx"
  * Real [DeviceRepository] implementation backed by [RommSyncApi.registerDevice]
  * and cached via [DeviceIdentityStore] (LIBRETRO_REFACTOR.md section 11.2).
  *
- * The local installation UUID ([DeviceIdentityStore.installationId]) is
- * always sent as `client_device_identifier` so the server can dedupe
- * re-registrations from the same physical install (this is what
- * distinguishes an HTTP 200 reuse from a 201 creation). The RomM-assigned
- * device id is only cached on a successful response; a failure never
- * overwrites a previously-cached identity.
+ * The RomM device id is cached for each server + user scope, whether it came
+ * from registration or from device-code pairing, and reused for as long as the
+ * server still has that device. `POST /api/devices` cannot dedupe for us: RomM
+ * matches an existing device only by MAC address, or by hostname together with
+ * platform, and drops `client_device_identifier`, which it reads only in the
+ * device-code pairing flow. So a registration is made only when there is no
+ * cached id, or when the server answers 404 for it (the device was deleted).
+ *
+ * The RomM-assigned device id is only cached on a successful response; a
+ * failure never overwrites a previously-cached identity.
  */
 class DeviceRepositoryImpl(
     private val client: OkHttpClient,
@@ -27,6 +31,26 @@ class DeviceRepositoryImpl(
     override suspend fun ensureRegistered(serverOrigin: String, username: String): DeviceRegistrationResult =
         withContext(Dispatchers.IO) {
             val installationId = identityStore.installationId(serverOrigin, username)
+
+            identityStore.cachedDeviceId(serverOrigin, username)?.let { cached ->
+                when (val lookup = RommSyncApi.fetchDevice(client, serverOrigin, cached)) {
+                    DeviceLookupResult.Found -> {
+                        RommLog.debug(TAG, "DeviceRepository.ensureRegistered: success status=cached")
+                        return@withContext DeviceRegistrationResult.Success(
+                            identity = DeviceIdentity(installationId, cached),
+                            alreadyExisted = true,
+                        )
+                    }
+                    is DeviceLookupResult.Failure -> {
+                        if (lookup.error != RommApiError.NOT_FOUND) {
+                            RommLog.debug(TAG, "DeviceRepository.ensureRegistered: lookup failure error=${lookup.error.name} httpCode=${lookup.httpCode}")
+                            return@withContext DeviceRegistrationResult.Failure(lookup.error, lookup.httpCode)
+                        }
+                        RommLog.debug(TAG, "DeviceRepository.ensureRegistered: cached device gone, registering again")
+                        identityStore.forgetDeviceId(serverOrigin, username)
+                    }
+                }
+            }
 
             val result = RommSyncApi.registerDevice(
                 client,

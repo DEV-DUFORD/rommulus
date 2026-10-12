@@ -88,15 +88,14 @@ class DeviceRepositoryImplTest {
                 MockResponse().setResponseCode(201)
                     .setBody("""{"device_id": "new-1", "created_at": "2026-01-01T00:00:00Z"}""")
             )
-            server.enqueue(
-                MockResponse().setResponseCode(200)
-                    .setBody("""{"device_id": "new-1", "created_at": "2026-01-01T00:00:00Z"}""")
-            )
+            // The second call finds new-1 cached and only checks that it still exists.
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"id": "new-1"}"""))
 
             val first = repository.ensureRegistered(baseUrl(), "root") as DeviceRegistrationResult.Success
             val second = repository.ensureRegistered(baseUrl(), "root") as DeviceRegistrationResult.Success
 
             assertThat(second.identity.installationId).isEqualTo(first.identity.installationId)
+            assertThat(second.identity.rommDeviceId).isEqualTo("new-1")
         }
     }
 
@@ -111,6 +110,75 @@ class DeviceRepositoryImplTest {
             assertThat(result).isInstanceOf(DeviceRegistrationResult.Failure::class.java)
             assertThat((result as DeviceRegistrationResult.Failure).error).isEqualTo(RommApiError.SERVER_ERROR)
             assertThat(identityStore.cachedDeviceId(baseUrl(), "root")).isEqualTo("previously-cached")
+        }
+    }
+
+    @Test
+    fun `a cached device id is checked and reused without registering again`() {
+        runBlocking {
+            identityStore.saveDeviceId(baseUrl(), "root", "dev-1")
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"id": "dev-1"}"""))
+
+            val result = repository.ensureRegistered(baseUrl(), "root") as DeviceRegistrationResult.Success
+
+            assertThat(result.identity.rommDeviceId).isEqualTo("dev-1")
+            assertThat(result.alreadyExisted).isTrue()
+            assertThat(server.requestCount).isEqualTo(1)
+            val recorded = server.takeRequest()
+            assertThat(recorded.method).isEqualTo("GET")
+            assertThat(recorded.path).isEqualTo("/api/devices/dev-1")
+        }
+    }
+
+    @Test
+    fun `the device made by device-code pairing is reused on every launch, never registered again`() {
+        runBlocking {
+            val pairingId = identityStore.pairingInstallationId(baseUrl())!!
+            identityStore.savePairedIdentity(baseUrl(), "root", pairingId, "paired-dev")
+            repeat(3) { server.enqueue(MockResponse().setResponseCode(200).setBody("""{"id": "paired-dev"}""")) }
+
+            repeat(3) {
+                val result = repository.ensureRegistered(baseUrl(), "root") as DeviceRegistrationResult.Success
+                assertThat(result.identity.rommDeviceId).isEqualTo("paired-dev")
+                assertThat(result.identity.installationId).isEqualTo(pairingId)
+            }
+
+            assertThat(server.requestCount).isEqualTo(3)
+            repeat(3) { assertThat(server.takeRequest().method).isEqualTo("GET") }
+        }
+    }
+
+    @Test
+    fun `a cached device the server no longer has is registered again`() {
+        runBlocking {
+            identityStore.saveDeviceId(baseUrl(), "root", "deleted-1")
+            server.enqueue(MockResponse().setResponseCode(404).setBody("""{"detail":"Device not found"}"""))
+            server.enqueue(
+                MockResponse().setResponseCode(201)
+                    .setBody("""{"device_id": "new-2", "created_at": "2026-01-01T00:00:00Z"}""")
+            )
+
+            val result = repository.ensureRegistered(baseUrl(), "root") as DeviceRegistrationResult.Success
+
+            assertThat(result.identity.rommDeviceId).isEqualTo("new-2")
+            assertThat(result.alreadyExisted).isFalse()
+            assertThat(identityStore.cachedDeviceId(baseUrl(), "root")).isEqualTo("new-2")
+            assertThat(server.takeRequest().method).isEqualTo("GET")
+            assertThat(server.takeRequest().method).isEqualTo("POST")
+        }
+    }
+
+    @Test
+    fun `a refused lookup keeps the cached device id and registers nothing`() {
+        runBlocking {
+            identityStore.saveDeviceId(baseUrl(), "root", "dev-1")
+            server.enqueue(MockResponse().setResponseCode(401))
+
+            val result = repository.ensureRegistered(baseUrl(), "root")
+
+            assertThat((result as DeviceRegistrationResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+            assertThat(server.requestCount).isEqualTo(1)
+            assertThat(identityStore.cachedDeviceId(baseUrl(), "root")).isEqualTo("dev-1")
         }
     }
 

@@ -24,6 +24,9 @@ interface DeviceIdentityStorage {
         rommDeviceId: String,
     ): Boolean
 
+    /** Returns the cached RomM device identity for this scope (registered or paired), if any. */
+    fun cachedDeviceId(origin: String, username: String): String?
+
     /** Persists a newly-registered (or reused) RomM device identity for this scope. */
     fun saveDeviceId(origin: String, username: String, rommDeviceId: String)
 

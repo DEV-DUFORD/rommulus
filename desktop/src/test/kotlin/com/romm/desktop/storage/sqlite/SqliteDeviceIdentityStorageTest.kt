@@ -8,8 +8,8 @@ import java.nio.file.Path
 /**
  * Focused tests for [SqliteDeviceIdentityStorage] over the V3 `device_identity` table:
  * stable installation UUIDs, pairing-id semantics, save/forget device-id behavior, and
- * Android-mirroring scope sanitization. Cached RomM device ids are asserted via direct SQL
- * (the seam exposes no read method by design — it mirrors the Android interface).
+ * Android-mirroring scope sanitization. Cached RomM device ids are asserted via direct SQL,
+ * so the seam's own [SqliteDeviceIdentityStorage.cachedDeviceId] is checked against the table.
  */
 class SqliteDeviceIdentityStorageTest {
 
@@ -125,6 +125,38 @@ class SqliteDeviceIdentityStorageTest {
         val store = openStore()
         store.forgetDeviceId("https://nowhere.example.com", "ghost") // must not throw
         assertThat(cachedDeviceId("https://nowhere.example.com", "ghost")).isNull()
+    }
+
+    // ── cachedDeviceId ─────────────────────────────────────────────────────────
+
+    @Test
+    fun `cached device id reads back a paired identity`() {
+        val store = openStore()
+        val pairing = store.pairingInstallationId("https://romm.example.com")!!
+        store.savePairedIdentity("https://romm.example.com", "player1", pairing, "dev-42")
+
+        assertThat(store.cachedDeviceId(" HTTPS://ROMM.EXAMPLE.COM ", "Player1")).isEqualTo("dev-42")
+    }
+
+    @Test
+    fun `cached device id is null before registration and after forget`() {
+        val store = openStore()
+        store.installationId("https://romm.example.com", "player1")
+        assertThat(store.cachedDeviceId("https://romm.example.com", "player1")).isNull()
+
+        store.saveDeviceId("https://romm.example.com", "player1", "dev-99")
+        assertThat(store.cachedDeviceId("https://romm.example.com", "player1")).isEqualTo("dev-99")
+
+        store.forgetDeviceId("https://romm.example.com", "player1")
+        assertThat(store.cachedDeviceId("https://romm.example.com", "player1")).isNull()
+    }
+
+    @Test
+    fun `cached device id is never another user's`() {
+        val store = openStore()
+        store.saveDeviceId("https://romm.example.com", "alice", "dev-alice")
+
+        assertThat(store.cachedDeviceId("https://romm.example.com", "bob")).isNull()
     }
 
     // ── fixtures ───────────────────────────────────────────────────────────────

@@ -110,7 +110,7 @@ class RommSyncApiTest {
         }
 
         @Test
-        fun `request body carries the stable client device identifier for fingerprint dedup`() {
+        fun `request body carries the stable client device identifier`() {
             server.enqueue(
                 MockResponse().setResponseCode(201)
                     .setBody("""{"device_id": "new-1", "created_at": "2026-01-01T00:00:00Z"}""")
@@ -123,6 +123,51 @@ class RommSyncApiTest {
 
             val recorded = server.takeRequest()
             assertThat(recorded.body.readUtf8()).contains("install-uuid-1").contains("android-tv")
+        }
+    }
+
+    @Nested
+    @DisplayName("fetchDevice — network classification")
+    inner class FetchDevice {
+        @Test
+        fun `200 means the device still exists`() {
+            server.enqueue(
+                MockResponse().setResponseCode(200)
+                    .setBody("""{"id": "dev-1", "name": "NVIDIA SHIELD Android TV", "client": "rommulus"}""")
+            )
+
+            val result = RommSyncApi.fetchDevice(client, baseUrl(), "dev-1")
+
+            assertThat(result).isEqualTo(DeviceLookupResult.Found)
+            val recorded = server.takeRequest()
+            assertThat(recorded.method).isEqualTo("GET")
+            assertThat(recorded.path).isEqualTo("/api/devices/dev-1")
+        }
+
+        @Test
+        fun `404 classifies as NOT_FOUND`() {
+            server.enqueue(MockResponse().setResponseCode(404).setBody("""{"detail":"Device not found"}"""))
+
+            val result = RommSyncApi.fetchDevice(client, baseUrl(), "gone-1")
+
+            assertThat((result as DeviceLookupResult.Failure).error).isEqualTo(RommApiError.NOT_FOUND)
+        }
+
+        @Test
+        fun `401 classifies as AUTH_EXPIRED`() {
+            server.enqueue(MockResponse().setResponseCode(401))
+
+            val result = RommSyncApi.fetchDevice(client, baseUrl(), "dev-1")
+
+            assertThat((result as DeviceLookupResult.Failure).error).isEqualTo(RommApiError.AUTH_EXPIRED)
+        }
+
+        @Test
+        fun `blank origin fails without a network call`() {
+            val result = RommSyncApi.fetchDevice(client, "", "dev-1")
+
+            assertThat((result as DeviceLookupResult.Failure).error).isEqualTo(RommApiError.ORIGIN_NOT_CONFIGURED)
+            assertThat(server.requestCount).isEqualTo(0)
         }
     }
 

@@ -68,6 +68,8 @@ class DesktopNetworkModuleTest {
                 return true
             }
 
+            override fun cachedDeviceId(origin: String, username: String): String? = null
+
             override fun saveDeviceId(origin: String, username: String, rommDeviceId: String) {}
 
             override fun forgetDeviceId(origin: String, username: String) {}
