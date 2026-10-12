@@ -424,6 +424,110 @@ class AuthRepositoryTest {
     }
 
     @Nested
+    @DisplayName("recheckClientToken after a sync AUTH_EXPIRED")
+    inner class TokenRecheck {
+
+        private lateinit var tokenStorage: FakeClientTokenStorage
+        private lateinit var repoWithTokens: AuthRepository
+
+        private val heartbeatJson = """{"version":"5.4.0","setup_complete":true,"userpass_enabled":true}"""
+
+        @BeforeEach
+        fun setUp() {
+            val cookieSync = RomMCookieSync(CookieManager(null, CookiePolicy.ACCEPT_ALL))
+            sessionStore = SessionStore(FakeSharedPreferences())
+            tokenStorage = FakeClientTokenStorage()
+            repoWithTokens = AuthRepository(
+                client,
+                AndroidSessionCookieSync(cookieSync),
+                AndroidSessionStorage(sessionStore),
+                tokenStorage,
+            )
+            sessionStore.save(baseUrl(), "root")
+        }
+
+        @Test
+        fun `a paired device whose token the server accepts keeps it`() = runBlocking<Unit> {
+            tokenStorage.setToken(baseUrl(), "root", ClientToken("paired-token"))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":false}"""))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(heartbeatJson))
+
+            val result = repoWithTokens.recheckClientToken(baseUrl(), "root")
+
+            assertThat(result).isEqualTo(TokenRecheckResult.StillValid)
+            assertThat(tokenStorage.storedTokens[listOf(baseUrl(), "root")]).isEqualTo("paired-token")
+            val check = server.takeRequest()
+            assertThat(check.path).isEqualTo("/api/users/me")
+            assertThat(check.getHeader("Authorization")).isEqualTo("Bearer paired-token")
+            // Never falls through to the cookie check, which a paired device can never pass.
+            assertThat(server.requestCount).isEqualTo(2)
+        }
+
+        @Test
+        fun `a refused token with no browser session is Refused`() = runBlocking<Unit> {
+            tokenStorage.setToken(baseUrl(), "root", ClientToken("revoked-token"))
+            server.enqueue(MockResponse().setResponseCode(401).setBody("""{"detail":"Not authenticated"}"""))
+            server.enqueue(MockResponse().setResponseCode(401).setBody("""{"detail":"Not authenticated"}"""))
+
+            val result = repoWithTokens.recheckClientToken(baseUrl(), "root")
+
+            assertThat(result).isEqualTo(TokenRecheckResult.Refused)
+            assertThat(server.takeRequest().getHeader("Authorization")).isEqualTo("Bearer revoked-token")
+            assertThat(server.takeRequest().getHeader("Authorization")).isNull()
+        }
+
+        @Test
+        fun `a refused token is replaced through a valid browser session`() = runBlocking<Unit> {
+            tokenStorage.setToken(baseUrl(), "root", ClientToken("revoked-token"))
+            server.enqueue(MockResponse().setResponseCode(401))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(heartbeatJson))
+            server.enqueue(
+                MockResponse().setResponseCode(201).setBody(
+                    """{"id": 3, "name": "romm-android-tv", "scopes": ["me.read"], "raw_token": "rmm_replacement", "expires_at": null}"""
+                )
+            )
+
+            val result = repoWithTokens.recheckClientToken(baseUrl(), "root")
+
+            assertThat(result).isEqualTo(TokenRecheckResult.Replaced)
+            assertThat(tokenStorage.storedTokens[listOf(baseUrl(), "root")]).isEqualTo("rmm_replacement")
+            assertThat(server.requestCount).isEqualTo(4)
+        }
+
+        @Test
+        fun `with no stored token, a browser session issues exactly one`() = runBlocking<Unit> {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"username":"root","admin":true}"""))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(heartbeatJson))
+            server.enqueue(
+                MockResponse().setResponseCode(201).setBody(
+                    """{"id": 4, "name": "romm-android-tv", "scopes": ["me.read"], "raw_token": "rmm_only_one", "expires_at": null}"""
+                )
+            )
+
+            val result = repoWithTokens.recheckClientToken(baseUrl(), "root")
+
+            assertThat(result).isEqualTo(TokenRecheckResult.Replaced)
+            assertThat(tokenStorage.storedTokens[listOf(baseUrl(), "root")]).isEqualTo("rmm_only_one")
+            val paths = List(server.requestCount) { server.takeRequest().path }
+            assertThat(paths.count { it == "/api/client-tokens" }).isEqualTo(1)
+        }
+
+        @Test
+        fun `an unreachable server is Unverified and keeps the token`() = runBlocking<Unit> {
+            tokenStorage.setToken(baseUrl(), "root", ClientToken("paired-token"))
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+
+            val result = repoWithTokens.recheckClientToken(baseUrl(), "root")
+
+            assertThat(result).isInstanceOf(TokenRecheckResult.Unverified::class.java)
+            assertThat((result as TokenRecheckResult.Unverified).error).isEqualTo(AuthError.NETWORK_ERROR)
+            assertThat(tokenStorage.storedTokens[listOf(baseUrl(), "root")]).isEqualTo("paired-token")
+            assertThat(server.requestCount).isEqualTo(1)
+        }
+    }
+
+    @Nested
     @DisplayName("validateServer classification")
     inner class ServerValidation {
 
