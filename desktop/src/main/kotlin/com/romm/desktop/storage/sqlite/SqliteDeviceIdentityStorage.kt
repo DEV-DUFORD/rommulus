@@ -20,6 +20,7 @@ import java.util.UUID
  *   origin and preserved across later user-scoped writes;
  * - [savePairedIdentity] durably adopts the identity returned by RomM's device
  *   authorization flow (the pairing value is copied into the normal scope);
+ * - [cachedDeviceId] returns the cached RomM device id, but only for the user the row holds;
  * - [forgetDeviceId] clears the cached RomM device id but keeps the local installation UUID.
  *
  * Schema deviation from Android (locked in plans/PHASE6.md §5.2): Android keys one prefs
@@ -81,6 +82,10 @@ class SqliteDeviceIdentityStorage(private val db: SqliteDatabase) : DeviceIdenti
         pairingInstallationId = lookup(sanitize(origin))?.pairingInstallationId,
         rommDeviceId = rommDeviceId,
     )
+
+    override fun cachedDeviceId(origin: String, username: String): String? =
+        // The row holds one user's identity per origin; another user's device id is not this one's.
+        lookup(sanitize(origin))?.takeIf { it.username == sanitize(username) }?.rommDeviceId
 
     override fun saveDeviceId(origin: String, username: String, rommDeviceId: String) {
         val o = sanitize(origin)

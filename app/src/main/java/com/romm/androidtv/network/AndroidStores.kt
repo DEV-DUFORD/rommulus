@@ -45,6 +45,9 @@ class AndroidDeviceIdentityStorage(private val delegate: DeviceIdentityStore) : 
         rommDeviceId: String,
     ): Boolean = delegate.savePairedIdentity(origin, username, installationId, rommDeviceId)
 
+    override fun cachedDeviceId(origin: String, username: String): String? =
+        delegate.cachedDeviceId(origin, username)
+
     override fun saveDeviceId(origin: String, username: String, rommDeviceId: String) =
         delegate.saveDeviceId(origin, username, rommDeviceId)
 

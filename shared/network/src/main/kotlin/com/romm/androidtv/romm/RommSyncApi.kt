@@ -80,6 +80,13 @@ internal data class DeviceCreateResponseJson(
     val created_at: String? = null,
 )
 
+sealed interface DeviceLookupResult {
+    /** The server still has this device for the signed-in user. */
+    data object Found : DeviceLookupResult
+    /** [RommApiError.NOT_FOUND] means the device is gone (deleted on the server, or another user's). */
+    data class Failure(val error: RommApiError, val httpCode: Int? = null) : DeviceLookupResult
+}
+
 // ---- Negotiated sync (POST /api/sync/negotiate, POST /api/sync/sessions/{id}/complete) ----
 
 /** Mirrors the backend's `ClientSaveState` (`endpoints/sync.py`). */
@@ -568,6 +575,34 @@ object RommSyncApi {
             val error = classifyIOException(e)
             diagLog(RommLog.WARN, "RommSyncApi.registerDevice: ioError $error")
             DeviceRegisterResult.Failure(error)
+        }
+    }
+
+    /** `GET /api/devices/{id}` — whether the server still has [deviceId] for the signed-in user. */
+    fun fetchDevice(
+        client: okhttp3.OkHttpClient,
+        origin: String,
+        deviceId: String,
+    ): DeviceLookupResult {
+        if (origin.isBlank()) return DeviceLookupResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val url = apiUrl(origin, "devices")?.toHttpUrlOrNull()?.newBuilder()?.addPathSegment(deviceId)?.build()
+            ?: return DeviceLookupResult.Failure(RommApiError.ORIGIN_NOT_CONFIGURED)
+        val request = okhttp3.Request.Builder().url(url).get().build()
+
+        return try {
+            client.newCall(request).execute().use { response ->
+                val classification = classifyResponse(response)
+                if (classification != null) {
+                    diagLog(RommLog.DEBUG, "RommSyncApi.fetchDevice: failure error=${classification.name} httpCode=${response.code}")
+                    DeviceLookupResult.Failure(classification, response.code)
+                } else {
+                    DeviceLookupResult.Found
+                }
+            }
+        } catch (e: IOException) {
+            val error = classifyIOException(e)
+            diagLog(RommLog.WARN, "RommSyncApi.fetchDevice: ioError $error")
+            DeviceLookupResult.Failure(error)
         }
     }
 
